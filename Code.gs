@@ -6,7 +6,7 @@
 function doGet(e) {
   const template = HtmlService.createTemplateFromFile('Index');
   
-  // 1. Pass Real App URL
+  // 1. Pass Real App URL (Prevents "White Page" on popout)
   template.appUrl = ScriptApp.getService().getUrl(); 
 
   // 2. Pass URL Parameters to bypass Sandbox restrictions
