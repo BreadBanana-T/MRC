@@ -106,27 +106,25 @@
       
       .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
       
-      /* --- FIXED STICKY HEADER --- */
+      /* --- FIXED FLOATING CONTROL BAR --- */
+      /* No longer tries to bleed to edge. Floats inside the container. */
       .sticky-header {
-         position: sticky; top: 0; z-index: 100;
-         background: var(--bg-root); 
-         background: linear-gradient(180deg, var(--bg-root) 0%, var(--bg-root) 85%, transparent 100%);
+         position: sticky; top: 10px; z-index: 100;
          
-         /* Increased padding for breathing room */
-         padding-top: 16px; 
-         padding-bottom: 24px;
-         margin-bottom: 12px;
+         /* Floating Style */
+         background: var(--glass-surface);
+         backdrop-filter: blur(25px);
+         border: var(--glass-border);
+         border-radius: 20px;
+         box-shadow: var(--glass-shadow);
          
-         /* Compensate for app-shell padding to reach full width */
-         margin-left: -32px; 
-         margin-right: -32px; 
+         padding: 12px 24px;
+         margin-bottom: 24px;
          
-         /* Restore padding for content alignment */
-         padding-left: 32px; 
-         padding-right: 32px;
-      }
-      @media (max-width: 900px) {
-         .sticky-header { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
+         display: flex;
+         align-items: center;
+         flex-wrap: wrap;
+         gap: 16px;
       }
 
       .grid-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
@@ -322,7 +320,13 @@
 
       window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
       window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
-      window.toggleTheme = () => { document.body.classList.toggle('dark'); localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); render(); };
+      
+      // FIXED SYNTAX ERROR HERE
+      window.toggleTheme = () => { 
+          document.body.classList.toggle('dark'); 
+          localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); 
+          render(); 
+      };
       
       window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
       window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
@@ -334,7 +338,6 @@
       function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
       function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
       
-      // FIX: handleSearch no longer re-renders. It toggles CSS visibility.
       function handleSearch(v) { 
           state.searchTerm = v; 
           if(state.view === 'agents') {
@@ -493,11 +496,11 @@
           const tab = state.agentTab;
           const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
           
-          // ADDED: Sticky Header Wrapper with REDUCED INPUT SIZE
+          // ADDED: Sticky Header Wrapper with REDUCED INPUT SIZE and Floating Style
           return `
           <div class="sticky-header">
-             <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
-                 <input id="agent-search" class="input-aether" style="width:250px; height:36px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
+             <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
+                 <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
                  <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
                     <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Operations Floor</button>
                     <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break Room</button>
