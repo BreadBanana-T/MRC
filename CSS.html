@@ -75,7 +75,8 @@
   .action-group { display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
   .action-btn { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: var(--glass-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
   .action-btn:hover { background: rgba(255,255,255,0.15); border-color: var(--accent-primary); }
-  
+  .action-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-color: var(--accent-primary); }
+
   .viewport { flex: 1; overflow-y: auto; overflow-x: hidden; border-radius: var(--radius-panel); padding-bottom: 80px; min-height: 0; }
   .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
   
