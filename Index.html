@@ -92,6 +92,7 @@
       .agent-pill:hover { background: rgba(255,255,255,0.08); border-color: var(--accent-primary); opacity: 1 !important; filter: grayscale(0) !important; }
       
       /* --- ROLE STYLING --- */
+      /* These control the colored border/box-shadow */
       .agent-pill.role-safe { border: 1px solid var(--status-active); opacity: 0.6; }
       .agent-pill.role-icl { border: 1px solid var(--status-role); opacity: 0.6; }
       .agent-pill.status-break { opacity: 0.5; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02) 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px); }
@@ -495,7 +496,10 @@
          let statusText = a.subStatus || "Active";
          let statusColor = "var(--text-secondary)";
          if (a.onBreakNow) { statusText = "ON BREAK"; statusColor = "var(--status-break)"; }
-         if (a.role === 'SAFE' || a.role === 'ICL') statusColor = "var(--status-role)";
+         
+         // FIXED: Green for SAFE, Purple for ICL
+         if (a.role === 'SAFE') statusColor = "var(--status-active)";
+         if (a.role === 'ICL') statusColor = "var(--status-role)";
 
          return `<div class="agent-pill ${extraClass}" onclick="openMenu(event, '${a.name}')">
             <div class="pill-left">
