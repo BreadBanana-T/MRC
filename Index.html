@@ -8,7 +8,6 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Font: Outfit (Clean, Friendly, Modern) -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
@@ -375,16 +374,13 @@
   </head>
   <body>
     
-    <!-- Background -->
     <div class="aether-bg">
         <div class="blob b1"></div>
         <div class="blob b2"></div>
     </div>
 
-    <!-- Main Layout -->
     <div class="app-shell" id="main-layout">
         
-        <!-- Header & Nav -->
         <header class="top-deck">
             <div class="brand">
                 <div class="brand-logo-diamond">
@@ -416,14 +412,11 @@
             </div>
         </header>
 
-        <!-- Dynamic Content -->
         <main class="viewport" id="content">
-            <!-- Injected here -->
-        </main>
+            </main>
 
     </div>
 
-    <!-- Drawer -->
     <div id="notif-panel" class="drawer">
         <div class="flex-between" style="padding:24px; border-bottom:1px solid var(--glass-border);">
             <h3 style="margin:0; font-size:1.2rem; font-weight:800;">Updates</h3>
@@ -432,7 +425,6 @@
         <div id="notif-list" style="padding:24px; overflow-y:auto; flex:1;"></div>
     </div>
 
-    <!-- Modals -->
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0; font-size:1.5rem; font-weight:800; margin-bottom:24px;">Import Data</h2>
@@ -476,7 +468,6 @@
                 <h2 id="wm-city" style="font-size:1.8rem; font-weight:800; margin:0;">City</h2>
                 <div id="wm-cond" style="color:var(--text-accent); font-weight:700; margin-top:4px;">Condition</div>
              </div>
-             <!-- WIND IS HERO -->
              <div style="text-align:right;">
                  <div id="wm-wind" style="font-size:3rem; font-weight:800; color:var(--text-main); line-height:1;">--</div>
                  <div class="kpi-label">KM/H WIND</div>
@@ -489,7 +480,6 @@
              </div>
           </div>
           <div id="wm-forecast" style="max-height:200px; overflow-y:auto; margin-bottom:24px;"></div>
-          <!-- Copy Button -->
           <div style="display:flex; justify-content:flex-end; gap:16px;">
               <button class="btn btn-glass" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button>
               <button class="btn btn-primary" onclick="document.getElementById('weather-modal').classList.remove('open')">Done</button>
@@ -497,12 +487,10 @@
        </div>
     </div>
 
-    <!-- Toast -->
     <div id="toast" style="position:fixed; bottom:30px; right:30px; background:var(--text-main); color:var(--bg-root); padding:14px 28px; border-radius:50px; opacity:0; pointer-events:none; transition:0.3s; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,0.2); z-index:2000; display:flex; gap:12px; align-items:center;">
        <i data-lucide="check-circle" width="20" style="color:var(--status-active);"></i> <span id="toast-msg">Success</span>
     </div>
 
-    <!-- Context Menu -->
     <div id="agent-menu" class="ctx-menu">
         <button class="ctx-item" onclick="setAgentStatus('role', 'ICL')">Assign ICL</button>
         <button class="ctx-item" onclick="setAgentStatus('role', 'SAFE')">Assign SAFE</button>
@@ -864,16 +852,40 @@
           const shrinkPct = Math.round(((state.agents.unplanned||[]).length + (state.agents.vacation||[]).length) / Math.max(1, (state.agents.active||[]).length + (state.agents.safe||[]).length + (state.agents.icl||[]).length + 10) * 100);
           
           const hist = state.slHistory || [];
-          const pts = hist.map((d,i) => `${(i/(hist.length-1||1))*100},${100 - Math.min(d.val,100)}`).join(' ');
+          
+          // Generate Graph Points
+          let svgContent = "";
+          if (hist.length > 1) {
+              const pts = hist.map((d,i) => {
+                  const x = (i / (hist.length - 1)) * 100;
+                  const y = 100 - Math.min(Math.max(d.val, 0), 100); // Clamp between 0-100
+                  return `${x},${y}`;
+              }).join(' ');
+              
+              svgContent = `
+                <defs>
+                   <linearGradient id="grad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                     <stop offset="0%" style="stop-color:var(--accent-primary);stop-opacity:0.4" />
+                     <stop offset="100%" style="stop-color:var(--accent-primary);stop-opacity:0" />
+                   </linearGradient>
+                </defs>
+                <line x1="0" y1="20" x2="100" y2="20" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="2" opacity="0.3" />
+                <line x1="0" y1="50" x2="100" y2="50" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="2" opacity="0.3" />
+                
+                <path d="M0,100 ${pts.split(' ').map(p => 'L'+p).join(' ')} L100,100 Z" fill="url(#grad1)" />
+                <polyline points="${pts}" fill="none" stroke="var(--accent-primary)" stroke-width="2.5" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+              `;
+          } else {
+              svgContent = `<text x="50" y="50" text-anchor="middle" fill="var(--text-muted)" font-size="8">Not enough data</text>`;
+          }
 
           return `
           <div class="grid-masonry">
-             <!-- HERO GRAPH CARD -->
              <div class="aether-card" style="grid-column: 1 / -1; display:flex; flex-direction:column; min-height:220px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div>
-                        <div style="font-size:3rem; font-weight:800; color:var(--text-accent); line-height:1;">${state.currentSL}</div>
+                        <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div>
@@ -881,48 +893,48 @@
                     </div>
                 </div>
                 
-                <div style="position:relative; flex:1; width:100%; margin-top:20px; max-height:100px;">
-                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%; height:100%;">
-                        <defs>
-                           <linearGradient id="grad1" x1="0%" y1="0%" x2="0%" y2="100%">
-                             <stop offset="0%" style="stop-color:var(--accent-primary);stop-opacity:0.6" />
-                             <stop offset="100%" style="stop-color:var(--accent-primary);stop-opacity:0" />
-                           </linearGradient>
-                        </defs>
-                        <path d="M0,100 ${pts.split(' ').map((p,i)=>i===0?'L'+p:'L'+p).join(' ')} L100,100 Z" fill="url(#grad1)" />
-                        <polyline points="${pts}" fill="none" stroke="var(--accent-primary)" stroke-width="2" stroke-linecap="round" />
+                <div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;">
+                    <div style="display:flex; flex-direction:column; justify-content:space-between; padding-right:10px; font-size:0.7rem; color:var(--text-muted); font-weight:700;">
+                        <span>100%</span>
+                        <span>50%</span>
+                        <span>0%</span>
+                    </div>
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="flex:1; width:100%; overflow:visible;">
+                        ${svgContent}
                     </svg>
                 </div>
              </div>
 
-             <!-- METRICS ROW -->
              <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
                 <h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Global Shrinkage</h4>
                 <div style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
              </div>
              
-             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer;">
+             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
                     <span style="font-weight:700;">Planned</span>
                     <i data-lucide="calendar" class="text-muted" width="20"></i>
                 </div>
                 <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${(state.agents.vacation||[]).length+(state.agents.planned||[]).length}</div>
              </div>
-             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer;">
+             
+             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
                     <span style="font-weight:700; color:var(--status-alert);">Unplanned</span>
                     <i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i>
                 </div>
                 <div style="font-size:2rem; font-weight:800; color:var(--status-alert);">${(state.agents.unplanned||[]).length}</div>
              </div>
-             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer;">
+             
+             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
                     <span style="font-weight:700;">ICL Line</span>
                     <i data-lucide="shield" class="text-muted" width="20"></i>
                 </div>
                 <div style="font-size:2rem; font-weight:800;">${(state.agents.icl||[]).length}</div>
              </div>
-             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer;">
+             
+             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
                     <span style="font-weight:700; color:var(--status-active);">SAFE</span>
                     <i data-lucide="heart" color="var(--status-active)" width="20"></i>
@@ -940,7 +952,6 @@
           <div style="margin-bottom:40px; display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
              <input id="agent-search" class="input-aether" style="width:320px;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
              
-             <!-- VIEW TOGGLE -->
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
                 <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Operations Floor</button>
                 <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break Room</button>
@@ -961,7 +972,6 @@
       
       function renderFloorLayout(upMap) {
          return `
-         <!-- SPECIAL OPS ROW -->
          <div class="grid-roles">
             <div class="aether-card" style="padding:20px;">
                 <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
@@ -977,7 +987,6 @@
             </div>
          </div>
          
-         <!-- MAIN FLOOR SPLIT -->
          <div class="grid-split" style="align-items:start;">
              <div style="display:flex; flex-direction:column; gap:20px;">
                  <div class="aether-card" style="padding:24px;">
@@ -998,7 +1007,6 @@
              </div>
          </div>
          
-         <!-- SUPPORT BELOW -->
          <div style="margin-top:40px;">
              <div class="section-header" style="color:var(--status-alert);">Unplanned / Support</div>
              <div class="agent-list" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
@@ -1077,6 +1085,64 @@
           </div>`;
       }
 
+      function renderWeather() {
+          if (!state.weather || Object.keys(state.weather).length === 0) {
+             return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;">
+                        <i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i>
+                        <div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div>
+                     </div>`;
+          }
+
+          let html = '<div class="grid-masonry">';
+          
+          // --- COPY ALL BUTTON ---
+          html += `<div style="grid-column:1/-1; display:flex; justify-content:flex-end; margin-bottom:10px;">
+                      <button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button>
+                   </div>`;
+         
+          // 1. Alerts Section (Top Priority)
+          if (state.alerts && state.alerts.length > 0) {
+             html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert);">
+                        <div class="section-header" style="color:var(--status-alert);">Active Alerts</div>
+                        <div style="display:flex; flex-wrap:wrap; gap:12px;">`;
+             state.alerts.forEach(a => {
+                 html += `<div style="background:rgba(220, 38, 38, 0.1); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700;">
+                            ${a.province}: ${a.type} (${a.count})
+                          </div>`;
+             });
+             html += `  </div>
+                      </div>`;
+          }
+
+          // 2. City Cards
+          Object.keys(state.weather).forEach(prov => {
+             const cities = state.weather[prov];
+             cities.forEach(c => {
+                 html += `
+                 <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
+                    <div class="flex-between" style="margin-bottom:16px;">
+                        <span style="font-weight:800; font-size:1.1rem;">${c.name}</span>
+                        <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
+                    </div>
+                    
+                    <div class="flex-between">
+                        <div>
+                            <div style="font-size:2.5rem; font-weight:800; line-height:1; letter-spacing:-1px;">${c.temp}°</div>
+                            <div style="font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-top:4px;">${c.condition}</div>
+                        </div>
+                        <div style="text-align:right;">
+                             <div style="font-size:1.4rem; font-weight:700;">${c.wind}</div>
+                             <div class="kpi-label">KM/H WIND</div>
+                        </div>
+                    </div>
+                 </div>`;
+             });
+          });
+
+          html += '</div>';
+          return html;
+      }
+
       function renderScripts() {
          const filtered = state.scripts.filter(s => !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase()));
          
@@ -1128,7 +1194,6 @@
                <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>
                <div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div>
                <div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;">
-                  <!-- ADDED pre-wrap to force newline rendering -->
                   <div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div>
                   <button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button>
                </div>
