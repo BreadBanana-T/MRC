@@ -5,7 +5,7 @@
 const ImportHandler = {
   run: function(text, date) {
     return processWFMImport(text, date);
-  }
+}
 };
 
 function processWFMImport(rawText, forcedDate) {
@@ -27,7 +27,7 @@ function processWFMImport(rawText, forcedDate) {
   
   if (!forcedDate) {
      forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-  }
+}
   
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
 
@@ -91,14 +91,15 @@ function processWFMImport(rawText, forcedDate) {
 
            // A. BREAKS
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
-               let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
+               let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ?
+               "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
-           } 
+            } 
            
            // B. WORK SEGMENT (Keeps them Active if they worked partial shift)
            else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP")) {
                buffer.hasWork = true;
-           }
+            }
 
            // C. PARTIAL ABSENCE CUTOFF (Fix for "Vacation Paid" ending the shift early)
            // If it's an absence activity and it ends exactly when the shift ends, assume they left early.
@@ -106,7 +107,8 @@ function processWFMImport(rawText, forcedDate) {
                 // Simple string comparison for times (e.g. "8:00 AM" == "8:00 AM")
                 // This assumes the format in the activity line matches the shift line, which is typical for WFM exports.
                 if (compareTimeStrings(actEnd, buffer.end)) {
-                    buffer.end = actStart; // Snap shift end to start of absence
+                    buffer.end = actStart;
+                    // Snap shift end to start of absence
                 }
            }
        }
@@ -159,12 +161,11 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
         let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
         let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
         
-        // Handle overnight shift crossing midnight
-        if (eDate <= sDate) eDate.setDate(eDate.getDate() + 1);
-        
-        // Handle massive rollovers (if shift ends next day but logic missed it, unlikely with above check but safe to have)
+        // FIX: Only treat as overnight if End is strictly LESS than Start.
+        // Equal times (e.g. 19:30-19:30) will result in a 0-duration shift, not 24h.
+        if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
+
         // Adjust for potential "Next Day" flags if WFM provides them, but raw parsing usually handles AM/PM logic.
-        
         startEpoch = sDate.getTime();
         endEpoch = eDate.getTime();
      }
@@ -173,7 +174,8 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
   let type = "Off";
   if (startEpoch) {
      const h = new Date(startEpoch).getHours();
-     type = h >= 14 ? "Evening" : "Day";
+     type = h >= 14 ?
+     "Evening" : "Day";
   }
 
   let cleanName = name;
