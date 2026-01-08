@@ -59,7 +59,6 @@
         transition: background 0.5s ease;
       }
       
-      /* --- CUSTOM SCROLLBAR --- */
       ::-webkit-scrollbar { width: 8px; height: 8px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; opacity: 0.5; }
@@ -74,22 +73,9 @@
       .top-deck { display: flex; justify-content: space-between; align-items: center; background: var(--glass-surface); backdrop-filter: blur(25px); border: var(--glass-border); padding: 0 24px; border-radius: var(--radius-panel); box-shadow: var(--glass-shadow); height: 72px; flex-shrink: 0; z-index: 50; gap: 16px; }
       .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; }
       
-      @keyframes pulse-diamond {
-        0% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); }
-        50% { transform: rotate(45deg) scale(1.1); box-shadow: 0 4px 30px rgba(99, 102, 241, 0.6); }
-        100% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); }
-      }
-      .brand-logo-diamond { 
-        width: 32px; height: 32px; 
-        background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); 
-        border-radius: 6px; 
-        transform: rotate(45deg); 
-        box-shadow: var(--accent-glow); 
-        display: flex; align-items: center; justify-content: center; 
-        flex-shrink: 0; margin: 0 8px; 
-        animation: pulse-diamond 3s infinite ease-in-out;
-      }
+      .brand-logo-diamond { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 6px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 8px; animation: pulse-diamond 3s infinite ease-in-out; }
       .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.9); border-radius: 3px; }
+      @keyframes pulse-diamond { 0% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); } 50% { transform: rotate(45deg) scale(1.1); box-shadow: 0 4px 30px rgba(99, 102, 241, 0.6); } 100% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); } }
       
       .kpi-row { display: flex; gap: 24px; text-align: right; height: 100%; align-items: center; margin-right: 24px; }
       .kpi-box h4 { margin: 0; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
@@ -103,24 +89,9 @@
       .action-btn:hover { background: rgba(255,255,255,0.15); border-color: var(--accent-primary); }
       
       .viewport { flex: 1; overflow-y: auto; overflow-x: hidden; border-radius: var(--radius-panel); padding-bottom: 80px; min-height: 0; }
-      
       .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
       
-      /* --- FIXED FLOATING CONTROL BAR --- */
-      .sticky-header {
-         position: sticky; top: 10px; z-index: 100;
-         background: var(--glass-surface);
-         backdrop-filter: blur(25px);
-         border: var(--glass-border);
-         border-radius: 20px;
-         box-shadow: var(--glass-shadow);
-         padding: 12px 24px;
-         margin-bottom: 24px;
-         display: flex;
-         align-items: center;
-         flex-wrap: wrap;
-         gap: 16px;
-      }
+      .sticky-header { position: sticky; top: 10px; z-index: 100; background: var(--glass-surface); backdrop-filter: blur(25px); border: var(--glass-border); border-radius: 20px; box-shadow: var(--glass-shadow); padding: 12px 24px; margin-bottom: 24px; display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
 
       .grid-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
       .grid-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
@@ -129,14 +100,10 @@
       
       .agent-pill { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: 0.2s; position: relative; }
       .agent-pill:hover { background: rgba(255,255,255,0.08); border-color: var(--accent-primary); opacity: 1 !important; filter: grayscale(0) !important; }
-      
       .agent-pill.role-safe { border: 1px solid var(--status-active); opacity: 0.6; }
       .agent-pill.role-icl { border: 1px solid var(--status-role); opacity: 0.6; }
       .agent-pill.status-break { opacity: 0.5; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02) 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px); }
-
-      /* FIX: FORCE OPACITY IN SPECIAL CARDS */
-      .special-group .agent-pill.role-safe, 
-      .special-group .agent-pill.role-icl { opacity: 1 !important; border-width: 2px; }
+      .special-group .agent-pill.role-safe, .special-group .agent-pill.role-icl { opacity: 1 !important; border-width: 2px; }
 
       .pill-left { display: flex; align-items: center; gap: 10px; overflow: hidden; }
       .pill-av { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)); color: var(--text-main); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
@@ -161,7 +128,6 @@
       .btn-glass { background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: var(--text-main); }
       .btn-icon-sm { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: transparent; cursor: pointer; border:none; }
       
-      /* FIX: Improved popout button visibility */
       .btn-popout { background: rgba(0,0,0,0.05); border: 1px solid var(--glass-border); color: var(--text-secondary); height: 28px; width: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition:0.2s; margin-left:8px; }
       .btn-popout:hover { color: var(--accent-primary); border-color:var(--accent-primary); background: rgba(255,255,255,0.2); }
 
@@ -169,11 +135,8 @@
       
       .modal-blur { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(10px); z-index: 1000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: 0.3s; }
       .modal-blur.open { opacity: 1; pointer-events: auto; }
-      
-      /* FIX: IMPROVED MODAL VISIBILITY IN DARK MODE */
       .modal-window { background: var(--bg-root); width: 500px; max-width: 90%; padding: 32px; border-radius: 24px; border: 1px solid var(--glass-border); box-shadow: 0 20px 60px rgba(0,0,0,0.5); transform: scale(0.95); transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
       body.dark .modal-window { background: #1e293b; border: 1px solid rgba(255,255,255,0.1); }
-
       .modal-blur.open .modal-window { transform: scale(1); }
       .drawer { position: fixed; top: 20px; right: 20px; bottom: 20px; width: 360px; background: var(--glass-surface); backdrop-filter: blur(30px); border: 1px solid var(--glass-border); border-radius: 24px; transform: translateX(120%); transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 200; display: flex; flex-direction: column; box-shadow: -10px 0 40px rgba(0,0,0,0.2); }
       .drawer.open { transform: translateX(0); }
@@ -189,7 +152,6 @@
       body.popout-mode .app-shell { margin: 0; width: 100%; max-width: none; padding: 0; }
       @media (max-width: 900px) { .app-shell { padding: 16px; } .top-deck { height: auto; flex-wrap: wrap; justify-content: center; } .grid-bento { grid-template-columns: 1fr; } }
       
-      /* WEATHER ENHANCEMENTS */
       .weather-mini-row { display: flex; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--glass-border); }
       .weather-day { text-align: center; display: flex; flex-direction: column; gap: 4px; }
       .wd-name { font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; }
@@ -324,15 +286,13 @@
         if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
         const urlParams = new URLSearchParams(window.location.search);
         
-        // FIX: HANDLE POPOUT URL CORRECTLY
+        // POPOUT HANDLING
         if (urlParams.has('popout')) {
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
             state.regionFilter = urlParams.get('mode') === 'onshore' ? 'Onshore' : (urlParams.get('mode') === 'offshore' ? 'Offshore' : 'All');
-            
-            // Show loading immediately so user doesn't see white page
+            // Show loading immediately
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
-            
             if (typeof google !== 'undefined') { 
                 setInterval(fetchData, 30000); 
                 fetchData(); 
@@ -744,13 +704,11 @@
           return `<i data-lucide="${i}" width="20"></i>`;
       }
 
-      /* --- NEW SCRIPT RENDERER --- */
       function renderScripts() {
          const cats = new Set(["All"]);
          state.scripts.forEach(s => cats.add(s.category || "General"));
          const categories = Array.from(cats);
          
-         // Side Bar HTML
          const catList = categories.map(c => `
              <button onclick="state.selectedCategory='${c}'; render();" 
                      class="ctx-item ${state.selectedCategory===c?'active-cat':''}" 
@@ -758,7 +716,6 @@
                  ${c}
              </button>`).join('');
 
-         // Filtered Scripts
          const filtered = state.scripts.filter(s => {
              const matchSearch = !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase());
              const matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
@@ -844,7 +801,6 @@
       window.saveBreaks = () => { const name = state.selectedAgent; let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) { const newBreaks = agent.rawBreaks.map((b, i) => ({ type: b.type, start: document.getElementById(`bs-${i}`).value, end: document.getElementById(`be-${i}`).value })); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
       window.saveOvertime = () => { const name = state.selectedAgent; const s = document.getElementById('ot-start').value; const e = document.getElementById('ot-end').value; if(s && e) { let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
       
-      // SCRIPT ACTIONS UPDATED
       window.addScript = () => { 
           const t = document.getElementById('new-script-title').value; 
           const b = document.getElementById('new-script-body').value; 
@@ -860,9 +816,8 @@
       };
       window.editScript = (idx) => { 
           const s = state.scripts[idx]; if(!s) return; 
-          openComposeMode(); // reset
-          // override state
-          state.editingId = s.index; // Use persistent index from backend
+          openComposeMode(); 
+          state.editingId = s.index; 
           document.getElementById('new-script-title').value = s.title; 
           document.getElementById('new-script-body').value = s.body; 
           document.getElementById('new-script-cat').value = s.category || "";
@@ -870,7 +825,6 @@
       window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
       window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
       
-      // Debounced search
       let searchTimeout;
       window.handleScriptSearch = (val) => { 
           clearTimeout(searchTimeout);
