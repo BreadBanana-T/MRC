@@ -2,20 +2,16 @@
  * WFM IMPORT ENGINE
  */
 
-// --- LINKER: Connects this file to Code.gs ---
 const ImportHandler = {
   run: function(text, date) {
-    // Delegates the call to the main function below
     return processWFMImport(text, date);
   }
 };
-// ---------------------------------------------
 
 function processWFMImport(rawText, forcedDate) {
   if (!rawText) return "Error: No text provided.";
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.setSpreadsheetTimeZone("America/Toronto");
-  
   let sheet = ss.getSheetByName("Raw Schedule");
   if (!sheet) { sheet = ss.insertSheet("Raw Schedule"); }
   
@@ -29,15 +25,13 @@ function processWFMImport(rawText, forcedDate) {
   let currentID = null;
   let buffer = resetBuffer();
   
-  // --- SAFETY FIX FOR DATE ---
   if (!forcedDate) {
      forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   }
   
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
-  // ---------------------------
 
-  const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i; 
+  const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
   const rgxAnyDateLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})/; 
   const rgxShiftLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
   const rgxActivityLine = /(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)\s*$/i;
@@ -61,7 +55,6 @@ function processWFMImport(rawText, forcedDate) {
        let dateMatch = line.match(rgxAnyDateLine);
        if (dateMatch) {
           const foundDate = dateMatch[1];
-          // If buffer has data and date changes, save & reset
           if ((buffer.dateStr && buffer.dateStr !== foundDate) || (buffer.isOff && !buffer.dateStr)) {
              pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
              buffer = resetBuffer();
@@ -90,12 +83,18 @@ function processWFMImport(rawText, forcedDate) {
        else if (upper.includes("VACATION") || upper.includes("VACP")) buffer.absentType = "VACATION";
        else if (upper.includes("TRAINING") || upper.includes("TRN")) buffer.absentType = "TRAINING";
 
-       // 5. BREAKS
-       if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS")) && !upper.includes("PAID LUNCH")) {
-           let actMatch = line.match(rgxActivityLine);
-           if (actMatch) {
+       // 5. BREAKS & WORK DETECTION
+       let actMatch = line.match(rgxActivityLine);
+       if (actMatch) {
+           // If it's a timed segment...
+           if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actMatch[1], end: actMatch[2] });
+           } 
+           // **NEW**: If it's a timed segment that is NOT an absence or break, assume it's WORK.
+           // This catches "Open Time", "Production", "Queue", etc.
+           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT")) {
+               buffer.hasWork = true;
            }
        }
     }
@@ -112,20 +111,22 @@ function processWFMImport(rawText, forcedDate) {
 }
 
 function resetBuffer() {
-  return { breaks: [], start: null, end: null, dateStr: null, absentType: "", isOffshore: false, isOff: false };
+  return { breaks: [], start: null, end: null, dateStr: null, absentType: "", isOffshore: false, isOff: false, hasWork: false };
 }
 
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
   if (!buf.start && !buf.isOff && !buf.absentType) return;
-  // Skip empty buffers
 
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
 
+  // **CRITICAL FIX**: If partial work was detected, clear the Vacation flag
+  if (buf.hasWork && buf.absentType === "VACATION") {
+      buf.absentType = ""; // Treat as Active
+  }
+
   let startEpoch = "", endEpoch = "";
   let finalDateStr = buf.dateStr;
-  
-  // Fallback to default date if none found in text
   if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`;
 
   if (buf.start && buf.end) {
@@ -142,12 +143,12 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
 
      const sObj = parseTime(buf.start);
      const eObj = parseTime(buf.end);
+
      if (sObj && eObj) {
         let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
         let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
         
         if (eDate <= sDate) eDate.setDate(eDate.getDate() + 1);
-
         startEpoch = sDate.getTime();
         endEpoch = eDate.getTime();
      }
