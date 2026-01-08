@@ -6,8 +6,12 @@
 function doGet(e) {
   const template = HtmlService.createTemplateFromFile('Index');
   
-  // --- CRITICAL FIX: Define appUrl here so Index.html doesn't crash ---
+  // 1. Pass Real App URL
   template.appUrl = ScriptApp.getService().getUrl(); 
+
+  // 2. Pass URL Parameters to bypass Sandbox restrictions
+  template.popoutParam = (e && e.parameter && e.parameter.popout) ? "true" : "false";
+  template.modeParam = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
 
   return template.evaluate()
       .setTitle('MRC Command Center')
@@ -15,11 +19,15 @@ function doGet(e) {
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+// --- CORE: INCLUDE FUNCTION ---
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
 /* --- ROUTER: CALCULATOR --- */
 function runCalculator(inText, outText) {
   if (typeof calculateMetrics !== 'undefined') {
-    const resultJson = calculateMetrics(inText, outText);
-    return resultJson;
+    return calculateMetrics(inText, outText);
   }
   return JSON.stringify({ report: "Error: Calculator.gs file not found." });
 }
@@ -45,7 +53,6 @@ function getLiveDashboardData() {
     if (typeof WeatherService !== 'undefined') {
       return JSON.stringify(WeatherService.fetch());
     }
-    // Fallback if WeatherService is missing (should not happen if Weather.gs is present)
     return JSON.stringify({ weather: {}, alerts: [] });
   } catch (e) {
     return JSON.stringify({ weather: {}, alerts: [] });
@@ -106,4 +113,22 @@ function saveTeamScript(i, t, b, c) {
 }
 function deleteTeamScript(i) { 
     if (typeof deleteTeamScript !== 'undefined') return ScriptHandler.delete(i); 
+}
+
+/* --- LOGGING & SHEET FILLING ROUTERS --- */
+function commitShiftAction(note) {
+   if (typeof LogSync !== 'undefined') return LogSync.commitShift(note);
+   return "LogSync Module Missing";
+}
+
+function saveJournalEntry(cat, note) {
+   if (typeof LogSync !== 'undefined') return LogSync.writeToJournal(cat, note, "User");
+   return "LogSync Module Missing";
+}
+
+function fillWindsToSheet() { 
+  if (typeof WeatherService === 'undefined') return "Weather Module Missing";
+  if (typeof LogSync === 'undefined') return "LogSync Module Missing";
+  const data = WeatherService.fetch();
+  return LogSync.fillWinds(data);
 }
