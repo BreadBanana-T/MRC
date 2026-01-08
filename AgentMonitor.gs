@@ -27,10 +27,11 @@ function compileFloorData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Raw Schedule");
   
-  // Define categories - Added startingSoon to separate pre-shift agents
   const emptyFloor = {
     active: [], 
     startingSoon: [],
+    safe: [], // Dedicated array for SAFE
+    icl: [],  // Dedicated array for ICL
     training: [],
     upcomingBreak: [],
     vacation: [], planned: [], unplanned: [], off: []
@@ -55,28 +56,26 @@ function compileFloorData() {
     let endEpoch = row ? Number(row[11]) : 0;
     let originalBreaksJson = row ? row[7] : "[]";
     
-    // Override Logic
     let role = (persistentData.role !== undefined && persistentData.role !== "") ? persistentData.role : (row ? row[8] : "");
     let absentType = (persistentData.absent !== undefined && persistentData.absent !== "") ? persistentData.absent : (row ? row[9] : "");
     
-    // If manually set to Active, clear absence
+    // Override: If role is manually set, clear any import absence
     if (persistentData.role && persistentData.role !== "") absentType = "";
 
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
 
-    // 1. FILTERING
+    // --- FILTERING ---
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
 
     if (startEpoch && endEpoch) {
-       // Hide if ended > 4 hours ago
-       const FOUR_HOURS = 14400000;
-       if (endEpoch < (now - FOUR_HOURS) && !isOT) return;
+       // Filter: Shift ended > 30 mins ago (Removed the 4 hour window to fix stuck agents)
+       const THIRTY_MINS = 1800000;
+       if (endEpoch < (now - THIRTY_MINS) && !isOT) return;
        
-       // Hide if starts > 1.5 hours (90 mins) from now
-       // This fixes the issue of 5 AM agents showing up at midnight
+       // Filter: Shift starts > 1.5 hours from now
        const NINETY_MINS = 90 * 60 * 1000; 
        if (startEpoch > (now + NINETY_MINS) && !isOT) return;
     }
@@ -156,7 +155,7 @@ function compileFloorData() {
        });
     }
 
-    // 2. CATEGORIZATION
+    // --- CATEGORIZATION ---
     let category = "active";
     let subStatus = role || ""; 
 
@@ -170,8 +169,7 @@ function compileFloorData() {
         category = "training";
     }
 
-    // STARTING SOON LOGIC
-    // If filtered in (> now and <= 1.5h), move to startingSoon
+    // Starting Soon
     if (['active', 'safe', 'icl'].includes(category)) {
         if (startEpoch && startEpoch > now) {
              category = "startingSoon";
@@ -219,6 +217,10 @@ function compileFloorData() {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else emptyFloor.active.push(item.agent);
+
+      // **FIX**: Populate the specific role lists regardless of main category
+      if (item.agent.role === 'SAFE') emptyFloor.safe.push(item.agent);
+      if (item.agent.role === 'ICL') emptyFloor.icl.push(item.agent);
   });
   
   return JSON.stringify(emptyFloor);
