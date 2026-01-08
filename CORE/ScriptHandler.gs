@@ -11,25 +11,25 @@ const ScriptHandler = {
     let sheet = ss.getSheetByName(this.SHEET_NAME);
     
     if (!sheet) {
-      // CREATE NEW SHEET
+      // Create new if missing
       sheet = ss.insertSheet(this.SHEET_NAME);
       sheet.appendRow(["Title", "Script Body", "Category"]);
       sheet.getRange(1, 1, 1, 3).setFontWeight("bold");
-      // Add defaults
       sheet.appendRow(["Long Call Check", "Hi, I noticed you've been on this call for 15+ mins. Do you need supervisor assistance?", "Quality"]);
-      sheet.appendRow(["Late from Break", "Hi, checking in—you're showing as away past your break time. Everything good?", "Supervision"]);
-    } else {
-      // AUTO-UPGRADE LEGACY SHEETS
-      // If the sheet exists but only has 2 columns, add the "Category" header
-      if (sheet.getLastColumn() < 3) {
-         sheet.getRange(1, 3).setValue("Category").setFontWeight("bold");
-         // Fill existing rows with "General" to prevent null errors
-         const lastRow = sheet.getLastRow();
-         if (lastRow > 1) {
-             sheet.getRange(2, 3, lastRow - 1, 1).setValue("General");
-         }
-      }
+    } 
+    
+    // --- SELF-REPAIR: Ensure Column C (Category) exists ---
+    const maxCols = sheet.getMaxColumns();
+    if (maxCols < 3) {
+       sheet.insertColumnsAfter(maxCols, 3 - maxCols);
     }
+    
+    // Ensure Header is correct
+    const header = sheet.getRange(1, 3).getValue();
+    if (header !== "Category") {
+       sheet.getRange(1, 3).setValue("Category").setFontWeight("bold");
+    }
+    
     return sheet;
   },
 
@@ -38,14 +38,15 @@ const ScriptHandler = {
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
     
-    // Force grab 3 columns even if empty
-    const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    // Safe Read: Grab all available columns, handle missing data in JS
+    const numCols = sheet.getLastColumn();
+    const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
     
     return data.map((row, index) => ({
       index: index,
-      title: row[0],
-      body: row[1],
-      category: row[2] || "General" 
+      title: row[0] || "",
+      body: row[1] || "",
+      category: row[2] || "General" // Default if column is empty/missing
     }));
   },
 
@@ -58,6 +59,7 @@ const ScriptHandler = {
     if (index !== null && index !== undefined && index !== "") {
        const row = parseInt(index) + 2; 
        if (row <= sheet.getLastRow()) {
+          // Force write to first 3 columns
           sheet.getRange(row, 1, 1, 3).setValues([[title, body, catVal]]);
           return "Updated";
        }
