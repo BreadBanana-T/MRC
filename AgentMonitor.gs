@@ -5,7 +5,8 @@
 
 const AgentMonitor = {
   getPayload: function() { return compileFloorData(); },
-  setStatus: function(n, t, v) { return StatusTracker.updateStatus(n, t, v); },
+  // UPDATE: Use RoleManager for instant status updates
+  setStatus: function(n, t, v) { return RoleManager.setStatus(n, t, v); },
   updateAgentBreaks: function(n, j) { return StatusTracker.updateBreaks(n, j); },
   logOvertime: function(n, s, e, bs, be) { 
       const res = StatusTracker.logOvertime(n, s, e, bs, be);
@@ -26,41 +27,45 @@ function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.lo
 function compileFloorData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Raw Schedule");
-  
   const emptyFloor = {
-    active: [], 
-    startingSoon: [],
-    safe: [], // Dedicated array for SAFE
-    icl: [],  // Dedicated array for ICL
-    training: [],
-    upcomingBreak: [],
-    vacation: [], planned: [], unplanned: [], off: []
+    active: [], startingSoon: [], safe: [], icl: [], training: [],
+    upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
 
-  const overrides = StatusTracker.getConsolidatedData(); 
+  // FETCH BOTH SOURCES
+  const sheetOverrides = StatusTracker.getConsolidatedData(); 
+  const fastOverrides = RoleManager.getFastMap(); // Get instant cache
+
   const data = (sheet && sheet.getLastRow() > 1) ?
     sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   
   const now = new Date().getTime();
   const agentMap = new Map();
-
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
     const cleanName = String(rawName).trim().toLowerCase();
-    const persistentData = overrides.get(cleanName) || {};
+    
+    // MERGE LOGIC: Fast Cache > Sheet > Import
+    const persistentData = sheetOverrides.get(cleanName) || {};
+    const fastData = fastOverrides[cleanName] || {};
+    
+    // Prioritize Fast Cache if it exists
+    let role = (fastData.role !== undefined) ? fastData.role : 
+               (persistentData.role !== undefined && persistentData.role !== "") ? persistentData.role : 
+               (row ? row[8] : "");
 
+    let absentType = (fastData.absent !== undefined) ? fastData.absent :
+                     (persistentData.absent !== undefined && persistentData.absent !== "") ? persistentData.absent :
+                     (row ? row[9] : "");
+    
     let shiftType = row ? row[5] : "Off";
     let region = row ? row[6] : "Offshore";
     let startEpoch = row ? Number(row[10]) : 0;
     let endEpoch = row ? Number(row[11]) : 0;
     let originalBreaksJson = row ? row[7] : "[]";
     
-    let role = (persistentData.role !== undefined && persistentData.role !== "") ? persistentData.role : (row ? row[8] : "");
-    let absentType = (persistentData.absent !== undefined && persistentData.absent !== "") ? persistentData.absent : (row ? row[9] : "");
-    
-    // Override: If role is manually set, clear any import absence
-    if (persistentData.role && persistentData.role !== "") absentType = "";
+    if (role && role !== "") absentType = "";
 
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
@@ -71,18 +76,13 @@ function compileFloorData() {
     if ((!startEpoch || !endEpoch) && !isOT) return;
 
     if (startEpoch && endEpoch) {
-       // Filter: Shift ended > 30 mins ago (Removed the 4 hour window to fix stuck agents)
        const THIRTY_MINS = 1800000;
        if (endEpoch < (now - THIRTY_MINS) && !isOT) return;
-       
-       // Filter: Shift starts > 1.5 hours from now
-       const NINETY_MINS = 90 * 60 * 1000; 
+       const NINETY_MINS = 90 * 60 * 1000;
        if (startEpoch > (now + NINETY_MINS) && !isOT) return;
     }
 
-    let dateStr = row && row[2] instanceof Date ?
-       Utilities.formatDate(row[2], "America/Toronto", "M/d/yy") : (row ? row[2] : "");
-    
+    let dateStr = row && row[2] instanceof Date ? Utilities.formatDate(row[2], "America/Toronto", "M/d/yy") : (row ? row[2] : "");
     let shiftStr = "";
     if(startEpoch && endEpoch) {
        const sFmt = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "HH:mm");
@@ -93,7 +93,6 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
-    
     if (isOT) {
        otList.forEach(o => {
            if(o.bStart && o.bStart !== "-" && o.bEnd && o.bEnd !== "-") {
@@ -111,7 +110,6 @@ function compileFloorData() {
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
        const shiftDateStr = Utilities.formatDate(baseTime, "America/Toronto", "yyyy-MM-dd");
-       
        rawBreaks.sort((a, b) => parseTimeValue(a.start) - parseTimeValue(b.start));
        let breakCounter = 0;
        
@@ -140,14 +138,12 @@ function compileFloorData() {
                  start: b.start, end: b.end, 
                  epochStart: bs, epochEnd: be 
              });
-
              if (now >= bs && now <= be) {
                  onBreakNow = true;
                  const rem = Math.ceil((be - now)/60000);
                  breakTimer = `${rem}m`;
                  breakLabel = displayLabel;
              }
-
              if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
              }
@@ -218,11 +214,10 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else emptyFloor.active.push(item.agent);
 
-      // **FIX**: Populate the specific role lists regardless of main category
       if (item.agent.role === 'SAFE') emptyFloor.safe.push(item.agent);
       if (item.agent.role === 'ICL') emptyFloor.icl.push(item.agent);
   });
-  
+
   return JSON.stringify(emptyFloor);
 }
 
