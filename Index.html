@@ -160,6 +160,8 @@
     </style>
   </head>
   <body>
+    <div id="data-store" data-url="<?= appUrl ?>" style="display:none;"></div>
+
     <div class="aether-bg"><div class="blob b1"></div><div class="blob b2"></div></div>
     
     <div class="app-shell" id="main-layout">
@@ -203,7 +205,7 @@
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0; font-size:1.5rem; font-weight:800; margin-bottom:24px;">Import Data</h2>
-          <textarea id="import-text" class="input-aether mb-6" style="height:auto;" rows="8" placeholder="Paste JSON..."></textarea>
+          <textarea id="import-text" class="input-aether mb-6" style="height:auto;" rows="8" placeholder="Paste Schedule Text..."></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
@@ -271,7 +273,7 @@
 
     <script>
       const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
-      let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null };
+      let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "" };
 
       document.addEventListener('mousemove', e => {
           document.querySelectorAll('.aether-card').forEach(card => {
@@ -284,13 +286,21 @@
 
       function initApp() {
         if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
+        
+        // LOAD REAL URL
+        const dataStore = document.getElementById('data-store');
+        if (dataStore) state.appUrl = dataStore.getAttribute('data-url');
+
         const urlParams = new URLSearchParams(window.location.search);
         
         // POPOUT HANDLING
         if (urlParams.has('popout')) {
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
-            state.regionFilter = urlParams.get('mode') === 'onshore' ? 'Onshore' : (urlParams.get('mode') === 'offshore' ? 'Offshore' : 'All');
+            // Support 'Breaks' mode properly
+            const m = urlParams.get('mode');
+            state.regionFilter = (m === 'onshore' ? 'Onshore' : (m === 'offshore' ? 'Offshore' : (m === 'breaks' ? 'Breaks' : 'All')));
+            
             // Show loading immediately
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
             if (typeof google !== 'undefined') { 
@@ -319,8 +329,11 @@
       window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
       window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
       
+      // FIX: USE REAL URL
       window.openPopout = (mode) => {
-         const url = window.location.href + (window.location.href.includes('?') ? '&' : '?') + 'popout=true&mode=' + mode.toLowerCase();
+         const baseUrl = state.appUrl || window.location.href.split('?')[0];
+         const sep = baseUrl.includes('?') ? '&' : '?';
+         const url = `${baseUrl}${sep}popout=true&mode=${mode.toLowerCase()}`;
          window.open(url, '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no');
       };
 
@@ -422,19 +435,40 @@
          const c = document.getElementById('content');
          if(!c) return; 
          const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
-         const title = mode === 'Onshore' ? 'Onshore Unit' : (mode === 'Offshore' ? 'Offshore Unit' : 'All Units');
          
-         const filterFn = (list) => (list||[]).filter(a => mode === 'All' || (a.region||"").includes(mode));
+         let title = "All Units";
+         if (mode === 'Onshore') title = "Onshore Unit";
+         else if (mode === 'Offshore') title = "Offshore Unit";
+         else if (mode === 'Breaks') title = "Break Room";
+         
+         const filterFn = (list) => (list||[]).filter(a => {
+            if (mode === 'All') return true;
+            if (mode === 'Breaks') return true; // Breaks handled separately
+            return (a.region||"").includes(mode);
+         });
          
          let h = `<div style="padding:20px;">
-             <h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">${title}</h2>
+             <h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">${title}</h2>`;
+         
+         // SHOW FLOOR ONLY IF NOT IN BREAKS MODE
+         if (mode !== 'Breaks') {
+             h += `
              <div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div>
              <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.startingSoon).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>
              <div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Active Floor</div>
-             <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>
-             <div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
-             <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).filter(a=>a.onBreakNow).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>
-         </div>`;
+             <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`;
+         }
+
+         // ALWAYS SHOW BREAKS IN BREAK MODE or ALL
+         if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') {
+             // For specific regions, filter breaks by region too
+             const breakList = filterFn(state.agents.active).filter(a=>a.onBreakNow);
+             
+             h += `<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
+             <div class="agent-list" style="grid-template-columns:1fr;">${breakList.length ? breakList.map(a => renderAgentPill(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
+         }
+         
+         h += `</div>`;
          c.innerHTML = h;
          refreshIcons();
       }
@@ -581,7 +615,7 @@
           <div>
              <div class="section-header">
                  Currently on Break <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${onBreakList.length}</span>
-                 <button class="btn-popout" title="Popout Break Room" onclick="openPopout('All')"><i data-lucide="external-link" width="14"></i></button>
+                 <button class="btn-popout" title="Popout Break Room" onclick="openPopout('Breaks')"><i data-lucide="external-link" width="14"></i></button>
              </div>
              <div class="break-grid" style="margin-bottom:40px;">
                 ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Break Room Empty</div>'}
@@ -704,11 +738,13 @@
           return `<i data-lucide="${i}" width="20"></i>`;
       }
 
+      /* --- NEW SCRIPT RENDERER --- */
       function renderScripts() {
          const cats = new Set(["All"]);
          state.scripts.forEach(s => cats.add(s.category || "General"));
          const categories = Array.from(cats);
          
+         // Side Bar HTML
          const catList = categories.map(c => `
              <button onclick="state.selectedCategory='${c}'; render();" 
                      class="ctx-item ${state.selectedCategory===c?'active-cat':''}" 
@@ -716,6 +752,7 @@
                  ${c}
              </button>`).join('');
 
+         // Filtered Scripts
          const filtered = state.scripts.filter(s => {
              const matchSearch = !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase());
              const matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
