@@ -106,13 +106,25 @@
       
       .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
       
-      /* NEW STICKY HEADER CLASS */
+      /* --- FIXED STICKY HEADER --- */
+      /* Added negative margins to pull edges to screen, padding to push content back */
       .sticky-header {
          position: sticky; top: 0; z-index: 100;
-         background: var(--bg-root); /* Fallback */
-         background: linear-gradient(180deg, var(--bg-root) 0%, var(--bg-root) 80%, transparent 100%);
+         background: var(--bg-root); 
+         /* Gradient to fade out content below if needed */
+         background: linear-gradient(180deg, var(--bg-root) 0%, var(--bg-root) 90%, transparent 100%);
          padding-top: 10px; padding-bottom: 20px;
          margin-bottom: 10px;
+         
+         /* FIX: Compensate for app-shell padding */
+         margin-left: -32px; 
+         margin-right: -32px; 
+         padding-left: 32px; 
+         padding-right: 32px;
+      }
+      /* Mobile adjustment */
+      @media (max-width: 900px) {
+         .sticky-header { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
       }
 
       .grid-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
@@ -479,7 +491,6 @@
           const tab = state.agentTab;
           const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
           
-          // ADDED: Sticky Header Wrapper
           return `
           <div class="sticky-header">
              <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
@@ -575,7 +586,6 @@
           return filtered.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
       }
 
-      // ADDED: data-name and data-region attributes for search filtering
       function renderAgentPill(a, upInfo) {
          let start = "00:00", end = "00:00";
          if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
