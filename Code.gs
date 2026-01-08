@@ -3,9 +3,13 @@
  * Main Router for Command Center
  */
 
-function doGet() {
-  return HtmlService.createTemplateFromFile('Index')
-      .evaluate()
+function doGet(e) {
+  const template = HtmlService.createTemplateFromFile('Index');
+  
+  // --- CRITICAL FIX: Define appUrl here so Index.html doesn't crash ---
+  template.appUrl = ScriptApp.getService().getUrl(); 
+
+  return template.evaluate()
       .setTitle('MRC Command Center')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -80,7 +84,7 @@ function submitOvertime(name, start, end, bStart, bEnd) {
 
 /* --- SYSTEM NOTIFICATIONS --- */
 function getSystemNotifications() {
-    if (typeof NotificationHandler !== 'undefined') return NotificationHandler.get();
+    if (typeof NotificationHandler !== 'undefined') return NotificationHandler.getPending();
     return JSON.stringify([]);
 }
 
@@ -94,12 +98,12 @@ function dismissSystemNotification(id) {
 
 /* --- SCRIPT ROUTERS --- */
 function fetchScripts() { 
-    if (typeof getTeamScripts !== 'undefined') return getTeamScripts(); 
+    if (typeof getTeamScripts !== 'undefined') return getTeamScripts();
     return JSON.stringify([]);
 }
-function saveScript(t, b) { 
-    if (typeof addTeamScript !== 'undefined') return addTeamScript(t, b); 
+function saveTeamScript(i, t, b, c) { 
+    if (typeof saveTeamScript !== 'undefined') return ScriptHandler.save(i, t, b, c);
 }
-function removeScript(i) { 
-    if (typeof deleteTeamScript !== 'undefined') return deleteTeamScript(i); 
+function deleteTeamScript(i) { 
+    if (typeof deleteTeamScript !== 'undefined') return ScriptHandler.delete(i); 
 }
