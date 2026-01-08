@@ -623,6 +623,7 @@
       return `<i data-lucide="${i}" width="20"></i>`;
   }
 
+  /* --- NEW SCRIPT RENDERER --- */
   function renderScripts() {
      const cats = new Set(["All"]);
      state.scripts.forEach(s => cats.add(s.category || "General"));
