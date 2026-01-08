@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MRC Center</title>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -157,6 +159,17 @@
       .wd-name { font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; }
       .wd-icon { opacity: 0.7; }
       .wd-temp { font-size: 0.9rem; font-weight: 700; }
+
+      /* INSIGHTS STYLES */
+      .feed-item { padding: 16px; border-bottom: 1px solid var(--glass-border); display: flex; gap: 12px; }
+      .feed-item:last-child { border-bottom: none; }
+      .feed-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); margin-top: 6px; flex-shrink: 0; }
+      .feed-content { flex: 1; }
+      .feed-time { font-size: 0.75rem; color: var(--text-muted); font-weight: 700; margin-bottom: 4px; }
+      .feed-text { font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); }
+      .feed-dot.critical { background: var(--status-alert); box-shadow: 0 0 10px rgba(220,38,38,0.3); }
+      .feed-dot.weather { background: var(--region-on); }
+
     </style>
   </head>
   <body>
@@ -174,6 +187,7 @@
                 <button class="nav-btn active" id="btn-overview" onclick="setView('overview')">Dashboard</button>
                 <button class="nav-btn" id="btn-agents" onclick="setView('agents')">Floor</button>
                 <button class="nav-btn" id="btn-scripts" onclick="setView('scripts')">Scripts</button>
+                <button class="nav-btn" id="btn-insights" onclick="setView('insights')">Insights</button>
                 <button class="nav-btn" id="btn-weather" onclick="setView('weather')">Weather</button>
                 <button class="nav-btn" id="btn-calc" onclick="setView('calc')">Calc</button>
             </nav>
@@ -188,6 +202,7 @@
                     <i data-lucide="bell" width="20"></i>
                     <div id="notif-dot" style="position:absolute; top:10px; right:10px; width:6px; height:6px; background:var(--status-alert); border-radius:50%; display:none;"></div>
                 </button>
+                <button class="action-btn" onclick="openJournal()" title="Operations Log"><i data-lucide="clipboard-list" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
@@ -237,6 +252,17 @@
           </div>
        </div>
     </div>
+
+    <div id="journal-modal" class="modal-blur" onclick="document.getElementById('journal-modal').classList.remove('open')">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:600px;">
+          <h2 style="margin-top:0; font-size:1.5rem; font-weight:800; margin-bottom:16px;">Operations Log</h2>
+          <textarea id="journal-text" class="input-aether" style="height:200px; resize:none; line-height:1.5; padding:16px; margin-bottom:24px;" placeholder="Log an event, issue, or handover note..."></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:16px;">
+             <button class="btn btn-glass" onclick="document.getElementById('journal-modal').classList.remove('open')">Cancel</button>
+             <button class="btn btn-primary" onclick="submitJournal()">Log Entry</button>
+          </div>
+       </div>
+    </div>
     
     <div id="weather-modal" class="modal-blur" onclick="document.getElementById('weather-modal').classList.remove('open')">
        <div class="modal-window" onclick="event.stopPropagation()">
@@ -271,9 +297,28 @@
     </div>
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
 
+    <div id="compose-area" class="aether-card" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); width:600px; max-width:90%; z-index:2000; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <div class="flex-between" style="margin-bottom:20px;">
+            <h2 style="margin:0;">Compose Script</h2>
+            <button onclick="closeComposeMode()" class="btn-icon-sm"><i data-lucide="x"></i></button>
+        </div>
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+            <input id="new-script-title" class="input-aether" placeholder="Script Title" style="flex:1;">
+            <div style="position:relative; width:150px;">
+               <input id="new-script-cat" class="input-aether" placeholder="Category" list="cat-suggestions">
+               <datalist id="cat-suggestions"></datalist>
+            </div>
+        </div>
+        <textarea id="new-script-body" class="input-aether" style="min-height:300px; resize:none; line-height:1.6; height:auto; align-items:start; padding-top:12px; margin-bottom:20px;" placeholder="Content (HTML/Emojis supported)..."></textarea>
+        <div style="display:flex; justify-content:flex-end;">
+            <button class="btn btn-primary" onclick="addScript()">Save Script</button>
+        </div>
+    </div>
+    <div id="compose-overlay" onclick="closeComposeMode()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1900;"></div>
+
     <script>
       const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
-      let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "" };
+      let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "", insightMode: 'week' };
 
       document.addEventListener('mousemove', e => {
           document.querySelectorAll('.aether-card').forEach(card => {
@@ -287,21 +332,17 @@
       function initApp() {
         if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
         
-        // LOAD REAL URL
         const dataStore = document.getElementById('data-store');
         if (dataStore) state.appUrl = dataStore.getAttribute('data-url');
 
         const urlParams = new URLSearchParams(window.location.search);
         
-        // POPOUT HANDLING
         if (urlParams.has('popout')) {
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
-            // Support 'Breaks' mode properly
             const m = urlParams.get('mode');
             state.regionFilter = (m === 'onshore' ? 'Onshore' : (m === 'offshore' ? 'Offshore' : (m === 'breaks' ? 'Breaks' : 'All')));
             
-            // Show loading immediately
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
             if (typeof google !== 'undefined') { 
                 setInterval(fetchData, 30000); 
@@ -315,6 +356,7 @@
 
       window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
       window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
+      window.setInsightMode = (m) => { state.insightMode = m; render(); };
       
       window.toggleTheme = () => { 
           document.body.classList.toggle('dark'); 
@@ -329,7 +371,6 @@
       window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
       window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
       
-      // FIX: USE REAL URL
       window.openPopout = (mode) => {
          const baseUrl = state.appUrl || window.location.href.split('?')[0];
          const sep = baseUrl.includes('?') ? '&' : '?';
@@ -427,10 +468,141 @@
          else if (state.view === 'weather') h = renderWeather();
          else if (state.view === 'calc') h = renderCalc();
          else if (state.view === 'scripts') h = renderScripts();
+         else if (state.view === 'insights') h = renderInsights();
          c.innerHTML = h; refreshIcons();
          const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
+         
+         if(state.view === 'insights') initCharts();
       }
       
+      // --- INSIGHTS RENDERER ---
+      function renderInsights() {
+          const isWeek = state.insightMode === 'week';
+          
+          return `
+          <div class="sticky-header" style="justify-content:space-between;">
+             <div style="display:flex; align-items:center; gap:16px;">
+                 <h2 style="margin:0; font-size:1.2rem;">${isWeek ? 'Week Overview' : 'Daily Resume'}</h2>
+                 <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                    <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Today</button>
+                    <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Week</button>
+                 </div>
+             </div>
+             <div style="display:flex; gap:12px;">
+                 <input type="date" class="input-aether" style="width:auto; height:34px;" value="${new Date().toISOString().split('T')[0]}">
+                 <button class="btn btn-primary" onclick="showToast('Data Synced')"><i data-lucide="save" width="16"></i> Commit Shift</button>
+             </div>
+          </div>
+          
+          <div style="display:grid; grid-template-columns: 350px 1fr; gap:24px; align-items:start;">
+             <div class="aether-card" style="padding:0; overflow:hidden; max-height:800px; display:flex; flex-direction:column;">
+                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">Shift Journal</div>
+                 <div style="padding:16px; overflow-y:auto; flex:1;">
+                     <div class="feed-item">
+                         <div class="feed-dot critical"></div>
+                         <div class="feed-content">
+                            <div class="feed-time">02:15 AM</div>
+                            <div class="feed-text">Critical system slowdown reported. IT ticket #4492 opened. Impact on AHT.</div>
+                         </div>
+                     </div>
+                     <div class="feed-item">
+                         <div class="feed-dot weather"></div>
+                         <div class="feed-content">
+                            <div class="feed-time">04:30 AM</div>
+                            <div class="feed-text">Weather warning issued for Toronto. High wind protocols active.</div>
+                         </div>
+                     </div>
+                     <div class="feed-item">
+                         <div class="feed-dot"></div>
+                         <div class="feed-content">
+                            <div class="feed-time">06:00 AM</div>
+                            <div class="feed-text">Shift handover complete. No pending escalations.</div>
+                         </div>
+                     </div>
+                 </div>
+                 <div style="padding:16px; border-top:1px solid var(--glass-border);">
+                     <button class="btn btn-glass" style="width:100%;" onclick="openJournal()">+ Add Entry</button>
+                 </div>
+             </div>
+             
+             <div style="display:flex; flex-direction:column; gap:24px;">
+                 <div class="aether-card">
+                     <div class="section-header">Staffing vs Demand</div>
+                     <div style="height:250px; width:100%;"><canvas id="chart-staffing"></canvas></div>
+                 </div>
+                 
+                 <div class="aether-card">
+                     <div class="section-header">Role Duration (Hours)</div>
+                     <div style="height:200px; width:100%;"><canvas id="chart-roles"></canvas></div>
+                 </div>
+
+                 <div class="grid-bento">
+                    <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
+                        <i data-lucide="users" width="32" style="color:var(--status-alert);"></i>
+                        <div>
+                            <div style="font-size:2rem; font-weight:800; line-height:1;">4</div>
+                            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">UNPLANNED ABSENCE</div>
+                        </div>
+                    </div>
+                     <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
+                        <i data-lucide="cloud-lightning" width="32" style="color:var(--text-main);"></i>
+                        <div>
+                            <div style="font-size:1.5rem; font-weight:800; line-height:1;">Toronto</div>
+                            <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">ACTIVE WEATHER ALERT</div>
+                        </div>
+                    </div>
+                 </div>
+             </div>
+          </div>
+          `;
+      }
+      
+      let charts = {};
+      function initCharts() {
+          if (typeof Chart === 'undefined') return;
+          
+          // Cleanup old charts
+          if(charts.staffing) charts.staffing.destroy();
+          if(charts.roles) charts.roles.destroy();
+
+          // 1. Staffing Chart (Multi-Line)
+          const ctx1 = document.getElementById('chart-staffing');
+          if(ctx1) {
+              charts.staffing = new Chart(ctx1, {
+                  type: 'line',
+                  data: {
+                      labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+                      datasets: [
+                          { label: 'Required', data: [15, 12, 25, 30, 28, 20], borderColor: '#94a3b8', borderDash: [5, 5], tension: 0.4 },
+                          { label: 'Actual', data: [16, 14, 24, 29, 26, 21], borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.1)', fill: true, tension: 0.4 }
+                      ]
+                  },
+                  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } } }
+              });
+          }
+
+          // 2. Roles Chart (Stacked Bar)
+          const ctx2 = document.getElementById('chart-roles');
+          if(ctx2) {
+              charts.roles = new Chart(ctx2, {
+                  type: 'bar',
+                  data: {
+                      labels: ['Night', 'Day', 'Evening'],
+                      datasets: [
+                          { label: 'SAFE', data: [12, 18, 14], backgroundColor: '#059669' },
+                          { label: 'ICL', data: [8, 10, 5], backgroundColor: '#7c3aed' },
+                          { label: 'Active', data: [40, 65, 50], backgroundColor: '#cbd5e1' }
+                      ]
+                  },
+                  options: { 
+                      responsive: true, 
+                      maintainAspectRatio: false, 
+                      scales: { x: { stacked: true }, y: { stacked: true } }
+                  }
+              });
+          }
+      }
+
       function renderPopout(mode) {
          const c = document.getElementById('content');
          if(!c) return; 
@@ -443,14 +615,13 @@
          
          const filterFn = (list) => (list||[]).filter(a => {
             if (mode === 'All') return true;
-            if (mode === 'Breaks') return true; // Breaks handled separately
+            if (mode === 'Breaks') return true; 
             return (a.region||"").includes(mode);
          });
          
          let h = `<div style="padding:20px;">
              <h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">${title}</h2>`;
          
-         // SHOW FLOOR ONLY IF NOT IN BREAKS MODE
          if (mode !== 'Breaks') {
              h += `
              <div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div>
@@ -459,11 +630,8 @@
              <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`;
          }
 
-         // ALWAYS SHOW BREAKS IN BREAK MODE or ALL
          if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') {
-             // For specific regions, filter breaks by region too
              const breakList = filterFn(state.agents.active).filter(a=>a.onBreakNow);
-             
              h += `<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
              <div class="agent-list" style="grid-template-columns:1fr;">${breakList.length ? breakList.map(a => renderAgentPill(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
          }
@@ -680,7 +848,7 @@
           if (!state.weather || Object.keys(state.weather).length === 0) {
              return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
           }
-          let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div>';
+          let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-glass" onclick="fillWindsAction()"><i data-lucide="save" width="16"></i> Fill Sheet</button><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
           if (state.alerts && state.alerts.length > 0) {
              html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
              state.alerts.forEach(a => html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province}: ${a.type} (${a.count})</div>`);
@@ -738,13 +906,11 @@
           return `<i data-lucide="${i}" width="20"></i>`;
       }
 
-      /* --- NEW SCRIPT RENDERER --- */
       function renderScripts() {
          const cats = new Set(["All"]);
          state.scripts.forEach(s => cats.add(s.category || "General"));
          const categories = Array.from(cats);
          
-         // Side Bar HTML
          const catList = categories.map(c => `
              <button onclick="state.selectedCategory='${c}'; render();" 
                      class="ctx-item ${state.selectedCategory===c?'active-cat':''}" 
@@ -752,7 +918,6 @@
                  ${c}
              </button>`).join('');
 
-         // Filtered Scripts
          const filtered = state.scripts.filter(s => {
              const matchSearch = !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase());
              const matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
@@ -792,27 +957,7 @@
                     ${listHTML || '<div style="text-align:center; color:var(--text-muted); padding:40px; grid-column:1/-1;">No scripts found in this category.</div>'}
                  </div>
              </div>
-         </div>
-         
-         <div id="compose-area" class="aether-card" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); width:600px; max-width:90%; z-index:2000; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-             <div class="flex-between" style="margin-bottom:20px;">
-                 <h2 style="margin:0;">Compose Script</h2>
-                 <button onclick="closeComposeMode()" class="btn-icon-sm"><i data-lucide="x"></i></button>
-             </div>
-             <div style="display:flex; gap:12px; margin-bottom:12px;">
-                 <input id="new-script-title" class="input-aether" placeholder="Script Title" style="flex:1;">
-                 <div style="position:relative; width:150px;">
-                    <input id="new-script-cat" class="input-aether" placeholder="Category" list="cat-suggestions">
-                    <datalist id="cat-suggestions">${categories.map(c=>`<option value="${c}">`).join('')}</datalist>
-                 </div>
-             </div>
-             <textarea id="new-script-body" class="input-aether" style="min-height:300px; resize:none; line-height:1.6; height:auto; align-items:start; padding-top:12px; margin-bottom:20px;" placeholder="Content (HTML/Emojis supported)..."></textarea>
-             <div style="display:flex; justify-content:flex-end;">
-                 <button class="btn btn-primary" onclick="addScript()">Save Script</button>
-             </div>
-         </div>
-         <div id="compose-overlay" onclick="closeComposeMode()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1900;"></div>
-         `;
+         </div>`;
       }
       
       window.openComposeMode = () => { document.getElementById('compose-area').style.display='block'; document.getElementById('compose-overlay').style.display='block'; state.editingId = null; document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; document.getElementById('new-script-cat').value=""; };
@@ -869,6 +1014,35 @@
       };
       
       window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
+      
+      // LOGGING ACTIONS
+      window.openJournal = () => {
+          document.getElementById('journal-modal').classList.add('open');
+          document.getElementById('journal-text').value = ""; 
+          document.getElementById('journal-text').focus();
+      };
+
+      window.submitJournal = () => {
+          const txt = document.getElementById('journal-text').value;
+          if(!txt) return;
+          if(typeof google !== 'undefined') {
+              google.script.run.withSuccessHandler(() => {
+                  showToast("Entry Logged");
+                  document.getElementById('journal-modal').classList.remove('open');
+              }).saveOpsLog(txt); 
+          }
+      };
+
+      window.fillWindsAction = () => {
+          if(confirm("Write current winds to the Daily Sheet?")) {
+              if(typeof google !== 'undefined') {
+                  showToast("Writing to Sheet...");
+                  google.script.run.withSuccessHandler(res => {
+                      showToast(res);
+                  }).fillWindsToSheet(); 
+              }
+          }
+      };
     </script>
   </body>
 </html>
