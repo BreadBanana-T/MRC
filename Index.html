@@ -11,7 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
-      /* ... (Keep your existing :root and body styles) ... */
       :root {
         --bg-root: #f0f4f8;
         --bg-blob-1: #c7d2fe;
@@ -34,7 +33,6 @@
         --radius-panel: 24px;
         --font-ui: 'Outfit', sans-serif;
       }
-      /* ... (Keep existing body.dark, *, body styles) ... */
       body.dark {
         --bg-root: #020408;
         --bg-blob-1: #1e1b4b;
@@ -60,29 +58,31 @@
         margin: 0; padding: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column;
         transition: background 0.5s ease;
       }
+      
+      /* --- CUSTOM SCROLLBAR --- */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; opacity: 0.5; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
       .aether-bg { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
       .blob { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.5; animation: float 25s infinite alternate ease-in-out; }
       .b1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: var(--bg-blob-1); }
       .b2 { bottom: -10%; right: -10%; width: 60vw; height: 60vw; background: var(--bg-blob-2); animation-delay: -5s; }
       @keyframes float { 0% { transform: translate(0,0); } 100% { transform: translate(30px, 50px); } }
-
-      /* ... (Keep .app-shell, .top-deck, .brand) ... */
       .app-shell { flex: 1; display: flex; flex-direction: column; padding: 24px 32px; max-width: 1800px; margin: 0 auto; width: 100%; gap: 24px; position: relative; z-index: 10; height: 100%; }
       .top-deck { display: flex; justify-content: space-between; align-items: center; background: var(--glass-surface); backdrop-filter: blur(25px); border: var(--glass-border); padding: 0 24px; border-radius: var(--radius-panel); box-shadow: var(--glass-shadow); height: 72px; flex-shrink: 0; z-index: 50; gap: 16px; }
       .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; }
-
-      /* --- NEW ANIMATION CSS --- */
+      
       @keyframes pulse-diamond {
         0% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); }
         50% { transform: rotate(45deg) scale(1.1); box-shadow: 0 4px 30px rgba(99, 102, 241, 0.6); }
         100% { transform: rotate(45deg) scale(1); box-shadow: 0 4px 20px rgba(99, 102, 241, 0.2); }
       }
-      
       .brand-logo-diamond { 
         width: 32px; height: 32px; 
         background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); 
         border-radius: 6px; 
-        /* UPDATED: Added animation */
         transform: rotate(45deg); 
         box-shadow: var(--accent-glow); 
         display: flex; align-items: center; justify-content: center; 
@@ -90,8 +90,7 @@
         animation: pulse-diamond 3s infinite ease-in-out;
       }
       .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.9); border-radius: 3px; }
-
-      /* ... (Keep the rest of your CSS exactly as it was) ... */
+      
       .kpi-row { display: flex; gap: 24px; text-align: right; height: 100%; align-items: center; margin-right: 24px; }
       .kpi-box h4 { margin: 0; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
       .kpi-box div { font-size: 1.2rem; font-weight: 800; color: var(--text-main); font-variant-numeric: tabular-nums; }
@@ -102,17 +101,32 @@
       .action-group { display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
       .action-btn { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: var(--glass-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
       .action-btn:hover { background: rgba(255,255,255,0.15); border-color: var(--accent-primary); }
+      
       .viewport { flex: 1; overflow-y: auto; overflow-x: hidden; border-radius: var(--radius-panel); padding-bottom: 80px; min-height: 0; }
+      
       .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+      
+      /* NEW STICKY HEADER CLASS */
+      .sticky-header {
+         position: sticky; top: 0; z-index: 100;
+         background: var(--bg-root); /* Fallback */
+         background: linear-gradient(180deg, var(--bg-root) 0%, var(--bg-root) 80%, transparent 100%);
+         padding-top: 10px; padding-bottom: 20px;
+         margin-bottom: 10px;
+      }
+
       .grid-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
       .grid-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
       .grid-masonry { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
       .agent-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+      
       .agent-pill { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: 0.2s; position: relative; }
       .agent-pill:hover { background: rgba(255,255,255,0.08); border-color: var(--accent-primary); opacity: 1 !important; filter: grayscale(0) !important; }
+      
       .agent-pill.role-safe { border: 1px solid var(--status-active); opacity: 0.6; }
       .agent-pill.role-icl { border: 1px solid var(--status-role); opacity: 0.6; }
       .agent-pill.status-break { opacity: 0.5; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02) 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px); }
+
       .pill-left { display: flex; align-items: center; gap: 10px; overflow: hidden; }
       .pill-av { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)); color: var(--text-main); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
       .pill-info { display: flex; flex-direction: column; overflow: hidden; }
@@ -122,6 +136,7 @@
       .region-tag.on { color: var(--region-on); background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.2); }
       .region-tag.off { color: var(--region-off); background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); }
       .pill-time { font-family: monospace; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+      
       .break-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
       .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
       .break-card::before { content:''; position:absolute; top:0; left:0; right:0; height:6px; background: var(--status-break); }
@@ -129,12 +144,14 @@
       .break-timer { font-size: 3rem; font-weight: 800; color: var(--text-main); font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -1px; }
       .break-name { font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 4px; }
       .break-label { font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 1px; }
+
       .btn { height: 36px; padding: 0 16px; border-radius: 10px; border: none; font-weight: 700; cursor: pointer; font-family: inherit; font-size: 0.85rem; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; }
       .btn-primary { background: var(--text-main); color: var(--bg-root); }
       .btn-glass { background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: var(--text-main); }
       .btn-icon-sm { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: transparent; cursor: pointer; border:none; }
       .btn-popout { background: transparent; border: 1px solid var(--text-muted); color: var(--text-muted); height: 24px; padding: 0 8px; font-size: 0.7rem; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; text-transform: uppercase; cursor: pointer; }
       .input-aether { width: 100%; padding: 0 16px; height: 40px; border-radius: 10px; background: rgba(0,0,0,0.05); border: 1px solid var(--glass-border); color: var(--text-main); font-family: inherit; font-size: 0.9rem; }
+      
       .modal-blur { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(10px); z-index: 1000; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: 0.3s; }
       .modal-blur.open { opacity: 1; pointer-events: auto; }
       .modal-window { background: var(--bg-root); width: 500px; max-width: 90%; padding: 32px; border-radius: 24px; border: 1px solid var(--glass-border); box-shadow: 0 20px 60px rgba(0,0,0,0.5); transform: scale(0.95); transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
@@ -265,7 +282,6 @@
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
 
     <script>
-      // ... (Keep the exact script section as it was in original file) ...
       const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
       let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "..." };
 
@@ -303,14 +319,65 @@
 
       function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
       function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
-      function handleSearch(v) { state.searchTerm=v; if(state.view==='agents') render(); }
+      
+      // FIX: handleSearch no longer re-renders. It toggles CSS visibility.
+      function handleSearch(v) { 
+          state.searchTerm = v; 
+          if(state.view === 'agents') {
+             const pills = document.querySelectorAll('.agent-pill');
+             const term = v.toLowerCase();
+             pills.forEach(p => {
+                 const name = p.getAttribute('data-name').toLowerCase();
+                 const reg = p.getAttribute('data-region');
+                 const matchName = !term || name.includes(term);
+                 const matchReg = state.regionFilter === 'All' || reg.includes(state.regionFilter);
+                 if (matchName && matchReg) p.style.display = 'flex';
+                 else p.style.display = 'none';
+             });
+          } else {
+             render(); // Other views still re-render
+          }
+      }
       function setRegionFilter(v) { state.regionFilter=v; handleSearch(state.searchTerm); }
 
       function fetchData() {
         if(typeof google==='undefined') return;
-        google.script.run.withSuccessHandler(j=>{try{const d=JSON.parse(j);if(d){state.agents={...state.agents,...d};applyPendingUpdates();if(state.view==='agents'||state.view==='overview')render();}}catch(e){}}).getFloorStatus();
-        google.script.run.withSuccessHandler(r=>{try{const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r);state.weather=d.weather||d;state.alerts=d.alerts||[];if(state.view.match(/overview|weather/))render();}catch(e){}}).getLiveDashboardData();
-        google.script.run.withSuccessHandler(j=>{try{const h=JSON.parse(j);if(h&&h.length){state.slHistory=h;if(state.view==='overview')render();}}catch(e){}}).getStatsHistory();
+        
+        // Fetch Agents
+        google.script.run.withSuccessHandler(j=>{
+            try{
+                const d=JSON.parse(j);
+                if(d){
+                    state.agents={...state.agents,...d};
+                    applyPendingUpdates();
+                    if(state.view==='agents'||state.view==='overview') render();
+                }
+            }catch(e){}
+        }).getFloorStatus();
+
+        // Fetch Weather
+        google.script.run.withSuccessHandler(r=>{
+            try{
+                const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r);
+                state.weather=d.weather||d;
+                state.alerts=d.alerts||[];
+                if(state.view.match(/overview|weather/)) render();
+            }catch(e){}
+        }).getLiveDashboardData();
+
+        // Fetch Stats History - Updates Big Numbers
+        google.script.run.withSuccessHandler(j=>{
+            try{
+                const h=JSON.parse(j);
+                if(h && h.length){
+                    state.slHistory=h;
+                    const latest = h[h.length - 1];
+                    state.currentSL = latest.val + "%";
+                    state.currentACK = latest.ack + "s";
+                    if(state.view==='overview') render();
+                }
+            }catch(e){}
+        }).getStatsHistory();
       }
       function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
       function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); document.getElementById('notif-dot').style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
@@ -345,7 +412,8 @@
       }
 
       function renderOverview() {
-          const shrinkPct = Math.round(((state.agents.unplanned||[]).length + (state.agents.vacation||[]).length) / Math.max(1, (state.agents.active||[]).length + 10) * 100);
+          const shrinkPct = Math.round(((state.agents.unplanned||[]).length) / Math.max(1, (state.agents.active||[]).length + 10) * 100);
+          
           const hist = state.slHistory || [];
           let svgContent = "";
           if (hist.length > 1) {
@@ -387,12 +455,22 @@
                 <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${(state.agents.vacation||[]).length+(state.agents.planned||[]).length}</div>
              </div>
 
-             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+             <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
                     <span style="font-weight:700;">Special Roles</span>
                     <i data-lucide="shield" class="text-muted" width="20"></i>
                 </div>
-                <div style="font-size:2rem; font-weight:800;">${(state.agents.icl||[]).length + (state.agents.safe||[]).length}</div>
+                <div style="display:flex; justify-content:space-around; align-items:center;">
+                    <div style="text-align:center;">
+                        <div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
+                        <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.safe||[]).length}</div>
+                    </div>
+                    <div style="width:1px; height:40px; background:var(--glass-border);"></div>
+                    <div style="text-align:center;">
+                        <div style="font-size:0.75rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
+                        <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.icl||[]).length}</div>
+                    </div>
+                </div>
              </div>
           </div>`;
       }
@@ -400,18 +478,22 @@
       function renderAgents() {
           const tab = state.agentTab;
           const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+          
+          // ADDED: Sticky Header Wrapper
           return `
-          <div style="margin-bottom:40px; display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
-             <input id="agent-search" class="input-aether" style="width:320px;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
-             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Operations Floor</button>
-                <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break Room</button>
-             </div>
-             <div style="flex:1"></div>
-             <div style="display:flex; gap:8px;">
-                <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
-                <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
-                <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
+          <div class="sticky-header">
+             <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                 <input id="agent-search" class="input-aether" style="width:320px;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
+                 <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                    <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Operations Floor</button>
+                    <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break Room</button>
+                 </div>
+                 <div style="flex:1"></div>
+                 <div style="display:flex; gap:8px;">
+                    <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
+                    <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
+                    <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
+                 </div>
              </div>
           </div>
           ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
@@ -430,7 +512,7 @@
          return `
          ${startingHtml}
          
-         <div class="grid-roles">
+         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; margin-bottom:24px;">
             <div class="aether-card" style="padding:20px;">
                 <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
                 <div class="agent-list">${renderGroup(state.agents.icl||[], upMap)}</div>
@@ -493,6 +575,7 @@
           return filtered.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
       }
 
+      // ADDED: data-name and data-region attributes for search filtering
       function renderAgentPill(a, upInfo) {
          let start = "00:00", end = "00:00";
          if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
@@ -513,7 +596,7 @@
          if (a.role === 'SAFE') statusColor = "var(--status-active)";
          if (a.role === 'ICL') statusColor = "var(--status-role)";
 
-         return `<div class="agent-pill ${extraClass}" onclick="openMenu(event, '${a.name}')">
+         return `<div class="agent-pill ${extraClass}" data-name="${a.name}" data-region="${a.region}" onclick="openMenu(event, '${a.name}')">
             <div class="pill-left">
                <div class="pill-av" style="${a.role?'border:2px solid var(--status-role)':''}">${a.name.substring(0,2).toUpperCase()}</div>
                <div class="pill-info">
@@ -537,6 +620,8 @@
           </div>`;
       }
 
+      // ... (Keep existing Weather, Scripts, Calc rendering functions) ...
+      
       function renderWeather() {
           if (!state.weather || Object.keys(state.weather).length === 0) {
              return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
@@ -564,7 +649,7 @@
       function renderCalc() {
          return `<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div><div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;"><div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>`;
       }
-
+      // Keep runCalculation, copyReport, etc...
       window.runCalculation = () => {
          const i=document.getElementById('in-text').value; const o=document.getElementById('out-text').value;
          if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(r=>{ const d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; render(); }).runCalculator(i,o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
@@ -579,7 +664,7 @@
          navigator.clipboard.writeText(rows.join("\n")).then(() => showToast("Copied")).catch(() => showToast("Error"));
       };
       function formatWindString(val) { if (!val) return ""; let w = val.toString(); if (w.toLowerCase().includes("light")) w = "~5"; if (w.includes("G")) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
-      
+      // Keep break/ot save functions...
       window.saveBreaks = () => { const name = state.selectedAgent; let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) { const newBreaks = agent.rawBreaks.map((b, i) => ({ type: b.type, start: document.getElementById(`bs-${i}`).value, end: document.getElementById(`be-${i}`).value })); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
       window.saveOvertime = () => { const name = state.selectedAgent; const s = document.getElementById('ot-start').value; const e = document.getElementById('ot-end').value; if(s && e) { let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
       window.addScript = () => { const t = document.getElementById('new-script-title').value; const b = document.getElementById('new-script-body').value; if(!t || !b) return; if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; showToast("Saved to Library"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).saveScript(t, b); } };
