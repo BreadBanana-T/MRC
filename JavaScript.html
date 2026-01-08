@@ -1,6 +1,30 @@
 <script>
   const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
-  let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "", insightMode: 'week' };
+  
+  // --- STATE MANAGEMENT ---
+  let state = { 
+      view: 'overview', 
+      agents: {}, 
+      pendingUpdates: {}, 
+      weather: {}, 
+      slHistory: [], 
+      currentSL: "--", 
+      currentACK: "--", 
+      selectedAgent: null, 
+      searchTerm: "", 
+      regionFilter: 'All', 
+      notifications: [], 
+      dismissedNotifs: new Set(), 
+      notifOpen: false, 
+      scripts: [], 
+      agentTab: 'floor', 
+      currentReport: "...", 
+      selectedCategory: "All", 
+      editingId: null, 
+      appUrl: "", 
+      insightMode: 'week', 
+      selectedDate: new Date().toISOString().split('T')[0] 
+  };
 
   document.addEventListener('mousemove', e => {
       document.querySelectorAll('.aether-card').forEach(card => {
@@ -11,10 +35,11 @@
   });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
 
+  // --- INITIALIZATION ---
   function initApp() {
     if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
     
-    // 2. READ PARAMS FROM HIDDEN DIV
+    // Read Params from Hidden Div (Popout Logic)
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -24,7 +49,6 @@
         if (popout === "true") {
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
-            // Support 'Breaks' mode properly
             state.regionFilter = (mode === 'onshore' ? 'Onshore' : (mode === 'offshore' ? 'Offshore' : (mode === 'breaks' ? 'Breaks' : 'All')));
             
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
@@ -40,16 +64,40 @@
     fetchData(); fetchNotifications();
   }
 
+  // --- NAVIGATION ---
   window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
   window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
-  window.setInsightMode = (m) => { state.insightMode = m; render(); };
   
+  window.setInsightMode = (m) => { 
+      state.insightMode = m; 
+      if (m === 'week') snapToSunday();
+      render(); 
+  };
+  
+  window.handleDateChange = (val) => {
+      state.selectedDate = val;
+      if (state.insightMode === 'week') snapToSunday();
+      else render(); 
+  };
+
+  function snapToSunday() {
+      const d = new Date(state.selectedDate);
+      const day = d.getDay(); // 0 is Sunday
+      if (day !== 0) {
+          d.setDate(d.getDate() - day);
+          state.selectedDate = d.toISOString().split('T')[0];
+          showToast("Snapped to Start of Week (Sunday)");
+      }
+      render();
+  }
+
   window.toggleTheme = () => { 
       document.body.classList.toggle('dark'); 
       localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); 
       render(); 
   };
   
+  // --- MODAL CONTROLS ---
   window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
   window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
   window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
@@ -57,7 +105,6 @@
   window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
   
-  // FIX: USE REAL URL
   window.openPopout = (mode) => {
      const baseUrl = state.appUrl || window.location.href.split('?')[0];
      const sep = baseUrl.includes('?') ? '&' : '?';
@@ -68,6 +115,9 @@
   function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
   function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
+  // --- SEARCH ---
+  let searchTimeout;
+  window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
   function handleSearch(v) { 
       state.searchTerm = v; 
       if(state.view === 'agents') {
@@ -81,48 +131,20 @@
              if (matchName && matchReg) p.style.display = 'flex';
              else p.style.display = 'none';
          });
-      } else {
-         render(); 
-      }
+      } else { render(); }
   }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
+  // --- DATA FETCHING ---
   function fetchData() {
     if(typeof google==='undefined') return;
-    
     google.script.run.withSuccessHandler(j=>{
-        try{
-            const d=JSON.parse(j);
-            if(d){
-                state.agents={...state.agents,...d};
-                applyPendingUpdates();
-                if(state.view==='agents'||state.view==='overview'||state.view==='popout-view') render();
-            }
-        }catch(e){}
+        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(state.view!=='scripts' && state.view!=='calc') render(); } }catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
-      google.script.run.withSuccessHandler(r=>{
-          try{
-              const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r);
-              state.weather=d.weather||d;
-              state.alerts=d.alerts||[];
-              if(state.view.match(/overview|weather/)) render();
-          }catch(e){}
-      }).getLiveDashboardData();
-
-      google.script.run.withSuccessHandler(j=>{
-          try{
-              const h=JSON.parse(j);
-              if(h && h.length){
-                  state.slHistory=h;
-                  const latest = h[h.length - 1];
-                  state.currentSL = latest.val + "%";
-                  state.currentACK = latest.ack + "s";
-                  if(state.view==='overview') render();
-              }
-          }catch(e){}
-      }).getStatsHistory();
+      google.script.run.withSuccessHandler(r=>{ try{ const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r); state.weather=d.weather||d; state.alerts=d.alerts||[]; if(state.view.match(/overview|weather/)) render(); }catch(e){} }).getLiveDashboardData();
+      google.script.run.withSuccessHandler(j=>{ try{ const h=JSON.parse(j); if(h && h.length){ state.slHistory=h; const latest=h[h.length-1]; state.currentSL=latest.val+"%"; state.currentACK=latest.ack+"s"; if(state.view==='overview') render(); } }catch(e){} }).getStatsHistory();
     }
   }
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
@@ -133,14 +155,12 @@
      let o = null; 
      for (const k in state.agents) { if(!Array.isArray(state.agents[k])) continue; const i = state.agents[k].findIndex(a => a.name === name); if(i > -1) { o = state.agents[k][i]; break; } }
      if(o) { 
-         if (type === 'role') { 
-             o.role = (val === 'Active') ? '' : val;
-             if(val === 'Active') { o.subStatus = ""; } 
-         }
+         if (type === 'role') { o.role = (val === 'Active') ? '' : val; if(val === 'Active') { o.subStatus = ""; } }
          else if (type === 'absent') { o.subStatus = val; } 
      }
   }
 
+  // --- RENDER MAIN ---
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
@@ -169,51 +189,69 @@
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
+      let narrativeHtml = '';
+      if (!isWeek) {
+          narrativeHtml = `
+          <div class="aether-card" style="padding:0; overflow:hidden; max-height:800px; display:flex; flex-direction:column;">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">Shift Journal</div>
+             <div style="padding:16px; overflow-y:auto; flex:1;">
+                 <div class="feed-item"><div class="feed-dot critical"></div><div class="feed-content"><div class="feed-time">02:15 AM</div><div class="feed-text">Critical system slowdown reported.</div></div></div>
+                 <div class="feed-item"><div class="feed-dot weather"></div><div class="feed-content"><div class="feed-time">04:30 AM</div><div class="feed-text">Weather warning issued for Toronto.</div></div></div>
+             </div>
+             <div style="padding:16px; border-top:1px solid var(--glass-border);">
+                 <button class="btn btn-glass" style="width:100%;" onclick="openJournal()">+ Add Entry</button>
+             </div>
+         </div>`;
+      } else {
+          narrativeHtml = `
+          <div class="aether-card" style="padding:24px;">
+              <div class="section-header">Weekly Summary</div>
+              <div style="color:var(--text-muted); font-size:0.9rem;">
+                  Week starting: <strong>${state.selectedDate}</strong><br><br>
+                  Select a specific day to view the Daily Shift Log.
+              </div>
+          </div>`;
+      }
+
       return `
       <div class="sticky-header" style="justify-content:space-between;">
          <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0; font-size:1.2rem;">${isWeek ? 'Week Overview' : 'Daily Resume'}</h2>
+             <h2 style="margin:0; font-size:1.2rem;">${isWeek ? 'Weekly Performance' : 'Shift Report'}</h2>
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
                 <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Today</button>
                 <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Week</button>
              </div>
          </div>
          <div style="display:flex; gap:12px;">
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${new Date().toISOString().split('T')[0]}">
-             <button class="btn btn-primary" onclick="commitShift()"><i data-lucide="save" width="16"></i> Commit Shift</button>
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
+             ${!isWeek ? `<button class="btn btn-primary" onclick="commitShift()"><i data-lucide="save" width="16"></i> Commit Shift</button>` : ''}
          </div>
       </div>
       
-      <div style="display:grid; grid-template-columns: 350px 1fr; gap:24px; align-items:start;">
-         <div class="aether-card" style="padding:0; overflow:hidden; max-height:800px; display:flex; flex-direction:column;">
-             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">Shift Journal</div>
-             <div style="padding:16px; overflow-y:auto; flex:1;">
-                 <div class="feed-item"><div class="feed-dot critical"></div><div class="feed-content"><div class="feed-time">02:15 AM</div><div class="feed-text">Critical system slowdown reported.</div></div></div>
-                 <div class="feed-item"><div class="feed-dot weather"></div><div class="feed-content"><div class="feed-time">04:30 AM</div><div class="feed-text">Weather warning issued for Toronto.</div></div></div>
-                 <div class="feed-item"><div class="feed-dot"></div><div class="feed-content"><div class="feed-time">06:00 AM</div><div class="feed-text">Shift handover complete.</div></div></div>
-             </div>
-             <div style="padding:16px; border-top:1px solid var(--glass-border);">
-                 <button class="btn btn-glass" style="width:100%;" onclick="openJournal()">+ Add Entry</button>
-             </div>
-         </div>
+      <div style="display:grid; grid-template-columns: ${isWeek ? '1fr' : '350px 1fr'}; gap:24px; align-items:start;">
+         ${narrativeHtml}
+         
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
                  <div class="section-header">Staffing vs Demand</div>
-                 <div style="height:250px; width:100%;"><canvas id="chart-staffing"></canvas></div>
+                 <div style="height:300px; width:100%;"><canvas id="chart-staffing"></canvas></div>
              </div>
-             <div class="aether-card">
-                 <div class="section-header">Role Duration (Hours)</div>
-                 <div style="height:200px; width:100%;"><canvas id="chart-roles"></canvas></div>
-             </div>
-             <div class="grid-bento">
-                <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
-                    <i data-lucide="users" width="32" style="color:var(--status-alert);"></i>
-                    <div><div style="font-size:2rem; font-weight:800; line-height:1;">4</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">UNPLANNED ABSENCE</div></div>
-                </div>
-                 <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
-                    <i data-lucide="cloud-lightning" width="32" style="color:var(--text-main);"></i>
-                    <div><div style="font-size:1.5rem; font-weight:800; line-height:1;">Toronto</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">ACTIVE WEATHER ALERT</div></div>
-                </div>
+             
+             <div class="grid-split">
+                 <div class="aether-card">
+                     <div class="section-header">Role Breakdown (Hours)</div>
+                     <div style="height:200px; width:100%;"><canvas id="chart-roles"></canvas></div>
+                 </div>
+                 <div class="aether-card" style="display:flex; flex-direction:column; justify-content:center; padding:24px;">
+                    <div style="display:flex; align-items:center; gap:16px; margin-bottom:20px;">
+                        <i data-lucide="users" width="32" style="color:var(--status-alert);"></i>
+                        <div><div style="font-size:2rem; font-weight:800; line-height:1;">4</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">UNPLANNED ABSENCE</div></div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <i data-lucide="shield" width="32" style="color:var(--status-active);"></i>
+                        <div><div style="font-size:2rem; font-weight:800; line-height:1;">12.5h</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">TOTAL SAFE HOURS</div></div>
+                    </div>
+                 </div>
              </div>
          </div>
       </div>
@@ -279,7 +317,7 @@
             options: { 
                 responsive: true, 
                 maintainAspectRatio: false,
-                scales: { y: { min: 50, max: 100 } },
+                scales: { y: { min: 0, max: 100 } },
                 plugins: { legend: { display: false } }
             }
           });
@@ -325,13 +363,11 @@
   }
 
   function renderOverview() {
-      // --- FIX: CALCULATE SHRINKAGE WITH PLANNED + UNPLANNED ---
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
       const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
       const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
       
-      // REPLACED SVG WITH CHARTJS CANVAS
       return `
       <div class="grid-bento">
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
@@ -587,7 +623,6 @@
       return `<i data-lucide="${i}" width="20"></i>`;
   }
 
-  /* --- NEW SCRIPT RENDERER --- */
   function renderScripts() {
      const cats = new Set(["All"]);
      state.scripts.forEach(s => cats.add(s.category || "General"));
