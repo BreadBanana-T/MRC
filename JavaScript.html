@@ -146,8 +146,10 @@
 
      document.getElementById('hdr-sl').innerText = state.currentSL;
      const c = document.getElementById('content');
-     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-     const b = document.getElementById('btn-'+state.view); if(b) b.classList.add('active');
+     document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
+     
+     const b = document.getElementById('btn-'+state.view); 
+     if(b) b.classList.add('active');
 
      let h = '';
      if (state.view === 'overview') h = renderOverview();
@@ -160,7 +162,6 @@
      const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
      
      if(state.view === 'insights') initCharts();
-     // If user wanted graph on overview, init here too
      if(state.view === 'overview') initOverviewChart();
   }
   
@@ -262,7 +263,6 @@
       if (charts.overview) charts.overview.destroy();
       const ctx = document.getElementById('chart-overview');
       if (ctx) {
-          // Simple SVL chart for overview
           charts.overview = new Chart(ctx, {
             type: 'line',
             data: {
@@ -587,6 +587,7 @@
       return `<i data-lucide="${i}" width="20"></i>`;
   }
 
+  /* --- NEW SCRIPT RENDERER --- */
   function renderScripts() {
      const cats = new Set(["All"]);
      state.scripts.forEach(s => cats.add(s.category || "General"));
@@ -732,4 +733,24 @@
       document.getElementById('journal-modal').classList.add('open');
       const btn = document.getElementById('btn-submit-journal');
       btn.innerText = "Commit Full Shift";
-      btn.onclick = () =>
+      btn.onclick = () => {
+          const note = document.getElementById('journal-text').value;
+          const cat = document.getElementById('journal-cat').value;
+          
+          showToast("Committing Data...");
+          
+          if(typeof google !== 'undefined') {
+              if (cat !== 'General' && note) {
+                  google.script.run.saveJournalEntry(cat, note);
+              }
+              
+              google.script.run.withSuccessHandler(res => {
+                  showToast(res); 
+                  document.getElementById('journal-modal').classList.remove('open');
+                  btn.innerText = "Log Entry";
+                  btn.onclick = window.submitJournal;
+              }).commitShiftAction(cat === 'General' ? note : ""); 
+          }
+      };
+  };
+</script>
