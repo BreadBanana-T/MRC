@@ -5,74 +5,45 @@
 
 const AgentMonitor = {
   getPayload: function() { return compileFloorData(); },
-
-  // Delegate all writes to StatusTracker
   setStatus: function(n, t, v) { return StatusTracker.updateStatus(n, t, v); },
   updateAgentBreaks: function(n, j) { return StatusTracker.updateBreaks(n, j); },
   logOvertime: function(n, s, e, bs, be) { 
-      const res = StatusTracker.logOvertime(n, s, e, bs, be); 
+      const res = StatusTracker.logOvertime(n, s, e, bs, be);
       if(typeof NotificationHandler !== 'undefined') NotificationHandler.add(n, `OVERTIME: ${s}-${e}`);
       return res;
   },
-  
   updateBreak: function() { return "Deprecated"; },
   clearFlag: function() { return "Flag Cleared"; }
 };
 
 /* --- PUBLIC ENDPOINTS --- */
-
-function getFloorStatus() {
-  return compileFloorData();
-}
-
-// RESTORED: This was removed previously but might be needed by legacy calls or specific router setups
-function getLiveDashboardData() {
-  try {
-    if (typeof WeatherService !== 'undefined') {
-      return JSON.stringify(WeatherService.fetch());
-    }
-    return JSON.stringify({ weather: {}, alerts: [] });
-  } catch (e) {
-    return JSON.stringify({ weather: {}, alerts: [] });
-  }
-}
-
-function updateAgentStatus(name, type, value) {
-  return AgentMonitor.setStatus(name, type, value);
-}
-
-function updateAgentBreaks(name, jsonBreaks) {
-  return AgentMonitor.updateAgentBreaks(name, jsonBreaks);
-}
-
-function submitOvertime(name, start, end, bStart, bEnd) {
-  return AgentMonitor.logOvertime(name, start, end, bStart, bEnd);
-}
+function getFloorStatus() { return compileFloorData(); }
+function updateAgentStatus(name, type, value) { return AgentMonitor.setStatus(name, type, value); }
+function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBreaks(name, jsonBreaks); }
+function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.logOvertime(name, start, end, bStart, bEnd); }
 
 /* --- CORE LOGIC --- */
-
 function compileFloorData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Raw Schedule");
   
+  // Define categories - Added startingSoon to separate pre-shift agents
   const emptyFloor = {
-    active: [], safe: [], icl: [], training: [],
-    onBreak: [], upcomingBreak: [], startingSoon: [],
+    active: [], 
+    startingSoon: [],
+    training: [],
+    upcomingBreak: [],
     vacation: [], planned: [], unplanned: [], off: []
   };
-  
+
   const overrides = StatusTracker.getConsolidatedData(); 
-  const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+  const data = (sheet && sheet.getLastRow() > 1) ?
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   
   const now = new Date().getTime();
   const agentMap = new Map();
-  
-  const SCORES = {
-    'safe': 60, 'icl': 60,
-    'active': 50, 'onBreak': 50, 'upcomingBreak': 50,
-    'startingSoon': 40, 'training': 30, 'unplanned': 20,
-    'vacation': 10, 'planned': 10, 'off': 0
-  };
+
+  const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
     const cleanName = String(rawName).trim().toLowerCase();
@@ -84,25 +55,36 @@ function compileFloorData() {
     let endEpoch = row ? Number(row[11]) : 0;
     let originalBreaksJson = row ? row[7] : "[]";
     
+    // Override Logic
     let role = (persistentData.role !== undefined && persistentData.role !== "") ? persistentData.role : (row ? row[8] : "");
     let absentType = (persistentData.absent !== undefined && persistentData.absent !== "") ? persistentData.absent : (row ? row[9] : "");
     
+    // If manually set to Active, clear absence
+    if (persistentData.role && persistentData.role !== "") absentType = "";
+
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
 
+    // 1. FILTERING
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
 
     if (startEpoch && endEpoch) {
-       if (endEpoch < (now - 60000) && !isOT) return; 
-       const TWO_HOURS_MS = 7200000;
-       if (startEpoch > (now + TWO_HOURS_MS) && !isOT) return; 
+       // Hide if ended > 4 hours ago
+       const FOUR_HOURS = 14400000;
+       if (endEpoch < (now - FOUR_HOURS) && !isOT) return;
+       
+       // Hide if starts > 1.5 hours (90 mins) from now
+       // This fixes the issue of 5 AM agents showing up at midnight
+       const NINETY_MINS = 90 * 60 * 1000; 
+       if (startEpoch > (now + NINETY_MINS) && !isOT) return;
     }
 
-    let dateStr = row && row[2] instanceof Date ? Utilities.formatDate(row[2], "America/Toronto", "M/d/yy") : (row ? row[2] : "");
-    let shiftStr = "";
+    let dateStr = row && row[2] instanceof Date ?
+       Utilities.formatDate(row[2], "America/Toronto", "M/d/yy") : (row ? row[2] : "");
     
+    let shiftStr = "";
     if(startEpoch && endEpoch) {
        const sFmt = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "HH:mm");
        const eFmt = Utilities.formatDate(new Date(endEpoch), "America/Toronto", "HH:mm");
@@ -112,7 +94,6 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
-    const originalBreaksRaw = isModified ? parseBreaksSafe(originalBreaksJson) : [];
     
     if (isOT) {
        otList.forEach(o => {
@@ -124,14 +105,17 @@ function compileFloorData() {
 
     const enrichedBreaks = [];
     let nextBreakStr = null;
-    
+    let onBreakNow = false;
+    let breakTimer = "";
+    let breakLabel = "";
+
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
        const shiftDateStr = Utilities.formatDate(baseTime, "America/Toronto", "yyyy-MM-dd");
        
        rawBreaks.sort((a, b) => parseTimeValue(a.start) - parseTimeValue(b.start));
-
        let breakCounter = 0;
+       
        rawBreaks.forEach(b => {
           let displayLabel = b.type;
           if (b.type === 'Break') {
@@ -139,19 +123,31 @@ function compileFloorData() {
              displayLabel = `${breakCounter}${['st','nd','rd'][breakCounter-1]||'th'} Break`;
           }
 
-          const bStart24 = Utilities.parseDate(`${shiftDateStr} ${b.start}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
-          const bEnd24 = Utilities.parseDate(`${shiftDateStr} ${b.end}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
-          
-          if(bStart24 && bEnd24) {
-             let bs = bStart24.getTime();
-             let be = bEnd24.getTime();
-             if (startEpoch && bs < startEpoch) { bs += 86400000; be += 86400000; }
-              
+          let bs = 0, be = 0;
+          try {
+             const bStart24 = Utilities.parseDate(`${shiftDateStr} ${b.start}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
+             const bEnd24 = Utilities.parseDate(`${shiftDateStr} ${b.end}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
+             if(bStart24 && bEnd24) {
+                 bs = bStart24.getTime();
+                 be = bEnd24.getTime();
+                 if (startEpoch && bs < startEpoch) { bs += 86400000; be += 86400000; }
+                 if (be < bs) be += 86400000;
+             }
+          } catch(e) {}
+
+          if(bs > 0) {
              enrichedBreaks.push({ 
                  type: displayLabel, originalType: b.type,
                  start: b.start, end: b.end, 
                  epochStart: bs, epochEnd: be 
              });
+
+             if (now >= bs && now <= be) {
+                 onBreakNow = true;
+                 const rem = Math.ceil((be - now)/60000);
+                 breakTimer = `${rem}m`;
+                 breakLabel = displayLabel;
+             }
 
              if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
@@ -160,71 +156,46 @@ function compileFloorData() {
        });
     }
 
-    if (role === "SAFE") region += " [SAFE]";
-    if (role === "ICL") region += " [ICL]";
+    // 2. CATEGORIZATION
+    let category = "active";
+    let subStatus = role || ""; 
+
+    if (absentType) {
+        const upper = absentType.toUpperCase();
+        if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) { category = "active"; } 
+        else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
+        else if (upper.match(/TRAIN|TRN/)) { category = "training"; subStatus = "Training"; }
+        else { category = "vacation"; subStatus = absentType; }
+    } else if (role === "Training") {
+        category = "training";
+    }
+
+    // STARTING SOON LOGIC
+    // If filtered in (> now and <= 1.5h), move to startingSoon
+    if (['active', 'safe', 'icl'].includes(category)) {
+        if (startEpoch && startEpoch > now) {
+             category = "startingSoon";
+             const diff = startEpoch - now;
+             subStatus = `In ${Math.ceil(diff/60000)}m`;
+        }
+    }
+
+    if (category === "active" && onBreakNow) {
+        subStatus = breakLabel || "On Break";
+    }
 
     let agent = {
       name: rawName, id: row ? row[1] : "", region: region, shift: shiftStr, shiftType: shiftType,
-      dateStr: dateStr, subStatus: "",
-      rawBreaks: enrichedBreaks, 
-      originalBreaks: originalBreaksRaw, 
-      isModified: isModified,            
-      breakTimeStr: nextBreakStr,
-      timer: "--:--", 
-      auxLabel: "Remaining",
-      onBreakNow: false, 
-      startEpoch: startEpoch,
-      isOT: isOT 
+      dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
+      isModified: isModified, breakTimeStr: nextBreakStr, timer: breakTimer, auxLabel: "Remaining",
+      onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
 
-    let category = "active";
-    
-    if (absentType) {
-        const upper = absentType.toUpperCase();
-        if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active"; 
-        else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; agent.subStatus = absentType; }
-        else if (upper.match(/TRAIN|TRN/)) { category = "training"; agent.subStatus = "Training"; }
-        else { category = "vacation"; agent.subStatus = absentType; }
-    }
-    else if (role === "SAFE") category = "safe";
-    else if (role === "ICL") category = "icl";
-    else if (role === "Training") category = "training";
-
-    if (['active', 'safe', 'icl'].includes(category)) {
-        if (startEpoch && startEpoch > now) {
-             const diff = startEpoch - now;
-             const twoHours = 120 * 60 * 1000; 
-             if (diff <= twoHours) {
-                 category = "startingSoon";
-                 agent.subStatus = `Starts in ${Math.ceil(diff/60000)}m`;
-             } 
-        } else {
-             let breakFound = false;
-             for (let b of enrichedBreaks) {
-                // ACTIVE BREAK
-                if (now >= b.epochStart && now <= b.epochEnd) {
-                   category = "onBreak";
-                   agent.subStatus = b.type;
-                   const rem = Math.ceil((b.epochEnd - now)/60000);
-                   agent.timer = `${rem}m`;
-                   agent.auxLabel = "Remaining"; 
-                   agent.onBreakNow = true;
-                   breakFound = true;
-                   break;
-                }
-                
-                // UPCOMING BREAK (Next 30 mins)
-                const timeToBreak = b.epochStart - now;
-                if (timeToBreak > 0 && timeToBreak <= 1800000) {
-                   category = "upcomingBreak";
-                   agent.timer = `${b.start} - ${b.end}`;
-                   agent.auxLabel = `in ${Math.ceil(timeToBreak/60000)}m`;
-                   breakFound = true;
-                   break;
-                }
-             }
-             if(!breakFound && category === "startingSoon") category = "active";
-        }
+    if (category === 'active' && nextBreakStr) {
+       let upAgent = {...agent};
+       upAgent.timer = nextBreakStr;
+       upAgent.auxLabel = "Starts Soon";
+       emptyFloor.upcomingBreak.push(upAgent);
     }
 
     const newScore = SCORES[category] || 0;
@@ -249,6 +220,7 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else emptyFloor.active.push(item.agent);
   });
+  
   return JSON.stringify(emptyFloor);
 }
 
