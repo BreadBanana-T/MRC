@@ -1,0 +1,735 @@
+<script>
+  const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
+  let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "", insightMode: 'week' };
+
+  document.addEventListener('mousemove', e => {
+      document.querySelectorAll('.aether-card').forEach(card => {
+          const rect = card.getBoundingClientRect();
+          card.style.setProperty('--x', `${e.clientX - rect.left}px`);
+          card.style.setProperty('--y', `${e.clientY - rect.top}px`);
+      });
+  });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
+
+  function initApp() {
+    if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
+    
+    // 2. READ PARAMS FROM HIDDEN DIV
+    const config = document.getElementById('app-config');
+    if (config) {
+        state.appUrl = config.getAttribute('data-url');
+        const popout = config.getAttribute('data-popout');
+        const mode = config.getAttribute('data-mode');
+
+        if (popout === "true") {
+            document.body.classList.add('popout-mode');
+            state.view = 'popout-view'; 
+            // Support 'Breaks' mode properly
+            state.regionFilter = (mode === 'onshore' ? 'Onshore' : (mode === 'offshore' ? 'Offshore' : (mode === 'breaks' ? 'Breaks' : 'All')));
+            
+            document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
+            if (typeof google !== 'undefined') { 
+                setInterval(fetchData, 30000); 
+                fetchData(); 
+            }
+            return;
+        }
+    }
+    
+    render(); setInterval(updateClock, 1000); setInterval(fetchData, 60000); setInterval(fetchNotifications, 10000);
+    fetchData(); fetchNotifications();
+  }
+
+  window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
+  window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
+  window.setInsightMode = (m) => { state.insightMode = m; render(); };
+  
+  window.toggleTheme = () => { 
+      document.body.classList.toggle('dark'); 
+      localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); 
+      render(); 
+  };
+  
+  window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
+  window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
+  window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
+  window.openMenu = (e, n) => { state.selectedAgent=n; const m=document.getElementById('agent-menu'),o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; const r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
+  window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
+  window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
+  
+  // FIX: USE REAL URL
+  window.openPopout = (mode) => {
+     const baseUrl = state.appUrl || window.location.href.split('?')[0];
+     const sep = baseUrl.includes('?') ? '&' : '?';
+     const url = `${baseUrl}${sep}popout=true&mode=${mode.toLowerCase()}`;
+     window.open(url, '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no');
+  };
+
+  function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
+  function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+  
+  function handleSearch(v) { 
+      state.searchTerm = v; 
+      if(state.view === 'agents') {
+         const pills = document.querySelectorAll('.agent-pill');
+         const term = v.toLowerCase();
+         pills.forEach(p => {
+             const name = p.getAttribute('data-name').toLowerCase();
+             const reg = p.getAttribute('data-region');
+             const matchName = !term || name.includes(term);
+             const matchReg = state.regionFilter === 'All' || reg.includes(state.regionFilter);
+             if (matchName && matchReg) p.style.display = 'flex';
+             else p.style.display = 'none';
+         });
+      } else {
+         render(); 
+      }
+  }
+  function setRegionFilter(v) { state.regionFilter=v; render(); }
+
+  function fetchData() {
+    if(typeof google==='undefined') return;
+    
+    google.script.run.withSuccessHandler(j=>{
+        try{
+            const d=JSON.parse(j);
+            if(d){
+                state.agents={...state.agents,...d};
+                applyPendingUpdates();
+                if(state.view==='agents'||state.view==='overview'||state.view==='popout-view') render();
+            }
+        }catch(e){}
+    }).getFloorStatus();
+
+    if(state.view !== 'popout-view') {
+      google.script.run.withSuccessHandler(r=>{
+          try{
+              const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r);
+              state.weather=d.weather||d;
+              state.alerts=d.alerts||[];
+              if(state.view.match(/overview|weather/)) render();
+          }catch(e){}
+      }).getLiveDashboardData();
+
+      google.script.run.withSuccessHandler(j=>{
+          try{
+              const h=JSON.parse(j);
+              if(h && h.length){
+                  state.slHistory=h;
+                  const latest = h[h.length - 1];
+                  state.currentSL = latest.val + "%";
+                  state.currentACK = latest.ack + "s";
+                  if(state.view==='overview') render();
+              }
+          }catch(e){}
+      }).getStatsHistory();
+    }
+  }
+  function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
+  function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); document.getElementById('notif-dot').style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
+
+  function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
+  function moveAgentInMemory(name, type, val) {
+     let o = null; 
+     for (const k in state.agents) { if(!Array.isArray(state.agents[k])) continue; const i = state.agents[k].findIndex(a => a.name === name); if(i > -1) { o = state.agents[k][i]; break; } }
+     if(o) { 
+         if (type === 'role') { 
+             o.role = (val === 'Active') ? '' : val;
+             if(val === 'Active') { o.subStatus = ""; } 
+         }
+         else if (type === 'absent') { o.subStatus = val; } 
+     }
+  }
+
+  function render() {
+     if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
+
+     document.getElementById('hdr-sl').innerText = state.currentSL;
+     const c = document.getElementById('content');
+     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+     const b = document.getElementById('btn-'+state.view); if(b) b.classList.add('active');
+
+     let h = '';
+     if (state.view === 'overview') h = renderOverview();
+     else if (state.view === 'agents') h = renderAgents();
+     else if (state.view === 'weather') h = renderWeather();
+     else if (state.view === 'calc') h = renderCalc();
+     else if (state.view === 'scripts') h = renderScripts();
+     else if (state.view === 'insights') h = renderInsights();
+     c.innerHTML = h; refreshIcons();
+     const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
+     
+     if(state.view === 'insights') initCharts();
+     // If user wanted graph on overview, init here too
+     if(state.view === 'overview') initOverviewChart();
+  }
+  
+  // --- INSIGHTS RENDERER ---
+  function renderInsights() {
+      const isWeek = state.insightMode === 'week';
+      
+      return `
+      <div class="sticky-header" style="justify-content:space-between;">
+         <div style="display:flex; align-items:center; gap:16px;">
+             <h2 style="margin:0; font-size:1.2rem;">${isWeek ? 'Week Overview' : 'Daily Resume'}</h2>
+             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Today</button>
+                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Week</button>
+             </div>
+         </div>
+         <div style="display:flex; gap:12px;">
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${new Date().toISOString().split('T')[0]}">
+             <button class="btn btn-primary" onclick="commitShift()"><i data-lucide="save" width="16"></i> Commit Shift</button>
+         </div>
+      </div>
+      
+      <div style="display:grid; grid-template-columns: 350px 1fr; gap:24px; align-items:start;">
+         <div class="aether-card" style="padding:0; overflow:hidden; max-height:800px; display:flex; flex-direction:column;">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">Shift Journal</div>
+             <div style="padding:16px; overflow-y:auto; flex:1;">
+                 <div class="feed-item"><div class="feed-dot critical"></div><div class="feed-content"><div class="feed-time">02:15 AM</div><div class="feed-text">Critical system slowdown reported.</div></div></div>
+                 <div class="feed-item"><div class="feed-dot weather"></div><div class="feed-content"><div class="feed-time">04:30 AM</div><div class="feed-text">Weather warning issued for Toronto.</div></div></div>
+                 <div class="feed-item"><div class="feed-dot"></div><div class="feed-content"><div class="feed-time">06:00 AM</div><div class="feed-text">Shift handover complete.</div></div></div>
+             </div>
+             <div style="padding:16px; border-top:1px solid var(--glass-border);">
+                 <button class="btn btn-glass" style="width:100%;" onclick="openJournal()">+ Add Entry</button>
+             </div>
+         </div>
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <div class="aether-card">
+                 <div class="section-header">Staffing vs Demand</div>
+                 <div style="height:250px; width:100%;"><canvas id="chart-staffing"></canvas></div>
+             </div>
+             <div class="aether-card">
+                 <div class="section-header">Role Duration (Hours)</div>
+                 <div style="height:200px; width:100%;"><canvas id="chart-roles"></canvas></div>
+             </div>
+             <div class="grid-bento">
+                <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
+                    <i data-lucide="users" width="32" style="color:var(--status-alert);"></i>
+                    <div><div style="font-size:2rem; font-weight:800; line-height:1;">4</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">UNPLANNED ABSENCE</div></div>
+                </div>
+                 <div class="aether-card" style="grid-column:span 2; padding:20px; display:flex; align-items:center; gap:16px;">
+                    <i data-lucide="cloud-lightning" width="32" style="color:var(--text-main);"></i>
+                    <div><div style="font-size:1.5rem; font-weight:800; line-height:1;">Toronto</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">ACTIVE WEATHER ALERT</div></div>
+                </div>
+             </div>
+         </div>
+      </div>
+      `;
+  }
+  
+  let charts = {};
+  function initCharts() {
+      if (typeof Chart === 'undefined') return;
+      if(charts.staffing) charts.staffing.destroy();
+      if(charts.roles) charts.roles.destroy();
+
+      const ctx1 = document.getElementById('chart-staffing');
+      if(ctx1) {
+          charts.staffing = new Chart(ctx1, {
+              type: 'line',
+              data: {
+                  labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+                  datasets: [
+                      { label: 'Required', data: [15, 12, 25, 30, 28, 20], borderColor: '#94a3b8', borderDash: [5, 5], tension: 0.4 },
+                      { label: 'Actual', data: [16, 14, 24, 29, 26, 21], borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.1)', fill: true, tension: 0.4 }
+                  ]
+              },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } } }
+          });
+      }
+
+      const ctx2 = document.getElementById('chart-roles');
+      if(ctx2) {
+          charts.roles = new Chart(ctx2, {
+              type: 'bar',
+              data: {
+                  labels: ['Night', 'Day', 'Evening'],
+                  datasets: [
+                      { label: 'SAFE', data: [12, 18, 14], backgroundColor: '#059669' },
+                      { label: 'ICL', data: [8, 10, 5], backgroundColor: '#7c3aed' },
+                      { label: 'Active', data: [40, 65, 50], backgroundColor: '#cbd5e1' }
+                  ]
+              },
+              options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+          });
+      }
+  }
+
+  function initOverviewChart() {
+      if (typeof Chart === 'undefined') return;
+      if (charts.overview) charts.overview.destroy();
+      const ctx = document.getElementById('chart-overview');
+      if (ctx) {
+          // Simple SVL chart for overview
+          charts.overview = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: state.slHistory.map(d=>d.name),
+                datasets: [{
+                    label: 'Service Level',
+                    data: state.slHistory.map(d=>d.val),
+                    borderColor: '#4f46e5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: { y: { min: 50, max: 100 } },
+                plugins: { legend: { display: false } }
+            }
+          });
+      }
+  }
+
+  function renderPopout(mode) {
+     const c = document.getElementById('content');
+     if(!c) return; 
+     const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+     
+     let title = "All Units";
+     if (mode === 'Onshore') title = "Onshore Unit";
+     else if (mode === 'Offshore') title = "Offshore Unit";
+     else if (mode === 'Breaks') title = "Break Room";
+     
+     const filterFn = (list) => (list||[]).filter(a => {
+        if (mode === 'All') return true;
+        if (mode === 'Breaks') return true; 
+        return (a.region||"").includes(mode);
+     });
+     
+     let h = `<div style="padding:20px;">
+         <h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">${title}</h2>`;
+     
+     if (mode !== 'Breaks') {
+         h += `
+         <div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div>
+         <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.startingSoon).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>
+         <div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Active Floor</div>
+         <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`;
+     }
+
+     if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') {
+         const breakList = filterFn(state.agents.active).filter(a=>a.onBreakNow);
+         h += `<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
+         <div class="agent-list" style="grid-template-columns:1fr;">${breakList.length ? breakList.map(a => renderAgentPill(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
+     }
+     
+     h += `</div>`;
+     c.innerHTML = h;
+     refreshIcons();
+  }
+
+  function renderOverview() {
+      // --- FIX: CALCULATE SHRINKAGE WITH PLANNED + UNPLANNED ---
+      const unplanCount = (state.agents.unplanned||[]).length;
+      const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
+      const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
+      const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
+      
+      // REPLACED SVG WITH CHARTJS CANVAS
+      return `
+      <div class="grid-bento">
+         <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div></div>
+                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentACK}</div></div>
+            </div>
+            <div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;">
+                <canvas id="chart-overview"></canvas>
+            </div>
+         </div>
+
+         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                <span style="font-weight:700; color:var(--status-alert);">Unplanned</span>
+                <i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i>
+            </div>
+            <div style="font-size:2rem; font-weight:800; color:var(--status-alert);">${(state.agents.unplanned||[]).length}</div>
+         </div>
+
+         <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Shrinkage</h4>
+            <div style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
+         </div>
+         
+         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                <span style="font-weight:700;">Planned</span>
+                <i data-lucide="calendar" class="text-muted" width="20"></i>
+            </div>
+            <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${(state.agents.vacation||[]).length+(state.agents.planned||[]).length}</div>
+         </div>
+
+         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+                <span style="font-weight:700;">Special Roles</span>
+                <i data-lucide="shield" class="text-muted" width="20"></i>
+            </div>
+            <div style="display:flex; justify-content:space-around; align-items:center;">
+                <div style="text-align:center;">
+                    <div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
+                    <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.safe||[]).length}</div>
+                </div>
+                <div style="width:1px; height:40px; background:var(--glass-border);"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.75rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
+                    <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.icl||[]).length}</div>
+                </div>
+            </div>
+         </div>
+      </div>`;
+  }
+
+  function renderAgents() {
+      const tab = state.agentTab;
+      const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+      
+      return `
+      <div class="sticky-header">
+         <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
+             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
+             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Operations Floor</button>
+                <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break Room</button>
+             </div>
+             <div style="flex:1"></div>
+             <div style="display:flex; gap:8px;">
+                <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
+                <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
+                <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
+             </div>
+         </div>
+      </div>
+      ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
+  }
+  
+  function renderFloorLayout(upMap) {
+     let startingHtml = '';
+     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
+         startingHtml = `
+         <div class="aether-card" style="padding:20px; margin-bottom:24px; border-left:4px solid var(--accent-primary);">
+             <div class="section-header" style="color:var(--accent-primary);">Starting Soon</div>
+             <div class="agent-list">${renderGroup(state.agents.startingSoon, upMap)}</div>
+         </div>`;
+     }
+
+     return `
+     ${startingHtml}
+     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; margin-bottom:24px;">
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
+            <div class="agent-list">${renderGroup(state.agents.icl||[], upMap)}</div>
+        </div>
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-active);">Special Roles (SAFE)</div>
+            <div class="agent-list">${renderGroup(state.agents.safe||[], upMap)}</div>
+        </div>
+     </div>
+     <div class="grid-split" style="align-items:start;">
+         <div style="display:flex; flex-direction:column; gap:20px;">
+             <div class="aether-card" style="padding:24px;">
+                 <div class="section-header">
+                    Onshore Unit
+                    <button class="btn-popout" title="Popout Onshore" onclick="openPopout('Onshore')"><i data-lucide="external-link" width="14"></i></button>
+                 </div>
+                 <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Onshore')), upMap)}</div>
+             </div>
+         </div>
+         <div style="display:flex; flex-direction:column; gap:20px;">
+             <div class="aether-card" style="padding:24px;">
+                 <div class="section-header">
+                    Offshore Unit
+                    <button class="btn-popout" title="Popout Offshore" onclick="openPopout('Offshore')"><i data-lucide="external-link" width="14"></i></button>
+                 </div>
+                 <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Offshore')), upMap)}</div>
+             </div>
+         </div>
+     </div>
+     <div style="margin-top:40px;">
+         <div class="section-header" style="color:var(--status-alert);">Unplanned / Support</div>
+         <div class="agent-list" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
+            ${renderGroup([...(state.agents.training||[]), ...(state.agents.unplanned||[]), ...(state.agents.vacation||[]), ...(state.agents.planned||[])], upMap)}
+         </div>
+     </div>`;
+  }
+  
+  function renderBreakLayout(upMap) {
+      const onBreakList = (state.agents.active||[]).filter(a => a.onBreakNow);
+      return `
+      <div>
+         <div class="section-header">
+             Currently on Break <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${onBreakList.length}</span>
+             <button class="btn-popout" title="Popout Break Room" onclick="openPopout('Breaks')"><i data-lucide="external-link" width="14"></i></button>
+         </div>
+         <div class="break-grid" style="margin-bottom:40px;">
+            ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Break Room Empty</div>'}
+         </div>
+         <div class="section-header">Upcoming Breaks <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem;">${(state.agents.upcomingBreak||[]).length}</span></div>
+         <div class="break-grid">
+            ${(state.agents.upcomingBreak||[]).map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">No Upcoming Breaks</div>'}
+         </div>
+      </div>`;
+  }
+
+  function renderGroup(list, upMap) {
+      const filtered = list.filter(a => {
+         const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
+         const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
+         return mName && mReg;
+      });
+      if(!filtered.length) return '';
+      return filtered.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
+  }
+
+  function renderAgentPill(a, upInfo) {
+     let start = "00:00", end = "00:00";
+     if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
+     const regionClass = a.region.includes('Onshore') ? 'on' : 'off';
+     const regionLabel = a.region.includes('Onshore') ? 'ONSHORE' : 'OFFSHORE';
+     let extraClass = "";
+     if (a.role === 'SAFE') extraClass = "role-safe";
+     else if (a.role === 'ICL') extraClass = "role-icl";
+     if (a.onBreakNow) extraClass += " status-break";
+     let statusText = a.subStatus || "Active";
+     let statusColor = "var(--text-secondary)";
+     if (a.onBreakNow) { statusText = "ON BREAK"; statusColor = "var(--status-break)"; }
+     if (a.role === 'SAFE') statusColor = "var(--status-active)";
+     if (a.role === 'ICL') statusColor = "var(--status-role)";
+
+     return `<div class="agent-pill ${extraClass}" data-name="${a.name}" data-region="${a.region}" onclick="openMenu(event, '${a.name}')">
+        <div class="pill-left">
+           <div class="pill-av" style="${a.role?'border:2px solid var(--status-role)':''}">${a.name.substring(0,2).toUpperCase()}</div>
+           <div class="pill-info">
+              <div class="pill-name">${a.name} ${a.isOT?'<span style="color:var(--text-accent); font-size:0.8em;">(OT)</span>':''}</div>
+              <div style="display:flex; align-items:center;">
+                 <div class="region-tag ${regionClass}">${regionLabel}</div>
+                 <div class="pill-role" style="color:${statusColor}; font-weight:700;">${statusText}</div>
+              </div>
+           </div>
+        </div>
+        <div class="pill-time">${start}-${end}</div>
+     </div>`;
+  }
+  
+  function renderBreakCard(a) {
+      const isNow = a.onBreakNow;
+      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.7; border-top:none;' : ''}">
+         <div class="break-name">${a.name}</div>
+         <div class="break-timer" style="${!isNow ? 'font-size:1.5rem; color:var(--text-muted);' : ''}">${a.timer}</div>
+         <div class="break-label">${a.auxLabel}</div>
+      </div>`;
+  }
+
+  function renderWeather() {
+      if (!state.weather || Object.keys(state.weather).length === 0) {
+         return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
+      }
+      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-glass" onclick="fillWindsAction()"><i data-lucide="save" width="16"></i> Fill Sheet</button><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      if (state.alerts && state.alerts.length > 0) {
+         html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
+         state.alerts.forEach(a => html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province}: ${a.type} (${a.count})</div>`);
+         html += `</div></div>`;
+      } else {
+         html += `<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>`;
+      }
+      Object.keys(state.weather).forEach(prov => {
+         const cities = state.weather[prov];
+         cities.forEach(c => {
+             const icon = getWeatherIcon(c.condition);
+             const forecastHtml = (c.forecast || []).slice(0,3).map(f => {
+                 return `<div class="weather-day"><span class="wd-name">${f.day.substring(0,3)}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp}</span></div>`;
+             }).join('');
+             html += `
+             <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
+                <div class="flex-between" style="margin-bottom:16px;">
+                    <span style="font-weight:800; font-size:1.1rem;">${c.name}</span>
+                    <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
+                </div>
+                <div class="flex-between" style="align-items:flex-end;">
+                    <div>
+                        <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp}°</div>
+                        <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:1.4rem; font-weight:700;">${c.wind}</div>
+                        <div class="kpi-label">KM/H</div>
+                    </div>
+                </div>
+                <div class="weather-mini-row">
+                    ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
+                </div>
+             </div>`;
+         });
+      });
+      html += '</div>';
+      return html;
+  }
+
+  function getWeatherIcon(cond, isSmall) {
+      const c = (cond || "").toLowerCase();
+      let i = "cloud";
+      if(c.includes("sun") || c.includes("clear")) i = "sun";
+      else if(c.includes("rain") || c.includes("shower")) i = "cloud-rain";
+      else if(c.includes("snow") || c.includes("flurr")) i = "snowflake";
+      else if(c.includes("storm") || c.includes("thunder")) i = "cloud-lightning";
+      else if(c.includes("cloud") || c.includes("overcast")) i = "cloud";
+      if(isSmall) {
+          if (i==="sun") return `<i data-lucide="sun" width="16"></i>`;
+          if (i==="cloud-rain") return `<i data-lucide="cloud-rain" width="16"></i>`;
+          if (i==="snowflake") return `<i data-lucide="snowflake" width="16"></i>`;
+          return `<i data-lucide="cloud" width="16"></i>`;
+      }
+      return `<i data-lucide="${i}" width="20"></i>`;
+  }
+
+  function renderScripts() {
+     const cats = new Set(["All"]);
+     state.scripts.forEach(s => cats.add(s.category || "General"));
+     const categories = Array.from(cats);
+     
+     const catList = categories.map(c => `
+         <button onclick="state.selectedCategory='${c}'; render();" 
+                 class="ctx-item ${state.selectedCategory===c?'active-cat':''}" 
+                 style="width:100%; text-align:left; padding:12px; ${state.selectedCategory===c?'background:var(--accent-primary); color:#fff;':''}">
+             ${c}
+         </button>`).join('');
+
+     const filtered = state.scripts.filter(s => {
+         const matchSearch = !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase());
+         const matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
+         return matchSearch && matchCat;
+     });
+     
+     const listHTML = filtered.map((s, i) => `
+         <div class="aether-card" style="padding:24px; height:100%; display:flex; flex-direction:column; gap:16px; border-left:4px solid var(--accent-primary);">
+             <div style="display:flex; justify-content:space-between; align-items:start;">
+                <div>
+                    <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; display:block;">${s.category||'General'}</span>
+                    <span style="font-weight:700; font-size:1.2rem; color:var(--text-main);">${s.title}</span>
+                </div>
+                <button onclick="copyScript(${i})" class="btn-icon-sm" style="background:var(--bg-root); color:var(--accent-primary);" title="Copy"><i data-lucide="copy" width="18"></i></button>
+             </div>
+             <div style="font-size:0.95rem; color:var(--text-secondary); white-space:pre-wrap; line-height:1.6; max-height:150px; overflow-y:auto; background:var(--bg-root); padding:12px; border-radius:12px;">${s.body}</div>
+             <div style="display:flex; gap:12px; margin-top:auto; padding-top:12px; border-top:1px solid var(--glass-border);">
+                 <button onclick="editScript(${i})" class="btn-popout" style="width:auto; padding:0 12px; font-size:0.8rem;">Edit</button>
+                 <div style="flex:1;"></div>
+                 <button onclick="delScript(${s.index || i})" class="btn-icon-sm" style="color:var(--status-alert);" title="Delete"><i data-lucide="trash-2" width="16"></i></button>
+             </div>
+         </div>`).join('');
+
+     return `
+     <div style="display:grid; grid-template-columns: 240px 1fr; gap:32px; height:100%; align-items:start;">
+         <div class="aether-card" style="padding:16px; position:sticky; top:20px;">
+             <div class="section-header">Categories</div>
+             <div style="display:flex; flex-direction:column; gap:4px;">${catList}</div>
+             <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--glass-border);">
+                 <button class="btn btn-primary" style="width:100%;" onclick="openComposeMode()">+ New Script</button>
+             </div>
+         </div>
+         
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <input id="script-search" class="input-aether" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="${state.searchTerm || ''}">
+             <div class="grid-masonry" style="grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));">
+                ${listHTML || '<div style="text-align:center; color:var(--text-muted); padding:40px; grid-column:1/-1;">No scripts found in this category.</div>'}
+             </div>
+         </div>
+     </div>`;
+  }
+  
+  window.openComposeMode = () => { document.getElementById('compose-area').style.display='block'; document.getElementById('compose-overlay').style.display='block'; state.editingId = null; document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; document.getElementById('new-script-cat').value=""; };
+  window.closeComposeMode = () => { document.getElementById('compose-area').style.display='none'; document.getElementById('compose-overlay').style.display='none'; state.editingId = null; };
+
+  function renderCalc() {
+     return `<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div><div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;"><div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>`;
+  }
+  window.runCalculation = () => {
+     const i=document.getElementById('in-text').value; const o=document.getElementById('out-text').value;
+     if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(r=>{ const d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; render(); }).runCalculator(i,o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
+  };
+  window.copyReport = () => {
+      const text = document.getElementById('report-content').innerText; const textArea = document.createElement("textarea"); textArea.value = text; document.body.appendChild(textArea); textArea.select(); try { document.execCommand('copy'); showToast("Copied Report"); } catch (err) { showToast("Copy Failed"); } document.body.removeChild(textArea);
+  };
+  window.copyWindTemplate = () => {
+     const targetOrder = ["Toronto", "Ottawa", "Calgary", "Edmonton", "Vancouver", "Prince George", "Montreal", "Quebec City"];
+     let flatList = []; if(state.weather) Object.values(state.weather).forEach(list => flatList.push(...list));
+     const rows = targetOrder.map(name => { const city = flatList.find(c => c.name === name); if (!city) return ""; return formatWindString(city.wind); });
+     navigator.clipboard.writeText(rows.join("\n")).then(() => showToast("Copied")).catch(() => showToast("Error"));
+  };
+  function formatWindString(val) { if (!val) return ""; let w = val.toString(); if (w.toLowerCase().includes("light")) w = "~5"; if (w.includes("G")) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
+  window.saveBreaks = () => { const name = state.selectedAgent; let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) { const newBreaks = agent.rawBreaks.map((b, i) => ({ type: b.type, start: document.getElementById(`bs-${i}`).value, end: document.getElementById(`be-${i}`).value })); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
+  window.saveOvertime = () => { const name = state.selectedAgent; const s = document.getElementById('ot-start').value; const e = document.getElementById('ot-end').value; if(s && e) { let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
+  
+  window.addScript = () => { 
+      const t = document.getElementById('new-script-title').value; 
+      const b = document.getElementById('new-script-body').value; 
+      const c = document.getElementById('new-script-cat').value;
+      if(!t || !b) return; 
+      if(typeof google !== 'undefined') { 
+          google.script.run.withSuccessHandler(() => { 
+              closeComposeMode();
+              showToast("Saved to Library"); 
+              google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); 
+          }).saveTeamScript(state.editingId, t, b, c); 
+      } 
+  };
+  window.editScript = (idx) => { 
+      const s = state.scripts[idx]; if(!s) return; 
+      openComposeMode(); 
+      state.editingId = s.index; 
+      document.getElementById('new-script-title').value = s.title; 
+      document.getElementById('new-script-body').value = s.body; 
+      document.getElementById('new-script-cat').value = s.category || "";
+  };
+  window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
+  window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
+  
+  let searchTimeout;
+  window.handleScriptSearch = (val) => { 
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200);
+  };
+  
+  window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
+  
+  // LOGGING ACTIONS
+  window.openJournal = () => {
+      document.getElementById('journal-modal').classList.add('open');
+      document.getElementById('journal-text').value = ""; 
+      document.getElementById('journal-text').focus();
+  };
+
+  window.submitJournal = () => {
+      const txt = document.getElementById('journal-text').value;
+      const cat = document.getElementById('journal-cat').value;
+      if(!txt) return;
+      if(typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(() => {
+              showToast("Entry Logged");
+              document.getElementById('journal-modal').classList.remove('open');
+              document.getElementById('journal-text').value = "";
+          }).saveJournalEntry(cat, txt); 
+      }
+  };
+
+  window.fillWindsAction = () => {
+      if(confirm("Write current winds to the Daily Sheet?")) {
+          if(typeof google !== 'undefined') {
+              showToast("Writing to Sheet...");
+              google.script.run.withSuccessHandler(res => {
+                  showToast(res);
+              }).fillWindsToSheet(); 
+          }
+      }
+  };
+  
+  // COMMIT SHIFT ACTION
+  window.commitShift = () => {
+      document.getElementById('journal-modal').classList.add('open');
+      const btn = document.getElementById('btn-submit-journal');
+      btn.innerText = "Commit Full Shift";
+      btn.onclick = () =>
