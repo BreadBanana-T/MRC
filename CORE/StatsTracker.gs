@@ -7,74 +7,67 @@ const StatsTracker = {
   
   // Configuration
   SHEET_NAME: "Stats History",
-  MAX_HISTORY_POINTS: 24, // Keep last 24 entries (e.g., 24 hours or 12 hours of 30m intervals)
+  MAX_HISTORY_POINTS: 24, // Keep last 24 entries
 
   /**
    * Appends a new SVL and ACK record with timestamp.
-   * @param {string|number} svl - Service Level (e.g. 85 or "85%")
-   * @param {string|number} ack - ACK Time (e.g. 25 or "25s")
    */
   logHourlyStats: function(svl, ack) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(this.SHEET_NAME);
     
-    // Create sheet if missing
     if (!sheet) {
       sheet = ss.insertSheet(this.SHEET_NAME);
-      sheet.appendRow(["Timestamp", "SVL", "ACK"]); // Added ACK column
+      sheet.appendRow(["Timestamp", "SVL", "ACK"]);
       sheet.getRange(1, 1, 1, 3).setFontWeight("bold");
     }
 
-    // Parse values
-    let sVal = parseFloat(svl);
-    let aVal = parseFloat(String(ack).replace(/[^\d.]/g, '')); // Strip 's' if present
+    let sVal = parseFloat(svl) || 0;
+    let aVal = parseFloat(String(ack).replace(/[^\d.]/g, '')) || 0;
 
-    if (isNaN(sVal)) sVal = 0;
-    if (isNaN(aVal)) aVal = 0;
-
-    const timestamp = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), "yyyy-MM-dd HH:mm:ss");
-    
+    const timestamp = new Date();
     sheet.appendRow([timestamp, sVal, aVal]);
     return "Stats Logged";
   },
 
   /**
-   * Retrieves historical stats for the dashboard graph.
-   * Returns: JSON string of array [{name: "10:00", val: 85, ack: 20}, ...]
+   * Retrieves historical stats, SORTED by time.
    */
   getHistory: function() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(this.SHEET_NAME);
     
     if (!sheet || sheet.getLastRow() < 2) {
-      return JSON.stringify([]); 
+      return JSON.stringify([]);
     }
 
     const lastRow = sheet.getLastRow();
-    // Get last N rows
-    const startRow = Math.max(2, lastRow - this.MAX_HISTORY_POINTS + 1);
+    // Grab more rows to ensure we cover the 24h window, then filter
+    const startRow = Math.max(2, lastRow - 48); 
     const numRows = lastRow - startRow + 1;
     
-    // Read 3 columns: Timestamp, SVL, ACK
-    const lastCol = sheet.getLastColumn();
-    const data = sheet.getRange(startRow, 1, numRows, lastCol).getValues();
+    const data = sheet.getRange(startRow, 1, numRows, 3).getValues();
     
-    const history = data.map(row => {
-      // Parse timestamp to simple time string (e.g., "14:00")
-      let timeLabel = "";
-      if (row[0] instanceof Date) {
-        timeLabel = Utilities.formatDate(row[0], ss.getSpreadsheetTimeZone(), "HH:mm");
-      } else {
-        timeLabel = String(row[0]).split(" ")[1] ? String(row[0]).split(" ")[1].substring(0, 5) : row[0];
-      }
-      
-      return {
-        name: timeLabel,
-        val: parseFloat(row[1]) || 0,
-        ack: parseFloat(row[2]) || 0
-      };
+    // 1. Map to Objects
+    let history = data.map(row => ({
+      time: new Date(row[0]), // Keep full Date object for sorting
+      label: "",
+      val: parseFloat(row[1]) || 0,
+      ack: parseFloat(row[2]) || 0
+    }));
+
+    // 2. SORT Chronologically (Fixes the "jumping time" bug)
+    history.sort((a, b) => a.time - b.time);
+
+    // 3. Slice to last 24 points and Format Label
+    history = history.slice(-this.MAX_HISTORY_POINTS);
+    
+    // 4. Create readable labels (HH:mm)
+    const tz = ss.getSpreadsheetTimeZone();
+    history.forEach(h => {
+        h.label = Utilities.formatDate(h.time, tz, "HH:mm");
     });
 
-    return JSON.stringify(history);
+    return JSON.stringify(history.map(h => ({ name: h.label, val: h.val, ack: h.ack })));
   }
 };
