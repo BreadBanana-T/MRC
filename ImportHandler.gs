@@ -32,7 +32,7 @@ function processWFMImport(rawText, forcedDate) {
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
 
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
-  const rgxAnyDateLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})/; 
+  const rgxAnyDateLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})/;
   const rgxShiftLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
   const rgxActivityLine = /(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)\s*$/i;
 
@@ -86,22 +86,34 @@ function processWFMImport(rawText, forcedDate) {
        // 5. BREAKS & WORK DETECTION
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
-           // If it's a timed segment...
-           if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS")) && !upper.includes("PAID LUNCH")) {
+           const actStart = actMatch[1];
+           const actEnd = actMatch[2];
+
+           // A. BREAKS
+           if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
-               buffer.breaks.push({ type: type, start: actMatch[1], end: actMatch[2] });
+               buffer.breaks.push({ type: type, start: actStart, end: actEnd });
            } 
-           // **NEW**: If it's a timed segment that is NOT an absence or break, assume it's WORK.
-           // This catches "Open Time", "Production", "Queue", etc.
-           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT")) {
+           
+           // B. WORK SEGMENT (Keeps them Active if they worked partial shift)
+           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP")) {
                buffer.hasWork = true;
+           }
+
+           // C. PARTIAL ABSENCE CUTOFF (Fix for "Vacation Paid" ending the shift early)
+           // If it's an absence activity and it ends exactly when the shift ends, assume they left early.
+           if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL") || upper.includes("FAMILY") || upper.includes("SIGNOFF") || upper.includes("SIGN OFF"))) {
+                // Simple string comparison for times (e.g. "8:00 AM" == "8:00 AM")
+                // This assumes the format in the activity line matches the shift line, which is typical for WFM exports.
+                if (compareTimeStrings(actEnd, buffer.end)) {
+                    buffer.end = actStart; // Snap shift end to start of absence
+                }
            }
        }
     }
   }
 
   if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-
   if (rosterData.length > 0) {
     const startRow = sheet.getLastRow() + 1;
     sheet.getRange(startRow, 1, rosterData.length, 12).setValues(rosterData);
@@ -117,12 +129,12 @@ function resetBuffer() {
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
   if (!buf.start && !buf.isOff && !buf.absentType) return;
-
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
 
   // **CRITICAL FIX**: If partial work was detected, clear the Vacation flag
   if (buf.hasWork && buf.absentType === "VACATION") {
-      buf.absentType = ""; // Treat as Active
+      buf.absentType = "";
+      // Treat as Active
   }
 
   let startEpoch = "", endEpoch = "";
@@ -143,12 +155,16 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
 
      const sObj = parseTime(buf.start);
      const eObj = parseTime(buf.end);
-
      if (sObj && eObj) {
         let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
         let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
         
+        // Handle overnight shift crossing midnight
         if (eDate <= sDate) eDate.setDate(eDate.getDate() + 1);
+        
+        // Handle massive rollovers (if shift ends next day but logic missed it, unlikely with above check but safe to have)
+        // Adjust for potential "Next Day" flags if WFM provides them, but raw parsing usually handles AM/PM logic.
+        
         startEpoch = sDate.getTime();
         endEpoch = eDate.getTime();
      }
@@ -189,4 +205,13 @@ function parseTime(tStr) {
    if (amp === "PM" && h < 12) h += 12;
    if (amp === "AM" && h === 12) h = 0;
    return { h, m };
+}
+
+// Helper to compare "8:00 AM" roughly
+function compareTimeStrings(t1, t2) {
+    if (!t1 || !t2) return false;
+    // Normalize spaces and leading zeros
+    const n1 = t1.replace(/\s+/g, '').replace(/^0/, '');
+    const n2 = t2.replace(/\s+/g, '').replace(/^0/, '');
+    return n1 === n2;
 }
