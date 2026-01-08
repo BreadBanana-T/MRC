@@ -30,25 +30,33 @@ const ScriptHandler = {
     // Get all rows (Cols 1-3: Title, Body, Category)
     const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
     return data.map((row, index) => ({
-      index: index, // Used for deletion
+      index: index, // Used for deletion/editing
       title: row[0],
       body: row[1],
-      category: row[2] || "General" // Default if empty
+      category: row[2] || "General" 
     }));
   },
 
-  add: function(title, body, category) {
+  save: function(index, title, body, category) {
     if(!title || !body) return "Missing Info";
     const sheet = this._getSheet();
-    // Save with Category
+    
+    // UPDATE EXISTING (If index is valid)
+    if (index !== null && index !== undefined && index !== "") {
+       const row = parseInt(index) + 2; // Data starts at row 2
+       if (row <= sheet.getLastRow()) {
+          sheet.getRange(row, 1, 1, 3).setValues([[title, body, category || "General"]]);
+          return "Updated";
+       }
+    }
+
+    // CREATE NEW
     sheet.appendRow([title, body, category || "General"]);
     return "Saved";
   },
 
   delete: function(index) {
     const sheet = this._getSheet();
-    // Index is 0-based from data array, but sheet is 1-based and has header (row 1)
-    // So Row = index + 2
     sheet.deleteRow(parseInt(index) + 2);
     return "Deleted";
   }
@@ -56,5 +64,6 @@ const ScriptHandler = {
 
 // --- GLOBAL EXPORTS ---
 function getTeamScripts() { return JSON.stringify(ScriptHandler.getAll()); }
-function addTeamScript(t, b, c) { return ScriptHandler.add(t, b, c); }
+// Updated to accept index for editing
+function saveTeamScript(i, t, b, c) { return ScriptHandler.save(i, t, b, c); }
 function deleteTeamScript(i) { return ScriptHandler.delete(i); }
