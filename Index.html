@@ -42,7 +42,9 @@
                 </div>
                 <div style="height:30px; width:1px; background:var(--glass-border);"></div>
                 <button class="action-btn" onclick="toggleTheme()"><i data-lucide="sun-moon" width="20"></i></button>
-                <button class="action-btn" onclick="openJournal()" title="Journal"><i data-lucide="clipboard-list" width="20"></i></button>
+                <button class="action-btn" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i></button>
+                <button class="action-btn" id="btn-insights" onclick="setView('insights')"><i data-lucide="bar-chart-2" width="20"></i></button>
+                <button class="action-btn" onclick="openJournal()"><i data-lucide="clipboard-list" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
@@ -64,8 +66,8 @@
 
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
-          <h2 style="margin-top:0;">Import Schedule</h2>
-          <textarea id="import-text" class="input-aether mb-6" rows="8" placeholder="Paste WFM Text..."></textarea>
+          <h2 style="margin-top:0;">Import Data</h2>
+          <textarea id="import-text" class="input-aether mb-6" rows="8"></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
@@ -77,14 +79,14 @@
        <div class="modal-window" onclick="event.stopPropagation()" style="width:600px;">
           <h2 style="margin-top:0;">Operations Log</h2>
           <select id="journal-cat" class="input-aether" style="margin-bottom:12px;">
-              <option value="General">General Note</option>
+              <option value="General">General / Handover</option>
               <option value="Critical">Critical Event</option>
               <option value="Weather">Weather Alert</option>
           </select>
-          <textarea id="journal-text" class="input-aether" style="height:200px;" placeholder="Type here..."></textarea>
+          <textarea id="journal-text" class="input-aether" style="height:200px;"></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="document.getElementById('journal-modal').classList.remove('open')">Cancel</button>
-             <button class="btn btn-primary" onclick="submitJournal()">Log Entry</button>
+             <button id="btn-submit-journal" class="btn btn-primary" onclick="submitJournal()">Log Entry</button>
           </div>
        </div>
     </div>
