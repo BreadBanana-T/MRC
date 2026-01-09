@@ -1,7 +1,14 @@
 <script>
   const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
-  let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', scripts: [], agentTab: 'floor', appUrl: "" };
+  // STATE
+  let state = { 
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], 
+      currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", 
+      regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, 
+      scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", 
+      editingId: null, appUrl: "", insightMode: 'week', selectedDate: new Date().toISOString().split('T')[0] 
+  };
 
   document.addEventListener('mousemove', e => {
       document.querySelectorAll('.aether-card').forEach(card => {
@@ -15,7 +22,6 @@
   function initApp() {
     if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
     
-    // READ PARAMS
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -26,38 +32,31 @@
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
             state.regionFilter = (mode === 'onshore' ? 'Onshore' : (mode === 'offshore' ? 'Offshore' : (mode === 'breaks' ? 'Breaks' : 'All')));
-            document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted);">Loading...</div>';
+            document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
             if (typeof google !== 'undefined') { setInterval(fetchData, 30000); fetchData(); }
             return;
         }
     }
     
-    render(); setInterval(updateClock, 1000); setInterval(fetchData, 60000);
-    fetchData();
+    render(); setInterval(updateClock, 1000); setInterval(fetchData, 60000); setInterval(fetchNotifications, 10000);
+    fetchData(); fetchNotifications();
   }
 
   window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
   window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
+  window.setInsightMode = (m) => { state.insightMode = m; if (m === 'week') snapToSunday(); render(); };
+  window.handleDateChange = (val) => { state.selectedDate = val; if (state.insightMode === 'week') snapToSunday(); else render(); };
+  function snapToSunday() { const d = new Date(state.selectedDate); const day = d.getDay(); if (day !== 0) { d.setDate(d.getDate() - day); state.selectedDate = d.toISOString().split('T')[0]; showToast("Snapped to Sunday"); } render(); }
   window.toggleTheme = () => { document.body.classList.toggle('dark'); localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); render(); };
   
   // ACTIONS
   window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
   window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
-  window.openJournal = () => document.getElementById('journal-modal').classList.add('open');
-  
+  window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   window.openMenu = (e, n) => { state.selectedAgent=n; const m=document.getElementById('agent-menu'),o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; const r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
   window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
+  window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
   
-  window.setAgentStatus = (type, val) => { 
-      closeMenu(); 
-      const name=state.selectedAgent; 
-      state.pendingUpdates[name]={type,val,timestamp:Date.now()}; 
-      moveAgentInMemory(name,type,val); 
-      render(); 
-      showToast("Status Updated"); 
-      if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); 
-  };
-
   window.openPopout = (mode) => {
      const baseUrl = state.appUrl || window.location.href.split('?')[0];
      const sep = baseUrl.includes('?') ? '&' : '?';
@@ -67,7 +66,12 @@
 
   function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
   function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+  let searchTimeout;
+  window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
+  function handleSearch(v) { state.searchTerm = v; render(); }
+  function setRegionFilter(v) { state.regionFilter=v; render(); }
 
+  // DATA
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{ try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(state.view!=='scripts' && state.view!=='calc') render(); } }catch(e){} }).getFloorStatus();
@@ -76,6 +80,8 @@
       google.script.run.withSuccessHandler(j=>{ try{ const h=JSON.parse(j); if(h && h.length){ state.slHistory=h; const latest=h[h.length-1]; state.currentSL=latest.val+"%"; state.currentACK=latest.ack+"s"; if(state.view==='overview') render(); } }catch(e){} }).getStatsHistory();
     }
   }
+  function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
+  function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); document.getElementById('notif-dot').style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
 
   function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
   function moveAgentInMemory(name, type, val) {
@@ -87,16 +93,13 @@
      }
   }
 
-  // --- RENDER MAIN ---
+  // --- RENDER ---
   function render() {
-     if (state.view === 'popout-view') { renderPopoutView(state.regionFilter); refreshIcons(); return; }
-
+     if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
      document.getElementById('hdr-sl').innerText = state.currentSL;
      const c = document.getElementById('content');
      document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
-     
-     const b = document.getElementById('btn-'+state.view); 
-     if(b) b.classList.add('active');
+     const b = document.getElementById('btn-'+state.view); if(b) b.classList.add('active');
 
      let h = '';
      if (state.view === 'overview') h = renderOverview();
@@ -104,20 +107,31 @@
      else if (state.view === 'weather') h = renderWeather();
      else if (state.view === 'calc') h = renderCalc();
      else if (state.view === 'scripts') h = renderScripts();
+     else if (state.view === 'insights') h = renderInsights();
      c.innerHTML = h; refreshIcons();
+     const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
+     
+     if(state.view === 'insights') initCharts();
+     if(state.view === 'overview') initOverviewChart();
   }
 
+  // SUB-RENDERERS
   function renderAgents() {
       const tab = state.agentTab;
       const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
-      
       return `
       <div class="sticky-header">
          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
-             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="state.searchTerm=this.value; render();" value="${state.searchTerm}">
+             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
                 <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
                 <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
+             </div>
+             <div style="flex:1"></div>
+             <div style="display:flex; gap:8px;">
+                <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
+                <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
+                <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
              </div>
          </div>
       </div>
@@ -125,35 +139,45 @@
   }
   
   function renderFloorLayout(upMap) {
+     const filterFn = (list) => {
+         if(!list) return [];
+         return list.filter(a => {
+             const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
+             const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
+             return mName && mReg;
+         });
+     };
+     const renderList = (list) => list.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
+
      return `
      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom:24px;">
         <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
-            <div class="agent-list">${renderGroup(state.agents.icl||[], upMap)}</div>
+            <div class="section-header" style="color:var(--status-role);">ICL</div>
+            <div class="agent-list">${renderList(filterFn(state.agents.icl))}</div>
         </div>
         <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-active);">Special Roles (SAFE)</div>
-            <div class="agent-list">${renderGroup(state.agents.safe||[], upMap)}</div>
+            <div class="section-header" style="color:var(--status-active);">SAFE</div>
+            <div class="agent-list">${renderList(filterFn(state.agents.safe))}</div>
         </div>
         <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC)</div>
-            <div class="agent-list">${renderGroup(state.agents.ulc||[], upMap)}</div>
+            <div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div>
+            <div class="agent-list">${renderList(filterFn(state.agents.ulc))}</div>
         </div>
      </div>
      <div class="grid-split" style="align-items:start;">
          <div class="aether-card" style="padding:24px;">
              <div class="section-header">Onshore Unit <button class="btn-popout" onclick="openPopout('Onshore')"><i data-lucide="external-link" width="14"></i></button></div>
-             <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Onshore')), upMap)}</div>
+             <div class="agent-list">${renderList(filterFn((state.agents.active||[]).filter(a=>a.region.includes('Onshore'))))}</div>
          </div>
          <div class="aether-card" style="padding:24px;">
              <div class="section-header">Offshore Unit <button class="btn-popout" onclick="openPopout('Offshore')"><i data-lucide="external-link" width="14"></i></button></div>
-             <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Offshore')), upMap)}</div>
+             <div class="agent-list">${renderList(filterFn((state.agents.active||[]).filter(a=>a.region.includes('Offshore'))))}</div>
          </div>
      </div>
      <div style="margin-top:40px;">
          <div class="section-header" style="color:var(--status-alert);">Unplanned / Support</div>
          <div class="agent-list" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
-            ${renderGroup([...(state.agents.training||[]), ...(state.agents.unplanned||[]), ...(state.agents.vacation||[]), ...(state.agents.planned||[])], upMap)}
+            ${renderList(filterFn([...(state.agents.training||[]), ...(state.agents.unplanned||[]), ...(state.agents.vacation||[]), ...(state.agents.planned||[])]))}
          </div>
      </div>`;
   }
@@ -169,21 +193,11 @@
          <div class="break-grid" style="margin-bottom:40px;">
             ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Empty</div>'}
          </div>
-         <div class="section-header">Upcoming Breaks</div>
+         <div class="section-header">Upcoming Breaks <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem;">${(state.agents.upcomingBreak||[]).length}</span></div>
          <div class="break-grid">
             ${(state.agents.upcomingBreak||[]).map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">None</div>'}
          </div>
       </div>`;
-  }
-
-  function renderGroup(list, upMap) {
-      if(!list) return '';
-      const filtered = list.filter(a => {
-         const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
-         return mName;
-      });
-      if(!filtered.length) return '';
-      return filtered.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
   }
 
   function renderAgentPill(a, upInfo) {
@@ -195,13 +209,13 @@
      let extraClass = "";
      if (a.role === 'SAFE') extraClass = "role-safe";
      else if (a.role === 'ICL') extraClass = "role-icl";
-     else if (a.role === 'ULC FIRE') extraClass = "role-ulc"; // NEW STYLE
+     else if (a.role === 'ULC FIRE') extraClass = "role-ulc";
      if (a.onBreakNow) extraClass += " status-break";
      
      let statusColor = "var(--text-secondary)";
      if (a.role === 'SAFE') statusColor = "var(--status-active)";
      if (a.role === 'ICL') statusColor = "var(--status-role)";
-     if (a.role === 'ULC FIRE') statusColor = "var(--status-ulc)"; // NEW COLOR
+     if (a.role === 'ULC FIRE') statusColor = "var(--status-ulc)";
 
      return `<div class="agent-pill ${extraClass}" data-name="${a.name}" onclick="openMenu(event, '${a.name}')">
         <div class="pill-left">
@@ -226,12 +240,42 @@
       </div>`;
   }
 
-  // --- OTHERS (Minimal for brevity, include your previous Calculator/Weather renderers here) ---
-  function renderOverview() { return '<div class="aether-card">Overview Loading...</div>'; }
-  function renderWeather() { return '<div class="aether-card">Weather Loading...</div>'; }
-  function renderCalc() { return '<div class="aether-card">Calculator Loading...</div>'; }
-  function renderScripts() { return '<div class="aether-card">Scripts Loading...</div>'; }
-  
+  // --- OTHERS ---
+  function renderOverview() {
+      const unplanCount = (state.agents.unplanned||[]).length;
+      const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
+      const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
+      const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
+      return `
+      <div class="grid-bento">
+         <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div></div>
+                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentACK}</div></div>
+            </div>
+            <div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;"><canvas id="chart-overview"></canvas></div>
+         </div>
+         <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Shrinkage</h4>
+            <div style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
+         </div>
+      </div>`;
+  }
+  function renderWeather() { return `<div class="aether-card">Weather Module Active</div>`; }
+  function renderCalc() { return `<div class="aether-card">Calculator Module Active</div>`; }
+  function renderScripts() { return `<div class="aether-card">Scripts Module Active</div>`; }
+  function renderInsights() { return `<div class="aether-card">Insights Module Active</div>`; }
+  function initCharts() {} 
+  function initOverviewChart() {
+      if (typeof Chart === 'undefined') return;
+      if (charts.overview) charts.overview.destroy();
+      const ctx = document.getElementById('chart-overview');
+      if (ctx) {
+          charts.overview = new Chart(ctx, { type: 'line', data: { labels: state.slHistory.map(d=>d.name), datasets: [{ label: 'Service Level', data: state.slHistory.map(d=>d.val), borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.1)', fill: true, tension: 0.4 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } } });
+      }
+  }
+  let charts = {};
+
   // --- SUBMIT ACTIONS ---
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   window.submitJournal = () => { const t=document.getElementById('journal-text').value; const c=document.getElementById('journal-cat').value; if(!t)return; if(typeof google!=='undefined') google.script.run.withSuccessHandler(()=>{showToast("Logged"); document.getElementById('journal-modal').classList.remove('open');}).saveJournalEntry(c,t); };
@@ -242,10 +286,40 @@
      const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
      const filterFn = (list) => (list||[]).filter(a => mode === 'All' || (a.region||"").includes(mode));
      let h = `<div style="padding:20px;"><h2 style="margin-top:0;">${mode}</h2>`;
-     if (mode !== 'Breaks') {
-         h += `<div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`;
-     }
+     if (mode !== 'Breaks') { h += `<div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`; }
      h += `</div>`;
      c.innerHTML = h;
   }
+  
+  // ACTIONS
+  window.openJournal = () => {
+      document.getElementById('journal-modal').classList.add('open');
+      document.getElementById('journal-text').value = ""; 
+      document.getElementById('journal-text').focus();
+  };
+  window.fillWindsAction = () => {
+      if(confirm("Write winds?")) {
+          showToast("Writing...");
+          google.script.run.withSuccessHandler(res => showToast(res)).fillWindsToSheet(); 
+      }
+  };
+  window.commitShift = () => {
+      document.getElementById('journal-modal').classList.add('open');
+      const btn = document.getElementById('btn-submit-journal');
+      btn.innerText = "Commit Full Shift";
+      btn.onclick = () => {
+          const note = document.getElementById('journal-text').value;
+          const cat = document.getElementById('journal-cat').value;
+          showToast("Committing...");
+          if(typeof google !== 'undefined') {
+              if (cat !== 'General' && note) google.script.run.saveJournalEntry(cat, note);
+              google.script.run.withSuccessHandler(res => {
+                  showToast(res); 
+                  document.getElementById('journal-modal').classList.remove('open');
+                  btn.innerText = "Log Entry";
+                  btn.onclick = window.submitJournal;
+              }).commitShiftAction(cat === 'General' ? note : ""); 
+          }
+      };
+  };
 </script>
