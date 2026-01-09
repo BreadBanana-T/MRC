@@ -17,7 +17,7 @@ function doGet(e) {
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-// --- ESSENTIAL: CONNECTS HTML/JS/CSS FILES ---
+// --- CORE: INCLUDE FUNCTION (THIS IS WHAT WAS MISSING/BROKEN) ---
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
@@ -73,8 +73,20 @@ function deleteTeamScript(i) {
     if (typeof deleteTeamScript !== 'undefined') return ScriptHandler.delete(i); 
 }
 
-/* --- LOGGING ROUTER (Journal / Sessions) --- */
+/* --- LOGGING ROUTERS --- */
 function saveJournalEntry(cat, note) {
    if (typeof LogSync !== 'undefined') return LogSync.writeToJournal(cat, note, "User");
    return "LogSync Missing";
+}
+
+function commitShiftAction(note) {
+   if (typeof LogSync !== 'undefined') return LogSync.commitShift(note);
+   return "LogSync Missing";
+}
+
+function fillWindsToSheet() { 
+  if (typeof WeatherService === 'undefined') return "Weather Module Missing";
+  if (typeof LogSync === 'undefined') return "LogSync Module Missing";
+  const data = WeatherService.fetch();
+  return LogSync.fillWinds(data);
 }
