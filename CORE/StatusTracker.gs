@@ -30,6 +30,17 @@ const StatusTracker = {
     // --- SESSION TRACKING LOGIC ---
     // If we are changing a Role, calculate how long they were in the OLD role
     if (foundRow > -1 && oldData && typeof LogSync !== 'undefined') {
+        const oldRole = oldData[2]; 
+        const oldTime = oldData[0]; 
+
+        if (type === 'role' && oldRole && oldRole !== "" && oldRole !== value) {
+             const startEpoch = new Date(oldTime).getTime();
+             const endEpoch = now.getTime();
+             // Will log SAFE, ICL, or ULC FIRE
+             LogSync.logSession(name, oldRole, startEpoch, endEpoch);
+        }
+    }
+    if (foundRow > -1 && oldData && typeof LogSync !== 'undefined') {
         const oldRole = oldData[2]; // Role Column
         const oldTime = oldData[0]; // Timestamp Column
 
