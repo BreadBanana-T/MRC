@@ -230,7 +230,7 @@ function compileFloorData() {
       // Special Roles Sorting
       if (item.agent.role === 'SAFE') emptyFloor.safe.push(item.agent);
       if (item.agent.role === 'ICL') emptyFloor.icl.push(item.agent);
-      if (item.agent.role === 'ULC FIRE') emptyFloor.ulc.push(item.agent); // NEW
+      if (item.agent.role === 'ULC FIRE') emptyFloor.ulc.push(item.agent); // NEW ULC Logic
   });
 
   return JSON.stringify(emptyFloor);
