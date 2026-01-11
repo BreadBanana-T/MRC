@@ -42,13 +42,21 @@
                 </div>
                 <div style="height:30px; width:1px; background:var(--glass-border);"></div>
                 <button class="action-btn" onclick="toggleTheme()"><i data-lucide="sun-moon" width="20"></i></button>
-                <button class="action-btn" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i></button>
+                <button class="action-btn" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
                 <button class="action-btn" id="btn-insights" onclick="setView('insights')"><i data-lucide="bar-chart-2" width="20"></i></button>
                 <button class="action-btn" onclick="openJournal()"><i data-lucide="clipboard-list" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
         <main class="viewport" id="content"></main>
+    </div>
+
+    <div id="notif-panel" class="drawer" style="right:20px; top:80px; bottom:auto; height:500px; transform:translateX(120%);">
+        <div class="section-header" style="padding:20px;">
+            <span>Notifications</span>
+            <button class="btn-icon-sm" onclick="toggleNotifPanel()"><i data-lucide="x" width="20"></i></button>
+        </div>
+        <div id="notif-list" style="overflow-y:auto; flex:1; padding:0 20px 20px;"></div>
     </div>
 
     <div id="agent-menu" class="ctx-menu">
@@ -62,12 +70,13 @@
         <button class="ctx-item" onclick="openBreakModal()">Edit Schedule</button>
         <button class="ctx-item" onclick="openOtModal()">Log Overtime</button>
     </div>
+    
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
 
-    <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
+    <div id="import-modal" class="modal-blur">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data</h2>
-          <textarea id="import-text" class="input-aether mb-6" rows="8"></textarea>
+          <textarea id="import-text" class="input-aether mb-6" rows="8" placeholder="Paste WFM schedule text here..."></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
@@ -75,20 +84,39 @@
        </div>
     </div>
 
-    <div id="journal-modal" class="modal-blur" onclick="document.getElementById('journal-modal').classList.remove('open')">
+    <div id="journal-modal" class="modal-blur">
        <div class="modal-window" onclick="event.stopPropagation()" style="width:600px;">
           <h2 style="margin-top:0;">Operations Log</h2>
           <select id="journal-cat" class="input-aether" style="margin-bottom:12px;">
               <option value="General">General / Handover</option>
               <option value="Critical">Critical Event</option>
               <option value="Weather">Weather Alert</option>
+              <option value="Maintenance">Maintenance</option>
           </select>
-          <textarea id="journal-text" class="input-aether" style="height:200px;"></textarea>
-          <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
+          <textarea id="journal-text" class="input-aether" style="height:200px; margin-bottom:16px;"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="document.getElementById('journal-modal').classList.remove('open')">Cancel</button>
              <button id="btn-submit-journal" class="btn btn-primary" onclick="submitJournal()">Log Entry</button>
           </div>
        </div>
+    </div>
+
+    <div id="compose-overlay" class="modal-blur">
+        <div id="compose-area" class="modal-window">
+            <h2 style="margin-top:0;">Compose Script</h2>
+            <input id="new-script-title" class="input-aether" placeholder="Title" style="margin-bottom:12px;">
+            <input id="new-script-cat" class="input-aether" placeholder="Category (Optional)" style="margin-bottom:12px;">
+            <textarea id="new-script-body" class="input-aether" style="height:150px; margin-bottom:16px;" placeholder="Script content..."></textarea>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button class="btn btn-glass" onclick="closeComposeMode()">Cancel</button>
+                <button class="btn btn-primary" onclick="addScript()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">
+        <i data-lucide="check-circle" width="18"></i>
+        <span id="toast-msg">Action Completed</span>
     </div>
 
     <?!= include('JavaScript'); ?>
