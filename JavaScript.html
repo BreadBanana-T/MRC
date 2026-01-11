@@ -1,7 +1,34 @@
 <script>
+  // --- INITIALIZATION & GLOBAL STATE ---
   const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
-  let state = { view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", editingId: null, appUrl: "", insightMode: 'week', selectedDate: new Date().toISOString().split('T')[0] };
+  
+  let state = { 
+      view: 'overview', 
+      agents: {}, 
+      pendingUpdates: {}, 
+      weather: {}, 
+      slHistory: [], 
+      roleLogs: [], 
+      statsLogs: [], 
+      currentSL: "--", 
+      currentACK: "--", 
+      selectedAgent: null, 
+      searchTerm: "", 
+      regionFilter: 'All', 
+      notifications: [], 
+      dismissedNotifs: new Set(), 
+      notifOpen: false, 
+      scripts: [], 
+      agentTab: 'floor', 
+      currentReport: "...", 
+      selectedCategory: "All", 
+      editingId: null, 
+      appUrl: "", 
+      insightMode: 'day', 
+      selectedDate: new Date().toISOString().split('T')[0] 
+  };
 
+  // Mouse move effect for glass cards
   document.addEventListener('mousemove', e => {
       document.querySelectorAll('.aether-card').forEach(card => {
           const rect = card.getBoundingClientRect();
@@ -9,12 +36,13 @@
           card.style.setProperty('--y', `${e.clientY - rect.top}px`);
       });
   });
+  
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
 
   function initApp() {
-    if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark');
+    try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     
-    // Read Params from Hidden Div (Popout Logic)
+    // Read Params from Hidden Div
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -24,64 +52,83 @@
         if (popout === "true") {
             document.body.classList.add('popout-mode');
             state.view = 'popout-view'; 
-            // Support 'Breaks' mode properly
             state.regionFilter = (mode === 'onshore' ? 'Onshore' : (mode === 'offshore' ? 'Offshore' : (mode === 'breaks' ? 'Breaks' : 'All')));
-            
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
-            if (typeof google !== 'undefined') { 
-                setInterval(fetchData, 30000); 
-                fetchData(); 
-            }
+            if (typeof google !== 'undefined') { setInterval(fetchData, 30000); fetchData(); }
             return;
         }
     }
     
-    render(); setInterval(updateClock, 1000); setInterval(fetchData, 60000); setInterval(fetchNotifications, 10000);
-    fetchData(); fetchNotifications();
+    render(); 
+    setInterval(updateClock, 1000); 
+    setInterval(fetchData, 60000); 
+    setInterval(fetchNotifications, 10000);
+    // Refresh Insights timers every minute if on insights tab
+    setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
+    fetchData(); 
+    fetchNotifications();
   }
 
-  window.setView = (v) => { state.view = v; if(v==='scripts') fetchScripts(); render(); };
-  window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
-  window.setInsightMode = (m) => { state.insightMode = m; if (m === 'week') snapToSunday(); render(); };
-  window.handleDateChange = (val) => { state.selectedDate = val; if (state.insightMode === 'week') snapToSunday(); else render(); };
-  function snapToSunday() { const d = new Date(state.selectedDate); const day = d.getDay(); if (day !== 0) { d.setDate(d.getDate() - day); state.selectedDate = d.toISOString().split('T')[0]; showToast("Snapped to Start of Week (Sunday)"); } render(); }
-  window.toggleTheme = () => { document.body.classList.toggle('dark'); localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); render(); };
+  // --- NAVIGATION & VIEW CONTROL ---
+  window.setView = (v) => { 
+      state.view = v; 
+      if(v==='scripts') fetchScripts(); 
+      if(v==='insights') fetchInsightData(); 
+      render(); 
+  };
   
-  // ACTIONS
+  window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
+  window.setInsightMode = (m) => { state.insightMode = m; fetchInsightData(); render(); };
+  window.handleDateChange = (val) => { state.selectedDate = val; fetchInsightData(); render(); };
+  window.toggleTheme = () => { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
+  
+  // --- ACTIONS ---
   window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
   window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
   window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
-  window.openMenu = (e, n) => { state.selectedAgent=n; const m=document.getElementById('agent-menu'),o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; const r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
-  window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
-  window.setAgentStatus = (type, val) => { closeMenu(); const name=state.selectedAgent; state.pendingUpdates[name]={type,val,timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents')render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
   
-  window.openPopout = (mode) => {
-     const baseUrl = state.appUrl || window.location.href.split('?')[0];
-     const sep = baseUrl.includes('?') ? '&' : '?';
-     const url = `${baseUrl}${sep}popout=true&mode=${mode.toLowerCase()}`;
-     window.open(url, '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no');
+  window.openMenu = (e, n) => { 
+      state.selectedAgent=n; 
+      const m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); 
+      o.style.display='block'; m.style.display='flex'; 
+      const r=e.currentTarget.getBoundingClientRect(); 
+      m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; 
+  };
+  window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
+  
+  window.setAgentStatus = (type, val) => { 
+      closeMenu(); 
+      const name=state.selectedAgent; 
+      state.pendingUpdates[name]={type,val,timestamp:Date.now()}; 
+      moveAgentInMemory(name,type,val); 
+      if(state.view==='agents') render(); 
+      showToast("Status Updated"); 
+      if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); 
+  };
+  
+  window.openPopout = (mode) => { 
+      const baseUrl = state.appUrl || window.location.href.split('?')[0]; 
+      const sep = baseUrl.includes('?') ? '&' : '?'; 
+      window.open(`${baseUrl}${sep}popout=true&mode=${mode.toLowerCase()}`, '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); 
   };
 
-  function showToast(m) { const t=document.getElementById('toast'); t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
+  function showToast(m) { const t=document.getElementById('toast'); if(!t) return; t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
   function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
-  // --- SEARCH ---
   let searchTimeout;
   window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
   function handleSearch(v) { 
       state.searchTerm = v; 
-      if(state.view === 'agents') {
-         const pills = document.querySelectorAll('.agent-pill');
-         const term = v.toLowerCase();
-         pills.forEach(p => {
-             const name = p.getAttribute('data-name').toLowerCase();
-             const reg = p.getAttribute('data-region');
-             const matchName = !term || name.includes(term);
-             const matchReg = state.regionFilter === 'All' || reg.includes(state.regionFilter);
-             if (matchName && matchReg) p.style.display = 'flex';
-             else p.style.display = 'none';
-         });
-      } else { render(); }
+      if(state.view === 'agents') { 
+          const pills = document.querySelectorAll('.agent-pill'); const term = v.toLowerCase(); 
+          pills.forEach(p => { 
+              const name = p.getAttribute('data-name').toLowerCase(); 
+              const reg = p.getAttribute('data-region'); 
+              const matchName = !term || name.includes(term); 
+              const matchReg = state.regionFilter === 'All' || reg.includes(state.regionFilter); 
+              if (matchName && matchReg) p.style.display = 'flex'; else p.style.display = 'none'; 
+          }); 
+      } else { render(); } 
   }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
@@ -89,7 +136,7 @@
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{
-        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(state.view!=='scripts' && state.view!=='calc') render(); } }catch(e){}
+        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(state.view!=='scripts' && state.view!=='calc' && state.view!=='insights') render(); } }catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
@@ -97,8 +144,23 @@
       google.script.run.withSuccessHandler(j=>{ try{ const h=JSON.parse(j); if(h && h.length){ state.slHistory=h; const latest=h[h.length-1]; state.currentSL=latest.val+"%"; state.currentACK=latest.ack+"s"; if(state.view==='overview') render(); } }catch(e){} }).getStatsHistory();
     }
   }
+  
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
-  function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); document.getElementById('notif-dot').style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
+  function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); const dot = document.getElementById('notif-dot'); if(dot) dot.style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
+  
+  function fetchInsightData() {
+      if(typeof google === 'undefined') return;
+      
+      const roleHandler = (res) => { try { state.roleLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
+      const statsHandler = (res) => { try { state.statsLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
+
+      if (state.insightMode === 'week') {
+          google.script.run.withSuccessHandler(roleHandler).getWeeklyRoleLogs(state.selectedDate);
+      } else {
+          google.script.run.withSuccessHandler(roleHandler).getDailyRoleLogs(state.selectedDate);
+          google.script.run.withSuccessHandler(statsHandler).getDailyStatsLog(state.selectedDate);
+      }
+  }
 
   function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
   function moveAgentInMemory(name, type, val) {
@@ -110,14 +172,17 @@
      }
   }
 
-  // --- RENDER MAIN ---
+  // --- RENDER MAIN ROUTER ---
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
-     document.getElementById('hdr-sl').innerText = state.currentSL;
-     const c = document.getElementById('content');
-     document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
+     const sl = document.getElementById('hdr-sl');
+     if(sl) sl.innerText = state.currentSL;
      
+     const c = document.getElementById('content');
+     if(!c) return;
+
+     document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
      const b = document.getElementById('btn-'+state.view); 
      if(b) b.classList.add('active');
 
@@ -128,6 +193,7 @@
      else if (state.view === 'calc') h = renderCalc();
      else if (state.view === 'scripts') h = renderScripts();
      else if (state.view === 'insights') h = renderInsights();
+     
      c.innerHTML = h; refreshIcons();
      const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
      
@@ -135,75 +201,148 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER ---
+  // --- INSIGHTS RENDERER (LIVE + HISTORICAL) ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
-      let narrativeHtml = '';
-      if (!isWeek) {
-          narrativeHtml = `
-          <div class="aether-card" style="padding:0; overflow:hidden; max-height:800px; display:flex; flex-direction:column;">
-             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">Shift Journal</div>
-             <div style="padding:16px; overflow-y:auto; flex:1;">
-                 <div class="feed-item"><div class="feed-dot critical"></div><div class="feed-content"><div class="feed-time">02:15 AM</div><div class="feed-text">Critical system slowdown reported.</div></div></div>
-                 <div class="feed-item"><div class="feed-dot weather"></div><div class="feed-content"><div class="feed-time">04:30 AM</div><div class="feed-text">Weather warning issued for Toronto.</div></div></div>
-             </div>
-             <div style="padding:16px; border-top:1px solid var(--glass-border);">
-                 <button class="btn btn-glass" style="width:100%;" onclick="openJournal()">+ Add Entry</button>
-             </div>
-         </div>`;
-      } else {
-          narrativeHtml = `
-          <div class="aether-card" style="padding:24px;">
-              <div class="section-header">Weekly Summary</div>
-              <div style="color:var(--text-muted); font-size:0.9rem;">
-                  Week starting: <strong>${state.selectedDate}</strong><br><br>
-                  Select a specific day to view the Daily Shift Log.
-              </div>
-          </div>`;
+      // 1. GATHER DATA (Active + Historical)
+      let activeRoles = [];
+
+      // If viewing Today, include active agents from state.agents
+      if (!isWeek && state.selectedDate === new Date().toISOString().split('T')[0]) {
+          ['icl','safe','ulc','active'].forEach(group => {
+              if (state.agents[group]) {
+                  state.agents[group].forEach(a => {
+                      if (a.role && a.role !== 'Active') {
+                          activeRoles.push({ agent: a.name, role: a.role, status: 'LIVE' });
+                      }
+                  });
+              }
+          });
       }
 
+      // 2. Build Active Roles Card
+      const activeRows = activeRoles.map(r => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--glass-surface); border-radius:12px; margin-bottom:10px; border:1px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+              <div style="font-weight:700; color:var(--text-main);">${r.agent}</div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                  <span class="agent-pill ${r.role.includes('SAFE')?'role-safe':(r.role.includes('ICL')?'role-icl':'role-ulc')}" style="font-size:0.8rem; padding:4px 10px;">${r.role}</span>
+                  <div style="color:var(--status-active); font-weight:800; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; animation:pulse 2s infinite;">● LIVE</div>
+              </div>
+          </div>
+      `).join('');
+
+      // 3. Build Historical Table
+      const tableRows = state.roleLogs.map(log => `
+          <tr style="border-bottom:1px solid var(--glass-border);">
+              ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
+              <td style="padding:12px; font-weight:700;">${log.agent}</td>
+              <td style="padding:12px;"><span class="agent-pill ${log.role.includes('SAFE')?'role-safe':(log.role.includes('ICL')?'role-icl':'role-ulc')}" style="width:fit-content; font-size:0.75rem; padding:4px 8px;">${log.role}</span></td>
+              <td style="padding:12px; text-align:right; font-weight:700;">${log.duration} min</td>
+              <td style="padding:12px; text-align:right; color:var(--text-muted); font-family:monospace; font-size:0.85rem;">${log.start} - ${log.end}</td>
+          </tr>
+      `).join('');
+
+      // 4. Build Stats Table
+      const statsRows = state.statsLogs.map(s => `
+          <tr style="border-bottom:1px solid var(--glass-border);">
+              <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
+              <td style="padding:12px; color:${parseFloat(s.svl)<80?'var(--status-alert)':'var(--status-active)'}; font-weight:700;">${s.svl}</td>
+              <td style="padding:12px;">${s.ack}s</td>
+              <td style="padding:12px; color:var(--text-secondary);">-</td> </tr>
+      `).join('');
+
+      // 5. Build Flags
+      const flagged = (state.agents.unplanned||[]).map(a => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border);">
+             <span style="font-weight:700;">${a.name}</span>
+             <span style="color:var(--status-alert); font-weight:700; background:rgba(220,38,38,0.1); padding:4px 8px; border-radius:6px; font-size:0.8rem;">${a.subStatus}</span>
+          </div>`).join('') || '<div style="padding:24px; color:var(--text-muted); text-align:center;">No active flags today</div>';
+
       return `
+      <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
       <div class="sticky-header" style="justify-content:space-between;">
          <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0; font-size:1.2rem;">${isWeek ? 'Weekly Performance' : 'Shift Report'}</h2>
+             <h2 style="margin:0;">Operations Insight</h2>
+             
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Today</button>
-                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Week</button>
+                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Daily</button>
+                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Weekly</button>
              </div>
-         </div>
-         <div style="display:flex; gap:12px;">
+
              <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
-             ${!isWeek ? `<button class="btn btn-primary" onclick="commitShift()"><i data-lucide="save" width="16"></i> Commit Shift</button>` : ''}
+         </div>
+         <div style="display:flex; gap:16px;">
+             <div class="kpi-box" style="text-align:right;">
+                 <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
+                 <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
+             </div>
          </div>
       </div>
       
-      <div style="display:grid; grid-template-columns: ${isWeek ? '1fr' : '350px 1fr'}; gap:24px; align-items:start;">
-         ${narrativeHtml}
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
          
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
-                 <div class="section-header">Staffing vs Demand</div>
-                 <div style="height:300px; width:100%;"><canvas id="chart-staffing"></canvas></div>
+                 <div class="section-header" style="color:var(--status-active);">Active Roles (Live)</div>
+                 <div style="max-height:300px; overflow-y:auto;">
+                    ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
+                 </div>
              </div>
              
-             <div class="grid-split">
-                 <div class="aether-card">
-                     <div class="section-header">Role Breakdown (Hours)</div>
-                     <div style="height:200px; width:100%;"><canvas id="chart-roles"></canvas></div>
+             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
+                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
+                     ⚠️ Active Flags
                  </div>
-                 <div class="aether-card" style="display:flex; flex-direction:column; justify-content:center; padding:24px;">
-                    <div style="display:flex; align-items:center; gap:16px; margin-bottom:20px;">
-                        <i data-lucide="users" width="32" style="color:var(--status-alert);"></i>
-                        <div><div style="font-size:2rem; font-weight:800; line-height:1;">4</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">UNPLANNED ABSENCE</div></div>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:16px;">
-                        <i data-lucide="shield" width="32" style="color:var(--status-active);"></i>
-                        <div><div style="font-size:2rem; font-weight:800; line-height:1;">12.5h</div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">TOTAL SAFE HOURS</div></div>
-                    </div>
+                 <div style="flex:1; overflow-y:auto;">
+                     ${flagged}
                  </div>
              </div>
          </div>
+
+         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px;">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
+                 Performance Logs
+             </div>
+             <div style="overflow-y:auto; flex:1;">
+                 <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                    <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
+                        <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th><th style="padding:10px; text-align:left;">IDP</th></tr>
+                    </thead>
+                    <tbody>
+                        ${statsRows || '<tr><td colspan="4" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
+                    </tbody>
+                 </table>
+             </div>
+         </div>
+
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <div class="aether-card">
+                 <div class="section-header">Total Hours</div>
+                 <div style="height:200px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
+             </div>
+             
+             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:400px;">
+                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
+                     Completed Sessions
+                 </div>
+                 <div style="overflow-y:auto; flex:1;">
+                     <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                        <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
+                            <tr>
+                                ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
+                                <th style="padding:10px; text-align:left;">Agent</th>
+                                <th style="padding:10px; text-align:left;">Role</th>
+                                <th style="padding:10px; text-align:right;">Mins</th>
+                                <th style="padding:10px; text-align:right;">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tableRows}</tbody>
+                     </table>
+                 </div>
+             </div>
+         </div>
+
       </div>
       `;
   }
@@ -211,37 +350,48 @@
   let charts = {};
   function initCharts() {
       if (typeof Chart === 'undefined') return;
-      if(charts.staffing) charts.staffing.destroy();
-      if(charts.roles) charts.roles.destroy();
+      if(charts.rolesHist) charts.rolesHist.destroy();
 
-      const ctx1 = document.getElementById('chart-staffing');
-      if(ctx1) {
-          charts.staffing = new Chart(ctx1, {
-              type: 'line',
-              data: {
-                  labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
-                  datasets: [
-                      { label: 'Required', data: [15, 12, 25, 30, 28, 20], borderColor: '#94a3b8', borderDash: [5, 5], tension: 0.4 },
-                      { label: 'Actual', data: [16, 14, 24, 29, 26, 21], borderColor: '#4f46e5', backgroundColor: 'rgba(79, 70, 229, 0.1)', fill: true, tension: 0.4 }
-                  ]
-              },
-              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } } }
-          });
-      }
+      // Aggregate data from logs AND active agents
+      const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
+      
+      // 1. History
+      state.roleLogs.forEach(log => {
+          if (log.role.includes('SAFE')) roleData.SAFE += (log.duration/60);
+          else if (log.role.includes('ICL')) roleData.ICL += (log.duration/60);
+          else if (log.role.includes('ULC')) roleData.ULC += (log.duration/60);
+      });
 
-      const ctx2 = document.getElementById('chart-roles');
+      // 2. Active (Add 0.5h estimate for visualization)
+      ['safe','icl','ulc'].forEach(g => {
+          if(state.agents[g]) {
+              state.agents[g].forEach(a => {
+                  if (a.role.includes('SAFE')) roleData.SAFE += 0.5;
+                  if (a.role.includes('ICL')) roleData.ICL += 0.5;
+                  if (a.role.includes('ULC')) roleData.ULC += 0.5;
+              });
+          }
+      });
+
+      const ctx2 = document.getElementById('chart-roles-hist');
       if(ctx2) {
-          charts.roles = new Chart(ctx2, {
+          charts.rolesHist = new Chart(ctx2, {
               type: 'bar',
               data: {
-                  labels: ['Night', 'Day', 'Evening'],
-                  datasets: [
-                      { label: 'SAFE', data: [12, 18, 14], backgroundColor: '#059669' },
-                      { label: 'ICL', data: [8, 10, 5], backgroundColor: '#7c3aed' },
-                      { label: 'Active', data: [40, 65, 50], backgroundColor: '#cbd5e1' }
-                  ]
+                  labels: ['SAFE', 'ICL', 'ULC'],
+                  datasets: [{
+                      label: 'Hours',
+                      data: [roleData.SAFE, roleData.ICL, roleData.ULC],
+                      backgroundColor: ['#059669', '#7c3aed', '#f97316'],
+                      borderRadius: 6
+                  }]
               },
-              options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+              options: { 
+                  responsive: true, 
+                  maintainAspectRatio: false, 
+                  plugins: { legend: { display: false } },
+                  scales: { y: { beginAtZero: true } }
+              }
           });
       }
   }
@@ -274,6 +424,7 @@
       }
   }
 
+  // --- STANDARD RENDER FUNCTIONS ---
   function renderPopout(mode) {
      const c = document.getElementById('content');
      if(!c) return; 
@@ -681,68 +832,10 @@
   window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
-  let searchTimeout;
-  window.handleScriptSearch = (val) => { 
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200);
-  };
-  
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   
-  // LOGGING ACTIONS
-  window.openJournal = () => {
-      document.getElementById('journal-modal').classList.add('open');
-      document.getElementById('journal-text').value = ""; 
-      document.getElementById('journal-text').focus();
-  };
-
-  window.submitJournal = () => {
-      const txt = document.getElementById('journal-text').value;
-      const cat = document.getElementById('journal-cat').value;
-      if(!txt) return;
-      if(typeof google !== 'undefined') {
-          google.script.run.withSuccessHandler(() => {
-              showToast("Entry Logged");
-              document.getElementById('journal-modal').classList.remove('open');
-              document.getElementById('journal-text').value = "";
-          }).saveJournalEntry(cat, txt); 
-      }
-  };
-
-  window.fillWindsAction = () => {
-      if(confirm("Write current winds to the Daily Sheet?")) {
-          if(typeof google !== 'undefined') {
-              showToast("Writing to Sheet...");
-              google.script.run.withSuccessHandler(res => {
-                  showToast(res);
-              }).fillWindsToSheet(); 
-          }
-      }
-  };
-  
-  // COMMIT SHIFT ACTION
-  window.commitShift = () => {
-      document.getElementById('journal-modal').classList.add('open');
-      const btn = document.getElementById('btn-submit-journal');
-      btn.innerText = "Commit Full Shift";
-      btn.onclick = () => {
-          const note = document.getElementById('journal-text').value;
-          const cat = document.getElementById('journal-cat').value;
-          
-          showToast("Committing Data...");
-          
-          if(typeof google !== 'undefined') {
-              if (cat !== 'General' && note) {
-                  google.script.run.saveJournalEntry(cat, note);
-              }
-              
-              google.script.run.withSuccessHandler(res => {
-                  showToast(res); 
-                  document.getElementById('journal-modal').classList.remove('open');
-                  btn.innerText = "Log Entry";
-                  btn.onclick = window.submitJournal;
-              }).commitShiftAction(cat === 'General' ? note : ""); 
-          }
-      };
-  };
+  window.openJournal = () => { document.getElementById('journal-modal').classList.add('open'); document.getElementById('journal-text').value = ""; document.getElementById('journal-text').focus(); };
+  window.submitJournal = () => { const txt = document.getElementById('journal-text').value; const cat = document.getElementById('journal-cat').value; if(!txt) return; if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Entry Logged"); document.getElementById('journal-modal').classList.remove('open'); document.getElementById('journal-text').value = ""; }).saveJournalEntry(cat, txt); } };
+  window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
+  window.commitShift = () => { document.getElementById('journal-modal').classList.add('open'); const btn = document.getElementById('btn-submit-journal'); btn.innerText = "Commit Full Shift"; btn.onclick = () => { const note = document.getElementById('journal-text').value; const cat = document.getElementById('journal-cat').value; showToast("Committing Data..."); if(typeof google !== 'undefined') { if (cat !== 'General' && note) { google.script.run.saveJournalEntry(cat, note); } google.script.run.withSuccessHandler(res => { showToast(res); document.getElementById('journal-modal').classList.remove('open'); btn.innerText = "Log Entry"; btn.onclick = window.submitJournal; }).commitShiftAction(cat === 'General' ? note : ""); } }; };
 </script>
