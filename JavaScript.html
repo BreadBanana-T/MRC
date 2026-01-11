@@ -201,14 +201,11 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER (LIVE + HISTORICAL) ---
+  // --- INSIGHTS RENDERER ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
-      // 1. GATHER DATA (Active + Historical)
       let activeRoles = [];
-
-      // If viewing Today, include active agents from state.agents
       if (!isWeek && state.selectedDate === new Date().toISOString().split('T')[0]) {
           ['icl','safe','ulc','active'].forEach(group => {
               if (state.agents[group]) {
@@ -221,7 +218,6 @@
           });
       }
 
-      // 2. Build Active Roles Card
       const activeRows = activeRoles.map(r => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--glass-surface); border-radius:12px; margin-bottom:10px; border:1px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
               <div style="font-weight:700; color:var(--text-main);">${r.agent}</div>
@@ -232,7 +228,6 @@
           </div>
       `).join('');
 
-      // 3. Build Historical Table
       const tableRows = state.roleLogs.map(log => `
           <tr style="border-bottom:1px solid var(--glass-border);">
               ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
@@ -243,7 +238,6 @@
           </tr>
       `).join('');
 
-      // 4. Build Stats Table
       const statsRows = state.statsLogs.map(s => `
           <tr style="border-bottom:1px solid var(--glass-border);">
               <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
@@ -252,7 +246,6 @@
               <td style="padding:12px; color:var(--text-secondary);">-</td> </tr>
       `).join('');
 
-      // 5. Build Flags
       const flagged = (state.agents.unplanned||[]).map(a => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border);">
              <span style="font-weight:700;">${a.name}</span>
@@ -352,23 +345,19 @@
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
 
-      // Aggregate data from logs AND active agents
       const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
-      
-      // 1. History
       state.roleLogs.forEach(log => {
           if (log.role.includes('SAFE')) roleData.SAFE += (log.duration/60);
           else if (log.role.includes('ICL')) roleData.ICL += (log.duration/60);
-          else if (log.role.includes('ULC')) roleData.ULC += (log.duration/60);
+          else if (log.role.includes('ULC') || log.role.includes('FIRE')) roleData.ULC += (log.duration/60);
       });
 
-      // 2. Active (Add 0.5h estimate for visualization)
       ['safe','icl','ulc'].forEach(g => {
           if(state.agents[g]) {
               state.agents[g].forEach(a => {
-                  if (a.role.includes('SAFE')) roleData.SAFE += 0.5;
-                  if (a.role.includes('ICL')) roleData.ICL += 0.5;
-                  if (a.role.includes('ULC')) roleData.ULC += 0.5;
+                  if (a.role && a.role.includes('SAFE')) roleData.SAFE += 0.5;
+                  if (a.role && a.role.includes('ICL')) roleData.ICL += 0.5;
+                  if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) roleData.ULC += 0.5;
               });
           }
       });
@@ -507,15 +496,20 @@
                 <span style="font-weight:700;">Special Roles</span>
                 <i data-lucide="shield" class="text-muted" width="20"></i>
             </div>
-            <div style="display:flex; justify-content:space-around; align-items:center;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="text-align:center;">
-                    <div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
-                    <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.safe||[]).length}</div>
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.safe||[]).length}</div>
                 </div>
-                <div style="width:1px; height:40px; background:var(--glass-border);"></div>
+                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
                 <div style="text-align:center;">
-                    <div style="font-size:0.75rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
-                    <div style="font-size:2.2rem; font-weight:800; line-height:1;">${(state.agents.icl||[]).length}</div>
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.icl||[]).length}</div>
+                </div>
+                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC FIRE</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.ulc||[]).length}</div>
                 </div>
             </div>
          </div>
@@ -567,7 +561,7 @@
             <div class="agent-list">${renderGroup(state.agents.safe||[], upMap)}</div>
         </div>
         <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC)</div>
+            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC FIRE)</div>
             <div class="agent-list">${renderGroup(state.agents.ulc||[], upMap)}</div>
         </div>
      </div>
@@ -633,23 +627,28 @@
      const regionClass = a.region.includes('Onshore') ? 'on' : 'off';
      const regionLabel = a.region.includes('Onshore') ? 'ONSHORE' : 'OFFSHORE';
      let extraClass = "";
-     if (a.role === 'SAFE') extraClass = "role-safe";
-     else if (a.role === 'ICL') extraClass = "role-icl";
-     else if (a.role === 'ULC FIRE') extraClass = "role-ulc";
      
-     if (a.onBreakNow) extraClass += " status-break";
-     let statusText = a.subStatus || "Active";
      let statusColor = "var(--text-secondary)";
-     if (a.onBreakNow) { statusText = "ON BREAK"; statusColor = "var(--status-break)"; }
-     if (a.role === 'SAFE') statusColor = "var(--status-active)";
-     if (a.role === 'ICL') statusColor = "var(--status-role)";
-     if (a.role === 'ULC FIRE') statusColor = "var(--status-ulc)";
+     if (a.role && a.role.includes('SAFE')) { extraClass += " role-safe"; statusColor = "var(--status-active)"; }
+     if (a.role && a.role.includes('ICL')) { extraClass += " role-icl"; statusColor = "var(--status-role)"; }
+     if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { extraClass += " role-ulc"; statusColor = "var(--status-ulc)"; }
+     
+     if (a.onBreakNow) { extraClass += " status-break"; statusColor = "var(--status-break)"; }
+     
+     let statusText = a.subStatus || "Active";
+     if (a.onBreakNow) statusText = "ON BREAK";
 
      return `<div class="agent-pill ${extraClass}" data-name="${a.name}" data-region="${a.region}" onclick="openMenu(event, '${a.name}')">
         <div class="pill-left">
            <div class="pill-av" style="${a.role?'border:2px solid '+statusColor:''}">${a.name.substring(0,2).toUpperCase()}</div>
            <div class="pill-info">
-              <div class="pill-name">${a.name} ${a.isOT?'<span style="color:var(--text-accent); font-size:0.8em;">(OT)</span>':''}</div>
+              <div class="pill-name">
+                  <button class="btn-icon-sm" style="width:18px; height:18px; margin-right:6px; background:rgba(0,0,0,0.1); color:var(--text-muted); display:inline-flex;" onclick="copyAgentInfo(event, '${a.name}', '${a.id}')" title="Copy ID & Name">
+                      <i data-lucide="copy" width="10"></i>
+                  </button>
+                  <span style="font-family:monospace; opacity:0.6; font-size:0.8em; margin-right:4px;">${a.id||''}</span>
+                  ${a.name} ${a.isOT?'<span style="color:var(--text-accent); font-size:0.8em;">(OT)</span>':''}
+              </div>
               <div style="display:flex; align-items:center;">
                  <div class="region-tag ${regionClass}">${regionLabel}</div>
                  <div class="pill-role" style="color:${statusColor}; font-weight:700;">${statusText}</div>
@@ -658,6 +657,14 @@
         </div>
         <div class="pill-time">${start}-${end}</div>
      </div>`;
+  }
+  
+  function copyAgentInfo(e, name, id) {
+      e.stopPropagation(); 
+      const text = `${name} (${id})`;
+      navigator.clipboard.writeText(text).then(() => {
+          showToast(`Copied: ${text}`);
+      });
   }
   
   function renderBreakCard(a) {
