@@ -1,219 +1,211 @@
 /**
- * WFM IMPORT ENGINE
+ * MODULE: IMPORT HANDLER (WFM PARSER)
+ * Parses "dirty" text from WFM, extracts Schedule, Region, Breaks, and Status.
+ * Handles "Partial Sick" vs "Full Sick".
  */
-
 const ImportHandler = {
-  run: function(text, date) {
-    return processWFMImport(text, date);
-}
-};
+  run: function(text) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("Raw Schedule");
+    if (!sheet) return "Error: 'Raw Schedule' sheet missing";
+    
+    // 1. CLEAN THE INPUT
+    // Remove the "UnknownActive" garbage and split into lines
+    const cleanText = text.replace(/UnknownActive/g, "\n");
+    const lines = cleanText.split(/\r?\n/);
+    
+    const outputRows = [];
+    
+    // STATE VARIABLES
+    let currentRegion = "Onshore"; // Default
+    let currentAgentName = null;
+    let currentAgentID = "";
+    let currentShiftDate = "";
+    let currentShiftStart = "";
+    let currentShiftEnd = "";
+    let currentBreaks = [];
+    let isOff = false;
+    
+    // Flags for status detection
+    let hasWorkedHours = false;
+    let sickType = ""; // SICK, SICU, MED, etc.
+    let isNCNS = false;
+    let isAWOL = false;
 
-function processWFMImport(rawText, forcedDate) {
-  if (!rawText) return "Error: No text provided.";
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.setSpreadsheetTimeZone("America/Toronto");
-  let sheet = ss.getSheetByName("Raw Schedule");
-  if (!sheet) { sheet = ss.insertSheet("Raw Schedule"); }
-  
-  sheet.clear();
-  sheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
-  sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+    // --- HELPER TO SAVE CURRENT AGENT ---
+    const saveAgent = () => {
+        if (currentAgentName) {
+            // Determine Status based on flags
+            let status = "Active";
+            let subStatus = "";
 
-  const lines = rawText.split(/\r?\n/);
-  let rosterData = [];
-  let currentAgent = null;
-  let currentID = null;
-  let buffer = resetBuffer();
-  
-  if (!forcedDate) {
-     forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-}
-  
-  const [defY, defM, defD] = forcedDate.split('-').map(Number);
-
-  const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
-  const rgxAnyDateLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})/;
-  const rgxShiftLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
-  const rgxActivityLine = /(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)\s*$/i;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.length < 2) continue;
-
-    // 1. DETECT NEW AGENT
-    let agentMatch = line.match(rgxAgent);
-    if (agentMatch) {
-      if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-      currentID = agentMatch[1];
-      currentAgent = agentMatch[2].trim(); 
-      buffer = resetBuffer();
-      continue;
-    }
-
-    if (currentAgent) {
-       // 2. NEW DAY DETECTION
-       let dateMatch = line.match(rgxAnyDateLine);
-       if (dateMatch) {
-          const foundDate = dateMatch[1];
-          if ((buffer.dateStr && buffer.dateStr !== foundDate) || (buffer.isOff && !buffer.dateStr)) {
-             pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-             buffer = resetBuffer();
-          }
-       }
-
-       // 3. SHIFT LINE
-       let shiftMatch = line.match(rgxShiftLine);
-       if (shiftMatch) {
-          buffer.dateStr = shiftMatch[1];
-          buffer.start = shiftMatch[2];
-          buffer.end = shiftMatch[3];
-          buffer.isOff = false; 
-       } 
-       else if (line.includes("Off") && !buffer.start) {
-          if (dateMatch) buffer.dateStr = dateMatch[1];
-          buffer.isOff = true;
-       }
-
-       // 4. ACTIVITY PARSING
-       const upper = line.toUpperCase();
-       if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
-       
-       if (upper.includes("SICK")) buffer.absentType = "SICK";
-       else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
-       else if (upper.includes("VACATION") || upper.includes("VACP")) buffer.absentType = "VACATION";
-       else if (upper.includes("TRAINING") || upper.includes("TRN")) buffer.absentType = "TRAINING";
-
-       // 5. BREAKS & WORK DETECTION
-       let actMatch = line.match(rgxActivityLine);
-       if (actMatch) {
-           const actStart = actMatch[1];
-           const actEnd = actMatch[2];
-
-           // A. BREAKS
-           if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
-               let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ?
-               "Lunch" : "Break";
-               buffer.breaks.push({ type: type, start: actStart, end: actEnd });
-            } 
-           
-           // B. WORK SEGMENT (Keeps them Active if they worked partial shift)
-           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP")) {
-               buffer.hasWork = true;
+            if (isOff) {
+                status = "Off";
+            } else if (isNCNS) {
+                status = "Absent";
+                subStatus = "NCNS";
+            } else if (isAWOL) {
+                status = "Absent";
+                subStatus = "AWOL";
+            } else if (sickType) {
+                // THE CRITICAL FIX:
+                // If they have a start/end time AND a sick code, it's Partial.
+                // If the shift appears to be empty/00:00, it's Full Sick.
+                if (hasWorkedHours) {
+                    status = "Active"; // Keep them on the board
+                    subStatus = "Leaving Early (Sick)";
+                } else {
+                    status = "Absent";
+                    subStatus = sickType; // e.g., "SICK"
+                }
+            } else {
+                status = "Active"; // Default
             }
 
-           // C. PARTIAL ABSENCE CUTOFF (Fix for "Vacation Paid" ending the shift early)
-           // If it's an absence activity and it ends exactly when the shift ends, assume they left early.
-           if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL") || upper.includes("FAMILY") || upper.includes("SIGNOFF") || upper.includes("SIGN OFF"))) {
-                // Simple string comparison for times (e.g. "8:00 AM" == "8:00 AM")
-                // This assumes the format in the activity line matches the shift line, which is typical for WFM exports.
-                if (compareTimeStrings(actEnd, buffer.end)) {
-                    buffer.end = actStart;
-                    // Snap shift end to start of absence
+            // Calculate Shift Name (Day/Night/Evening)
+            let shiftName = "Day";
+            if (currentShiftStart.includes("PM")) {
+                const hour = parseInt(currentShiftStart);
+                if (hour >= 9 || hour === 12) shiftName = "Night"; // 12 PM is noon, 12 AM is midnight... logic check needed
+                else if (hour >= 1 && hour < 9) shiftName = "Evening";
+            } else if (currentShiftStart.includes("AM")) {
+                const hour = parseInt(currentShiftStart);
+                if (hour < 5 || hour === 12) shiftName = "Night"; // 12 AM is night
+            }
+
+            // Format Breaks as JSON
+            const breaksJson = JSON.stringify(currentBreaks);
+
+            // PUSH ROW: [Name, ID, Date, Start, End, ShiftName, Region, Breaks, Status, SubStatus]
+            // Only add if they are NOT Off (unless you want to track Offs too)
+            if (status !== "Off") {
+                outputRows.push([
+                    currentAgentName,
+                    currentAgentID,
+                    currentShiftDate,
+                    currentShiftStart,
+                    currentShiftEnd,
+                    shiftName,
+                    currentRegion,
+                    breaksJson,
+                    status,
+                    subStatus
+                ]);
+            }
+        }
+    };
+
+    // --- MAIN PARSE LOOP ---
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        if (line.length < 2) continue;
+
+        // A. DETECT REGION (MU Set)
+        if (line.includes("MU Set:")) {
+            // Heuristic: "MONIT ALL" usually implies Onshore. Adjust keywords as needed.
+            if (line.toUpperCase().includes("MONIT")) currentRegion = "Onshore";
+            else if (line.toUpperCase().includes("OFFSHORE")) currentRegion = "Offshore";
+            else currentRegion = "Onshore"; // Fallback
+        }
+
+        // B. DETECT NEW AGENT
+        else if (line.startsWith("Agent:")) {
+            saveAgent(); // Save previous agent before starting new one
+            
+            // Reset State
+            currentAgentName = null;
+            currentAgentID = "";
+            currentShiftDate = "";
+            currentShiftStart = "";
+            currentShiftEnd = "";
+            currentBreaks = [];
+            isOff = false;
+            hasWorkedHours = false;
+            sickType = "";
+            isNCNS = false;
+            isAWOL = false;
+
+            // Parse Name & ID: "Agent: 326333 Aazzaz, Hamza"
+            const parts = line.split(":");
+            if (parts.length > 1) {
+                const info = parts[1].trim().split(" ");
+                currentAgentID = info[0]; // 326333
+                // Remainder is name (Aazzaz, Hamza)
+                currentAgentName = info.slice(1).join(" ");
+            }
+        }
+
+        // C. DETECT DATE & MAIN SHIFT
+        // Matches: "1/10/26 12:30 AM 9:30 AM Open/Ouvert..." or "1/11/26 Off"
+        else if (line.match(/^\d{1,2}\/\d{1,2}\/\d{2}/)) {
+            // Check if this is the "Current" date or "Next" date? 
+            // The paste often contains 2 days. We usually only want the first one or Today's.
+            // For now, we take the first date found for the agent.
+            if (currentShiftDate === "") {
+                const dateParts = line.split(" ");
+                currentShiftDate = dateParts[0];
+
+                if (line.includes("Off")) {
+                    isOff = true;
+                } else {
+                    // Extract Start/End times
+                    // Regex for times: 12:30 AM
+                    const times = line.match(/\d{1,2}:\d{2}\s(?:AM|PM)/g);
+                    if (times && times.length >= 2) {
+                        currentShiftStart = times[0];
+                        currentShiftEnd = times[1];
+                        hasWorkedHours = true;
+                    }
                 }
-           }
-       }
+            }
+        }
+
+        // D. DETECT BREAKS / LUNCH
+        else if (line.includes("Break") || line.includes("Lunch") || line.includes("Pause") || line.includes("Repas")) {
+            // "TI 1st Break 2:15 AM 2:30 AM"
+            const times = line.match(/\d{1,2}:\d{2}\s(?:AM|PM)/g);
+            if (times && times.length >= 2) {
+                let type = "Break";
+                if (line.toLowerCase().includes("lunch") || line.toLowerCase().includes("repas")) type = "Lunch";
+                
+                currentBreaks.push({
+                    type: type,
+                    start: times[0],
+                    end: times[1]
+                });
+            }
+        }
+
+        // E. DETECT SICKNESS / EXCEPTIONS
+        else if (line.includes("SICK") || line.includes("SICU") || line.includes("MALADIE")) {
+            // "SICU Maladie imprévue... 3:45 AM 8:00 AM"
+            sickType = "SICK";
+            
+            // Check if this line itself has hours.
+            // Sometimes the main line is "Open", but then a sub-line says "SICU 3am 8am".
+            // We already marked `hasWorkedHours = true` from the main line. 
+            // If the MAIN line was blank, `hasWorkedHours` would be false.
+        }
+        else if (line.includes("NCNS")) isNCNS = true;
+        else if (line.includes("AWOL")) isAWOL = true;
     }
-  }
 
-  if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-  if (rosterData.length > 0) {
-    const startRow = sheet.getLastRow() + 1;
-    sheet.getRange(startRow, 1, rosterData.length, 12).setValues(rosterData);
-    return `Synced ${rosterData.length} entries.`;
-  }
-  return "No valid data found.";
-}
+    // Save the very last agent
+    saveAgent();
 
-function resetBuffer() {
-  return { breaks: [], start: null, end: null, dateStr: null, absentType: "", isOffshore: false, isOff: false, hasWork: false };
-}
-
-function pushAgent(roster, name, id, buf, defY, defM, defD) {
-  if (!buf) return;
-  if (!buf.start && !buf.isOff && !buf.absentType) return;
-  if (buf.isOff) { buf.start = ""; buf.end = ""; }
-
-  // **CRITICAL FIX**: If partial work was detected, clear the Vacation flag
-  if (buf.hasWork && buf.absentType === "VACATION") {
-      buf.absentType = "";
-      // Treat as Active
-  }
-
-  let startEpoch = "", endEpoch = "";
-  let finalDateStr = buf.dateStr;
-  if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`;
-
-  if (buf.start && buf.end) {
-     let y, m, d;
-     if (buf.dateStr) {
-        const parts = buf.dateStr.split('/');
-        m = parseInt(parts[0]);
-        d = parseInt(parts[1]);
-        y = parseInt(parts[2]);
-        if (y < 100) y += 2000;
-     } else {
-        y = defY; m = defM; d = defD;
-     }
-
-     const sObj = parseTime(buf.start);
-     const eObj = parseTime(buf.end);
-     if (sObj && eObj) {
-        let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
-        let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
+    // 4. WRITE TO SHEET
+    sheet.clearContents();
+    // Headers (Optional, but good for debugging)
+    // sheet.appendRow(["Name", "ID", "Date", "Start", "End", "Shift", "Region", "Breaks", "Status", "SubStatus"]);
+    
+    if (outputRows.length > 0) {
+        sheet.getRange(1, 1, outputRows.length, outputRows[0].length).setValues(outputRows);
         
-        // FIX: Only treat as overnight if End is strictly LESS than Start.
-        // Equal times (e.g. 19:30-19:30) will result in a 0-duration shift, not 24h.
-        if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
-
-        // Adjust for potential "Next Day" flags if WFM provides them, but raw parsing usually handles AM/PM logic.
-        startEpoch = sDate.getTime();
-        endEpoch = eDate.getTime();
-     }
+        // SYNC TRIGGER
+        if (typeof AgentMonitor !== 'undefined') AgentMonitor.syncFromRaw();
+        
+        return `Imported ${outputRows.length} agents successfully.`;
+    }
+    return "No valid agent data found.";
   }
-
-  let type = "Off";
-  if (startEpoch) {
-     const h = new Date(startEpoch).getHours();
-     type = h >= 14 ?
-     "Evening" : "Day";
-  }
-
-  let cleanName = name;
-  if (name.includes(",")) {
-      const parts = name.split(",");
-      if(parts.length === 2) cleanName = `${parts[1].trim()} ${parts[0].trim()}`;
-  }
-
-  roster.push([
-    cleanName, id, finalDateStr,
-    buf.start || "", buf.end || "",
-    type, 
-    buf.isOffshore ? "Offshore" : "Onshore",
-    JSON.stringify(buf.breaks),
-    "", 
-    buf.absentType,
-    startEpoch, 
-    endEpoch
-  ]);
-}
-
-function parseTime(tStr) {
-   if(!tStr) return null;
-   const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
-   if(!match) return null;
-   let h = parseInt(match[1]);
-   let m = parseInt(match[2]);
-   let amp = match[3].toUpperCase();
-   if (amp === "PM" && h < 12) h += 12;
-   if (amp === "AM" && h === 12) h = 0;
-   return { h, m };
-}
-
-// Helper to compare "8:00 AM" roughly
-function compareTimeStrings(t1, t2) {
-    if (!t1 || !t2) return false;
-    // Normalize spaces and leading zeros
-    const n1 = t1.replace(/\s+/g, '').replace(/^0/, '');
-    const n2 = t2.replace(/\s+/g, '').replace(/^0/, '');
-    return n1 === n2;
-}
+};
