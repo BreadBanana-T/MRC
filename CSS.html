@@ -18,7 +18,7 @@
     --status-break: #d97706;
     --status-alert: #dc2626;
     --status-role: #7c3aed;
-    --status-ulc: #f97316; /* ULC Orange */
+    --status-ulc: #f97316;
     
     --region-on: #0ea5e9;
     --region-off: #8b5cf6;
@@ -76,25 +76,13 @@
   .kpi-box h4 { margin: 0; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
   .kpi-box div { font-size: 1.2rem; font-weight: 800; color: var(--text-main); font-variant-numeric: tabular-nums; }
   
-  /* FIXED NAV ISLAND - FORCES ROW LAYOUT */
-  .nav-island { 
-      display: flex; 
-      flex-direction: row; 
-      gap: 4px; 
-      background: rgba(0,0,0,0.05); 
-      padding: 4px; 
-      border-radius: 50px; 
-      align-items: center; 
-      overflow-x: auto; 
-      scrollbar-width: none; 
-      white-space: nowrap; 
-  }
-  
+  .nav-island { display: flex; flex-direction: row; gap: 4px; background: rgba(0,0,0,0.05); padding: 4px; border-radius: 50px; align-items: center; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
   .nav-btn { height: 36px; padding: 0 20px; border-radius: 18px; border: none; cursor: pointer; font-weight: 600; color: var(--text-muted); background: transparent; transition: 0.2s; white-space: nowrap; flex-shrink: 0; }
   .nav-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.1); }
   .nav-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  
   .action-group { display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
-  .action-btn { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: var(--glass-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+  .action-btn { width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: var(--glass-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; position: relative; }
   .action-btn:hover { background: rgba(255,255,255,0.15); border-color: var(--accent-primary); }
   .action-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-color: var(--accent-primary); }
 
@@ -112,7 +100,7 @@
   .agent-pill:hover { background: rgba(255,255,255,0.08); border-color: var(--accent-primary); opacity: 1 !important; filter: grayscale(0) !important; }
   .agent-pill.role-safe { border: 1px solid var(--status-active); opacity: 0.6; }
   .agent-pill.role-icl { border: 1px solid var(--status-role); opacity: 0.6; }
-  .agent-pill.role-ulc { border: 1px solid var(--status-ulc); opacity: 0.6; } /* ULC STYLE */
+  .agent-pill.role-ulc { border: 1px solid var(--status-ulc); opacity: 0.6; }
   .agent-pill.status-break { opacity: 0.5; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02) 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px); }
   .special-group .agent-pill.role-safe, .special-group .agent-pill.role-icl, .special-group .agent-pill.role-ulc { opacity: 1 !important; border-width: 2px; }
 
@@ -138,7 +126,6 @@
   .btn-primary { background: var(--text-main); color: var(--bg-root); }
   .btn-glass { background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: var(--text-main); }
   .btn-icon-sm { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: transparent; cursor: pointer; border:none; }
-  
   .btn-popout { background: rgba(0,0,0,0.05); border: 1px solid var(--glass-border); color: var(--text-secondary); height: 28px; width: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition:0.2s; margin-left:8px; }
   .btn-popout:hover { color: var(--accent-primary); border-color:var(--accent-primary); background: rgba(255,255,255,0.2); }
 
@@ -149,15 +136,19 @@
   .modal-window { background: var(--bg-root); width: 500px; max-width: 90%; padding: 32px; border-radius: 24px; border: 1px solid var(--glass-border); box-shadow: 0 20px 60px rgba(0,0,0,0.5); transform: scale(0.95); transition: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
   body.dark .modal-window { background: #1e293b; border: 1px solid rgba(255,255,255,0.1); }
   .modal-blur.open .modal-window { transform: scale(1); }
+  
   .drawer { position: fixed; top: 20px; right: 20px; bottom: 20px; width: 360px; background: var(--glass-surface); backdrop-filter: blur(30px); border: 1px solid var(--glass-border); border-radius: 24px; transform: translateX(120%); transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 200; display: flex; flex-direction: column; box-shadow: -10px 0 40px rgba(0,0,0,0.2); }
   .drawer.open { transform: translateX(0); }
+  
   .ctx-menu { position: fixed; background: var(--bg-root); border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0,0,0,0.3); border-radius: 16px; padding: 6px; width: 180px; z-index: 500; display: none; flex-direction: column; }
   .ctx-item { padding: 10px 12px; text-align: left; background: transparent; border: none; color: var(--text-main); font-weight: 600; cursor: pointer; border-radius: 8px; transition: 0.1s; font-size: 0.85rem; }
   .ctx-item:hover { background: rgba(255,255,255,0.05); color: var(--accent-primary); }
+  
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
   .text-sm { font-size: 0.85rem; }
   .hidden { display: none !important; }
   .section-header { font-size: 1rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; }
+  
   body.popout-mode { padding: 20px; background: var(--bg-root); overflow: auto; }
   body.popout-mode .top-deck, body.popout-mode .aether-bg { display: none; }
   body.popout-mode .app-shell { margin: 0; width: 100%; max-width: none; padding: 0; }
