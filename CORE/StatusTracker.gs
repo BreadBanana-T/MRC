@@ -1,8 +1,7 @@
 /**
  * MODULE: STATUS TRACKER
- * The Persistent Brain. 
- * Manages overrides (Roles, Breaks, OT) so they survive refreshes and re-imports.
- * Includes "Overnight Awareness" logic.
+ * Manages overrides (Roles, Breaks, OT) so they survive refreshes.
+ * Bridges local actions to the Master Database.
  */
 
 const StatusTracker = {
@@ -16,7 +15,8 @@ const StatusTracker = {
     const data = sheet.getDataRange().getValues();
     let foundRow = -1;
     let oldData = null;
-
+    
+    // Scan for existing entry for this agent today
     for (let i = 1; i < data.length; i++) {
       if (this._matchRow(data[i], cleanName, dateStr, 1, 4)) {
         foundRow = i + 1;
@@ -27,34 +27,43 @@ const StatusTracker = {
 
     const now = new Date();
 
-    // --- SESSION TRACKING LOGIC ---
-    // If we are changing a Role, calculate how long they were in the OLD role
-    if (foundRow > -1 && oldData && typeof LogSync !== 'undefined') {
-        const oldRole = oldData[2]; 
-        const oldTime = oldData[0]; 
-
-        if (type === 'role' && oldRole && oldRole !== "" && oldRole !== value) {
-             const startEpoch = new Date(oldTime).getTime();
-             const endEpoch = now.getTime();
-             // Will log SAFE, ICL, or ULC FIRE
-             LogSync.logSession(name, oldRole, startEpoch, endEpoch);
+    // ======================================================
+    // BRIDGE TO MASTER DB (The "Tandem" Logic)
+    // ======================================================
+    
+    // A. Log Absence (SICK, AWOL, NCNS, etc.)
+    // Only logs if we are SETTING a value (not clearing it)
+    if (type === 'absent' && value !== "") {
+        if (typeof MasterConnector !== 'undefined') {
+            MasterConnector.logAbsence(name, value);
         }
     }
-    if (foundRow > -1 && oldData && typeof LogSync !== 'undefined') {
+
+    // B. Log Role Session (SAFE, ICL, ULC)
+    // If we are changing roles, we calculate how long they spent in the OLD role
+    if (foundRow > -1 && oldData) {
         const oldRole = oldData[2]; // Role Column
         const oldTime = oldData[0]; // Timestamp Column
 
-        // If type is 'role' AND there was an old role AND it's different from new value
+        // If type is 'role' AND there was an old role AND it's different
         if (type === 'role' && oldRole && oldRole !== "" && oldRole !== value) {
              const startEpoch = new Date(oldTime).getTime();
              const endEpoch = now.getTime();
              
-             // Log to DB_Sessions
-             LogSync.logSession(name, oldRole, startEpoch, endEpoch);
+             // 1. Send to Master DB (Permanent Record)
+             if (typeof MasterConnector !== 'undefined') {
+                 MasterConnector.logRoleSession(name, oldRole, startEpoch, endEpoch);
+             }
+             
+             // 2. Log Locally (For the Dashboard/Insights graphs)
+             if (typeof LogSync !== 'undefined') {
+                 LogSync.logSession(name, oldRole, startEpoch, endEpoch);
+             }
         }
     }
-    // -----------------------------
+    // ======================================================
 
+    // Update Local Sheet
     if (foundRow > -1) {
       sheet.getRange(foundRow, 1).setValue(now);
       if (type === 'role') sheet.getRange(foundRow, 3).setValue(value);
@@ -96,7 +105,34 @@ const StatusTracker = {
     const sheet = this._getSheet("Overtime_Tracking", ["Timestamp", "Agent Name", "OT Start", "OT End", "Break Start", "Break End", "DateStr"]);
     const dateStr = this._getTodayStr();
     sheet.appendRow([new Date(), name, start, end, bStart || "-", bEnd || "-", dateStr]);
+    
+    // Log to Master DB as well
+    if (typeof MasterConnector !== 'undefined') {
+        MasterConnector.logOvertime(name, start, end, bStart, bEnd);
+    }
+    
     return "OT Logged";
+  },
+
+  // --- 4. STATS HISTORY (For Graphs) ---
+  logHourlyStats: function(svl, ack) {
+    const sheet = this._getSheet("Stats History", ["Timestamp", "SVL", "ACK"]);
+    sheet.appendRow([new Date(), svl, ack]);
+  },
+
+  getHistory: function() {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Stats History");
+    if (!sheet) return "[]";
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return "[]";
+    
+    // Return last 24 entries
+    const slice = data.slice(1).slice(-24);
+    return JSON.stringify(slice.map(r => ({
+        name: Utilities.formatDate(new Date(r[0]), "America/Toronto", "HH:mm"),
+        val: r[1],
+        ack: r[2]
+    })));
   },
 
   // --- DATA RETRIEVAL (INTELLIGENT) ---
@@ -111,7 +147,8 @@ const StatusTracker = {
       if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [] });
       return map.get(k);
     };
-
+    
+    // Reads overrides for Today AND Yesterday (to handle overnight shifts)
     const readSheet = (sheetName, nameIdx, dateIdx, callback) => {
       const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
       if (sheet && sheet.getLastRow() > 1) {
