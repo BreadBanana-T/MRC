@@ -1,6 +1,5 @@
 /**
  * MODULE: CALCULATOR
- * Parses Metrics, Trends, and sends data to Master DB.
  */
 
 function runCalculator(inText, outText) {
@@ -11,77 +10,79 @@ function calculateMetrics(inText, outText) {
   let stats = {
     svl: "0%", ack: "0s", 
     trendData: { labels: [], actual: [], trend: [] }, 
-    idp: "0", law: "0s",
     trendIn: "0%", trendOut: "0%",
+    asa: "0s", inSVL: "0%",
     report: ""
   };
 
-  const LIST_ACK = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-TAMP", "6-O/C", "7-TRB", "5-SUPV"];
-  const LIST_SVL = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-TAMP", "6-O/C", "7-TRB", "5-SUPV"];
-  
-  // 1. INBOUND PARSING
+  // 1. SLA LIST (For ACK / SVL) - STRICT PRIORITY
+  // Excludes 7-TRB and 5-SUPF/V to keep response times accurate to alarms.
+  const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
+
+  // 2. TREND LIST (For Workload Volume) - BROADER
+  // Includes 7-TRB because it affects staffing/volume trends (-55%), but still excludes Supervision skew.
+  const LIST_TREND = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C", "7-TRB"];
+
+  // ----------------------------------------------------
+  // A. INBOUND PARSING
+  // ----------------------------------------------------
   if (inText) {
     const lines = inText.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes("Intraday")) {
-          const parts = lines[i].trim().split(/\s+/);
-          const pctIdx = parts.findIndex(p => p.includes("%"));
-          if (pctIdx > -1 && parts[pctIdx+1]) stats.inSVL = parts[pctIdx+1] + "%";
+    for (const line of lines) {
+      // Clean tabs/spaces
+      const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
+      
+      // Target: Monit - Intraday
+      if (line.includes("Monit - Intraday")) {
+          // Columns roughly: Name, Off, ASA, Trend, Diff%, SL20...
+          // ASA is usually index 2 or has colon
+          const asaPart = parts.find(p => p.includes(":"));
+          if (asaPart) stats.asa = fmt(asaPart);
+          
+          // SL 20 is usually around index 5 or 6 (Look for high number)
+          // parts[5] in your pasted example was "81"
+          if (parts[5] && parts[5].match(/^\d+$/)) stats.inSVL = parts[5] + "%";
       }
-      if (lines[i].includes("Last 60 minutes")) {
-          const parts = lines[i].split(/\s+/);
-          const pctIdx = parts.findIndex(p => p.includes("%"));
-          if (pctIdx > -1) stats.trendIn = parts[pctIdx];
+      
+      // Target: Monit - Last 60 minutes
+      if (line.includes("Monit - Last 60 minutes")) {
+          // Trend Diff % is usually index 4 ("+16%")
+          const diffPart = parts.find(p => p.includes("%"));
+          if (diffPart) stats.trendIn = diffPart;
       }
     }
   }
 
-  // 2. OUTBOUND PARSING
+  // ----------------------------------------------------
+  // B. OUTBOUND PARSING
+  // ----------------------------------------------------
   if (outText) {
-    // A. LAW
-    const lawMatch = outText.match(/Longest.*?(\d+s?)/i);
-    if (lawMatch) stats.law = lawMatch[1]; 
+    // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_SLA
+    const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
+    
+    let svlVol = 0, svlW = 0; 
+    let ackVol = 0, ackW = 0; 
 
-    // B. IDP
-    const idpMatch = outText.match(/IDP.*?(\d+)/i);
-    if (idpMatch) stats.idp = idpMatch[1];
+    if (intraSection) {
+      const lines = intraSection.split(/\r?\n/);
+      lines.forEach(line => {
+        const codeMatch = line.match(/^(\d+-[A-Z\/]+)/);
+        if (codeMatch) {
+            const code = codeMatch[1];
+            const parts = line.trim().split(/\s+/);
+            const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
+            
+            if (timeIdx > -1 && timeIdx >= 3) {
+                const vol = parseInt(parts[timeIdx - 3]) || 0;
+                const timeSec = dur(parts[timeIdx]);
+                const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
-    // C. TREND GRAPH (Last 60 min)
-    const trendSection = extractSection(outText, "Alarm Resp Time - Last 60 min");
-    if (trendSection) {
-       const lines = trendSection.split(/\r?\n/);
-       lines.forEach(line => {
-           // Heuristic: Look for lines starting with digit-Letter (e.g. 1-FIRE)
-           const parts = line.trim().split(/\t/);
-           // If tab split fails, try space split but be careful of descriptions with spaces
-           const cleanLine = line.trim();
-           if (cleanLine.match(/^\d-[A-Z]+/)) {
-               // Simple space split might break description, but usually Actual/Trend are at the end
-               // Let's assume columns: Code | Desc | Actual | Trend | Diff | ACK | SL
-               // We need Actual (col 3) and Trend (col 4)
-               // Regex to find the numbers
-               const nums = cleanLine.match(/(\d+)\s+(\d+)\s+(-?\d+)\s+\d{2}:\d{2}:\d{2}/);
-               if (nums) {
-                   const code = cleanLine.split(" ")[0];
-                   stats.trendData.labels.push(code);
-                   stats.trendData.actual.push(parseInt(nums[1]));
-                   stats.trendData.trend.push(parseInt(nums[2]));
-               }
-           }
-       });
-    }
-
-    // D. GLOBAL SVL & ACK (Intraday)
-    const secIntra = extractSection(outText, "Alarm Resp Time - Intraday");
-    let svlVol=0, svlW=0, ackVol=0, ackW=0, totalDiff=0, totalRef=0;
-
-    if (secIntra) {
-      parseTable(secIntra, (id, vol, sl, sec, diff, ref) => {
-        if (vol > 0) {
-             if (checkList(id, LIST_ACK)) { ackVol += vol; ackW += (vol * sec); }
-             if (checkList(id, LIST_SVL)) { svlVol += vol; svlW += (vol * sl); }
-             totalDiff += diff; 
-             totalRef += ref;
+                // STRICT LIST for SLA/ACK
+                if (vol > 0 && checkList(code, LIST_SLA)) {
+                     ackVol += vol; ackW += (vol * timeSec);
+                     svlVol += vol; svlW += (vol * slVal);
+                }
+            }
         }
       });
     }
@@ -89,53 +90,87 @@ function calculateMetrics(inText, outText) {
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
     
-    if (totalRef > 0) {
-        const growth = (totalDiff / totalRef) * 100;
-        stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(1) + "%";
+    // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_TREND
+    const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
+    let trendDiff = 0, trendRef = 0;
+
+    if (trend60) {
+        const lines = trend60.split(/\r?\n/);
+        lines.forEach(line => {
+            const codeMatch = line.match(/^(\d+-[A-Z\/]+)/);
+            if (codeMatch) {
+                const code = codeMatch[1];
+                const parts = line.trim().split(/\s+/);
+                const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
+                
+                if (timeIdx > -1 && timeIdx >= 3) {
+                   const vol = parseInt(parts[timeIdx - 3]) || 0; 
+                   const tr = parseInt(parts[timeIdx - 2]) || 0; // Trend (Reference)
+                   const diff = parseInt(parts[timeIdx - 1]) || 0; // Diff
+
+                   // Graph Data (Show all active)
+                   if (vol > 0 || tr > 0) {
+                      stats.trendData.labels.push(code);
+                      stats.trendData.actual.push(vol);
+                      stats.trendData.trend.push(tr);
+                   }
+
+                   // BROADER LIST for Trends (Includes TRB)
+                   if (checkList(code, LIST_TREND)) {
+                       trendDiff += diff;
+                       trendRef += tr;
+                   }
+                }
+            }
+        });
+    }
+
+    if (trendRef > 0) {
+       const growth = (trendDiff / trendRef) * 100;
+       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(1) + "%";
     }
   }
 
-  // --- LOGGING ---
+  // LOGGING
   if (typeof MasterConnector !== 'undefined' && stats.svl !== "0%") {
-      MasterConnector.logStats(stats.svl, stats.ack, stats.law, stats.idp);
+      MasterConnector.logStats(stats.svl, stats.ack, "", ""); // Blank LAW/IDP
   }
-  
   if (typeof StatsTracker !== 'undefined' && stats.svl !== "0%") {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nLAW: ${stats.law}\nIDP: ${stats.idp}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nNOTES:\n %% Coachings Open%%`;
+  // FINAL REPORT TEXT - LAW REMOVED
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
+  
   return JSON.stringify(stats);
 }
 
+// HELPERS
 function extractSection(text, header) {
   const idx = text.indexOf(header);
   if (idx === -1) return "";
   const remainder = text.substring(idx + header.length);
-  const nextSection = remainder.search(/(Alarm Resp Time|Pending Alarm|Logged-in Users|« Prev)/);
-  return nextSection === -1 ? remainder : remainder.substring(0, nextSection);
+  const nextIdx = remainder.search(/(Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
+  return nextIdx === -1 ? remainder : remainder.substring(0, nextIdx);
 }
-
-function parseTable(text, callback) {
-  const lines = text.split(/\r?\n/);
-  lines.forEach(line => {
-    const match = line.match(/^(\d+-[A-Z\/]+)/);
-    if (match) {
-      let cols = line.trim().split(/\t/);
-      if (cols.length < 3) cols = line.trim().split(/\s{2,}/);
-      if (cols.length >= 4) {
-        const vol = parseInt(cols[2]) || 0;
-        const ref = parseInt(cols[3]) || 0; 
-        const diff = parseInt(cols[4]) || 0; 
-        const timeIdx = cols.findIndex(c => c.match(/^\d{2}:\d{2}:\d{2}$/));
-        const sec = timeIdx > -1 ? dur(cols[timeIdx]) : 0;
-        const slIdx = cols.length - 1;
-        const sl = parseFloat(cols[slIdx]) || 0;
-        callback(match[1], vol, sl, sec, diff, ref);
-      } 
-    }
-  });
-}
-
 function checkList(id, list) { return list.some(key => id.startsWith(key)); }
-function dur(t) { if(!t) return 0; const p=t.split(":"); return (parseInt(p[0]||0)*3600)+(parseInt(p[1]||0)*60)+parseInt(p[2]||0); }
+function dur(t) { 
+    if (!t) return 0;
+    const parts = t.split(":");
+    if (parts.length === 3) return (parseInt(parts[0]) * 3600) + (parseInt(parts[1]) * 60) + parseInt(parts[2]);
+    if (parts.length === 4) return (parseInt(parts[0]) * 86400) + (parseInt(parts[1]) * 3600) + (parseInt(parts[2]) * 60) + parseInt(parts[3]);
+    return 0;
+}
+function fmt(t) { 
+  if(!t) return "0s";
+  if(t.includes(":")) {
+      const p = t.split(":");
+      const s = parseInt(p[p.length-1]);
+      const m = parseInt(p[p.length-2] || 0);
+      const h = parseInt(p[p.length-3] || 0);
+      if(h>0) return `${h}h ${m}m`;
+      if(m>0) return `${m}m ${s}s`;
+      return `${s}s`;
+  }
+  return t;
+}
