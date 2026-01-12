@@ -401,7 +401,7 @@
           });
       }
 
-      // IDP GRAPH
+      // IDP GRAPH (Will be overwritten if new IDP is calculated)
       const ctx3 = document.getElementById('chart-idp-hist');
       if(ctx3 && state.idpHistory.length) {
           charts.idpHist = new Chart(ctx3, {
@@ -953,20 +953,62 @@
 
   // IDP ACTIONS
   window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
+  
+  // UPDATED: Now handles graph rendering!
   window.submitIdpAction = () => {
-     const val = document.getElementById('idp-input').value; // Now reads from TEXTAREA
+     const val = document.getElementById('idp-input').value; 
      if(!val) return;
      
      document.getElementById('idp-modal').classList.remove('open');
      showToast("Calculating IDP...");
      
      if(typeof google !== 'undefined') {
-         // Changed: Calls calculateIdpFromText instead of submitIdpValue
          google.script.run.withSuccessHandler((res) => {
              const result = JSON.parse(res);
              if(result.success) {
                  showToast(result.msg);
-                 fetchInsightData(); // Refresh graph
+                 
+                 // Render Forecast vs Actual Graph
+                 if (result.graphData && typeof Chart !== 'undefined') {
+                     const ctx = document.getElementById('chart-idp-hist'); 
+                     if (ctx) {
+                        if (charts.idpHist) charts.idpHist.destroy();
+                        
+                        charts.idpHist = new Chart(ctx, {
+                          type: 'line',
+                          data: {
+                              labels: result.graphData.labels,
+                              datasets: [
+                                {
+                                  label: 'Forecasted (Req)',
+                                  data: result.graphData.forecast,
+                                  borderColor: '#94a3b8', 
+                                  borderDash: [5, 5],
+                                  tension: 0.4,
+                                  fill: false
+                                },
+                                {
+                                  label: 'Actual (Open)',
+                                  data: result.graphData.actual,
+                                  borderColor: '#f97316', 
+                                  backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                                  tension: 0.4,
+                                  fill: true
+                                }
+                              ]
+                          },
+                          options: { 
+                              responsive: true, 
+                              maintainAspectRatio: false,
+                              interaction: { mode: 'index', intersect: false },
+                              plugins: { 
+                                  legend: { display: true, position: 'top' },
+                                  title: { display: true, text: `Intraday Analysis (${result.val}%)` }
+                              }
+                          }
+                        });
+                     }
+                 }
              } else {
                  showToast("Error: " + result.msg);
              }
@@ -980,7 +1022,6 @@
       if(!e) return;
       document.getElementById('evt-modal-title').innerText = e.title;
       document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
-      // Changed to innerHTML to render HTML tags in description
       document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
