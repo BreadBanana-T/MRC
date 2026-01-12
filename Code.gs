@@ -30,7 +30,7 @@ function getLiveDashboardData() {
 function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
 }
 
-// --- CALENDAR SYNC (STRICT FILTER + EXCLUSIONS + HTML DESC) ---
+// --- CALENDAR SYNC (UPDATED FILTERS) ---
 function getDailyCalendarEvents() {
   try {
     const cal = CalendarApp.getDefaultCalendar();
@@ -43,8 +43,14 @@ function getDailyCalendarEvents() {
     const events = cal.getEvents(now, future);
     
     // 1. MUST contain one of these
-    const validTitles = ["Weekly Operational Meetings", "Scheduled Maintenance"];
-    // 2. MUST NOT contain any of these
+    const validTitles = [
+        "Weekly Operational Meetings", 
+        "Scheduled Maintenance", 
+        "DEO", 
+        "Monthly MRC Meeting"
+    ];
+    
+    // 2. MUST NOT contain any of these (Overrides valid titles)
     const blockedTerms = ["Prep", "Out of Office", "OOO", "Canceled", "Declined"];
 
     const mapped = events.filter(e => {
