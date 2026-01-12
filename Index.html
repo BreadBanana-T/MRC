@@ -84,13 +84,13 @@
     </div>
 
     <div id="idp-modal" class="modal-blur">
-       <div class="modal-window" onclick="event.stopPropagation()" style="width:400px;">
-          <h2 style="margin-top:0;">Update IDP</h2>
-          <div style="margin-bottom:16px; color:var(--text-secondary);">Enter the current IDP Percentage:</div>
-          <input id="idp-input" class="input-aether" placeholder="e.g. 95.5" type="number" step="0.1" style="margin-bottom:20px;">
-          <div style="display:flex; justify-content:flex-end; gap:16px;">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:600px;">
+          <h2 style="margin-top:0;">Log IDP</h2>
+          <div style="margin-bottom:16px; color:var(--text-secondary);">Paste the WFM Report text (Requirements / Occupied Seats):</div>
+          <textarea id="idp-input" class="input-aether" rows="10" placeholder="Paste data here..."></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="document.getElementById('idp-modal').classList.remove('open')">Cancel</button>
-             <button class="btn btn-primary" onclick="submitIdpAction()">Save Log</button>
+             <button class="btn btn-primary" onclick="submitIdpAction()">Calculate & Save</button>
           </div>
        </div>
     </div>
