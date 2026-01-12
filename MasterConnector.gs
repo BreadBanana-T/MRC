@@ -20,7 +20,7 @@ const MasterConnector = {
     try {
       const ss = SpreadsheetApp.openById(this.DB_ID);
       // Ensure 'Stats_Log' exists in the Master DB!
-      ss.getSheetByName("Stats_Log").appendRow([new Date(), svl, ack, law, idp, SpreadsheetApp.getActiveSpreadsheet().getName()]);
+      ss.getSheetByName("Stats_Log").appendRow([new Date(), svl, ack, law, SpreadsheetApp.getActiveSpreadsheet().getName()]);
     } catch (e) { 
       // This will show up in the 'Executions' tab of Apps Script
       console.error("MasterConnector Error: " + e.toString()); 
