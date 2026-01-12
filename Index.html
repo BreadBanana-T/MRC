@@ -108,6 +108,17 @@
         </div>
     </div>
 
+    <div id="event-modal" class="modal-blur">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:500px;">
+          <h2 id="evt-modal-title" style="margin-top:0;">Event Title</h2>
+          <div id="evt-modal-time" style="color:var(--accent-primary); font-weight:700; margin-bottom:16px;"></div>
+          <div id="evt-modal-desc" style="white-space:pre-wrap; color:var(--text-secondary); line-height:1.5; max-height:300px; overflow-y:auto; background:rgba(0,0,0,0.03); padding:12px; border-radius:8px;"></div>
+          <div style="display:flex; justify-content:flex-end; margin-top:20px;">
+             <button class="btn btn-primary" onclick="document.getElementById('event-modal').classList.remove('open')">Close</button>
+          </div>
+       </div>
+    </div>
+
     <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">
         <i data-lucide="check-circle" width="18"></i>
         <span id="toast-msg">Action Completed</span>
