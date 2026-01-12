@@ -30,24 +30,34 @@ function getLiveDashboardData() {
 function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
 }
 
-// --- CALENDAR SYNC ---
+// --- CALENDAR SYNC (STRICT FILTER + 45 DAYS + DESCRIPTION) ---
 function getDailyCalendarEvents() {
   try {
     const cal = CalendarApp.getDefaultCalendar();
     if (!cal) return "[]";
+    
     const now = new Date();
-    const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59);
+    const future = new Date(now);
+    future.setDate(now.getDate() + 45); // Look 45 days ahead
     
-    // Fetch events from NOW until End of Day
-    const events = cal.getEvents(now, endOfDay);
-    
-    const mapped = events.map(e => ({
+    // Fetch events
+    const events = cal.getEvents(now, future);
+    const validTitles = ["Weekly Operational Meetings", "Scheduled Maintenance"];
+
+    const mapped = events.filter(e => {
+      const t = e.getTitle();
+      // Strict check: Must contain one of the valid phrases
+      return validTitles.some(vt => t.includes(vt));
+    }).map(e => ({
       title: e.getTitle(),
+      description: e.getDescription() || "", // Get Description
+      date: Utilities.formatDate(e.getStartTime(), "America/Toronto", "MMM dd"),
       startTime: Utilities.formatDate(e.getStartTime(), "America/Toronto", "HH:mm"),
       endTime: Utilities.formatDate(e.getEndTime(), "America/Toronto", "HH:mm"),
       isAllDay: e.isAllDayEvent(),
       type: (e.getTitle().toLowerCase().includes("maintenance")) ? "maintenance" : "meeting"
     }));
+    
     return JSON.stringify(mapped);
   } catch (e) { return "[]"; }
 }
@@ -114,7 +124,6 @@ function updateAgentStatus(name, type, val) { if(typeof AgentMonitor!=='undefine
 function updateAgentBreaks(name, json) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(name, json); }
 function submitOvertime(name, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(name, s, e, bs, be);
 }
-// REVERTED: Original signature
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
 function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]";
 }
