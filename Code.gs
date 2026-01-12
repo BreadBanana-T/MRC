@@ -16,68 +16,21 @@ function doGet(e) {
 function include(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
 
 // --- DATA FETCHERS ---
-function getFloorStatus() { return (typeof AgentMonitor !== 'undefined') ?
-    AgentMonitor.getPayload() : "{}"; }
-function getStatsHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getHistory() : "[]";
-}
-function getIdpHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getIdpHistory() : "[]"; 
-}
+function getFloorStatus() { return (typeof AgentMonitor !== 'undefined') ? AgentMonitor.getPayload() : "{}"; }
+function getStatsHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getHistory() : "[]"; }
+function getIdpHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getIdpHistory() : "[]"; }
 function getLiveDashboardData() {
-  try { return (typeof WeatherService !== 'undefined') ? JSON.stringify(WeatherService.fetch()) : "{}";
-  } 
+  try { return (typeof WeatherService !== 'undefined') ? JSON.stringify(WeatherService.fetch()) : "{}"; } 
   catch (e) { return "{}"; }
 }
-function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
-}
+function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]"; }
 
-// --- CALENDAR SYNC (UPDATED FILTERS) ---
-function getDailyCalendarEvents() {
-  try {
-    const cal = CalendarApp.getDefaultCalendar();
-    if (!cal) return "[]";
-    
-    const now = new Date();
-    const future = new Date(now);
-    future.setDate(now.getDate() + 45); // Look 45 days ahead
-    
-    const events = cal.getEvents(now, future);
-    
-    // 1. MUST contain one of these
-    const validTitles = [
-        "Weekly Operational Meetings", 
-        "Scheduled Maintenance", 
-        "DEO", 
-        "Monthly MRC Meeting"
-    ];
-    
-    // 2. MUST NOT contain any of these (Overrides valid titles)
-    const blockedTerms = ["Prep", "Out of Office", "OOO", "Canceled", "Declined"];
+// --- DELEGATED HANDLERS ---
+function getDailyCalendarEvents() { return (typeof CalendarHandler !== 'undefined') ? CalendarHandler.getEvents() : "[]"; }
+function calculateIdpFromText(text) { return (typeof IdpCalculator !== 'undefined') ? calculateAndLogIdp(text) : JSON.stringify({success:false}); }
 
-    const mapped = events.filter(e => {
-      const t = e.getTitle();
-      const hasValid = validTitles.some(vt => t.includes(vt));
-      const hasBlocked = blockedTerms.some(bt => t.toLowerCase().includes(bt.toLowerCase()));
-      
-      return hasValid && !hasBlocked;
-    }).map(e => ({
-      title: e.getTitle(),
-      description: e.getDescription() || "",
-      date: Utilities.formatDate(e.getStartTime(), "America/Toronto", "MMM dd"),
-      startTime: Utilities.formatDate(e.getStartTime(), "America/Toronto", "HH:mm"),
-      endTime: Utilities.formatDate(e.getEndTime(), "America/Toronto", "HH:mm"),
-      isAllDay: e.isAllDayEvent(),
-      type: (e.getTitle().toLowerCase().includes("maintenance")) ? "maintenance" : "meeting"
-    }));
-    
-    return JSON.stringify(mapped);
-  } catch (e) { return "[]"; }
-}
-
-// --- LOG RETRIEVAL FOR INSIGHTS ---
-function getDailyRoleLogs(dateStr) {
-  return fetchLogs(rowDate => rowDate === dateStr);
-}
-
+// --- LOG RETRIEVAL ---
+function getDailyRoleLogs(dateStr) { return fetchLogs(rowDate => rowDate === dateStr); }
 function getWeeklyRoleLogs(dateStr) {
   const target = new Date(dateStr + "T12:00:00");
   const day = target.getDay();
@@ -88,14 +41,11 @@ function getWeeklyRoleLogs(dateStr) {
   const endStr = Utilities.formatDate(end, "America/Toronto", "yyyy-MM-dd");
   return fetchLogs(rowDate => rowDate >= startStr && rowDate <= endStr);
 }
-
 function getDailyStatsLog(dateStr) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Stats History"); 
   if (!sheet) return "[]";
-  
   const data = sheet.getDataRange().getValues();
-  // Filter by date (Col 0)
   const stats = data.slice(1).filter(row => {
     const rowDate = Utilities.formatDate(new Date(row[0]), "America/Toronto", "yyyy-MM-dd");
     return rowDate === dateStr;
@@ -106,13 +56,10 @@ function getDailyStatsLog(dateStr) {
   }));
   return JSON.stringify(stats);
 }
-
 function fetchLogs(filterFn) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("DB_Sessions");
-  // Reads local history
   if (!sheet) return "[]";
-
   const data = sheet.getDataRange().getValues();
   const logs = data.slice(1).filter(row => {
     if (!row[3]) return false; 
@@ -130,19 +77,13 @@ function fetchLogs(filterFn) {
 }
 
 // --- ACTIONS ---
-function updateAgentStatus(name, type, val) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(name, type, val);
-}
-function updateAgentBreaks(name, json) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(name, json); }
-function submitOvertime(name, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(name, s, e, bs, be);
-}
+function updateAgentStatus(n, t, v) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(n, t, v); }
+function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
+function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
-function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]";
-}
+function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]"; }
 function saveTeamScript(i, t, b, c) { if(typeof saveTeamScript!=='undefined') return ScriptHandler.save(i, t, b, c); }
-function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return ScriptHandler.delete(i);
-}
+function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return ScriptHandler.delete(i); }
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
-
-// NEW: IDP Logging
-function submitIdpValue(val) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(val); }
+function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
