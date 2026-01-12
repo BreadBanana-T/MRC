@@ -30,7 +30,7 @@ function getLiveDashboardData() {
 function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
 }
 
-// --- CALENDAR SYNC (STRICT FILTER + EXCLUSIONS) ---
+// --- CALENDAR SYNC (STRICT FILTER + EXCLUSIONS + HTML DESC) ---
 function getDailyCalendarEvents() {
   try {
     const cal = CalendarApp.getDefaultCalendar();
