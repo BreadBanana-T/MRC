@@ -27,7 +27,8 @@
       editingId: null, 
       appUrl: "", 
       insightMode: 'day', 
-      selectedDate: new Date().toISOString().split('T')[0] 
+      selectedDate: new Date().toISOString().split('T')[0],
+      graphRendered: false 
   };
 
   // Mouse move effect for glass cards
@@ -434,33 +435,41 @@
       const labels = state.slHistory.map(d => d.name);
       const dataPoints = state.slHistory.map(d => d.val);
 
+      // FIX: Destroy old chart instance if the canvas was re-created in DOM
       if (charts.overview) {
-          charts.overview.data.labels = labels;
-          charts.overview.data.datasets[0].data = dataPoints;
-          charts.overview.update('none'); 
-      } else {
-          charts.overview = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Service Level',
-                    data: dataPoints,
-                    borderColor: '#4f46e5',
-                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false,
-                scales: { y: { min: 0, max: 100 } },
-                plugins: { legend: { display: false } },
-                animation: { duration: 1000 }
-            }
-          });
+          charts.overview.destroy();
+          charts.overview = null;
       }
+      
+      // Determine Animation
+      let animConfig = { duration: 1000 };
+      if (state.graphRendered) {
+          animConfig = { duration: 0 }; // Disable animation for updates
+      } else {
+          state.graphRendered = true;
+      }
+
+      charts.overview = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Service Level',
+                data: dataPoints,
+                borderColor: '#4f46e5',
+                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false,
+            scales: { y: { min: 0, max: 100 } },
+            plugins: { legend: { display: false } },
+            animation: animConfig
+        }
+      });
   }
 
   // --- STANDARD RENDER FUNCTIONS ---
