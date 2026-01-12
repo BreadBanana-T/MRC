@@ -30,7 +30,7 @@ function getLiveDashboardData() {
 function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
 }
 
-// --- CALENDAR SYNC (STRICT FILTER + 45 DAYS + DESCRIPTION) ---
+// --- CALENDAR SYNC (STRICT FILTER + EXCLUSIONS) ---
 function getDailyCalendarEvents() {
   try {
     const cal = CalendarApp.getDefaultCalendar();
@@ -40,17 +40,22 @@ function getDailyCalendarEvents() {
     const future = new Date(now);
     future.setDate(now.getDate() + 45); // Look 45 days ahead
     
-    // Fetch events
     const events = cal.getEvents(now, future);
+    
+    // 1. MUST contain one of these
     const validTitles = ["Weekly Operational Meetings", "Scheduled Maintenance"];
+    // 2. MUST NOT contain any of these
+    const blockedTerms = ["Prep", "Out of Office", "OOO", "Canceled", "Declined"];
 
     const mapped = events.filter(e => {
       const t = e.getTitle();
-      // Strict check: Must contain one of the valid phrases
-      return validTitles.some(vt => t.includes(vt));
+      const hasValid = validTitles.some(vt => t.includes(vt));
+      const hasBlocked = blockedTerms.some(bt => t.toLowerCase().includes(bt.toLowerCase()));
+      
+      return hasValid && !hasBlocked;
     }).map(e => ({
       title: e.getTitle(),
-      description: e.getDescription() || "", // Get Description
+      description: e.getDescription() || "",
       date: Utilities.formatDate(e.getStartTime(), "America/Toronto", "MMM dd"),
       startTime: Utilities.formatDate(e.getStartTime(), "America/Toronto", "HH:mm"),
       endTime: Utilities.formatDate(e.getEndTime(), "America/Toronto", "HH:mm"),
