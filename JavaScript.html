@@ -45,7 +45,6 @@
   function initApp() {
     try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     
-    // Read Params from Hidden Div
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -66,8 +65,7 @@
     setInterval(updateClock, 1000); 
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 10000);
-    setInterval(fetchCalendar, 300000); // 5 mins
-    // Refresh Insights timers every minute if on insights tab
+    setInterval(fetchCalendar, 300000); 
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); 
     fetchNotifications();
@@ -210,7 +208,7 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER ---
+  // --- INSIGHTS RENDERER (REVISED LAYOUT) ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
@@ -283,7 +281,7 @@
          </div>
       </div>
       
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom: 24px;">
          
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
@@ -329,11 +327,6 @@
                  <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
              </div>
 
-             <div class="aether-card">
-                 <div class="section-header">IDP History</div>
-                 <div style="height:160px; width:100%;"><canvas id="chart-idp-hist"></canvas></div>
-             </div>
-             
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                      Stats Updates
@@ -350,7 +343,13 @@
                  </div>
              </div>
          </div>
+      </div>
 
+      <div class="aether-card" style="min-height: 400px; display:flex; flex-direction:column;">
+          <div class="section-header">IDP Analysis (Forecast vs Actual)</div>
+          <div style="flex:1; width:100%; min-height:350px;">
+              <canvas id="chart-idp-hist"></canvas>
+          </div>
       </div>
       `;
   }
@@ -401,7 +400,7 @@
           });
       }
 
-      // IDP GRAPH
+      // IDP GRAPH - Handled by submitIdpAction, but placeholder here if history exists
       const ctx3 = document.getElementById('chart-idp-hist');
       if(ctx3 && state.idpHistory.length) {
           charts.idpHist = new Chart(ctx3, {
@@ -435,13 +434,11 @@
       const labels = state.slHistory.map(d => d.name);
       const dataPoints = state.slHistory.map(d => d.val);
 
-      // FIX: Destroy old chart instance if the canvas was re-created in DOM
       if (charts.overview) {
           charts.overview.destroy();
           charts.overview = null;
       }
       
-      // Stop blinking by disabling animation on reload
       charts.overview = new Chart(ctx, {
         type: 'line',
         data: {
@@ -460,7 +457,7 @@
             maintainAspectRatio: false,
             scales: { y: { min: 0, max: 100 } },
             plugins: { legend: { display: false } },
-            animation: false // Disables the "goes down then back up" effect
+            animation: false 
         }
       });
   }
@@ -510,7 +507,6 @@
       const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
       const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
       
-      // RESTORED: Special Roles Breakdown
       const safeCount = (state.agents.safe||[]).length;
       const iclCount = (state.agents.icl||[]).length;
       const ulcCount = (state.agents.ulc||[]).length;
@@ -954,7 +950,6 @@
   // IDP ACTIONS
   window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
   
-  // UPDATED: Renders Forecast vs Actual from IDP Calculator
   window.submitIdpAction = () => {
      const val = document.getElementById('idp-input').value; 
      if(!val) return;
@@ -968,7 +963,7 @@
              if(result.success) {
                  showToast(result.msg);
                  
-                 // --- RENDER GRAPH: Forecast vs Actual ---
+                 // Render Forecast vs Actual Graph
                  if (result.graphData && typeof Chart !== 'undefined') {
                      const ctx = document.getElementById('chart-idp-hist'); 
                      if (ctx) {
@@ -1009,7 +1004,6 @@
                         });
                      }
                  }
-                 // ----------------------------------------
              } else {
                  showToast("Error: " + result.msg);
              }
