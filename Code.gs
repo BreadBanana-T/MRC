@@ -3,9 +3,10 @@
  */
 function doGet(e) {
   const template = HtmlService.createTemplateFromFile('Index');
-  template.appUrl = ScriptApp.getService().getUrl(); 
+  template.appUrl = ScriptApp.getService().getUrl();
   template.popoutParam = (e && e.parameter && e.parameter.popout) ? "true" : "false";
-  template.modeParam = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
+  template.modeParam = (e && e.parameter && e.parameter.mode) ?
+      e.parameter.mode : "";
   return template.evaluate()
       .setTitle('MRC Command Center')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
@@ -15,13 +16,17 @@ function doGet(e) {
 function include(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
 
 // --- DATA FETCHERS ---
-function getFloorStatus() { return (typeof AgentMonitor !== 'undefined') ? AgentMonitor.getPayload() : "{}"; }
-function getStatsHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getHistory() : "[]"; }
+function getFloorStatus() { return (typeof AgentMonitor !== 'undefined') ?
+    AgentMonitor.getPayload() : "{}"; }
+function getStatsHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getHistory() : "[]";
+}
 function getLiveDashboardData() {
-  try { return (typeof WeatherService !== 'undefined') ? JSON.stringify(WeatherService.fetch()) : "{}"; } 
+  try { return (typeof WeatherService !== 'undefined') ? JSON.stringify(WeatherService.fetch()) : "{}";
+  } 
   catch (e) { return "{}"; }
 }
-function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]"; }
+function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
+}
 
 // --- LOG RETRIEVAL FOR INSIGHTS ---
 function getDailyRoleLogs(dateStr) {
@@ -30,14 +35,12 @@ function getDailyRoleLogs(dateStr) {
 
 function getWeeklyRoleLogs(dateStr) {
   const target = new Date(dateStr + "T12:00:00");
-  const day = target.getDay(); 
+  const day = target.getDay();
   const diff = target.getDate() - day; 
   const start = new Date(target); start.setDate(diff); 
-  const end = new Date(start); end.setDate(start.getDate() + 6); 
-  
+  const end = new Date(start); end.setDate(start.getDate() + 6);
   const startStr = Utilities.formatDate(start, "America/Toronto", "yyyy-MM-dd");
   const endStr = Utilities.formatDate(end, "America/Toronto", "yyyy-MM-dd");
-
   return fetchLogs(rowDate => rowDate >= startStr && rowDate <= endStr);
 }
 
@@ -61,7 +64,8 @@ function getDailyStatsLog(dateStr) {
 
 function fetchLogs(filterFn) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("DB_Sessions"); // Reads local history
+  const sheet = ss.getSheetByName("DB_Sessions");
+  // Reads local history
   if (!sheet) return "[]";
 
   const data = sheet.getDataRange().getValues();
@@ -81,14 +85,17 @@ function fetchLogs(filterFn) {
 }
 
 // --- ACTIONS ---
-function updateAgentStatus(name, type, val) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(name, type, val); }
+function updateAgentStatus(name, type, val) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(name, type, val);
+}
 function updateAgentBreaks(name, json) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(name, json); }
-function submitOvertime(name, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(name, s, e, bs, be); }
-function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
-function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]"; }
+function submitOvertime(name, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(name, s, e, bs, be);
+}
+// UPDATED: Now accepts 3 arguments
+function runCalculator(i, o, idp) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o, idp); return "{}"; }
+function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]";
+}
 function saveTeamScript(i, t, b, c) { if(typeof saveTeamScript!=='undefined') return ScriptHandler.save(i, t, b, c); }
-function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return ScriptHandler.delete(i); }
-function saveJournalEntry(c, n) { if(typeof LogSync!=='undefined') return LogSync.writeToJournal(c, n, "User"); }
-function commitShiftAction(n) { if(typeof LogSync!=='undefined') return LogSync.commitShift(n); }
+function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return ScriptHandler.delete(i);
+}
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
