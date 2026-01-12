@@ -509,7 +509,11 @@
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
       const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
       const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
-      const specialCount = (state.agents.safe||[]).length + (state.agents.icl||[]).length + (state.agents.ulc||[]).length;
+      
+      // RESTORED: Special Roles Breakdown
+      const safeCount = (state.agents.safe||[]).length;
+      const iclCount = (state.agents.icl||[]).length;
+      const ulcCount = (state.agents.ulc||[]).length;
       
       const eventsHtml = state.calendarEvents.map((e, i) => `
           <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
@@ -557,12 +561,27 @@
             <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${planCount}</div>
          </div>
 
-         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-                <span style="font-weight:700; color:var(--status-role);">Special Roles</span>
+         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+                <span style="font-weight:700;">Special Roles</span>
                 <i data-lucide="shield" class="text-muted" width="20"></i>
             </div>
-            <div style="font-size:2rem; font-weight:800; color:var(--status-role);">${specialCount}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="text-align:center;">
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${safeCount}</div>
+                </div>
+                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${iclCount}</div>
+                </div>
+                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div>
+                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${ulcCount}</div>
+                </div>
+            </div>
          </div>
          
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;">
@@ -935,15 +954,23 @@
   // IDP ACTIONS
   window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
   window.submitIdpAction = () => {
-     const val = document.getElementById('idp-input').value;
+     const val = document.getElementById('idp-input').value; // Now reads from TEXTAREA
      if(!val) return;
+     
      document.getElementById('idp-modal').classList.remove('open');
-     showToast("Saving IDP...");
+     showToast("Calculating IDP...");
+     
      if(typeof google !== 'undefined') {
-         google.script.run.withSuccessHandler(() => {
-             showToast("IDP Saved");
-             fetchInsightData();
-         }).submitIdpValue(val);
+         // Changed: Calls calculateIdpFromText instead of submitIdpValue
+         google.script.run.withSuccessHandler((res) => {
+             const result = JSON.parse(res);
+             if(result.success) {
+                 showToast(result.msg);
+                 fetchInsightData(); // Refresh graph
+             } else {
+                 showToast("Error: " + result.msg);
+             }
+         }).calculateIdpFromText(val);
      }
   }
 
@@ -953,7 +980,7 @@
       if(!e) return;
       document.getElementById('evt-modal-title').innerText = e.title;
       document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
-      // FIX: Changed innerText to innerHTML to render bold and line breaks
+      // Changed to innerHTML to render HTML tags in description
       document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
