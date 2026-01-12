@@ -314,6 +314,11 @@
                  <div class="section-header">Total Hours</div>
                  <div style="height:200px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
              </div>
+
+             <div class="aether-card">
+                 <div class="section-header">Floor Composition</div>
+                 <div style="height:200px; width:100%;"><canvas id="chart-floor-comp"></canvas></div>
+             </div>
              
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:400px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
@@ -344,6 +349,7 @@
   function initCharts() {
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
+      if(charts.floorComp) charts.floorComp.destroy();
 
       const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
       state.roleLogs.forEach(log => {
@@ -383,20 +389,55 @@
               }
           });
       }
+
+      const ctx3 = document.getElementById('chart-floor-comp');
+      if(ctx3) {
+          const cActive = (state.agents.active||[]).length;
+          const cBreak = (state.agents.active||[]).filter(a=>a.onBreakNow).length;
+          const cSpecial = (state.agents.safe||[]).length + (state.agents.icl||[]).length;
+          
+          charts.floorComp = new Chart(ctx3, {
+              type: 'doughnut',
+              data: {
+                  labels: ['Active', 'On Break', 'Special Roles'],
+                  datasets: [{
+                      data: [cActive, cBreak, cSpecial],
+                      backgroundColor: ['#059669', '#d97706', '#7c3aed'],
+                      borderWidth: 0
+                  }]
+              },
+              options: { 
+                  responsive: true, 
+                  maintainAspectRatio: false, 
+                  plugins: { legend: { position: 'right' } }
+              }
+          });
+      }
   }
 
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
-      if (charts.overview) charts.overview.destroy();
+      
       const ctx = document.getElementById('chart-overview');
-      if (ctx) {
+      if (!ctx) return;
+
+      const labels = state.slHistory.map(d => d.name);
+      const dataPoints = state.slHistory.map(d => d.val);
+
+      if (charts.overview) {
+          // Update existing chart without animation to prevent blinking
+          charts.overview.data.labels = labels;
+          charts.overview.data.datasets[0].data = dataPoints;
+          charts.overview.update('none'); 
+      } else {
+          // Create fresh chart
           charts.overview = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: state.slHistory.map(d=>d.name),
+                labels: labels,
                 datasets: [{
                     label: 'Service Level',
-                    data: state.slHistory.map(d=>d.val),
+                    data: dataPoints,
                     borderColor: '#4f46e5',
                     backgroundColor: 'rgba(79, 70, 229, 0.1)',
                     fill: true,
@@ -407,7 +448,8 @@
                 responsive: true, 
                 maintainAspectRatio: false,
                 scales: { y: { min: 0, max: 100 } },
-                plugins: { legend: { display: false } }
+                plugins: { legend: { display: false } },
+                animation: { duration: 1000 }
             }
           });
       }
@@ -796,11 +838,44 @@
   window.closeComposeMode = () => { document.getElementById('compose-area').style.display='none'; document.getElementById('compose-overlay').style.display='none'; state.editingId = null; };
 
   function renderCalc() {
-     return `<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div><div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;"><div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>`;
+     return `<div class="grid-split">
+        <div class="aether-card">
+            <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div>
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <input id="idp-val" class="input-aether" placeholder="IDP % (Manual)" style="width:150px;">
+            </div>
+            <textarea id="in-text" class="input-aether" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea>
+            <textarea id="out-text" class="input-aether" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea>
+            <button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button>
+        </div>
+        <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+            <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>
+            <div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div>
+            <div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;">
+                <div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div>
+                <button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button>
+            </div>
+        </div>
+     </div>`;
   }
   window.runCalculation = () => {
-     const i=document.getElementById('in-text').value; const o=document.getElementById('out-text').value;
-     if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(r=>{ const d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; render(); }).runCalculator(i,o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
+     const i = document.getElementById('in-text').value; 
+     const o = document.getElementById('out-text').value;
+     const idp = document.getElementById('idp-val').value || "";
+
+     if(typeof google!=='undefined') { 
+         showToast("Calculating..."); 
+         google.script.run.withSuccessHandler(r=>{ 
+             const d=JSON.parse(r); 
+             state.currentSL=d.svl; 
+             state.currentReport = d.report; 
+             render(); 
+         }).runCalculator(i, o, idp); 
+     } else { 
+         state.currentSL = "84.5%"; 
+         state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\nIDP: " + idp + "%\n..."; 
+         render(); 
+     }
   };
   window.copyReport = () => {
       const text = document.getElementById('report-content').innerText; const textArea = document.createElement("textarea"); textArea.value = text; document.body.appendChild(textArea); textArea.select(); try { document.execCommand('copy'); showToast("Copied Report"); } catch (err) { showToast("Copy Failed"); } document.body.removeChild(textArea);
@@ -841,8 +916,5 @@
   
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   
-  window.openJournal = () => { document.getElementById('journal-modal').classList.add('open'); document.getElementById('journal-text').value = ""; document.getElementById('journal-text').focus(); };
-  window.submitJournal = () => { const txt = document.getElementById('journal-text').value; const cat = document.getElementById('journal-cat').value; if(!txt) return; if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Entry Logged"); document.getElementById('journal-modal').classList.remove('open'); document.getElementById('journal-text').value = ""; }).saveJournalEntry(cat, txt); } };
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
-  window.commitShift = () => { document.getElementById('journal-modal').classList.add('open'); const btn = document.getElementById('btn-submit-journal'); btn.innerText = "Commit Full Shift"; btn.onclick = () => { const note = document.getElementById('journal-text').value; const cat = document.getElementById('journal-cat').value; showToast("Committing Data..."); if(typeof google !== 'undefined') { if (cat !== 'General' && note) { google.script.run.saveJournalEntry(cat, note); } google.script.run.withSuccessHandler(res => { showToast(res); document.getElementById('journal-modal').classList.remove('open'); btn.innerText = "Log Entry"; btn.onclick = window.submitJournal; }).commitShiftAction(cat === 'General' ? note : ""); } }; };
 </script>
