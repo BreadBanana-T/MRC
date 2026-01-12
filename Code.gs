@@ -20,12 +20,36 @@ function getFloorStatus() { return (typeof AgentMonitor !== 'undefined') ?
     AgentMonitor.getPayload() : "{}"; }
 function getStatsHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getHistory() : "[]";
 }
+function getIdpHistory() { return (typeof StatsTracker !== 'undefined') ? StatsTracker.getIdpHistory() : "[]"; 
+}
 function getLiveDashboardData() {
   try { return (typeof WeatherService !== 'undefined') ? JSON.stringify(WeatherService.fetch()) : "{}";
   } 
   catch (e) { return "{}"; }
 }
 function getSystemNotifications() { return (typeof NotificationHandler !== 'undefined') ? NotificationHandler.getPending() : "[]";
+}
+
+// --- CALENDAR SYNC ---
+function getDailyCalendarEvents() {
+  try {
+    const cal = CalendarApp.getDefaultCalendar();
+    if (!cal) return "[]";
+    const now = new Date();
+    const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59);
+    
+    // Fetch events from NOW until End of Day
+    const events = cal.getEvents(now, endOfDay);
+    
+    const mapped = events.map(e => ({
+      title: e.getTitle(),
+      startTime: Utilities.formatDate(e.getStartTime(), "America/Toronto", "HH:mm"),
+      endTime: Utilities.formatDate(e.getEndTime(), "America/Toronto", "HH:mm"),
+      isAllDay: e.isAllDayEvent(),
+      type: (e.getTitle().toLowerCase().includes("maintenance")) ? "maintenance" : "meeting"
+    }));
+    return JSON.stringify(mapped);
+  } catch (e) { return "[]"; }
 }
 
 // --- LOG RETRIEVAL FOR INSIGHTS ---
@@ -90,8 +114,8 @@ function updateAgentStatus(name, type, val) { if(typeof AgentMonitor!=='undefine
 function updateAgentBreaks(name, json) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(name, json); }
 function submitOvertime(name, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(name, s, e, bs, be);
 }
-// UPDATED: Now accepts 3 arguments
-function runCalculator(i, o, idp) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o, idp); return "{}"; }
+// REVERTED: Original signature
+function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
 function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]";
 }
 function saveTeamScript(i, t, b, c) { if(typeof saveTeamScript!=='undefined') return ScriptHandler.save(i, t, b, c); }
@@ -99,3 +123,6 @@ function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return 
 }
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
+
+// NEW: IDP Logging
+function submitIdpValue(val) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(val); }
