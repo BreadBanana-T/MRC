@@ -44,7 +44,6 @@
                 <button class="action-btn" onclick="toggleTheme()"><i data-lucide="sun-moon" width="20"></i></button>
                 <button class="action-btn" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
                 <button class="action-btn" id="btn-insights" onclick="setView('insights')"><i data-lucide="bar-chart-2" width="20"></i></button>
-                <button class="action-btn" onclick="openJournal()"><i data-lucide="clipboard-list" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
@@ -80,23 +79,6 @@
           <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
-          </div>
-       </div>
-    </div>
-
-    <div id="journal-modal" class="modal-blur">
-       <div class="modal-window" onclick="event.stopPropagation()" style="width:600px;">
-          <h2 style="margin-top:0;">Operations Log</h2>
-          <select id="journal-cat" class="input-aether" style="margin-bottom:12px;">
-              <option value="General">General / Handover</option>
-              <option value="Critical">Critical Event</option>
-              <option value="Weather">Weather Alert</option>
-              <option value="Maintenance">Maintenance</option>
-          </select>
-          <textarea id="journal-text" class="input-aether" style="height:200px; margin-bottom:16px;"></textarea>
-          <div style="display:flex; justify-content:flex-end; gap:16px;">
-             <button class="btn btn-glass" onclick="document.getElementById('journal-modal').classList.remove('open')">Cancel</button>
-             <button id="btn-submit-journal" class="btn btn-primary" onclick="submitJournal()">Log Entry</button>
           </div>
        </div>
     </div>
