@@ -45,6 +45,7 @@
   function initApp() {
     try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     
+    // Read Params from Hidden Div
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -65,7 +66,8 @@
     setInterval(updateClock, 1000); 
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 10000);
-    setInterval(fetchCalendar, 300000); 
+    setInterval(fetchCalendar, 300000); // 5 mins
+    // Refresh Insights timers every minute if on insights tab
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); 
     fetchNotifications();
@@ -208,7 +210,7 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER (REVISED LAYOUT) ---
+  // --- INSIGHTS RENDERER ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
@@ -281,7 +283,7 @@
          </div>
       </div>
       
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom: 24px;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom:24px;">
          
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
@@ -290,7 +292,6 @@
                     ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
                  </div>
              </div>
-             
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
                      ⚠️ Active Flags
@@ -326,7 +327,6 @@
                  <div class="section-header">Total Hours</div>
                  <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
              </div>
-
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                      Stats Updates
@@ -400,7 +400,7 @@
           });
       }
 
-      // IDP GRAPH - Handled by submitIdpAction, but placeholder here if history exists
+      // Placeholder for IDP Graph (Rendered on calculation)
       const ctx3 = document.getElementById('chart-idp-hist');
       if(ctx3 && state.idpHistory.length) {
           charts.idpHist = new Chart(ctx3, {
@@ -950,6 +950,7 @@
   // IDP ACTIONS
   window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
   
+  // UPDATED: Renders cleaner graph in full width card
   window.submitIdpAction = () => {
      const val = document.getElementById('idp-input').value; 
      if(!val) return;
@@ -963,7 +964,7 @@
              if(result.success) {
                  showToast(result.msg);
                  
-                 // Render Forecast vs Actual Graph
+                 // --- RENDER CLEANER GRAPH ---
                  if (result.graphData && typeof Chart !== 'undefined') {
                      const ctx = document.getElementById('chart-idp-hist'); 
                      if (ctx) {
@@ -975,20 +976,22 @@
                               labels: result.graphData.labels,
                               datasets: [
                                 {
-                                  label: 'Forecasted (Req)',
-                                  data: result.graphData.forecast,
-                                  borderColor: '#94a3b8', 
-                                  borderDash: [5, 5],
-                                  tension: 0.4,
-                                  fill: false
-                                },
-                                {
                                   label: 'Actual (Open)',
                                   data: result.graphData.actual,
-                                  borderColor: '#f97316', 
-                                  backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                                  tension: 0.4,
-                                  fill: true
+                                  borderColor: '#059669', // Green
+                                  backgroundColor: 'rgba(5, 150, 105, 0.2)', // Green fill
+                                  tension: 0.3,
+                                  fill: true,
+                                  borderWidth: 2
+                                },
+                                {
+                                  label: 'Forecasted (Req)',
+                                  data: result.graphData.forecast,
+                                  borderColor: '#94a3b8', // Grey
+                                  borderDash: [6, 4],
+                                  tension: 0.3,
+                                  fill: false,
+                                  borderWidth: 2
                                 }
                               ]
                           },
@@ -999,11 +1002,16 @@
                               plugins: { 
                                   legend: { display: true, position: 'top' },
                                   title: { display: true, text: `Intraday Analysis (${result.val}%)` }
+                              },
+                              scales: {
+                                  y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } },
+                                  x: { grid: { display: false } }
                               }
                           }
                         });
                      }
                  }
+                 // ---------------------------
              } else {
                  showToast("Error: " + result.msg);
              }
