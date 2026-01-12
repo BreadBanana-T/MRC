@@ -2,17 +2,16 @@
  * MODULE: CALCULATOR
  */
 
-function runCalculator(inText, outText, manualIdp) {
-  return calculateMetrics(inText, outText, manualIdp);
+function runCalculator(inText, outText) {
+  return calculateMetrics(inText, outText);
 }
 
-function calculateMetrics(inText, outText, manualIdp) {
+function calculateMetrics(inText, outText) {
   let stats = {
     svl: "0%", ack: "0s", 
     trendData: { labels: [], actual: [], trend: [] }, 
     trendIn: "0%", trendOut: "0%",
     asa: "0s", inSVL: "0%",
-    idp: manualIdp || "-", // Store IDP
     report: ""
   };
   // 1. SLA LIST (For ACK / SVL) - STRICT PRIORITY
@@ -128,14 +127,14 @@ function calculateMetrics(inText, outText, manualIdp) {
 
   // LOGGING
   if (typeof MasterConnector !== 'undefined' && stats.svl !== "0%") {
-      MasterConnector.logStats(stats.svl, stats.ack, "", stats.idp); 
+      MasterConnector.logStats(stats.svl, stats.ack, "", "");
   }
   if (typeof StatsTracker !== 'undefined' && stats.svl !== "0%") {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  // FINAL REPORT TEXT - LAW REMOVED, IDP ADDED
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nIDP: ${stats.idp}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
+  // FINAL REPORT TEXT
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
 
