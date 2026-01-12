@@ -517,17 +517,20 @@
       const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
       const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
       
-      const eventsHtml = state.calendarEvents.map(e => `
-          <div style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center;">
+      const eventsHtml = state.calendarEvents.map((e, i) => `
+          <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
              <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
              <div style="flex:1;">
                  <div style="font-weight:700; font-size:0.9rem;">${e.title}</div>
-                 <div style="font-size:0.75rem; color:var(--text-muted);">${e.startTime} - ${e.endTime}</div>
+                 <div style="font-size:0.75rem; color:var(--text-muted);">
+                     <span style="color:var(--text-main); font-weight:700;">${e.date}</span> • ${e.startTime} - ${e.endTime}
+                 </div>
              </div>
           </div>
       `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance today.</div>';
 
       return `
+      <style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>
       <div class="grid-bento">
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -933,4 +936,14 @@
          }).submitIdpValue(val);
      }
   }
+
+  // EVENT DETAILS MODAL
+  window.openEventModal = (idx) => {
+      const e = state.calendarEvents[idx];
+      if(!e) return;
+      document.getElementById('evt-modal-title').innerText = e.title;
+      document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
+      document.getElementById('evt-modal-desc').innerText = e.description || "No description provided.";
+      document.getElementById('event-modal').classList.add('open');
+  };
 </script>
