@@ -953,7 +953,7 @@
       if(!e) return;
       document.getElementById('evt-modal-title').innerText = e.title;
       document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
-      // Changed to innerHTML to render HTML tags in description
+      // FIX: Changed innerText to innerHTML to render bold and line breaks
       document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
