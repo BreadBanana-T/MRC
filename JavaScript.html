@@ -8,6 +8,8 @@
       pendingUpdates: {}, 
       weather: {}, 
       slHistory: [], 
+      idpHistory: [],
+      calendarEvents: [],
       roleLogs: [], 
       statsLogs: [], 
       currentSL: "--", 
@@ -63,10 +65,12 @@
     setInterval(updateClock, 1000); 
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 10000);
+    setInterval(fetchCalendar, 300000); // 5 mins
     // Refresh Insights timers every minute if on insights tab
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); 
     fetchNotifications();
+    fetchCalendar();
   }
 
   // --- NAVIGATION & VIEW CONTROL ---
@@ -147,12 +151,16 @@
   
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
   function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); const dot = document.getElementById('notif-dot'); if(dot) dot.style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
+  function fetchCalendar() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.calendarEvents=JSON.parse(j); if(state.view==='overview') render(); }catch(e){}}).getDailyCalendarEvents(); }
   
   function fetchInsightData() {
       if(typeof google === 'undefined') return;
       
       const roleHandler = (res) => { try { state.roleLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
       const statsHandler = (res) => { try { state.statsLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
+      const idpHandler = (res) => { try { state.idpHistory = JSON.parse(res); if (state.view === 'insights') initCharts(); } catch(e) {} };
+
+      google.script.run.withSuccessHandler(idpHandler).getIdpHistory();
 
       if (state.insightMode === 'week') {
           google.script.run.withSuccessHandler(roleHandler).getWeeklyRoleLogs(state.selectedDate);
@@ -243,7 +251,7 @@
               <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
               <td style="padding:12px; color:${parseFloat(s.svl)<80?'var(--status-alert)':'var(--status-active)'}; font-weight:700;">${s.svl}</td>
               <td style="padding:12px;">${s.ack}s</td>
-              <td style="padding:12px; color:var(--text-secondary);">-</td> </tr>
+          </tr>
       `).join('');
 
       const flagged = (state.agents.unplanned||[]).map(a => `
@@ -266,6 +274,7 @@
              <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
          </div>
          <div style="display:flex; gap:16px;">
+             <button class="btn btn-primary" onclick="openIdpModal()">Log IDP</button>
              <div class="kpi-box" style="text-align:right;">
                  <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
                  <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
@@ -292,19 +301,23 @@
                  </div>
              </div>
          </div>
-
-         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px;">
-             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
-                 Performance Logs
+         
+         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px; border:2px solid var(--accent-primary);">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; background:var(--accent-primary); color:white;">
+                 Completed Sessions (Roles)
              </div>
              <div style="overflow-y:auto; flex:1;">
-                 <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                 <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
                     <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                        <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th><th style="padding:10px; text-align:left;">IDP</th></tr>
+                        <tr>
+                            ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
+                            <th style="padding:10px; text-align:left;">Agent</th>
+                            <th style="padding:10px; text-align:left;">Role</th>
+                            <th style="padding:10px; text-align:right;">Mins</th>
+                            <th style="padding:10px; text-align:right;">Time</th>
+                        </tr>
                     </thead>
-                    <tbody>
-                        ${statsRows || '<tr><td colspan="4" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
-                    </tbody>
+                    <tbody>${tableRows}</tbody>
                  </table>
              </div>
          </div>
@@ -312,30 +325,26 @@
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
                  <div class="section-header">Total Hours</div>
-                 <div style="height:200px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
+                 <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
              </div>
 
              <div class="aether-card">
-                 <div class="section-header">Floor Composition</div>
-                 <div style="height:200px; width:100%;"><canvas id="chart-floor-comp"></canvas></div>
+                 <div class="section-header">IDP History</div>
+                 <div style="height:160px; width:100%;"><canvas id="chart-idp-hist"></canvas></div>
              </div>
              
-             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:400px;">
+             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
-                     Completed Sessions
+                     Stats Updates (No IDP)
                  </div>
                  <div style="overflow-y:auto; flex:1;">
-                     <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                     <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
                         <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                            <tr>
-                                ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
-                                <th style="padding:10px; text-align:left;">Agent</th>
-                                <th style="padding:10px; text-align:left;">Role</th>
-                                <th style="padding:10px; text-align:right;">Mins</th>
-                                <th style="padding:10px; text-align:right;">Time</th>
-                            </tr>
+                            <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th></tr>
                         </thead>
-                        <tbody>${tableRows}</tbody>
+                        <tbody>
+                            ${statsRows || '<tr><td colspan="3" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
+                        </tbody>
                      </table>
                  </div>
              </div>
@@ -349,7 +358,7 @@
   function initCharts() {
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
-      if(charts.floorComp) charts.floorComp.destroy();
+      if(charts.idpHist) charts.idpHist.destroy();
 
       const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
       state.roleLogs.forEach(log => {
@@ -358,6 +367,7 @@
           else if (log.role.includes('ULC') || log.role.includes('FIRE')) roleData.ULC += (log.duration/60);
       });
 
+      // Add Active sessions
       ['safe','icl','ulc'].forEach(g => {
           if(state.agents[g]) {
               state.agents[g].forEach(a => {
@@ -390,26 +400,26 @@
           });
       }
 
-      const ctx3 = document.getElementById('chart-floor-comp');
-      if(ctx3) {
-          const cActive = (state.agents.active||[]).length;
-          const cBreak = (state.agents.active||[]).filter(a=>a.onBreakNow).length;
-          const cSpecial = (state.agents.safe||[]).length + (state.agents.icl||[]).length;
-          
-          charts.floorComp = new Chart(ctx3, {
-              type: 'doughnut',
+      // IDP GRAPH
+      const ctx3 = document.getElementById('chart-idp-hist');
+      if(ctx3 && state.idpHistory.length) {
+          charts.idpHist = new Chart(ctx3, {
+              type: 'line',
               data: {
-                  labels: ['Active', 'On Break', 'Special Roles'],
+                  labels: state.idpHistory.map(d=>d.name),
                   datasets: [{
-                      data: [cActive, cBreak, cSpecial],
-                      backgroundColor: ['#059669', '#d97706', '#7c3aed'],
-                      borderWidth: 0
+                      label: 'IDP %',
+                      data: state.idpHistory.map(d=>d.val),
+                      borderColor: '#f97316',
+                      backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                      fill: true,
+                      tension: 0.3
                   }]
               },
               options: { 
                   responsive: true, 
                   maintainAspectRatio: false, 
-                  plugins: { legend: { position: 'right' } }
+                  plugins: { legend: { display: false } }
               }
           });
       }
@@ -425,12 +435,10 @@
       const dataPoints = state.slHistory.map(d => d.val);
 
       if (charts.overview) {
-          // Update existing chart without animation to prevent blinking
           charts.overview.data.labels = labels;
           charts.overview.data.datasets[0].data = dataPoints;
           charts.overview.update('none'); 
       } else {
-          // Create fresh chart
           charts.overview = new Chart(ctx, {
             type: 'line',
             data: {
@@ -500,6 +508,16 @@
       const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
       const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
       
+      const eventsHtml = state.calendarEvents.map(e => `
+          <div style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center;">
+             <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
+             <div style="flex:1;">
+                 <div style="font-weight:700; font-size:0.9rem;">${e.title}</div>
+                 <div style="font-size:0.75rem; color:var(--text-muted);">${e.startTime} - ${e.endTime}</div>
+             </div>
+          </div>
+      `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance today.</div>';
+
       return `
       <div class="grid-bento">
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
@@ -525,34 +543,13 @@
             <div style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
          </div>
          
-         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-                <span style="font-weight:700;">Planned</span>
-                <i data-lucide="calendar" class="text-muted" width="20"></i>
+         <div class="aether-card" style="grid-column: span 2; display:flex; flex-direction:column;">
+            <div class="section-header">
+                Schedule
+                <i data-lucide="calendar" class="text-muted" width="16"></i>
             </div>
-            <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${(state.agents.vacation||[]).length+(state.agents.planned||[]).length}</div>
-         </div>
-
-         <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-                <span style="font-weight:700;">Special Roles</span>
-                <i data-lucide="shield" class="text-muted" width="20"></i>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="text-align:center;">
-                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.safe||[]).length}</div>
-                </div>
-                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
-                <div style="text-align:center;">
-                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.icl||[]).length}</div>
-                </div>
-                <div style="width:1px; height:30px; background:var(--glass-border);"></div>
-                <div style="text-align:center;">
-                    <div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC FIRE</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${(state.agents.ulc||[]).length}</div>
-                </div>
+            <div style="overflow-y:auto; max-height:150px;">
+                ${eventsHtml}
             </div>
          </div>
       </div>`;
@@ -841,9 +838,6 @@
      return `<div class="grid-split">
         <div class="aether-card">
             <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div>
-            <div style="display:flex; gap:10px; margin-bottom:10px;">
-                <input id="idp-val" class="input-aether" placeholder="IDP % (Manual)" style="width:150px;">
-            </div>
             <textarea id="in-text" class="input-aether" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea>
             <textarea id="out-text" class="input-aether" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea>
             <button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button>
@@ -861,8 +855,6 @@
   window.runCalculation = () => {
      const i = document.getElementById('in-text').value; 
      const o = document.getElementById('out-text').value;
-     const idp = document.getElementById('idp-val').value || "";
-
      if(typeof google!=='undefined') { 
          showToast("Calculating..."); 
          google.script.run.withSuccessHandler(r=>{ 
@@ -870,10 +862,10 @@
              state.currentSL=d.svl; 
              state.currentReport = d.report; 
              render(); 
-         }).runCalculator(i, o, idp); 
+         }).runCalculator(i, o); 
      } else { 
          state.currentSL = "84.5%"; 
-         state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\nIDP: " + idp + "%\n..."; 
+         state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; 
          render(); 
      }
   };
@@ -917,4 +909,19 @@
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
+
+  // IDP ACTIONS
+  window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
+  window.submitIdpAction = () => {
+     const val = document.getElementById('idp-input').value;
+     if(!val) return;
+     document.getElementById('idp-modal').classList.remove('open');
+     showToast("Saving IDP...");
+     if(typeof google !== 'undefined') {
+         google.script.run.withSuccessHandler(() => {
+             showToast("IDP Saved");
+             fetchInsightData();
+         }).submitIdpValue(val);
+     }
+  }
 </script>
