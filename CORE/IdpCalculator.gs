@@ -13,7 +13,6 @@ const IdpCalculator = {
       const lines = rawText.split(/\r?\n/);
       const now = new Date();
       const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-      // Example: "Monday, January 12, 2026" matches your Excel header format
       const todayStr = now.toLocaleDateString('en-US', options); 
       
       let reqIdx = -1;
@@ -25,13 +24,12 @@ const IdpCalculator = {
       // Scan the first 20 lines to find the headers
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
         const line = lines[i];
-        // Handle Tab (Excel copy) or Comma (CSV)
         const delim = line.includes("\t") ? "\t" : ",";
         const parts = line.split(delim).map(p => p.replace(/"/g, "").trim());
 
         for (let c = 0; c < parts.length; c++) {
-           const header = parts[c].toLowerCase(); // Normalize to lowercase for checking
-           const originalHeader = parts[c]; // Keep original for date checking
+           const header = parts[c].toLowerCase(); 
+           const originalHeader = parts[c];
            
            // 1. Detect Time Column
            if (header === "time" || header.match(/^\d{2}:\d{2}/)) {
@@ -39,17 +37,14 @@ const IdpCalculator = {
            }
 
            // 2. Detect Requirements (Forecast)
-           // Must include "req" AND the date string (e.g. "Requirements Monday, January 12, 2026")
-           // OR if no specific date is found in headers, just take the first "Requirements"
            if (header.includes("req")) {
                if (originalHeader.includes(todayStr) || reqIdx === -1) {
                    reqIdx = c;
                }
            }
            
-           // 3. Detect Actual (Open / Occupied)
-           // Your file has "Open" and "Open +/-". We want "Open". 
-           // We explicitly exclude "+/-" to avoid the variance column.
+           // 3. Detect Actual (Open)
+           // Exclude "+/-" to avoid variance columns
            if ((header.includes("open") || header.includes("occupied") || header.includes("actual")) && !header.includes("+/-")) {
                if (originalHeader.includes(todayStr) || occIdx === -1) {
                    occIdx = c;
@@ -57,10 +52,9 @@ const IdpCalculator = {
            }
         }
         
-        // If we found both columns, the data starts on the NEXT row
         if (reqIdx > -1 && occIdx > -1) {
            startRow = i + 1;
-           if (timeIdx === -1) timeIdx = 0; // Default to first column if Time not found
+           if (timeIdx === -1) timeIdx = 0; 
            break;
         }
       }
@@ -82,14 +76,21 @@ const IdpCalculator = {
          const delim = line.includes("\t") ? "\t" : ",";
          const parts = line.split(delim);
          
-         // Ensure row has enough columns
          if (parts.length > Math.max(reqIdx, occIdx)) {
-             // Extract and Clean Numbers
+             // Clean strings
              const rStr = (parts[reqIdx] || "0").replace(/,/g, "").replace(/"/g, "");
              const oStr = (parts[occIdx] || "0").replace(/,/g, "").replace(/"/g, "");
-             const timeStr = (parts[timeIdx] || "").replace(/"/g, "");
+             const timeStr = (parts[timeIdx] || "").replace(/"/g, "").trim();
 
-             // Skip invalid lines
+             // --- STRICT VALIDATION TO FIX "BOTTOM PART" ISSUE ---
+             
+             // 1. Stop if we hit a Footer row (Total, Average, etc.)
+             if (timeStr.match(/^(total|grand|average|notes|count)/i)) break;
+
+             // 2. Skip if Time doesn't look like a Time (Must contain ":")
+             if (!timeStr.includes(":")) continue;
+
+             // 3. Skip if values are not numbers
              if (isNaN(parseFloat(rStr)) && isNaN(parseFloat(oStr))) continue;
 
              const rVal = parseFloat(rStr) || 0;
@@ -98,24 +99,18 @@ const IdpCalculator = {
              totalReq += rVal;
              totalOcc += oVal;
 
-             // Prepare Graph Data
-             // Only add if we have a valid time-looking string to keep the X-axis clean
-             if (timeStr.includes(":") || timeStr.match(/^\d+$/)) { 
-                seriesTime.push(timeStr);
-                seriesReq.push(rVal);
-                seriesOcc.push(oVal);
-             }
+             seriesTime.push(timeStr);
+             seriesReq.push(rVal);
+             seriesOcc.push(oVal);
          }
       }
 
       // --- CALCULATION ---
       if (totalReq === 0) return { success: false, msg: "Total Requirements is 0" };
       
-      // Standard IDP % Calculation: (Actual / Requirements) * 100
       const idpPercent = (totalOcc / totalReq) * 100;
       const finalVal = idpPercent.toFixed(1);
       
-      // Log for history
       if (typeof StatsTracker !== 'undefined') StatsTracker.logIdp(finalVal);
       
       return { 
@@ -124,8 +119,8 @@ const IdpCalculator = {
         msg: `IDP Calculated: ${finalVal}%`,
         graphData: {
           labels: seriesTime,
-          forecast: seriesReq, // Requirements
-          actual: seriesOcc    // Open (Actual Staff)
+          forecast: seriesReq, 
+          actual: seriesOcc    
         }
       };
       
