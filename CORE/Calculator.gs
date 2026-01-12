@@ -2,27 +2,25 @@
  * MODULE: CALCULATOR
  */
 
-function runCalculator(inText, outText) {
-  return calculateMetrics(inText, outText);
+function runCalculator(inText, outText, manualIdp) {
+  return calculateMetrics(inText, outText, manualIdp);
 }
 
-function calculateMetrics(inText, outText) {
+function calculateMetrics(inText, outText, manualIdp) {
   let stats = {
     svl: "0%", ack: "0s", 
     trendData: { labels: [], actual: [], trend: [] }, 
     trendIn: "0%", trendOut: "0%",
     asa: "0s", inSVL: "0%",
+    idp: manualIdp || "-", // Store IDP
     report: ""
   };
-
   // 1. SLA LIST (For ACK / SVL) - STRICT PRIORITY
   // Excludes 7-TRB and 5-SUPF/V to keep response times accurate to alarms.
   const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
-
   // 2. TREND LIST (For Workload Volume) - BROADER
   // Includes 7-TRB because it affects staffing/volume trends (-55%), but still excludes Supervision skew.
   const LIST_TREND = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C", "7-TRB"];
-
   // ----------------------------------------------------
   // A. INBOUND PARSING
   // ----------------------------------------------------
@@ -31,7 +29,6 @@ function calculateMetrics(inText, outText) {
     for (const line of lines) {
       // Clean tabs/spaces
       const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
-      
       // Target: Monit - Intraday
       if (line.includes("Monit - Intraday")) {
           // Columns roughly: Name, Off, ASA, Trend, Diff%, SL20...
@@ -59,10 +56,8 @@ function calculateMetrics(inText, outText) {
   if (outText) {
     // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_SLA
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
-    
     let svlVol = 0, svlW = 0; 
-    let ackVol = 0, ackW = 0; 
-
+    let ackVol = 0, ackW = 0;
     if (intraSection) {
       const lines = intraSection.split(/\r?\n/);
       lines.forEach(line => {
@@ -87,9 +82,9 @@ function calculateMetrics(inText, outText) {
       });
     }
 
-    stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
+    stats.svl = svlVol > 0 ?
+    Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
-    
     // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_TREND
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
@@ -133,15 +128,14 @@ function calculateMetrics(inText, outText) {
 
   // LOGGING
   if (typeof MasterConnector !== 'undefined' && stats.svl !== "0%") {
-      MasterConnector.logStats(stats.svl, stats.ack, "", ""); // Blank LAW/IDP
+      MasterConnector.logStats(stats.svl, stats.ack, "", stats.idp); 
   }
   if (typeof StatsTracker !== 'undefined' && stats.svl !== "0%") {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  // FINAL REPORT TEXT - LAW REMOVED
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
-  
+  // FINAL REPORT TEXT - LAW REMOVED, IDP ADDED
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nIDP: ${stats.idp}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
 
@@ -151,9 +145,11 @@ function extractSection(text, header) {
   if (idx === -1) return "";
   const remainder = text.substring(idx + header.length);
   const nextIdx = remainder.search(/(Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
-  return nextIdx === -1 ? remainder : remainder.substring(0, nextIdx);
+  return nextIdx === -1 ?
+  remainder : remainder.substring(0, nextIdx);
 }
-function checkList(id, list) { return list.some(key => id.startsWith(key)); }
+function checkList(id, list) { return list.some(key => id.startsWith(key));
+}
 function dur(t) { 
     if (!t) return 0;
     const parts = t.split(":");
