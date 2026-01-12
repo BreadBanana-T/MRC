@@ -336,7 +336,7 @@
              
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
-                     Stats Updates (No IDP)
+                     Stats Updates
                  </div>
                  <div style="overflow-y:auto; flex:1;">
                      <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
@@ -401,7 +401,7 @@
           });
       }
 
-      // IDP GRAPH (Will be overwritten if new IDP is calculated)
+      // IDP GRAPH
       const ctx3 = document.getElementById('chart-idp-hist');
       if(ctx3 && state.idpHistory.length) {
           charts.idpHist = new Chart(ctx3, {
@@ -586,7 +586,7 @@
          
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;">
             <div class="section-header">
-                Schedule (45 Days)
+                Agenda
                 <i data-lucide="calendar" class="text-muted" width="16"></i>
             </div>
             <div style="overflow-y:auto; max-height:200px;">
@@ -954,7 +954,7 @@
   // IDP ACTIONS
   window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
   
-  // UPDATED: Now handles graph rendering!
+  // UPDATED: Renders Forecast vs Actual from IDP Calculator
   window.submitIdpAction = () => {
      const val = document.getElementById('idp-input').value; 
      if(!val) return;
@@ -968,7 +968,7 @@
              if(result.success) {
                  showToast(result.msg);
                  
-                 // Render Forecast vs Actual Graph
+                 // --- RENDER GRAPH: Forecast vs Actual ---
                  if (result.graphData && typeof Chart !== 'undefined') {
                      const ctx = document.getElementById('chart-idp-hist'); 
                      if (ctx) {
@@ -1009,6 +1009,7 @@
                         });
                      }
                  }
+                 // ----------------------------------------
              } else {
                  showToast("Error: " + result.msg);
              }
