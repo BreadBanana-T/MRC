@@ -20,31 +20,32 @@ const IdpCalculator = {
       let timeIdx = -1;
       let startRow = -1;
       
-      // --- HEADER DISCOVERY ---
-      // Scan the first 20 lines to find the headers
+      // --- 1. HEADER DISCOVERY ---
+      // We scan the first 20 lines to find the headers
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
         const line = lines[i];
-        const delim = line.includes("\t") ? "\t" : ",";
+        const delim = line.includes("\t") ? "\t" : ","; // Auto-detect Tab (Excel) or Comma (CSV)
         const parts = line.split(delim).map(p => p.replace(/"/g, "").trim());
 
         for (let c = 0; c < parts.length; c++) {
            const header = parts[c].toLowerCase(); 
            const originalHeader = parts[c];
            
-           // 1. Detect Time Column
-           if (header === "time" || header.match(/^\d{2}:\d{2}/)) {
+           // Detect Time Column
+           if (header === "time" || header.match(/^\d{1,2}:\d{2}/)) {
                if(timeIdx === -1) timeIdx = c;
            }
 
-           // 2. Detect Requirements (Forecast)
+           // Detect Requirements (Forecast)
            if (header.includes("req")) {
+               // Prioritize today's column if date is present, otherwise take first found
                if (originalHeader.includes(todayStr) || reqIdx === -1) {
                    reqIdx = c;
                }
            }
            
-           // 3. Detect Actual (Open)
-           // Exclude "+/-" to avoid variance columns
+           // Detect Actual (Open/Occupied)
+           // Exclude "+/-" to avoid the variance column
            if ((header.includes("open") || header.includes("occupied") || header.includes("actual")) && !header.includes("+/-")) {
                if (originalHeader.includes(todayStr) || occIdx === -1) {
                    occIdx = c;
@@ -52,16 +53,17 @@ const IdpCalculator = {
            }
         }
         
+        // If we found headers, data starts next row
         if (reqIdx > -1 && occIdx > -1) {
            startRow = i + 1;
-           if (timeIdx === -1) timeIdx = 0; 
+           if (timeIdx === -1) timeIdx = 0; // Default to first col if 'Time' header missing
            break;
         }
       }
 
-      if (startRow === -1) return { success: false, msg: `Could not find 'Requirements' and 'Open' columns for ${todayStr}.` };
+      if (startRow === -1) return { success: false, msg: `Could not find 'Requirements' and 'Open' columns.` };
 
-      // --- DATA EXTRACTION ---
+      // --- 2. DATA EXTRACTION ---
       let totalReq = 0;
       let totalOcc = 0;
       
@@ -82,15 +84,17 @@ const IdpCalculator = {
              const oStr = (parts[occIdx] || "0").replace(/,/g, "").replace(/"/g, "");
              const timeStr = (parts[timeIdx] || "").replace(/"/g, "").trim();
 
-             // --- STRICT VALIDATION TO FIX "BOTTOM PART" ISSUE ---
-             
-             // 1. Stop if we hit a Footer row (Total, Average, etc.)
-             if (timeStr.match(/^(total|grand|average|notes|count)/i)) break;
+             // --- CRITICAL FIX: STOP PARSING AT FOOTER ---
+             // If the Time column doesn't look like "00:00" or "9:00", we assume we hit the totals/footer.
+             // This regex checks for digits:digits.
+             if (!timeStr.match(/^\d{1,2}:\d{2}/)) {
+                 // Double check it's not just a blank line
+                 if(timeStr === "") continue; 
+                 // If it has text like "Total", "Day", "Notes", "Average", we STOP.
+                 break; 
+             }
 
-             // 2. Skip if Time doesn't look like a Time (Must contain ":")
-             if (!timeStr.includes(":")) continue;
-
-             // 3. Skip if values are not numbers
+             // Parse Numbers
              if (isNaN(parseFloat(rStr)) && isNaN(parseFloat(oStr))) continue;
 
              const rVal = parseFloat(rStr) || 0;
@@ -105,7 +109,7 @@ const IdpCalculator = {
          }
       }
 
-      // --- CALCULATION ---
+      // --- 3. CALCULATION ---
       if (totalReq === 0) return { success: false, msg: "Total Requirements is 0" };
       
       const idpPercent = (totalOcc / totalReq) * 100;
