@@ -27,7 +27,8 @@
       editingId: null, 
       appUrl: "", 
       insightMode: 'day', 
-      selectedDate: new Date().toISOString().split('T')[0]
+      selectedDate: new Date().toISOString().split('T')[0],
+      graphRendered: false 
   };
 
   // Mouse move effect for glass cards
@@ -434,7 +435,7 @@
       const labels = state.slHistory.map(d => d.name);
       const dataPoints = state.slHistory.map(d => d.val);
 
-      // FIX: Ensure previous chart is strictly destroyed before creating a new one
+      // FIX: Destroy old chart instance if the canvas was re-created in DOM
       if (charts.overview) {
           charts.overview.destroy();
           charts.overview = null;
@@ -952,7 +953,8 @@
       if(!e) return;
       document.getElementById('evt-modal-title').innerText = e.title;
       document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
-      document.getElementById('evt-modal-desc').innerText = e.description || "No description provided.";
+      // Changed to innerHTML to render HTML tags in description
+      document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
 </script>
