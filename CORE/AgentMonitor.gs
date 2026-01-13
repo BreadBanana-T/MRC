@@ -1,7 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V4.1)
- * - 30 Minute Lookahead
- * - Break Countdown Logic
+ * MODULE: AGENT MONITOR (V4.2)
+ * - Fixes Break End Time display
+ * - Passes current break range to frontend
  */
 
 const AgentMonitor = {
@@ -84,10 +84,11 @@ function compileFloorData() {
 
     const enrichedBreaks = [];
     let nextBreakStr = null;
+    let currentBreakStr = null; // Store current break range
     let onBreakNow = false;
     let breakTimer = "";
     let breakLabel = "";
-    let breakStartsIn = ""; // New field for countdown
+    let breakStartsIn = ""; 
 
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
@@ -116,14 +117,18 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
+             
+             // ACTIVE BREAK
              if (now >= bs && now <= be) {
                  onBreakNow = true;
                  const rem = Math.ceil((be - now)/60000);
                  breakTimer = `${rem}m`;
                  breakLabel = displayLabel;
+                 currentBreakStr = `${b.start} - ${b.end}`; // Capture the range!
              }
-             // Upcoming Break Logic
-             if (bs > now && !nextBreakStr && (bs - now < 1800000)) { // 30 min preview for breaks
+             
+             // UPCOMING BREAK
+             if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
                  breakStartsIn = Math.ceil((bs - now)/60000) + "m";
              }
@@ -157,14 +162,16 @@ function compileFloorData() {
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
-      isModified: isModified, breakTimeStr: nextBreakStr, timer: breakTimer, 
-      auxLabel: "Remaining", startsIn: breakStartsIn, // Pass the countdown
+      isModified: isModified, breakTimeStr: nextBreakStr, 
+      currentBreakStr: currentBreakStr, // Pass current range
+      timer: breakTimer, 
+      auxLabel: "Remaining", startsIn: breakStartsIn,
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
 
     if (category === 'active' && nextBreakStr) {
        let upAgent = {...agent};
-       upAgent.timer = nextBreakStr; // Keep the time range here
+       upAgent.timer = nextBreakStr; 
        upAgent.auxLabel = "Starts Soon";
        emptyFloor.upcomingBreak.push(upAgent);
     }
