@@ -1,7 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V4.2)
- * - Fixes Break End Time display
- * - Passes current break range to frontend
+ * MODULE: AGENT MONITOR (V4.4)
+ * - 30 Minute Lookahead
+ * - Captures exact Break Start/End for display
  */
 
 const AgentMonitor = {
@@ -28,6 +28,7 @@ function compileFloorData() {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
+  
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
@@ -84,7 +85,7 @@ function compileFloorData() {
 
     const enrichedBreaks = [];
     let nextBreakStr = null;
-    let currentBreakStr = null; // Store current break range
+    let currentBreakStr = null; // IMPORTANT: Used for "Ends at 14:15"
     let onBreakNow = false;
     let breakTimer = "";
     let breakLabel = "";
@@ -118,16 +119,16 @@ function compileFloorData() {
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
              
-             // ACTIVE BREAK
+             // IS ON BREAK NOW?
              if (now >= bs && now <= be) {
                  onBreakNow = true;
                  const rem = Math.ceil((be - now)/60000);
                  breakTimer = `${rem}m`;
                  breakLabel = displayLabel;
-                 currentBreakStr = `${b.start} - ${b.end}`; // Capture the range!
+                 currentBreakStr = `${b.start} - ${b.end}`; // Capture EXACT time range
              }
              
-             // UPCOMING BREAK
+             // IS BREAK STARTING SOON? (Next 30 mins)
              if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
                  breakStartsIn = Math.ceil((bs - now)/60000) + "m";
@@ -163,7 +164,7 @@ function compileFloorData() {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
       isModified: isModified, breakTimeStr: nextBreakStr, 
-      currentBreakStr: currentBreakStr, // Pass current range
+      currentBreakStr: currentBreakStr, // Pass to frontend
       timer: breakTimer, 
       auxLabel: "Remaining", startsIn: breakStartsIn,
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
