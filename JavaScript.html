@@ -262,49 +262,20 @@
       ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
   }
   
-  // --- NEW FLOOR LAYOUT (SPLIT & LIST VIEW) ---
+  // --- FLOOR LAYOUT (SPLIT & LIST VIEW) ---
   function renderFloorLayout(upMap) {
-     // 1. Unplanned Group (Alerts)
-     const unplannedList = state.agents.unplanned || [];
-     
-     // 2. Planned / Support (Vacation, Training, Meetings)
-     const plannedList = [...(state.agents.vacation||[]), ...(state.agents.training||[]), ...(state.agents.planned||[])];
-     
-     // 3. Active Floor (The rest)
-     // Filter active lists by search/region is done inside renderGroup
-     
      let startingHtml = '';
      if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
          startingHtml = `
          <div class="aether-card" style="padding:20px; margin-bottom:24px; border-left:4px solid var(--accent-primary);">
-             <div class="section-header" style="color:var(--accent-primary);">Starting Soon</div>
+             <div class="section-header" style="color:var(--accent-primary);">Starting Soon (Next 30m)</div>
              <div class="agent-list-view">${renderGroup(state.agents.startingSoon, upMap)}</div>
          </div>`;
      }
 
      return `
      ${startingHtml}
-     
-     <div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention (${unplannedList.length})</div>
-     <div class="agent-list-view" style="margin-bottom:30px;">
-        ${renderGroup(unplannedList, upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>'}
-     </div>
 
-     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;">
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
-            <div class="agent-list-view">${renderGroup(state.agents.icl||[], upMap)}</div>
-        </div>
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-active);">Special Roles (SAFE)</div>
-            <div class="agent-list-view">${renderGroup(state.agents.safe||[], upMap)}</div>
-        </div>
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC FIRE)</div>
-            <div class="agent-list-view">${renderGroup(state.agents.ulc||[], upMap)}</div>
-        </div>
-     </div>
-     
      <div class="grid-split" style="align-items:start;">
          <div style="display:flex; flex-direction:column; gap:20px;">
              <div class="aether-card" style="padding:24px;">
@@ -326,9 +297,30 @@
          </div>
      </div>
 
+     <div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div>
+     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;">
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-role);">ICL</div>
+            <div class="agent-list-view">${renderGroup(state.agents.icl||[], upMap)}</div>
+        </div>
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-active);">SAFE</div>
+            <div class="agent-list-view">${renderGroup(state.agents.safe||[], upMap)}</div>
+        </div>
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div>
+            <div class="agent-list-view">${renderGroup(state.agents.ulc||[], upMap)}</div>
+        </div>
+     </div>
+     
+     <div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div>
+     <div class="agent-list-view" style="margin-bottom:30px;">
+        ${renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>'}
+     </div>
+
      <div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div>
      <div class="agent-list-view" style="opacity:0.8;">
-         ${renderGroup(plannedList, upMap)}
+         ${renderGroup([...(state.agents.vacation||[]), ...(state.agents.training||[]), ...(state.agents.planned||[])], upMap)}
      </div>`;
   }
   
@@ -342,31 +334,25 @@
       return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
   }
 
-  // --- NEW SLIM ROW COMPONENT ---
+  // --- SLIM ROW COMPONENT ---
   function renderAgentRow(a, upInfo) {
      let start = "00:00", end = "00:00";
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      
-     // Color Strip Logic
      let stripClass = a.region.includes('Onshore') ? 'on' : 'off';
      if(a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
 
-     // Status Text Logic
      let statusText = a.subStatus || "Active";
      let statusColor = "var(--text-secondary)";
      
-     // Role highlighting
      if (a.role && a.role.includes('SAFE')) { statusColor = "var(--status-active)"; }
      else if (a.role && a.role.includes('ICL')) { statusColor = "var(--status-role)"; }
      else if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { statusColor = "var(--status-ulc)"; }
      
      if (a.onBreakNow) {
          statusColor = "var(--status-break)";
-         // Logic: Your backend AgentMonitor already sends "1st Break", "Lunch" etc in a.subStatus
-         // If for some reason it's missing, we fallback
          if(statusText === "On Break" && a.rawBreaks) {
-             // Fallback client-side calculation if needed
              const brk = a.rawBreaks.find(b => b.type.includes('Break'));
              if(brk) statusText = brk.type; 
          }
@@ -384,7 +370,6 @@
   
   function renderBreakLayout(upMap) {
       const onBreakList = (state.agents.active||[]).filter(a => a.onBreakNow);
-      // We keep CARDS for the break room as big timers are useful there
       return `
       <div>
          <div class="section-header">
@@ -403,16 +388,64 @@
   
   function renderBreakCard(a) {
       const isNow = a.onBreakNow;
-      // Note: a.subStatus often contains "1st Break" etc.
-      const label = isNow ? a.subStatus : a.auxLabel;
-      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.7; border-top:none;' : ''}">
+      let timeDisplay = "";
+      let subLabel = "";
+
+      if (isNow) {
+          // On Break: Show Remaining Time + Range
+          timeDisplay = a.timer; // "5m"
+          subLabel = `<span style="opacity:0.7">Ends at</span> ${a.breakTimeStr ? a.breakTimeStr.split('-')[1] : '??:??'}`;
+      } else {
+          // Upcoming: Show "In X m" + Range
+          timeDisplay = `<span style="font-size:1.5rem">In ${a.startsIn || '?'}</span>`;
+          subLabel = a.timer; // "10:00 - 10:15"
+      }
+
+      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.8; border-top:none;' : ''}">
          <div class="break-name">${a.name}</div>
-         <div class="break-timer" style="${!isNow ? 'font-size:1.5rem; color:var(--text-muted);' : ''}">${a.timer}</div>
-         <div class="break-label">${label}</div>
+         <div class="break-timer" style="${!isNow ? 'font-size:1.2rem; margin:8px 0;' : ''}">
+            ${timeDisplay}
+         </div>
+         <div class="break-label" style="font-family:monospace; font-size:0.9rem;">${subLabel}</div>
       </div>`;
   }
 
-  // --- STANDARD RENDER FUNCTIONS (Overview, etc - largely unchanged) ---
+  // --- RESTORED: MODAL FUNCTIONS ---
+  window.openBreakModal = () => {
+      closeMenu();
+      const name = state.selectedAgent;
+      let agent = null;
+      for(let k in state.agents) {
+          if(!Array.isArray(state.agents[k])) continue;
+          const found = state.agents[k].find(a => a.name === name);
+          if(found) { agent = found; break; }
+      }
+      
+      if(!agent) { showToast("Agent data not found"); return; }
+      
+      const container = document.getElementById('break-editor');
+      container.innerHTML = "";
+      (agent.rawBreaks || []).forEach((b, i) => {
+          container.innerHTML += `
+          <div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;">
+              <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">${b.type}</div>
+              <div style="display:flex; gap:8px;">
+                  <input id="bs-${i}" class="input-aether" value="${b.start}" style="font-size:0.85rem;">
+                  <input id="be-${i}" class="input-aether" value="${b.end}" style="font-size:0.85rem;">
+              </div>
+          </div>`;
+      });
+      document.getElementById('break-modal').classList.add('open');
+  };
+
+  window.openOtModal = () => {
+      closeMenu();
+      document.getElementById('ot-start').value = "";
+      document.getElementById('ot-end').value = "";
+      document.getElementById('ot-modal').classList.add('open');
+  };
+
+  // --- STANDARD RENDER FUNCTIONS (Overview, etc) ---
   function renderOverview() {
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
