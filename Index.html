@@ -106,6 +106,31 @@
           </div>
        </div>
     </div>
+    
+    <div id="break-modal" class="modal-blur">
+        <div class="modal-window" onclick="event.stopPropagation()">
+            <h2 style="margin-top:0;">Edit Schedule</h2>
+            <div id="break-editor" style="max-height:300px; overflow-y:auto; margin-bottom:20px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button class="btn btn-glass" onclick="document.getElementById('break-modal').classList.remove('open')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveBreaks()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ot-modal" class="modal-blur">
+        <div class="modal-window" onclick="event.stopPropagation()">
+            <h2 style="margin-top:0;">Log Overtime</h2>
+            <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">OT Start</label>
+            <input id="ot-start" class="input-aether" placeholder="17:00" style="margin-bottom:12px;">
+            <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">OT End</label>
+            <input id="ot-end" class="input-aether" placeholder="20:00" style="margin-bottom:12px;">
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button class="btn btn-glass" onclick="document.getElementById('ot-modal').classList.remove('open')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveOvertime()">Submit OT</button>
+            </div>
+        </div>
+    </div>
 
     <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">
         <i data-lucide="check-circle" width="18"></i>
