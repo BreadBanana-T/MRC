@@ -8,7 +8,6 @@
       pendingUpdates: {}, 
       weather: {}, 
       slHistory: [], 
-      // idpHistory REMOVED
       calendarEvents: [],
       roleLogs: [], 
       statsLogs: [], 
@@ -158,8 +157,6 @@
       
       const roleHandler = (res) => { try { state.roleLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
       const statsHandler = (res) => { try { state.statsLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
-      
-      // IDP History fetch REMOVED
 
       if (state.insightMode === 'week') {
           google.script.run.withSuccessHandler(roleHandler).getWeeklyRoleLogs(state.selectedDate);
@@ -208,7 +205,7 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER (Cleaned of IDP) ---
+  // --- INSIGHTS RENDERER (Cleaned - NO IDP) ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
@@ -350,7 +347,6 @@
   function initCharts() {
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
-      // IDP Chart Destroy REMOVED
 
       const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
       state.roleLogs.forEach(log => {
@@ -391,7 +387,6 @@
               }
           });
       }
-      // IDP CHART INIT REMOVED
   }
 
   function initOverviewChart() {
@@ -915,8 +910,6 @@
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
-
-  // IDP ACTIONS REMOVED
 
   // EVENT DETAILS MODAL
   window.openEventModal = (idx) => {
