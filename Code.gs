@@ -5,8 +5,7 @@ function doGet(e) {
   const template = HtmlService.createTemplateFromFile('Index');
   template.appUrl = ScriptApp.getService().getUrl();
   template.popoutParam = (e && e.parameter && e.parameter.popout) ? "true" : "false";
-  template.modeParam = (e && e.parameter && e.parameter.mode) ?
-      e.parameter.mode : "";
+  template.modeParam = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
   return template.evaluate()
       .setTitle('MRC Command Center')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
