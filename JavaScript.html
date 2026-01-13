@@ -117,10 +117,7 @@
   
   let searchTimeout;
   window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
-  function handleSearch(v) { 
-      state.searchTerm = v; 
-      render();
-  }
+  function handleSearch(v) { state.searchTerm = v; render(); }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
   // --- DATA FETCHING ---
@@ -260,7 +257,7 @@
       ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
   }
   
-  // --- FLOOR LAYOUT (CORRECT ORDER) ---
+  // --- FLOOR LAYOUT (Unplanned Last) ---
   function renderFloorLayout(upMap) {
      let startingHtml = '';
      if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
@@ -323,6 +320,7 @@
   }
   
   function renderGroup(list, upMap) {
+      if (!list) return ''; // Safety check to prevent crashing
       const filtered = list.filter(a => {
          const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
          const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
@@ -332,7 +330,7 @@
       return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
   }
 
-  // --- SLIM ROW COMPONENT ---
+  // --- SLIM ROW COMPONENT (With Copy Button) ---
   function renderAgentRow(a, upInfo) {
      let start = "00:00", end = "00:00";
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
@@ -397,12 +395,9 @@
       let subLabel = "";
 
       if (isNow) {
-          // On Break: Show Remaining Time + Range
           timeDisplay = a.timer; // "5m"
-          // FIX: Use currentBreakStr from backend to show actual range
           subLabel = `<span style="opacity:0.7">Ends at</span> ${a.currentBreakStr ? a.currentBreakStr.split('-')[1] : '??:??'}`;
       } else {
-          // Upcoming: Show "In X m" + Range
           timeDisplay = `<span style="font-size:1.5rem">In ${a.startsIn || '?'}</span>`;
           subLabel = a.timer; // "10:00 - 10:15"
       }
