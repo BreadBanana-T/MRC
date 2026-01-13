@@ -15,11 +15,14 @@ function calculateMetrics(inText, outText) {
     report: ""
   };
   // 1. SLA LIST (For ACK / SVL) - STRICT PRIORITY
-  // Excludes 7-TRB and 5-SUPF/V to keep response times accurate to alarms.
-  const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
-  // 2. TREND LIST (For Workload Volume) - BROADER
-  // Includes 7-TRB because it affects staffing/volume trends (-55%), but still excludes Supervision skew.
-  const LIST_TREND = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-CCM", "2-FARM", "3-LWK", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C", "7-TRB"];
+  // Aligned with Old Tool Regex: ^(1-FIRE|1-GAS|1-H\/U|1-MED|2-FARM|3-VID|4-BURG|4-COMM|4-TAMP|6-O\/C)
+  const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
+  
+  // 2. TREND LIST (For Workload Volume) - STRICT
+  // Matches LIST_SLA to ensure Trend % mirrors the "Outbound Calculator" tool exactly.
+  // Previously included 7-TRB, which skewed the data negatively.
+  const LIST_TREND = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
+  
   // ----------------------------------------------------
   // A. INBOUND PARSING
   // ----------------------------------------------------
@@ -72,18 +75,21 @@ function calculateMetrics(inText, outText) {
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
                 // STRICT LIST for SLA/ACK
+             
                 if (vol > 0 && checkList(code, LIST_SLA)) {
                      ackVol += vol; ackW += (vol * timeSec);
                      svlVol += vol; svlW += (vol * slVal);
                 }
             }
-        }
+      
+         }
       });
     }
 
     stats.svl = svlVol > 0 ?
-    Math.round(svlW / svlVol) + "%" : "0%";
+      Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
+    
     // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_TREND
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
@@ -96,23 +102,27 @@ function calculateMetrics(inText, outText) {
                 const code = codeMatch[1];
                 const parts = line.trim().split(/\s+/);
                 const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
-                
+          
+       
                 if (timeIdx > -1 && timeIdx >= 3) {
                    const vol = parseInt(parts[timeIdx - 3]) || 0; 
                    const tr = parseInt(parts[timeIdx - 2]) || 0; // Trend (Reference)
+              
                    const diff = parseInt(parts[timeIdx - 1]) || 0; // Diff
 
                    // Graph Data (Show all active)
                    if (vol > 0 || tr > 0) {
                       stats.trendData.labels.push(code);
+             
                       stats.trendData.actual.push(vol);
                       stats.trendData.trend.push(tr);
                    }
 
                    // BROADER LIST for Trends (Includes TRB)
                    if (checkList(code, LIST_TREND)) {
-                       trendDiff += diff;
-                       trendRef += tr;
+   
+                      trendDiff += diff;
+                      trendRef += tr;
                    }
                 }
             }
@@ -145,7 +155,7 @@ function extractSection(text, header) {
   const remainder = text.substring(idx + header.length);
   const nextIdx = remainder.search(/(Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
   return nextIdx === -1 ?
-  remainder : remainder.substring(0, nextIdx);
+    remainder : remainder.substring(0, nextIdx);
 }
 function checkList(id, list) { return list.some(key => id.startsWith(key));
 }
