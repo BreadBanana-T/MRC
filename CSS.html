@@ -94,26 +94,97 @@
   .grid-bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
   .grid-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   .grid-masonry { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
-  .agent-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
   
-  .agent-pill { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: 0.2s; position: relative; }
-  .agent-pill:hover { background: rgba(255,255,255,0.08); border-color: var(--accent-primary); opacity: 1 !important; filter: grayscale(0) !important; }
-  .agent-pill.role-safe { border: 1px solid var(--status-active); opacity: 0.6; }
-  .agent-pill.role-icl { border: 1px solid var(--status-role); opacity: 0.6; }
-  .agent-pill.role-ulc { border: 1px solid var(--status-ulc); opacity: 0.6; }
-  .agent-pill.status-break { opacity: 0.5; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.02), rgba(0,0,0,0.02) 10px, rgba(0,0,0,0.05) 10px, rgba(0,0,0,0.05) 20px); }
-  .special-group .agent-pill.role-safe, .special-group .agent-pill.role-icl, .special-group .agent-pill.role-ulc { opacity: 1 !important; border-width: 2px; }
+  /* --- NEW: SLIM AGENT ROW (High Density) --- */
+  .agent-list-view { display: flex; flex-direction: column; gap: 4px; }
+  
+  .agent-row {
+      display: grid;
+      grid-template-columns: 4px 180px 70px 1fr 110px; /* StatusStrip Name ID Status Time */
+      align-items: center;
+      background: var(--glass-surface);
+      border: 1px solid var(--glass-border);
+      border-radius: 6px;
+      height: 42px;
+      padding-right: 16px;
+      transition: all 0.1s ease;
+      position: relative;
+      overflow: visible; /* Changed to visible for tooltip */
+  }
+  .agent-row:hover {
+      transform: translateX(4px);
+      background: rgba(255,255,255,0.15);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      z-index: 10;
+  }
+  
+  /* Status Strip (Color Bar) */
+  .status-strip { height: 100%; width: 100%; }
+  .status-strip.on { background: var(--region-on); }
+  .status-strip.off { background: var(--region-off); }
+  .status-strip.break { background: var(--status-break); }
+  .status-strip.alert { background: var(--status-alert); }
 
-  .pill-left { display: flex; align-items: center; gap: 10px; overflow: hidden; }
-  .pill-av { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)); color: var(--text-main); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
-  .pill-info { display: flex; flex-direction: column; overflow: hidden; }
-  .pill-name { font-weight: 700; color: var(--text-main); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pill-role { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; white-space: nowrap; }
-  .region-tag { font-size: 0.6rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; margin-right: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .region-tag.on { color: var(--region-on); background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.2); }
-  .region-tag.off { color: var(--region-off); background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); }
-  .pill-time { font-family: monospace; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); background: rgba(0,0,0,0.1); padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+  /* Name with Tooltip */
+  .row-name {
+      font-weight: 700;
+      color: var(--text-main);
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding-left: 12px;
+      cursor: help;
+      position: relative;
+  }
+  .row-name:hover::after {
+      content: attr(data-full-name);
+      position: absolute;
+      left: 10px;
+      top: -28px;
+      background: var(--text-main);
+      color: var(--bg-root);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      white-space: nowrap;
+      z-index: 1000;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      pointer-events: none;
+  }
+
+  .row-id { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); opacity: 0.7; }
   
+  .row-status { font-weight: 600; font-size: 0.85rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-time { font-family: monospace; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-align: right; background: rgba(0,0,0,0.05); padding: 2px 8px; border-radius: 4px; }
+  
+  /* Responsive Grid for Smaller Screens */
+  @media (max-width: 1200px) {
+      .agent-row { grid-template-columns: 4px 1fr 1fr 80px; }
+      .row-id { display: none; }
+  }
+
+  /* --- SECTION HEADERS --- */
+  .group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-top: 24px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.03);
+  }
+  .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
+  .group-header i { opacity: 0.7; }
+
+  /* Break Room Grid (Keeping Cards for Breaks) */
   .break-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
   .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
   .break-card::before { content:''; position:absolute; top:0; left:0; right:0; height:6px; background: var(--status-break); }
