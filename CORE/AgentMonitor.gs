@@ -1,7 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V4)
- * - Safe data reading.
- * - Multi-role sorting.
+ * MODULE: AGENT MONITOR (V4.1)
+ * - 30 Minute Lookahead
+ * - Break Countdown Logic
  */
 
 const AgentMonitor = {
@@ -24,12 +24,10 @@ function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.lo
 function compileFloorData() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Raw Schedule");
-  
   const emptyFloor = {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
-
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
@@ -43,8 +41,7 @@ function compileFloorData() {
     const persistentData = sheetOverrides.get(cleanName) || {};
     const fastData = fastOverrides[cleanName] || {};
     
-    // Read Columns (Safely)
-    // Row Index: 0=Name, 1=ID, 2=Date, 3=Start, 4=End, 5=Shift, 6=Region, 7=Breaks, 8=Role, 9=Absent, 10=EpStart, 11=EpEnd
+    // Row Mapping: 0=Name, 1=ID, 2=Date, 3=Start, 4=End, 5=Shift, 6=Region, 7=Breaks, 8=Role, 9=Absent, 10=EpStart, 11=EpEnd
     let role = (fastData.role !== undefined) ? fastData.role : (persistentData.role || (row ? row[8] : ""));
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
@@ -55,17 +52,17 @@ function compileFloorData() {
     let agentID = row ? row[1] : "";
 
     if (role && role !== "") absentType = "";
-    
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
 
+    // --- LOOKAHEAD FILTER (30 MINS) ---
+    const LOOKAHEAD = 30 * 60 * 1000; 
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
     if (startEpoch && endEpoch) {
        if (endEpoch <= now && !isOT) return;
-       const NINETY_MINS = 90 * 60 * 1000;
-       if (startEpoch > (now + NINETY_MINS) && !isOT) return;
+       if (startEpoch > (now + LOOKAHEAD) && !isOT) return;
     }
 
     let dateStr = row ? row[2] : "";
@@ -90,6 +87,7 @@ function compileFloorData() {
     let onBreakNow = false;
     let breakTimer = "";
     let breakLabel = "";
+    let breakStartsIn = ""; // New field for countdown
 
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
@@ -124,7 +122,11 @@ function compileFloorData() {
                  breakTimer = `${rem}m`;
                  breakLabel = displayLabel;
              }
-             if (bs > now && !nextBreakStr && (bs - now < 1800000)) nextBreakStr = `${b.start} - ${b.end}`;
+             // Upcoming Break Logic
+             if (bs > now && !nextBreakStr && (bs - now < 1800000)) { // 30 min preview for breaks
+                 nextBreakStr = `${b.start} - ${b.end}`;
+                 breakStartsIn = Math.ceil((bs - now)/60000) + "m";
+             }
           }
        });
     }
@@ -151,17 +153,18 @@ function compileFloorData() {
     }
 
     if (category === "active" && onBreakNow) subStatus = breakLabel || "On Break";
-
+    
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
-      isModified: isModified, breakTimeStr: nextBreakStr, timer: breakTimer, auxLabel: "Remaining",
+      isModified: isModified, breakTimeStr: nextBreakStr, timer: breakTimer, 
+      auxLabel: "Remaining", startsIn: breakStartsIn, // Pass the countdown
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
 
     if (category === 'active' && nextBreakStr) {
        let upAgent = {...agent};
-       upAgent.timer = nextBreakStr;
+       upAgent.timer = nextBreakStr; // Keep the time range here
        upAgent.auxLabel = "Starts Soon";
        emptyFloor.upcomingBreak.push(upAgent);
     }
@@ -179,19 +182,16 @@ function compileFloorData() {
   sheetOverrides.forEach((val, key) => {
       if (!agentMap.has(key) && !agentMap.has(toTitleCase(key)) && val.ot.length > 0) processEntry(toTitleCase(key), null); 
   });
-
-  // SORT INTO BUCKETS (Additive)
+  
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else emptyFloor.active.push(item.agent);
-
       const r = (item.agent.role || "").toUpperCase();
       if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
       if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
       if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
   });
-
   return JSON.stringify(emptyFloor);
 }
 
