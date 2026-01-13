@@ -29,7 +29,6 @@
       selectedDate: new Date().toISOString().split('T')[0]
   };
 
-  // Mouse move effect for glass cards
   document.addEventListener('mousemove', e => {
       document.querySelectorAll('.aether-card').forEach(card => {
           const rect = card.getBoundingClientRect();
@@ -43,7 +42,6 @@
   function initApp() {
     try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     
-    // Read Params from Hidden Div
     const config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
@@ -64,15 +62,14 @@
     setInterval(updateClock, 1000); 
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 10000);
-    setInterval(fetchCalendar, 300000); // 5 mins
-    // Refresh Insights timers every minute if on insights tab
+    setInterval(fetchCalendar, 300000); 
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); 
     fetchNotifications();
     fetchCalendar();
   }
 
-  // --- NAVIGATION & VIEW CONTROL ---
+  // --- NAVIGATION ---
   window.setView = (v) => { 
       state.view = v; 
       if(v==='scripts') fetchScripts(); 
@@ -122,16 +119,8 @@
   window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
   function handleSearch(v) { 
       state.searchTerm = v; 
-      if(state.view === 'agents') { 
-          const pills = document.querySelectorAll('.agent-pill'); const term = v.toLowerCase(); 
-          pills.forEach(p => { 
-              const name = p.getAttribute('data-name').toLowerCase(); 
-              const reg = p.getAttribute('data-region'); 
-              const matchName = !term || name.includes(term); 
-              const matchReg = state.regionFilter === 'All' || reg.includes(state.regionFilter); 
-              if (matchName && matchReg) p.style.display = 'flex'; else p.style.display = 'none'; 
-          }); 
-      } else { render(); } 
+      // Force re-render to apply filter to the new rows
+      render();
   }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
@@ -204,229 +193,8 @@
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
   }
-  
-  // --- INSIGHTS RENDERER (Cleaned - NO IDP) ---
-  function renderInsights() {
-      const isWeek = state.insightMode === 'week';
-      
-      let activeRoles = [];
-      if (!isWeek && state.selectedDate === new Date().toISOString().split('T')[0]) {
-          ['icl','safe','ulc','active'].forEach(group => {
-              if (state.agents[group]) {
-                  state.agents[group].forEach(a => {
-                      if (a.role && a.role !== 'Active') {
-                          activeRoles.push({ agent: a.name, role: a.role, status: 'LIVE' });
-                      }
-                  });
-              }
-          });
-      }
 
-      const activeRows = activeRoles.map(r => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--glass-surface); border-radius:12px; margin-bottom:10px; border:1px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-              <div style="font-weight:700; color:var(--text-main);">${r.agent}</div>
-              <div style="display:flex; align-items:center; gap:12px;">
-                  <span class="agent-pill ${r.role.includes('SAFE')?'role-safe':(r.role.includes('ICL')?'role-icl':'role-ulc')}" style="font-size:0.8rem; padding:4px 10px;">${r.role}</span>
-                  <div style="color:var(--status-active); font-weight:800; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; animation:pulse 2s infinite;">● LIVE</div>
-              </div>
-          </div>
-      `).join('');
-
-      const tableRows = state.roleLogs.map(log => `
-          <tr style="border-bottom:1px solid var(--glass-border);">
-              ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
-              <td style="padding:12px; font-weight:700;">${log.agent}</td>
-              <td style="padding:12px;"><span class="agent-pill ${log.role.includes('SAFE')?'role-safe':(log.role.includes('ICL')?'role-icl':'role-ulc')}" style="width:fit-content; font-size:0.75rem; padding:4px 8px;">${log.role}</span></td>
-              <td style="padding:12px; text-align:right; font-weight:700;">${log.duration} min</td>
-              <td style="padding:12px; text-align:right; color:var(--text-muted); font-family:monospace; font-size:0.85rem;">${log.start} - ${log.end}</td>
-          </tr>
-      `).join('');
-
-      const statsRows = state.statsLogs.map(s => `
-          <tr style="border-bottom:1px solid var(--glass-border);">
-              <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
-              <td style="padding:12px; color:${parseFloat(s.svl)<80?'var(--status-alert)':'var(--status-active)'}; font-weight:700;">${s.svl}</td>
-              <td style="padding:12px;">${s.ack}s</td>
-          </tr>
-      `).join('');
-
-      const flagged = (state.agents.unplanned||[]).map(a => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border);">
-             <span style="font-weight:700;">${a.name}</span>
-             <span style="color:var(--status-alert); font-weight:700; background:rgba(220,38,38,0.1); padding:4px 8px; border-radius:6px; font-size:0.8rem;">${a.subStatus}</span>
-          </div>`).join('') || '<div style="padding:24px; color:var(--text-muted); text-align:center;">No active flags today</div>';
-
-      return `
-      <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
-      <div class="sticky-header" style="justify-content:space-between;">
-         <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0;">Operations Insight</h2>
-             
-             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Daily</button>
-                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Weekly</button>
-             </div>
-
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
-         </div>
-         <div style="display:flex; gap:16px;">
-             <div class="kpi-box" style="text-align:right;">
-                 <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
-                 <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
-             </div>
-         </div>
-      </div>
-      
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
-         
-         <div style="display:flex; flex-direction:column; gap:24px;">
-             <div class="aether-card">
-                 <div class="section-header" style="color:var(--status-active);">Active Roles (Live)</div>
-                 <div style="max-height:300px; overflow-y:auto;">
-                    ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
-                 </div>
-             </div>
-             
-             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
-                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
-                     ⚠️ Active Flags
-                 </div>
-                 <div style="flex:1; overflow-y:auto;">
-                     ${flagged}
-                 </div>
-             </div>
-         </div>
-         
-         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px; border:2px solid var(--accent-primary);">
-             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; background:var(--accent-primary); color:white;">
-                 Completed Sessions (Roles)
-             </div>
-             <div style="overflow-y:auto; flex:1;">
-                 <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
-                    <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                        <tr>
-                            ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
-                            <th style="padding:10px; text-align:left;">Agent</th>
-                            <th style="padding:10px; text-align:left;">Role</th>
-                            <th style="padding:10px; text-align:right;">Mins</th>
-                            <th style="padding:10px; text-align:right;">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody>${tableRows}</tbody>
-                 </table>
-             </div>
-         </div>
-
-         <div style="display:flex; flex-direction:column; gap:24px;">
-             <div class="aether-card">
-                 <div class="section-header">Total Hours</div>
-                 <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
-             </div>
-
-             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
-                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
-                     Stats Updates
-                 </div>
-                 <div style="overflow-y:auto; flex:1;">
-                     <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                        <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                            <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th></tr>
-                        </thead>
-                        <tbody>
-                            ${statsRows || '<tr><td colspan="3" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
-                        </tbody>
-                     </table>
-                 </div>
-             </div>
-         </div>
-      </div>
-      `;
-  }
-  
-  let charts = {};
-  function initCharts() {
-      if (typeof Chart === 'undefined') return;
-      if(charts.rolesHist) charts.rolesHist.destroy();
-
-      const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
-      state.roleLogs.forEach(log => {
-          if (log.role.includes('SAFE')) roleData.SAFE += (log.duration/60);
-          else if (log.role.includes('ICL')) roleData.ICL += (log.duration/60);
-          else if (log.role.includes('ULC') || log.role.includes('FIRE')) roleData.ULC += (log.duration/60);
-      });
-
-      // Add Active sessions
-      ['safe','icl','ulc'].forEach(g => {
-          if(state.agents[g]) {
-              state.agents[g].forEach(a => {
-                  if (a.role && a.role.includes('SAFE')) roleData.SAFE += 0.5;
-                  if (a.role && a.role.includes('ICL')) roleData.ICL += 0.5;
-                  if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) roleData.ULC += 0.5;
-              });
-          }
-      });
-
-      const ctx2 = document.getElementById('chart-roles-hist');
-      if(ctx2) {
-          charts.rolesHist = new Chart(ctx2, {
-              type: 'bar',
-              data: {
-                  labels: ['SAFE', 'ICL', 'ULC'],
-                  datasets: [{
-                      label: 'Hours',
-                      data: [roleData.SAFE, roleData.ICL, roleData.ULC],
-                      backgroundColor: ['#059669', '#7c3aed', '#f97316'],
-                      borderRadius: 6
-                  }]
-              },
-              options: { 
-                  responsive: true, 
-                  maintainAspectRatio: false, 
-                  plugins: { legend: { display: false } },
-                  scales: { y: { beginAtZero: true } }
-              }
-          });
-      }
-  }
-
-  function initOverviewChart() {
-      if (typeof Chart === 'undefined') return;
-      
-      const ctx = document.getElementById('chart-overview');
-      if (!ctx) return;
-
-      const labels = state.slHistory.map(d => d.name);
-      const dataPoints = state.slHistory.map(d => d.val);
-
-      if (charts.overview) {
-          charts.overview.destroy();
-          charts.overview = null;
-      }
-      
-      charts.overview = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Service Level',
-                data: dataPoints,
-                borderColor: '#4f46e5',
-                backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: { 
-            responsive: true, 
-            maintainAspectRatio: false,
-            scales: { y: { min: 0, max: 100 } },
-            plugins: { legend: { display: false } },
-            animation: false 
-        }
-      });
-  }
-
-  // --- STANDARD RENDER FUNCTIONS ---
+  // --- RENDER POP OUT (Uses Slim Rows now too!) ---
   function renderPopout(mode) {
      const c = document.getElementById('content');
      if(!c) return; 
@@ -449,22 +217,202 @@
      if (mode !== 'Breaks') {
          h += `
          <div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div>
-         <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.startingSoon).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>
+         <div class="agent-list-view">${filterFn(state.agents.startingSoon).map(a => renderAgentRow(a, upMap.get(a.id))).join('')}</div>
          <div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Active Floor</div>
-         <div class="agent-list" style="grid-template-columns:1fr;">${filterFn(state.agents.active).map(a => renderAgentPill(a, upMap.get(a.id))).join('')}</div>`;
+         <div class="agent-list-view">${filterFn(state.agents.active).map(a => renderAgentRow(a, upMap.get(a.id))).join('')}</div>`;
      }
 
      if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') {
          const breakList = filterFn(state.agents.active).filter(a=>a.onBreakNow);
          h += `<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
-         <div class="agent-list" style="grid-template-columns:1fr;">${breakList.length ? breakList.map(a => renderAgentPill(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
+         <div class="agent-list-view">${breakList.length ? breakList.map(a => renderAgentRow(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
      }
      
      h += `</div>`;
      c.innerHTML = h;
      refreshIcons();
   }
+  
+  // --- AGENTS VIEW (FLOOR) ---
+  function renderAgents() {
+      const tab = state.agentTab;
+      const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+      
+      return `
+      <div class="sticky-header">
+         <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
+             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
+             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
+                <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
+             </div>
+             
+             <button class="btn btn-glass" style="height:34px;" onclick="window.open('https://sharepoint.tsl.telus.com/sites/NSE/CAM/Lists/Queue_Manager/AllItems.aspx', '_blank')">
+                 <i data-lucide="radio" width="16"></i> Tower Control
+             </button>
 
+             <div style="flex:1"></div>
+             <div style="display:flex; gap:8px;">
+                <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
+                <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
+                <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
+             </div>
+         </div>
+      </div>
+      ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
+  }
+  
+  // --- NEW FLOOR LAYOUT (SPLIT & LIST VIEW) ---
+  function renderFloorLayout(upMap) {
+     // 1. Unplanned Group (Alerts)
+     const unplannedList = state.agents.unplanned || [];
+     
+     // 2. Planned / Support (Vacation, Training, Meetings)
+     const plannedList = [...(state.agents.vacation||[]), ...(state.agents.training||[]), ...(state.agents.planned||[])];
+     
+     // 3. Active Floor (The rest)
+     // Filter active lists by search/region is done inside renderGroup
+     
+     let startingHtml = '';
+     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
+         startingHtml = `
+         <div class="aether-card" style="padding:20px; margin-bottom:24px; border-left:4px solid var(--accent-primary);">
+             <div class="section-header" style="color:var(--accent-primary);">Starting Soon</div>
+             <div class="agent-list-view">${renderGroup(state.agents.startingSoon, upMap)}</div>
+         </div>`;
+     }
+
+     return `
+     ${startingHtml}
+     
+     <div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention (${unplannedList.length})</div>
+     <div class="agent-list-view" style="margin-bottom:30px;">
+        ${renderGroup(unplannedList, upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>'}
+     </div>
+
+     <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;">
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
+            <div class="agent-list-view">${renderGroup(state.agents.icl||[], upMap)}</div>
+        </div>
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-active);">Special Roles (SAFE)</div>
+            <div class="agent-list-view">${renderGroup(state.agents.safe||[], upMap)}</div>
+        </div>
+        <div class="aether-card special-group" style="padding:20px;">
+            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC FIRE)</div>
+            <div class="agent-list-view">${renderGroup(state.agents.ulc||[], upMap)}</div>
+        </div>
+     </div>
+     
+     <div class="grid-split" style="align-items:start;">
+         <div style="display:flex; flex-direction:column; gap:20px;">
+             <div class="aether-card" style="padding:24px;">
+                 <div class="section-header">
+                    Onshore Unit
+                    <button class="btn-popout" title="Popout Onshore" onclick="openPopout('Onshore')"><i data-lucide="external-link" width="14"></i></button>
+                 </div>
+                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Onshore')), upMap)}</div>
+             </div>
+         </div>
+         <div style="display:flex; flex-direction:column; gap:20px;">
+             <div class="aether-card" style="padding:24px;">
+                 <div class="section-header">
+                    Offshore Unit
+                    <button class="btn-popout" title="Popout Offshore" onclick="openPopout('Offshore')"><i data-lucide="external-link" width="14"></i></button>
+                 </div>
+                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Offshore')), upMap)}</div>
+             </div>
+         </div>
+     </div>
+
+     <div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div>
+     <div class="agent-list-view" style="opacity:0.8;">
+         ${renderGroup(plannedList, upMap)}
+     </div>`;
+  }
+  
+  function renderGroup(list, upMap) {
+      const filtered = list.filter(a => {
+         const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
+         const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
+         return mName && mReg;
+      });
+      if(!filtered.length) return '';
+      return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
+  }
+
+  // --- NEW SLIM ROW COMPONENT ---
+  function renderAgentRow(a, upInfo) {
+     let start = "00:00", end = "00:00";
+     if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
+     
+     // Color Strip Logic
+     let stripClass = a.region.includes('Onshore') ? 'on' : 'off';
+     if(a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
+     if(a.onBreakNow) stripClass = 'break';
+
+     // Status Text Logic
+     let statusText = a.subStatus || "Active";
+     let statusColor = "var(--text-secondary)";
+     
+     // Role highlighting
+     if (a.role && a.role.includes('SAFE')) { statusColor = "var(--status-active)"; }
+     else if (a.role && a.role.includes('ICL')) { statusColor = "var(--status-role)"; }
+     else if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { statusColor = "var(--status-ulc)"; }
+     
+     if (a.onBreakNow) {
+         statusColor = "var(--status-break)";
+         // Logic: Your backend AgentMonitor already sends "1st Break", "Lunch" etc in a.subStatus
+         // If for some reason it's missing, we fallback
+         if(statusText === "On Break" && a.rawBreaks) {
+             // Fallback client-side calculation if needed
+             const brk = a.rawBreaks.find(b => b.type.includes('Break'));
+             if(brk) statusText = brk.type; 
+         }
+     }
+
+     return `
+     <div class="agent-row" onclick="openMenu(event, '${a.name}')">
+        <div class="status-strip ${stripClass}"></div>
+        <div class="row-name" data-full-name="${a.name}">${a.name}</div>
+        <div class="row-id">${a.id}</div>
+        <div class="row-status" style="color:${statusColor}">${statusText} ${a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px;">OT</span>' : ''}</div>
+        <div class="row-time">${start}-${end}</div>
+     </div>`;
+  }
+  
+  function renderBreakLayout(upMap) {
+      const onBreakList = (state.agents.active||[]).filter(a => a.onBreakNow);
+      // We keep CARDS for the break room as big timers are useful there
+      return `
+      <div>
+         <div class="section-header">
+             Currently on Break <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${onBreakList.length}</span>
+             <button class="btn-popout" title="Popout Break Room" onclick="openPopout('Breaks')"><i data-lucide="external-link" width="14"></i></button>
+         </div>
+         <div class="break-grid" style="margin-bottom:40px;">
+            ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Break Room Empty</div>'}
+         </div>
+         <div class="section-header">Upcoming Breaks <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem;">${(state.agents.upcomingBreak||[]).length}</span></div>
+         <div class="break-grid">
+            ${(state.agents.upcomingBreak||[]).map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">No Upcoming Breaks</div>'}
+         </div>
+      </div>`;
+  }
+  
+  function renderBreakCard(a) {
+      const isNow = a.onBreakNow;
+      // Note: a.subStatus often contains "1st Break" etc.
+      const label = isNow ? a.subStatus : a.auxLabel;
+      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.7; border-top:none;' : ''}">
+         <div class="break-name">${a.name}</div>
+         <div class="break-timer" style="${!isNow ? 'font-size:1.5rem; color:var(--text-muted);' : ''}">${a.timer}</div>
+         <div class="break-label">${label}</div>
+      </div>`;
+  }
+
+  // --- STANDARD RENDER FUNCTIONS (Overview, etc - largely unchanged) ---
   function renderOverview() {
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
@@ -555,149 +503,6 @@
          </div>
       </div>`;
   }
-
-  function renderAgents() {
-      const tab = state.agentTab;
-      const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
-      
-      return `
-      <div class="sticky-header">
-         <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
-             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
-             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
-                <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
-             </div>
-             <div style="flex:1"></div>
-             <div style="display:flex; gap:8px;">
-                <button class="btn ${state.regionFilter==='All'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('All')">All</button>
-                <button class="btn ${state.regionFilter==='Onshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Onshore')">On</button>
-                <button class="btn ${state.regionFilter==='Offshore'?'btn-primary':'btn-glass'}" onclick="setRegionFilter('Offshore')">Off</button>
-             </div>
-         </div>
-      </div>
-      ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
-  }
-  
-  function renderFloorLayout(upMap) {
-     let startingHtml = '';
-     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
-         startingHtml = `
-         <div class="aether-card" style="padding:20px; margin-bottom:24px; border-left:4px solid var(--accent-primary);">
-             <div class="section-header" style="color:var(--accent-primary);">Starting Soon</div>
-             <div class="agent-list">${renderGroup(state.agents.startingSoon, upMap)}</div>
-         </div>`;
-     }
-
-     return `
-     ${startingHtml}
-     <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom:24px;">
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-role);">Special Roles (ICL)</div>
-            <div class="agent-list">${renderGroup(state.agents.icl||[], upMap)}</div>
-        </div>
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-active);">Special Roles (SAFE)</div>
-            <div class="agent-list">${renderGroup(state.agents.safe||[], upMap)}</div>
-        </div>
-        <div class="aether-card special-group" style="padding:20px;">
-            <div class="section-header" style="color:var(--status-ulc);">Special Roles (ULC FIRE)</div>
-            <div class="agent-list">${renderGroup(state.agents.ulc||[], upMap)}</div>
-        </div>
-     </div>
-     <div class="grid-split" style="align-items:start;">
-         <div style="display:flex; flex-direction:column; gap:20px;">
-             <div class="aether-card" style="padding:24px;">
-                 <div class="section-header">
-                    Onshore Unit
-                    <button class="btn-popout" title="Popout Onshore" onclick="openPopout('Onshore')"><i data-lucide="external-link" width="14"></i></button>
-                 </div>
-                 <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Onshore')), upMap)}</div>
-             </div>
-         </div>
-         <div style="display:flex; flex-direction:column; gap:20px;">
-             <div class="aether-card" style="padding:24px;">
-                 <div class="section-header">
-                    Offshore Unit
-                    <button class="btn-popout" title="Popout Offshore" onclick="openPopout('Offshore')"><i data-lucide="external-link" width="14"></i></button>
-                 </div>
-                 <div class="agent-list">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Offshore')), upMap)}</div>
-             </div>
-         </div>
-     </div>
-     <div style="margin-top:40px;">
-         <div class="section-header" style="color:var(--status-alert);">Unplanned / Support</div>
-         <div class="agent-list" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
-            ${renderGroup([...(state.agents.training||[]), ...(state.agents.unplanned||[]), ...(state.agents.vacation||[]), ...(state.agents.planned||[])], upMap)}
-         </div>
-     </div>`;
-  }
-  
-  function renderBreakLayout(upMap) {
-      const onBreakList = (state.agents.active||[]).filter(a => a.onBreakNow);
-      return `
-      <div>
-         <div class="section-header">
-             Currently on Break <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${onBreakList.length}</span>
-             <button class="btn-popout" title="Popout Break Room" onclick="openPopout('Breaks')"><i data-lucide="external-link" width="14"></i></button>
-         </div>
-         <div class="break-grid" style="margin-bottom:40px;">
-            ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Break Room Empty</div>'}
-         </div>
-         <div class="section-header">Upcoming Breaks <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem;">${(state.agents.upcomingBreak||[]).length}</span></div>
-         <div class="break-grid">
-            ${(state.agents.upcomingBreak||[]).map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">No Upcoming Breaks</div>'}
-         </div>
-      </div>`;
-  }
-
-  function renderGroup(list, upMap) {
-      const filtered = list.filter(a => {
-         const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
-         const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
-         return mName && mReg;
-      });
-      if(!filtered.length) return '';
-      return filtered.map(a => renderAgentPill(a, upMap.get(a.id))).join('');
-  }
-
-  function renderAgentPill(a, upInfo) {
-     let start = "00:00", end = "00:00";
-     if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
-     const regionClass = a.region.includes('Onshore') ? 'on' : 'off';
-     const regionLabel = a.region.includes('Onshore') ? 'ONSHORE' : 'OFFSHORE';
-     let extraClass = "";
-     
-     let statusColor = "var(--text-secondary)";
-     if (a.role && a.role.includes('SAFE')) { extraClass += " role-safe"; statusColor = "var(--status-active)"; }
-     if (a.role && a.role.includes('ICL')) { extraClass += " role-icl"; statusColor = "var(--status-role)"; }
-     if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { extraClass += " role-ulc"; statusColor = "var(--status-ulc)"; }
-     
-     if (a.onBreakNow) { extraClass += " status-break"; statusColor = "var(--status-break)"; }
-     
-     let statusText = a.subStatus || "Active";
-     if (a.onBreakNow) statusText = "ON BREAK";
-
-     return `<div class="agent-pill ${extraClass}" data-name="${a.name}" data-region="${a.region}" onclick="openMenu(event, '${a.name}')">
-        <div class="pill-left">
-           <div class="pill-av" style="${a.role?'border:2px solid '+statusColor:''}">${a.name.substring(0,2).toUpperCase()}</div>
-           <div class="pill-info">
-              <div class="pill-name">
-                  <button class="btn-icon-sm" style="width:18px; height:18px; margin-right:6px; background:rgba(0,0,0,0.1); color:var(--text-muted); display:inline-flex;" onclick="copyAgentInfo(event, '${a.name}', '${a.id}')" title="Copy ID & Name">
-                      <i data-lucide="copy" width="10"></i>
-                  </button>
-                  <span style="font-family:monospace; opacity:0.6; font-size:0.8em; margin-right:4px;">${a.id||''}</span>
-                  ${a.name} ${a.isOT?'<span style="color:var(--text-accent); font-size:0.8em;">(OT)</span>':''}
-              </div>
-              <div style="display:flex; align-items:center;">
-                 <div class="region-tag ${regionClass}">${regionLabel}</div>
-                 <div class="pill-role" style="color:${statusColor}; font-weight:700;">${statusText}</div>
-              </div>
-           </div>
-        </div>
-        <div class="pill-time">${start}-${end}</div>
-     </div>`;
-  }
   
   function copyAgentInfo(e, name, id) {
       e.stopPropagation(); 
@@ -705,15 +510,6 @@
       navigator.clipboard.writeText(text).then(() => {
           showToast(`Copied: ${text}`);
       });
-  }
-  
-  function renderBreakCard(a) {
-      const isNow = a.onBreakNow;
-      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.7; border-top:none;' : ''}">
-         <div class="break-name">${a.name}</div>
-         <div class="break-timer" style="${!isNow ? 'font-size:1.5rem; color:var(--text-muted);' : ''}">${a.timer}</div>
-         <div class="break-label">${a.auxLabel}</div>
-      </div>`;
   }
 
   function renderWeather() {
@@ -920,4 +716,225 @@
       document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
+  
+  // INSIGHTS CHARTS (Same as before)
+  let charts = {};
+  function initCharts() {
+      if (typeof Chart === 'undefined') return;
+      if(charts.rolesHist) charts.rolesHist.destroy();
+
+      const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
+      state.roleLogs.forEach(log => {
+          if (log.role.includes('SAFE')) roleData.SAFE += (log.duration/60);
+          else if (log.role.includes('ICL')) roleData.ICL += (log.duration/60);
+          else if (log.role.includes('ULC') || log.role.includes('FIRE')) roleData.ULC += (log.duration/60);
+      });
+
+      ['safe','icl','ulc'].forEach(g => {
+          if(state.agents[g]) {
+              state.agents[g].forEach(a => {
+                  if (a.role && a.role.includes('SAFE')) roleData.SAFE += 0.5;
+                  if (a.role && a.role.includes('ICL')) roleData.ICL += 0.5;
+                  if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) roleData.ULC += 0.5;
+              });
+          }
+      });
+
+      const ctx2 = document.getElementById('chart-roles-hist');
+      if(ctx2) {
+          charts.rolesHist = new Chart(ctx2, {
+              type: 'bar',
+              data: {
+                  labels: ['SAFE', 'ICL', 'ULC'],
+                  datasets: [{
+                      label: 'Hours',
+                      data: [roleData.SAFE, roleData.ICL, roleData.ULC],
+                      backgroundColor: ['#059669', '#7c3aed', '#f97316'],
+                      borderRadius: 6
+                  }]
+              },
+              options: { 
+                  responsive: true, 
+                  maintainAspectRatio: false, 
+                  plugins: { legend: { display: false } },
+                  scales: { y: { beginAtZero: true } }
+              }
+          });
+      }
+  }
+
+  function initOverviewChart() {
+      if (typeof Chart === 'undefined') return;
+      
+      const ctx = document.getElementById('chart-overview');
+      if (!ctx) return;
+
+      const labels = state.slHistory.map(d => d.name);
+      const dataPoints = state.slHistory.map(d => d.val);
+
+      if (charts.overview) {
+          charts.overview.destroy();
+          charts.overview = null;
+      }
+      
+      charts.overview = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Service Level',
+                data: dataPoints,
+                borderColor: '#4f46e5',
+                backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false,
+            scales: { y: { min: 0, max: 100 } },
+            plugins: { legend: { display: false } },
+            animation: false 
+        }
+      });
+  }
+
+  // INSIGHTS RENDERER
+  function renderInsights() {
+      const isWeek = state.insightMode === 'week';
+      
+      let activeRoles = [];
+      if (!isWeek && state.selectedDate === new Date().toISOString().split('T')[0]) {
+          ['icl','safe','ulc','active'].forEach(group => {
+              if (state.agents[group]) {
+                  state.agents[group].forEach(a => {
+                      if (a.role && a.role !== 'Active') {
+                          activeRoles.push({ agent: a.name, role: a.role, status: 'LIVE' });
+                      }
+                  });
+              }
+          });
+      }
+
+      const activeRows = activeRoles.map(r => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--glass-surface); border-radius:12px; margin-bottom:10px; border:1px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+              <div style="font-weight:700; color:var(--text-main);">${r.agent}</div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                  <span class="agent-pill ${r.role.includes('SAFE')?'role-safe':(r.role.includes('ICL')?'role-icl':'role-ulc')}" style="font-size:0.8rem; padding:4px 10px;">${r.role}</span>
+                  <div style="color:var(--status-active); font-weight:800; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; animation:pulse 2s infinite;">● LIVE</div>
+              </div>
+          </div>
+      `).join('');
+
+      const tableRows = state.roleLogs.map(log => `
+          <tr style="border-bottom:1px solid var(--glass-border);">
+              ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
+              <td style="padding:12px; font-weight:700;">${log.agent}</td>
+              <td style="padding:12px;"><span class="agent-pill ${log.role.includes('SAFE')?'role-safe':(log.role.includes('ICL')?'role-icl':'role-ulc')}" style="width:fit-content; font-size:0.75rem; padding:4px 8px;">${log.role}</span></td>
+              <td style="padding:12px; text-align:right; font-weight:700;">${log.duration} min</td>
+              <td style="padding:12px; text-align:right; color:var(--text-muted); font-family:monospace; font-size:0.85rem;">${log.start} - ${log.end}</td>
+          </tr>
+      `).join('');
+
+      const statsRows = state.statsLogs.map(s => `
+          <tr style="border-bottom:1px solid var(--glass-border);">
+              <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
+              <td style="padding:12px; color:${parseFloat(s.svl)<80?'var(--status-alert)':'var(--status-active)'}; font-weight:700;">${s.svl}</td>
+              <td style="padding:12px;">${s.ack}s</td>
+          </tr>
+      `).join('');
+
+      const flagged = (state.agents.unplanned||[]).map(a => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border);">
+             <span style="font-weight:700;">${a.name}</span>
+             <span style="color:var(--status-alert); font-weight:700; background:rgba(220,38,38,0.1); padding:4px 8px; border-radius:6px; font-size:0.8rem;">${a.subStatus}</span>
+          </div>`).join('') || '<div style="padding:24px; color:var(--text-muted); text-align:center;">No active flags today</div>';
+
+      return `
+      <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
+      <div class="sticky-header" style="justify-content:space-between;">
+         <div style="display:flex; align-items:center; gap:16px;">
+             <h2 style="margin:0;">Operations Insight</h2>
+             
+             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
+                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Daily</button>
+                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Weekly</button>
+             </div>
+
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
+         </div>
+         <div style="display:flex; gap:16px;">
+             <div class="kpi-box" style="text-align:right;">
+                 <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
+                 <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
+             </div>
+         </div>
+      </div>
+      
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
+         
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <div class="aether-card">
+                 <div class="section-header" style="color:var(--status-active);">Active Roles (Live)</div>
+                 <div style="max-height:300px; overflow-y:auto;">
+                    ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
+                 </div>
+             </div>
+             
+             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
+                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
+                     ⚠️ Active Flags
+                 </div>
+                 <div style="flex:1; overflow-y:auto;">
+                     ${flagged}
+                 </div>
+             </div>
+         </div>
+         
+         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px; border:2px solid var(--accent-primary);">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; background:var(--accent-primary); color:white;">
+                 Completed Sessions (Roles)
+             </div>
+             <div style="overflow-y:auto; flex:1;">
+                 <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
+                    <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
+                        <tr>
+                            ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
+                            <th style="padding:10px; text-align:left;">Agent</th>
+                            <th style="padding:10px; text-align:left;">Role</th>
+                            <th style="padding:10px; text-align:right;">Mins</th>
+                            <th style="padding:10px; text-align:right;">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                 </table>
+             </div>
+         </div>
+
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <div class="aether-card">
+                 <div class="section-header">Total Hours</div>
+                 <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
+             </div>
+
+             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
+                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
+                     Stats Updates
+                 </div>
+                 <div style="overflow-y:auto; flex:1;">
+                     <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                        <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
+                            <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th></tr>
+                        </thead>
+                        <tbody>
+                            ${statsRows || '<tr><td colspan="3" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
+                        </tbody>
+                     </table>
+                 </div>
+             </div>
+         </div>
+      </div>
+      `;
+  }
 </script>
