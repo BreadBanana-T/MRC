@@ -8,7 +8,7 @@
       pendingUpdates: {}, 
       weather: {}, 
       slHistory: [], 
-      idpHistory: [],
+      // idpHistory REMOVED
       calendarEvents: [],
       roleLogs: [], 
       statsLogs: [], 
@@ -27,8 +27,7 @@
       editingId: null, 
       appUrl: "", 
       insightMode: 'day', 
-      selectedDate: new Date().toISOString().split('T')[0],
-      graphRendered: false 
+      selectedDate: new Date().toISOString().split('T')[0]
   };
 
   // Mouse move effect for glass cards
@@ -159,9 +158,8 @@
       
       const roleHandler = (res) => { try { state.roleLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
       const statsHandler = (res) => { try { state.statsLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
-      const idpHandler = (res) => { try { state.idpHistory = JSON.parse(res); if (state.view === 'insights') initCharts(); } catch(e) {} };
-
-      google.script.run.withSuccessHandler(idpHandler).getIdpHistory();
+      
+      // IDP History fetch REMOVED
 
       if (state.insightMode === 'week') {
           google.script.run.withSuccessHandler(roleHandler).getWeeklyRoleLogs(state.selectedDate);
@@ -210,7 +208,7 @@
      if(state.view === 'overview') initOverviewChart();
   }
   
-  // --- INSIGHTS RENDERER ---
+  // --- INSIGHTS RENDERER (Cleaned of IDP) ---
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
@@ -275,7 +273,6 @@
              <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
          </div>
          <div style="display:flex; gap:16px;">
-             <button class="btn btn-primary" onclick="openIdpModal()">Log IDP</button>
              <div class="kpi-box" style="text-align:right;">
                  <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
                  <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
@@ -283,7 +280,7 @@
          </div>
       </div>
       
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px; margin-bottom:24px;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
          
          <div style="display:flex; flex-direction:column; gap:24px;">
              <div class="aether-card">
@@ -292,6 +289,7 @@
                     ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
                  </div>
              </div>
+             
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
                      ⚠️ Active Flags
@@ -327,6 +325,7 @@
                  <div class="section-header">Total Hours</div>
                  <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
              </div>
+
              <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
                  <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                      Stats Updates
@@ -344,13 +343,6 @@
              </div>
          </div>
       </div>
-
-      <div class="aether-card" style="min-height: 400px; display:flex; flex-direction:column;">
-          <div class="section-header">IDP Analysis (Forecast vs Actual)</div>
-          <div style="flex:1; width:100%; min-height:350px;">
-              <canvas id="chart-idp-hist"></canvas>
-          </div>
-      </div>
       `;
   }
   
@@ -358,7 +350,7 @@
   function initCharts() {
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
-      if(charts.idpHist) charts.idpHist.destroy();
+      // IDP Chart Destroy REMOVED
 
       const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
       state.roleLogs.forEach(log => {
@@ -399,30 +391,7 @@
               }
           });
       }
-
-      // Placeholder for IDP Graph (Rendered on calculation)
-      const ctx3 = document.getElementById('chart-idp-hist');
-      if(ctx3 && state.idpHistory.length) {
-          charts.idpHist = new Chart(ctx3, {
-              type: 'line',
-              data: {
-                  labels: state.idpHistory.map(d=>d.name),
-                  datasets: [{
-                      label: 'IDP %',
-                      data: state.idpHistory.map(d=>d.val),
-                      borderColor: '#f97316',
-                      backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                      fill: true,
-                      tension: 0.3
-                  }]
-              },
-              options: { 
-                  responsive: true, 
-                  maintainAspectRatio: false, 
-                  plugins: { legend: { display: false } }
-              }
-          });
-      }
+      // IDP CHART INIT REMOVED
   }
 
   function initOverviewChart() {
@@ -947,77 +916,7 @@
   
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
 
-  // IDP ACTIONS
-  window.openIdpModal = () => document.getElementById('idp-modal').classList.add('open');
-  
-  // UPDATED: Renders cleaner graph in full width card
-  window.submitIdpAction = () => {
-     const val = document.getElementById('idp-input').value; 
-     if(!val) return;
-     
-     document.getElementById('idp-modal').classList.remove('open');
-     showToast("Calculating IDP...");
-     
-     if(typeof google !== 'undefined') {
-         google.script.run.withSuccessHandler((res) => {
-             const result = JSON.parse(res);
-             if(result.success) {
-                 showToast(result.msg);
-                 
-                 // --- RENDER CLEANER GRAPH ---
-                 if (result.graphData && typeof Chart !== 'undefined') {
-                     const ctx = document.getElementById('chart-idp-hist'); 
-                     if (ctx) {
-                        if (charts.idpHist) charts.idpHist.destroy();
-                        
-                        charts.idpHist = new Chart(ctx, {
-                          type: 'line',
-                          data: {
-                              labels: result.graphData.labels,
-                              datasets: [
-                                {
-                                  label: 'Actual (Open)',
-                                  data: result.graphData.actual,
-                                  borderColor: '#059669', // Green
-                                  backgroundColor: 'rgba(5, 150, 105, 0.2)', // Green fill
-                                  tension: 0.3,
-                                  fill: true,
-                                  borderWidth: 2
-                                },
-                                {
-                                  label: 'Forecasted (Req)',
-                                  data: result.graphData.forecast,
-                                  borderColor: '#94a3b8', // Grey
-                                  borderDash: [6, 4],
-                                  tension: 0.3,
-                                  fill: false,
-                                  borderWidth: 2
-                                }
-                              ]
-                          },
-                          options: { 
-                              responsive: true, 
-                              maintainAspectRatio: false,
-                              interaction: { mode: 'index', intersect: false },
-                              plugins: { 
-                                  legend: { display: true, position: 'top' },
-                                  title: { display: true, text: `Intraday Analysis (${result.val}%)` }
-                              },
-                              scales: {
-                                  y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } },
-                                  x: { grid: { display: false } }
-                              }
-                          }
-                        });
-                     }
-                 }
-                 // ---------------------------
-             } else {
-                 showToast("Error: " + result.msg);
-             }
-         }).calculateIdpFromText(val);
-     }
-  }
+  // IDP ACTIONS REMOVED
 
   // EVENT DETAILS MODAL
   window.openEventModal = (idx) => {
