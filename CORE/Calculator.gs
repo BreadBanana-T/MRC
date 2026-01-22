@@ -16,7 +16,7 @@ function calculateMetrics(inText, outText) {
   };
   // 1. SLA LIST (For ACK / SVL) - STRICT PRIORITY
   // Aligned with Old Tool Regex: ^(1-FIRE|1-GAS|1-H\/U|1-MED|2-FARM|3-VID|4-BURG|4-COMM|4-TAMP|6-O\/C)
-  const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "3-VID", "4-BURG", "4-COMM", "4-TAMP", "6-O/C"];
+  const LIST_SLA = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "3-VID", "4-BURG", "4-COMM"];
   
   // 2. TREND LIST (For Workload Volume) - STRICT
   // Matches LIST_SLA to ensure Trend % mirrors the "Outbound Calculator" tool exactly.
@@ -131,7 +131,7 @@ function calculateMetrics(inText, outText) {
 
     if (trendRef > 0) {
        const growth = (trendDiff / trendRef) * 100;
-       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(1) + "%";
+       stats.trendOut = (growth > 0 ? "+" : "") + Math.round(growth) + "%";
     }
   }
 
