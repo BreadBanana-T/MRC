@@ -58,7 +58,7 @@ function compileFloorData() {
     const isOT = otList.length > 0;
 
     // --- LOOKAHEAD FILTER (30 MINS) ---
-    const LOOKAHEAD = 30 * 60 * 1000; 
+    const LOOKAHEAD = 60 * 60 * 1000; // 60 Minutes
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
     if (startEpoch && endEpoch) {
