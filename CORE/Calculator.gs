@@ -70,9 +70,9 @@ function calculateMetrics(inText, outText) {
             const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
             
             if (timeIdx > -1 && timeIdx >= 3) {
-                const vol = parseInt(parts[timeIdx - 3]) || 0;
+                const vol = parseInt((parts[timeIdx - 3] || "0").replace(/,/g, "")) || 0;
                 const timeSec = dur(parts[timeIdx]);
-                const slVal = parseFloat(parts[timeIdx + 1]) || 0;
+                const slVal = parseFloat((parts[timeIdx + 1] || "0").replace(/,/g, ".")) || 0;
 
                 // STRICT LIST for SLA/ACK
              
@@ -105,10 +105,10 @@ function calculateMetrics(inText, outText) {
           
        
                 if (timeIdx > -1 && timeIdx >= 3) {
-                   const vol = parseInt(parts[timeIdx - 3]) || 0; 
-                   const tr = parseInt(parts[timeIdx - 2]) || 0; // Trend (Reference)
+                   const vol = parseInt((parts[timeIdx - 3] || "0").replace(/,/g, "")) || 0;
+                   const tr = parseInt((parts[timeIdx - 2] || "0").replace(/,/g, "")) || 0; // Trend (Reference)
               
-                   const diff = parseInt(parts[timeIdx - 1]) || 0; // Diff
+                   const diff = parseInt((parts[timeIdx - 1] || "0").replace(/,/g, "")) || 0; // Diff
 
                    // Graph Data (Show all active)
                    if (vol > 0 || tr > 0) {

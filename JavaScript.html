@@ -559,7 +559,7 @@
       if (!state.weather || Object.keys(state.weather).length === 0) {
          return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
       }
-      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-glass" onclick="fillWindsAction()"><i data-lucide="save" width="16"></i> Fill Sheet</button><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       if (state.alerts && state.alerts.length > 0) {
          html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
          state.alerts.forEach(a => html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province}: ${a.type} (${a.count})</div>`);
@@ -748,8 +748,6 @@
   
   window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
   
-  window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
-
   // EVENT DETAILS MODAL
   window.openEventModal = (idx) => {
       const e = state.calendarEvents[idx];
@@ -870,13 +868,20 @@
           </div>
       `).join('');
 
-      const tableRows = state.roleLogs.map(log => `
+      const agentTime = {};
+      state.roleLogs.forEach(log => {
+          if (!agentTime[log.agent]) agentTime[log.agent] = { 'UCL FIRE': 0, 'ICL': 0, 'SAFE': 0 };
+          if (log.role.includes('UCL FIRE')) agentTime[log.agent]['UCL FIRE'] += log.duration;
+          else if (log.role.includes('ICL')) agentTime[log.agent]['ICL'] += log.duration;
+          else if (log.role.includes('SAFE')) agentTime[log.agent]['SAFE'] += log.duration;
+      });
+
+      const tableRows = Object.entries(agentTime).map(([agent, roles]) => `
           <tr style="border-bottom:1px solid var(--glass-border);">
-              ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
-              <td style="padding:12px; font-weight:700;">${log.agent}</td>
-              <td style="padding:12px;"><span class="agent-pill ${log.role.includes('SAFE')?'role-safe':(log.role.includes('ICL')?'role-icl':'role-ulc')}" style="width:fit-content; font-size:0.75rem; padding:4px 8px;">${log.role}</span></td>
-              <td style="padding:12px; text-align:right; font-weight:700;">${log.duration} min</td>
-              <td style="padding:12px; text-align:right; color:var(--text-muted); font-family:monospace; font-size:0.85rem;">${log.start} - ${log.end}</td>
+              <td style="padding:12px; font-weight:700;">${agent}</td>
+              <td style="padding:12px; text-align:right;">${roles['UCL FIRE']} min</td>
+              <td style="padding:12px; text-align:right;">${roles['ICL']} min</td>
+              <td style="padding:12px; text-align:right;">${roles['SAFE']} min</td>
           </tr>
       `).join('');
 
@@ -943,11 +948,10 @@
                  <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
                     <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
                         <tr>
-                            ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
                             <th style="padding:10px; text-align:left;">Agent</th>
-                            <th style="padding:10px; text-align:left;">Role</th>
-                            <th style="padding:10px; text-align:right;">Mins</th>
-                            <th style="padding:10px; text-align:right;">Time</th>
+                            <th style="padding:10px; text-align:right;">UCL FIRE</th>
+                            <th style="padding:10px; text-align:right;">ICL</th>
+                            <th style="padding:10px; text-align:right;">SAFE</th>
                         </tr>
                     </thead>
                     <tbody>${tableRows}</tbody>

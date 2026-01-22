@@ -1,6 +1,6 @@
 const MasterConnector = {
   // *** PASTE YOUR MASTER DB ID HERE ***
-  DB_ID: "1RZOdFH3q0Zvgp2L2LbYD9NzpsfmzLGZNyd7O7j81Q-U", 
+  DB_ID: "1KpB_RgQ4qmaLVyTugeZK5LoUErDEg3gT4IDzMoqOU14",
   
   THRESHOLDS: { 'SICK': {days:30,limit:3}, 'NCNS': {days:90,limit:1}, 'AWOL': {days:90,limit:1} },
 
