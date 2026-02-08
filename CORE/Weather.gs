@@ -1,166 +1,101 @@
 /**
- * WEATHER MODULE (Severity Priority: Warning > Watch)
+ * WEATHER MODULE (Powered by Open-Meteo)
+ * Replaces EC RSS to bypass Google IP blocking.
+ * V3: Removes Gusts (User Request) & Adds Null Safety.
  */
 
 const WeatherService = {
-  fetch: function() { return fetchWeatherRSS(); }
+  fetch: function() { return fetchWeatherOpenMeteo(); }
 };
 
-function fetchWeatherRSS() {
+function fetchWeatherOpenMeteo() {
+  // Mapping Cities to Lat/Lon for Open-Meteo
   const cities = [
-    { name: "Toronto",       code: "on-143", province: "ON" },
-    { name: "Ottawa",        code: "on-118", province: "ON" },
-    { name: "Calgary",       code: "ab-52",  province: "AB" },
-    { name: "Edmonton",      code: "ab-50",  province: "AB" },
-    { name: "Vancouver",     code: "bc-74",  province: "BC" },
-    { name: "Prince George", code: "bc-79",  province: "BC" }, // [FIXED] Was split across lines
-    { name: "Montreal",      code: "qc-147", province: "QC" },
-    { name: "Quebec City",   code: "qc-133", province: "QC" }
+    { name: "Toronto",       lat: 43.70, lon: -79.42, province: "ON", code: "on-143" },
+    { name: "Ottawa",        lat: 45.42, lon: -75.70, province: "ON", code: "on-118" },
+    { name: "Calgary",       lat: 51.05, lon: -114.07, province: "AB", code: "ab-52" },
+    { name: "Edmonton",      lat: 53.54, lon: -113.49, province: "AB", code: "ab-50" },
+    { name: "Vancouver",     lat: 49.25, lon: -123.12, province: "BC", code: "bc-74" },
+    { name: "Prince George", lat: 53.91, lon: -122.74, province: "BC", code: "bc-79" },
+    { name: "Montreal",      lat: 45.50, lon: -73.57, province: "QC", code: "qc-147" },
+    { name: "Quebec City",   lat: 46.81, lon: -71.21, province: "QC", code: "qc-133" }
   ];
 
   const weatherData = {};
-  const alertStats = {}; 
   
-  cities.forEach(function(city) {
+  cities.forEach(city => {
     if (!weatherData[city.province]) weatherData[city.province] = [];
-    if (!alertStats[city.province]) alertStats[city.province] = {};
 
     try {
-      const url = `https://weather.gc.ca/rss/city/${city.code}_e.xml`;
-      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      // Fetch Current (Speed Only) + Daily Forecast
+      // Removed 'wind_gusts_10m' to ensure clean data for spreadsheet copy
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto`;
       
-      if (response.getResponseCode() !== 200) {
-         weatherData[city.province].push({ id: city.code, name: city.name, temp: "--", wind: "OFF", condition: "Offline", forecast: [] });
-         return;
-      }
-
-      const xml = response.getContentText();
-      const document = XmlService.parse(xml);
-      const root = document.getRootElement();
-      // [FIX] Use getNamespace() to correctly parse Atom feeds
-      const ns = root.getNamespace(); 
-      const entries = root.getChildren("entry", ns);
-
-      let temp = "--", windSpeed = "0", condition = "Unknown";
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) throw new Error("API Error " + res.getResponseCode());
+      
+      const data = JSON.parse(res.getContentText());
+      
+      // 1. Current Conditions
+      const current = data.current || {};
+      const curCode = current.weather_code !== undefined ? current.weather_code : 0;
+      const curTemp = Math.round(current.temperature_2m || 0);
+      
+      // Wind Logic: Speed ONLY (No Gusts), defaulted to 0 to prevent 'NaN' or errors
+      const speed = Math.round(current.wind_speed_10m || 0);
+      const windStr = speed.toString();
+      
+      // 2. Forecast (Next 3 days)
+      const daily = data.daily || {};
       const forecastData = [];
-
-      for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          const title = entry.getChild("title", ns).getText();
-          const summary = entry.getChild("summary", ns).getText();
-          
-          let category = "Unknown";
-          const catEl = entry.getChild("category", ns);
-          if (catEl) category = catEl.getAttribute("term").getValue();
-
-          // A. CURRENT CONDITIONS
-          if (category === "Current Conditions") {
-              const parts = title.split(":");
-              if (parts.length > 1) {
-                  const info = parts[1].trim();
-                  const infoParts = info.split(",");
-                  condition = infoParts[0].trim();
-                  const tempMatch = info.match(/(-?\d+(\.\d+)?)°C/);
-                  if (tempMatch) temp = Math.round(parseFloat(tempMatch[1]));
-              }
-              
-              const windMatch = summary.match(/Wind.*?\s+(\d{1,3})\s*km\/h/i);
-              const gustMatch = summary.match(/gusting to\s*(\d+)/i);
-              
-              if (windMatch) {
-                  windSpeed = windMatch[1];
-                  if(gustMatch) windSpeed += `G${gustMatch[1]}`;
-              } else if(summary.match(/calm/i)) {
-                  windSpeed = "0";
-              }
-          }
-
-          // B. WARNINGS
-          else if (category === "Warnings and Watches") {
-              if (!title.includes("No watches or warnings")) {
-                  const cleanDesc = title.replace(/ warning| watch| statement/i, "").trim();
-                  
-                  let severity = 1;
-                  if (title.toLowerCase().includes("warning")) severity = 3;
-                  else if (title.toLowerCase().includes("watch")) severity = 2;
-                  
-                  if (!alertStats[city.province][cleanDesc]) {
-                      alertStats[city.province][cleanDesc] = { count: 0, severity: severity };
-                  }
-                  alertStats[city.province][cleanDesc].count++;
-              }
-          }
-
-          // C. FORECAST
-          else if (category === "Weather Forecasts") {
-              // [FIX] REMOVED the "length > 1" check. 
-              // This ensures we get the day even if title is just "Wednesday" (no colon).
-              let fDay = title.trim();
-              if (title.includes(":")) {
-                  fDay = title.split(":")[0].trim();
-              }
-
-              // Ensure we only grab the next 5-7 days
-              if (forecastData.length < 7) {
-                  let fWind = "Light";
-                  const fWindMatch = summary.match(/wind.*?\s+(\d{1,3})\s*km\/h/i);
-                  const fGustMatch = summary.match(/gusting to\s*(\d+)/i);
-                  
-                  if (fWindMatch) {
-                      fWind = fWindMatch[1];
-                      if(fGustMatch) fWind += `G${fGustMatch[1]}`;
-                  }
-                  let fTemp = "";
-                  const tMatch = summary.match(/(High|Low|Temperature|Steady).*?(-?\d+)/i);
-                  if(tMatch) fTemp = tMatch[2] + "°";
-
-                  forecastData.push({ day: fDay, temp: fTemp, wind: fWind });
-              }
-          }
+      
+      if (daily.time) {
+        for (let i = 1; i <= 3; i++) {
+           if (!daily.time[i]) break;
+           
+           const dDate = new Date(daily.time[i] + "T00:00:00");
+           const dayName = Utilities.formatDate(dDate, "America/Toronto", "EEEE");
+           const high = Math.round(daily.temperature_2m_max[i]);
+           const fSpeed = Math.round(daily.wind_speed_10m_max[i] || 0).toString();
+           
+           forecastData.push({
+             day: dayName,
+             temp: `${high}°`,
+             wind: fSpeed
+           });
+        }
       }
 
       weatherData[city.province].push({ 
-          id: city.code, name: city.name, 
-          temp: temp, wind: windSpeed, condition: condition,
+          id: city.code, 
+          name: city.name, 
+          temp: curTemp, 
+          wind: windStr, // Pure speed string (e.g. "20")
+          condition: wmoToCondition(curCode),
           forecast: forecastData 
       });
+
     } catch (e) {
-      if (weatherData[city.province]) {
-         weatherData[city.province].push({ id: city.code, name: city.name, temp: "--", wind: "ERR", condition: "Error", forecast: [] });
-      }
+      console.warn(`Weather fail for ${city.name}: ${e.message}`);
+      weatherData[city.province].push({ 
+        id: city.code, name: city.name, 
+        temp: "--", wind: "ERR", condition: "Offline", forecast: [] 
+      });
     }
   });
 
-  // --- FINAL ALERT AGGREGATION ---
-  const finalAlerts = [];
-  Object.keys(alertStats).forEach(prov => {
-      const alerts = alertStats[prov];
-      let warnings = [];
-      let watches = [];
+  return { weather: weatherData, alerts: [] };
+}
 
-      for (const [type, data] of Object.entries(alerts)) {
-          if (data.severity === 3) warnings.push({ type, count: data.count, severity: 3 });
-          else if (data.severity === 2) watches.push({ type, count: data.count, severity: 2 });
-      }
-
-      let winner = null;
-      if (warnings.length > 0) {
-          warnings.sort((a,b) => b.count - a.count);
-          winner = warnings[0];
-      } else if (watches.length > 0) {
-          watches.sort((a,b) => b.count - a.count);
-          winner = watches[0];
-      }
-
-      if (winner) {
-          finalAlerts.push({ 
-              province: prov, 
-              type: winner.type, 
-              count: winner.count,
-              severity: winner.severity,
-              isOverride: false
-          });
-      }
-  });
-  return { weather: weatherData, alerts: finalAlerts };
+function wmoToCondition(code) {
+  if (code === 0) return "Clear";
+  if (code <= 3) return "Cloudy";
+  if (code === 45 || code === 48) return "Fog";
+  if (code >= 51 && code <= 57) return "Drizzle";
+  if (code >= 61 && code <= 67) return "Rain";
+  if (code >= 71 && code <= 77) return "Snow";
+  if (code >= 80 && code <= 82) return "Showers";
+  if (code >= 85 && code <= 86) return "Snow Showers";
+  if (code >= 95) return "Thunderstorm";
+  return "Unknown";
 }
