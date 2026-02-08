@@ -189,7 +189,7 @@
      if(state.view === 'overview') initOverviewChart();
   }
 
-  // --- RENDER POP OUT ---
+  // --- RENDER POPOUT ---
   function renderPopout(mode) {
      const c = document.getElementById('content');
      if(!c) return; 
@@ -396,7 +396,6 @@
 
       if (isNow) {
           timeDisplay = a.timer; // "5m"
-          // FIX: Uses currentBreakStr from updated AgentMonitor
           subLabel = `<span style="opacity:0.7">Ends at</span> ${a.currentBreakStr ? a.currentBreakStr.split('-')[1] : '??:??'}`;
       } else {
           timeDisplay = `<span style="font-size:1.5rem">In ${a.startsIn || '?'}</span>`;
@@ -547,14 +546,6 @@
       </div>`;
   }
   
-  function copyAgentInfo(e, name, id) {
-      e.stopPropagation(); 
-      const text = `${name} (${id})`;
-      navigator.clipboard.writeText(text).then(() => {
-          showToast(`Copied: ${text}`);
-      });
-  }
-
   function renderWeather() {
       if (!state.weather || Object.keys(state.weather).length === 0) {
          return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
@@ -572,7 +563,9 @@
          cities.forEach(c => {
              const icon = getWeatherIcon(c.condition);
              const forecastHtml = (c.forecast || []).slice(0,3).map(f => {
-                 return `<div class="weather-day"><span class="wd-name">${f.day.substring(0,3)}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp}</span></div>`;
+                 // FIX: Added safety check for day name
+                 const dayName = f.day ? f.day.substring(0,3) : "---";
+                 return `<div class="weather-day"><span class="wd-name">${dayName}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp}</span></div>`;
              }).join('');
              html += `
              <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
@@ -685,7 +678,7 @@
         <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
             <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>
             <div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div>
-            <div id="report-box" class="${state.currentSL==='0%'?'hidden':''}" style="width:100%;">
+            <div id="report-box" style="width:100%;">
                 <div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div>
                 <button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button>
             </div>
