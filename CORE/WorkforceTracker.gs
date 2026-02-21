@@ -5,8 +5,10 @@
 
 const WorkforceTracker = {
 
+  // --- 1. IMPORT LOGIC ---
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
     ['WF_SCHEDULE', 'WF_IDP', 'WF_FURLOUGH'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
@@ -153,6 +155,7 @@ const WorkforceTracker = {
     return msg.length ? msg.join('\n') : "No valid data found to import.";
   },
 
+  // --- 2. ANALYTICS API ---
   getAnalytics: function(mode, refDate, trackerType) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
@@ -183,71 +186,80 @@ const WorkforceTracker = {
 
     let buckets = [];
     let combinedEvents = [];
+    let groupedLogs = {}; // Enables visual aggregation
 
-    if (trackerType === 'coaching') {
-        const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
+    // Initialize buckets for Heatmap
+    if (mode === 'day' && trackerType === 'furlough') {
+      buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
+      idpData.forEach(row => {
+        if (this._formatDate(row[0]) === startStr) { 
+          let idx = this._timeToBucket(row[1]);
+          if (idx > -1) { buckets[idx].demand += Number(row[2] || 0); buckets[idx].supply += Number(row[3] || 0); }
+        }
+      });
+    }
+
+    const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
+    const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+
+    schedData.forEach(row => {
+        let sDateStr = this._formatDate(row[1]);
         
-        schedData.forEach(row => {
-            let sDateStr = this._formatDate(row[1]);
-            if (sDateStr >= startStr && sDateStr <= endStr) {
-                let act = String(row[2]).toLowerCase();
-                if (COACHING_CODES.some(c => act.includes(c))) {
-                    let sStart = this._timeToBucket(row[3]);
-                    combinedEvents.push({
-                       date: sDateStr, agent: row[0],
-                       time: `${this._formatTime(row[3])} - ${this._formatTime(row[4])}`,
-                       hours: this._getDuration(row[3], row[4]),
-                       shift: this._getShift(sStart),
-                       activityName: row[2]
-                    });
+        if (sDateStr >= startStr && sDateStr <= endStr) {
+            let agent = String(row[0]).trim();
+            let act = String(row[2]).toLowerCase();
+            
+            // MATH: Midpoint Evaluation for accurate Shift assignment
+            let sStart = this._timeToBucket(row[3]);
+            let sEndRaw = this._timeToBucket(row[4]);
+            let sEndReal = sEndRaw < sStart ? sEndRaw + 96 : sEndRaw; // Carry overnight
+            let mid = (sStart + sEndReal) / 2;
+            let shiftType = this._getShift(mid % 96);
+            let hoursVal = this._getDuration(row[3], row[4]);
+
+            let isCoach = trackerType === 'coaching' && COACHING_CODES.some(c => act.includes(c));
+            let isFurlough = trackerType === 'furlough' && ACSU_CODES.some(c => act.includes(c));
+
+            if (isCoach || isFurlough) {
+                // 1. Grid Deduction (Pristine intervals, ignoring lunches)
+                if (isFurlough && mode === 'day') {
+                    let endCap = sEndRaw < sStart ? 96 : sEndRaw; 
+                    for (let i = sStart; i < endCap; i++) {
+                        if (i >= 0 && i < 96) buckets[i].supply = Math.max(0, buckets[i].supply - 1);
+                    }
+                }
+
+                // 2. Aggregation for UI (Merges chunks separated by lunches into a unified block)
+                let groupKey = `${agent}_${sDateStr}_${shiftType}`;
+                if (isCoach) groupKey += `_${row[2]}`; // Keep distinct meetings separate
+
+                if (!groupedLogs[groupKey]) {
+                    groupedLogs[groupKey] = {
+                        date: sDateStr, agent: agent,
+                        activityName: isCoach ? row[2] : "Time Off",
+                        shift: shiftType, hours: hoursVal,
+                        timeStart: this._formatTime(row[3]),
+                        timeEnd: this._formatTime(row[4])
+                    };
+                } else {
+                    groupedLogs[groupKey].hours += hoursVal;
+                    groupedLogs[groupKey].timeEnd = this._formatTime(row[4]); // Stretch end time
                 }
             }
-        });
-    } else {
-        if (mode === 'day') {
-          buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
-          idpData.forEach(row => {
-            if (this._formatDate(row[0]) === startStr) { 
-              let idx = this._timeToBucket(row[1]);
-              if (idx > -1) { buckets[idx].demand += Number(row[2] || 0); buckets[idx].supply += Number(row[3] || 0); }
-            }
-          });
         }
+    });
 
-        const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
-        let prodMap = {};
-        
-        schedData.forEach(row => {
-          let sDateStr = this._formatDate(row[1]);
-          if (sDateStr >= startStr && sDateStr <= endStr) {
-              let agent = String(row[0]).trim();
-              let act = String(row[2]).toLowerCase();
-              let sStart = this._timeToBucket(row[3]);
-              let sEnd = this._timeToBucket(row[4]);
-              if (sEnd < sStart) sEnd = 96;
-
-              if (ACSU_CODES.some(c => act.includes(c))) {
-                   combinedEvents.push({
-                     type: 'auto', date: sDateStr, agent: row[0],
-                     time: `${this._formatTime(row[3])} - ${this._formatTime(row[4])}`,
-                     hours: this._getDuration(row[3], row[4]),
-                     shift: this._getShift(sStart), startIdx: sStart, endIdx: sEnd
-                   });
-              } else if (!['break', 'lunch', 'off', 'sick', 'maladie'].some(ex => act.includes(ex))) {
-                   if (!prodMap[sDateStr]) prodMap[sDateStr] = {};
-                   if (!prodMap[sDateStr][agent]) prodMap[sDateStr][agent] = [];
-                   prodMap[sDateStr][agent].push({ start: sStart, end: sEnd });
-              }
-          }
-        });
-
-        if (mode === 'day') {
-           combinedEvents.forEach(f => {
-              for (let i = f.startIdx; i < f.endIdx; i++) if (i >= 0 && i < 96) buckets[i].supply = Math.max(0, buckets[i].supply - 1);
-           });
-           buckets.forEach(b => { b.net = parseFloat((b.supply - b.demand).toFixed(2)); });
-        }
+    // Finalize Grid
+    if (mode === 'day' && trackerType === 'furlough') {
+        buckets.forEach(b => { b.net = parseFloat((b.supply - b.demand).toFixed(2)); });
     }
+
+    // Process merged events
+    combinedEvents = Object.values(groupedLogs).map(g => ({
+        date: g.date, agent: g.agent, activityName: g.activityName, shift: g.shift,
+        hours: parseFloat(g.hours.toFixed(2)),
+        time: `${g.timeStart} - ${g.timeEnd}`
+    }));
 
     let totals = { all: 0, morning: 0, evening: 0, night: 0, count: combinedEvents.length };
     combinedEvents.forEach(f => {
@@ -263,6 +275,7 @@ const WorkforceTracker = {
     });
   },
 
+  // --- DUAL-UPSERT UTILS ---
   _upsertData: function(sheetName, newRows, dateColIdx, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._executeUpsert(ssLocal, sheetName, newRows, dateColIdx, headersArray);
@@ -330,7 +343,15 @@ const WorkforceTracker = {
     } return -1;
   },
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; },
-  _getShift: function(idx) { if (idx >= 28 && idx < 60) return 'Morning'; if (idx >= 60 && idx < 92) return 'Evening'; return 'Night'; },
+  
+  // FIX: Accurate Shift Logic
+  _getShift: function(idx) { 
+      // 28 = 07:00 | 60 = 15:00 | 92 = 23:00
+      if (idx >= 28 && idx < 60) return 'Morning'; 
+      if (idx >= 60 && idx < 92) return 'Evening'; 
+      return 'Night'; 
+  },
+  
   _getDuration: function(t1, t2) {
       let parseTimeObj = str => {
         let parts = String(str).match(/(\d+):(\d+)\s?([AP]M)?/i);
