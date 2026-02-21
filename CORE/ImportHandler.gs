@@ -3,7 +3,7 @@
  * - Based on your "Old Working Code" for stability.
  * - Adds ID-based Offshore detection (ID starts with 3).
  * - Handles Partial Sick vs Full Sick.
- * - Ignores Planned/LTD sickness for alerts.
+ * - Supports MULTIPLE Roles natively (appends SAFE, ICL, ULC together).
  */
 
 const ImportHandler = {
@@ -15,7 +15,6 @@ const ImportHandler = {
 function processWFMImport(rawText, forcedDate) {
   if (!rawText) return "Error: No text provided.";
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  // Ensure we are working with the correct timezone for timestamps
   ss.setSpreadsheetTimeZone("America/Toronto");
   
   let sheet = ss.getSheetByName("Raw Schedule");
@@ -46,29 +45,25 @@ function processWFMImport(rawText, forcedDate) {
     const line = lines[i].trim();
     if (line.length < 2) continue;
 
-    // 1. DETECT NEW AGENT
     let agentMatch = line.match(rgxAgent);
     if (agentMatch) {
       if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
       currentID = agentMatch[1];
-      currentAgent = agentMatch[2].replace(/["',]/g, "").trim(); // Clean extra quotes
+      currentAgent = agentMatch[2].replace(/["',]/g, "").trim(); 
       buffer = resetBuffer();
       continue;
     }
 
     if (currentAgent) {
-       // 2. NEW DAY DETECTION
        let dateMatch = line.match(rgxAnyDateLine);
        if (dateMatch) {
           const foundDate = dateMatch[1];
-          // If date changes, we save the previous buffer and reset (handle multi-day paste)
           if ((buffer.dateStr && buffer.dateStr !== foundDate) || (buffer.isOff && !buffer.dateStr)) {
              pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
              buffer = resetBuffer();
           }
        }
 
-       // 3. SHIFT LINE (Main Shift)
        let shiftMatch = line.match(rgxShiftLine);
        if (shiftMatch) {
           buffer.dateStr = shiftMatch[1];
@@ -81,20 +76,28 @@ function processWFMImport(rawText, forcedDate) {
           buffer.isOff = true;
        }
 
-       // 4. ACTIVITY PARSING
        const upper = line.toUpperCase();
        
-       // Region Detection (Primary: TI code)
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
        
-       // Role Detection (SAFE / Training)
-       if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) buffer.role = "SAFE";
-       else if (upper.includes("COACHING") || upper.includes("TRN")) buffer.role = "Training";
+       // --- MULTIPLE ROLE DETECTION (APPEND LOGIC) ---
+       if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) {
+           if (!buffer.role.includes("SAFE")) buffer.role = (buffer.role + " SAFE").trim();
+       }
+       if (upper.includes("ICL") || upper.includes("INCIDENT")) {
+           if (!buffer.role.includes("ICL")) buffer.role = (buffer.role + " ICL").trim();
+       }
+       if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
+           if (!buffer.role.includes("ULC FIRE")) buffer.role = (buffer.role + " ULC FIRE").trim();
+       }
+       if (upper.includes("COACHING") || upper.includes("TRN")) {
+           if (!buffer.role.includes("Training")) buffer.role = (buffer.role + " Training").trim();
+       }
 
        // Absence Detection
        if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
            if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) {
-               buffer.absentType = "Medical Leave"; // Treated as Planned
+               buffer.absentType = "Medical Leave";
            } else {
                buffer.absentType = "SICK";
            }
@@ -102,28 +105,23 @@ function processWFMImport(rawText, forcedDate) {
        else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
        else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
        else if (upper.includes("TRAINING") || upper.includes("TRN")) buffer.absentType = "TRAINING";
-
-       // 5. BREAKS & WORK DETECTION
+       
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
            const actStart = actMatch[1];
            const actEnd = actMatch[2];
 
-           // A. BREAKS
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
-            } 
-           
-           // B. WORK SEGMENT (Keeps them Active if they worked partial shift)
+           } 
            else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
                buffer.hasWork = true;
-            }
+           }
 
-           // C. PARTIAL ABSENCE CUTOFF
            if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL"))) {
                if (compareTimeStrings(actEnd, buffer.end)) {
-                   buffer.end = actStart; // Snap shift end to start of absence
+                   buffer.end = actStart;
                }
            }
        }
@@ -131,14 +129,9 @@ function processWFMImport(rawText, forcedDate) {
   }
 
   if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-  
   if (rosterData.length > 0) {
-    // Write starting at Row 2
     sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
-    
-    // Sync to AgentMonitor instantly if available
     if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
-    
     return `Synced ${rosterData.length} entries.`;
   }
   return "No valid data found.";
@@ -153,33 +146,21 @@ function resetBuffer() {
 
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
-  // If no start time, no Off status, and no absence, ignore (empty line)
   if (!buf.start && !buf.isOff && !buf.absentType) return;
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
 
-  // --- SMART LOGIC ---
-
-  // 1. Offshore ID Check (The Backup Rule)
-  // If ID starts with 3, FORCE Offshore
   if (String(id).startsWith("3")) {
       buf.isOffshore = true;
   }
 
-  // 2. Partial Work Fix
   if (buf.hasWork) {
-      if (buf.absentType === "VACATION") buf.absentType = ""; // Worked part of vacation? Treat as active.
-      if (buf.absentType === "SICK") {
-          // Worked part of sick day? Treat as active with note.
-          // We clear absentType so they don't show red "SICK", but we can add a sub-label if needed later.
-          // For now, we clear it so they show up on the floor.
-          buf.absentType = "Leaving Early (Sick)"; 
-      }
+      if (buf.absentType === "VACATION") buf.absentType = "";
+      if (buf.absentType === "SICK") buf.absentType = "Leaving Early (Sick)";
   }
 
-  // 3. Epoch Calculation
   let startEpoch = "", endEpoch = "";
   let finalDateStr = buf.dateStr;
-  if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`; // Use fallback date
+  if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`; 
 
   if (buf.start && buf.end) {
      let y, m, d;
@@ -198,16 +179,12 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
      if (sObj && eObj) {
         let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
         let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
-        
-        // Overnight Logic: If End < Start, add 1 day
         if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
-
         startEpoch = sDate.getTime();
         endEpoch = eDate.getTime();
      }
   }
 
-  // 4. Shift Name
   let type = "Off";
   if (startEpoch) {
      const h = new Date(startEpoch).getHours();
@@ -222,20 +199,10 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
      if(parts.length === 2) cleanName = `${parts[1].trim()} ${parts[0].trim()}`;
   }
 
-  // OUTPUT ROW
   roster.push([
-    cleanName, 
-    id, 
-    finalDateStr,
-    buf.start || "", 
-    buf.end || "",
-    type, 
-    buf.isOffshore ? "Offshore" : "Onshore",
-    JSON.stringify(buf.breaks),
-    buf.role, 
-    buf.absentType,
-    startEpoch, 
-    endEpoch
+    cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, 
+    buf.isOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks),
+    buf.role, buf.absentType, startEpoch, endEpoch
   ]);
 }
 
