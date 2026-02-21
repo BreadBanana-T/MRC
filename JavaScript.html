@@ -26,7 +26,13 @@
       editingId: null, 
       appUrl: "", 
       insightMode: 'day', 
-      selectedDate: new Date().toISOString().split('T')[0]
+      selectedDate: new Date().toISOString().split('T')[0],
+      // NEW: WORKFORCE TRACKER STATE
+      trackerData: null,
+      trackerMode: 'furlough', // 'furlough' or 'coaching'
+      trackerDate: new Date().toISOString().split('T')[0],
+      trackerRange: 'day',
+      trackerSearch: ''
   };
 
   document.addEventListener('mousemove', e => {
@@ -64,9 +70,11 @@
     setInterval(fetchNotifications, 10000);
     setInterval(fetchCalendar, 300000); 
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
+    
     fetchData(); 
     fetchNotifications();
     fetchCalendar();
+    fetchTrackerData(); // NEW: Initial fetch for the tracker
   }
 
   // --- NAVIGATION ---
@@ -74,6 +82,7 @@
       state.view = v; 
       if(v==='scripts') fetchScripts(); 
       if(v==='insights') fetchInsightData(); 
+      if(v==='tracker') fetchTrackerData(); // NEW: Refresh tracker on view
       render(); 
   };
   
@@ -124,7 +133,7 @@
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{
-        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(state.view!=='scripts' && state.view!=='calc' && state.view!=='insights') render(); } }catch(e){}
+        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(!['scripts', 'calc', 'insights', 'tracker'].includes(state.view)) render(); } }catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
@@ -148,6 +157,17 @@
           google.script.run.withSuccessHandler(roleHandler).getDailyRoleLogs(state.selectedDate);
           google.script.run.withSuccessHandler(statsHandler).getDailyStatsLog(state.selectedDate);
       }
+  }
+
+  // NEW: FETCH WORKFORCE TRACKER DATA
+  function fetchTrackerData() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(res => {
+          try { 
+              state.trackerData = JSON.parse(res); 
+              if (state.view === 'tracker') render(); 
+          } catch(e) {}
+      }).getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode);
   }
 
   function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
@@ -181,12 +201,14 @@
      else if (state.view === 'calc') h = renderCalc();
      else if (state.view === 'scripts') h = renderScripts();
      else if (state.view === 'insights') h = renderInsights();
+     else if (state.view === 'tracker') h = renderTracker(); // NEW VIEW ROUTE
      
      c.innerHTML = h; refreshIcons();
      const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
      
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
+     if(state.view === 'tracker') initTrackerChart(); // NEW CHART INIT
   }
 
   // --- RENDER POPOUT ---
@@ -257,7 +279,6 @@
       ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
   }
   
-  // --- FLOOR LAYOUT (CORRECT ORDER) ---
   function renderFloorLayout(upMap) {
      let startingHtml = '';
      if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
@@ -330,7 +351,6 @@
       return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
   }
 
-  // --- SLIM ROW COMPONENT (With Copy Button) ---
   function renderAgentRow(a, upInfo) {
      let start = "00:00", end = "00:00";
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
@@ -414,9 +434,7 @@
   function copyAgentInfo(e, name, id) {
       e.stopPropagation(); 
       const text = `${name} (${id})`;
-      navigator.clipboard.writeText(text).then(() => {
-          showToast(`Copied: ${text}`);
-      });
+      navigator.clipboard.writeText(text).then(() => showToast(`Copied: ${text}`));
   }
 
   // --- MODAL FUNCTIONS ---
@@ -454,7 +472,7 @@
       document.getElementById('ot-modal').classList.add('open');
   };
 
-  // --- STANDARD RENDER FUNCTIONS (Overview, etc) ---
+  // --- STANDARD RENDER FUNCTIONS ---
   function renderOverview() {
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
@@ -563,7 +581,6 @@
          cities.forEach(c => {
              const icon = getWeatherIcon(c.condition);
              const forecastHtml = (c.forecast || []).slice(0,3).map(f => {
-                 // FIX: Added safety check for day name
                  const dayName = f.day ? f.day.substring(0,3) : "---";
                  return `<div class="weather-day"><span class="wd-name">${dayName}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp}</span></div>`;
              }).join('');
@@ -664,6 +681,118 @@
      </div>`;
   }
   
+  // NEW: WORKFORCE TRACKER UI RENDERER
+  function renderTracker() {
+      if (!state.trackerData || state.trackerData.error) {
+          return `<div class="aether-card" style="padding:40px; text-align:center;">
+              <h2 style="color:var(--text-main);">Workforce DB Empty</h2>
+              <p style="color:var(--text-muted); margin-bottom:20px;">${state.trackerData ? state.trackerData.error : "Loading data..."}</p>
+              <button class="btn btn-primary" onclick="openImportModal()">Import WFM Schedule</button>
+          </div>`;
+      }
+
+      const d = state.trackerData;
+      const isCoach = d.trackerType === 'coaching';
+      
+      const filteredEvents = d.events.filter(e => 
+          !state.trackerSearch || 
+          e.agent.toLowerCase().includes(state.trackerSearch.toLowerCase()) || 
+          (e.activityName && e.activityName.toLowerCase().includes(state.trackerSearch.toLowerCase()))
+      );
+
+      const eventLogs = filteredEvents.map(f => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
+             <div style="display:flex; align-items:center; gap:12px;">
+                 <div style="width:36px; height:36px; border-radius:10px; background:var(--glass-surface); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; color:var(--text-muted);">
+                     <i data-lucide="${isCoach ? 'forum' : 'person-standing'}" width="18"></i>
+                 </div>
+                 <div>
+                    <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${f.agent}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date} • ${f.time} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName}</span>` : ''}</div>
+                 </div>
+             </div>
+             <div style="text-align:right;">
+                 <div style="font-size:1.1rem; font-weight:800; color:var(--text-main);">${f.hours}h</div>
+                 <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${f.shift}</div>
+             </div>
+          </div>
+      `).join('') || '<div style="padding:30px; text-align:center; color:var(--text-muted);">No logs found.</div>';
+
+      let gridHtml = '';
+      if (!isCoach && d.mode === 'day') {
+          gridHtml = `
+          <div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;">
+              <div class="section-header">Intraday IDP Heatmap</div>
+              <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap:8px;">
+                  ${d.grid.map((b, i) => {
+                      let cls = 'status-neutral'; 
+                      if(b.net > 3) cls = 'status-surplus'; if(b.net <= 0) cls = 'status-risk';
+                      return `<div class="heatmap-cell ${cls}" style="animation: slideUp 0.3s ease forwards; animation-delay: ${i * 0.005}s; opacity:0; transform:translateY(10px);">
+                          <span style="font-size:0.65rem; opacity:0.7; font-weight:700;">${b.label}</span>
+                          <span style="font-size:1rem; font-weight:800; font-family:monospace;">${b.net>0?'+'+b.net:b.net}</span>
+                      </div>`;
+                  }).join('')}
+              </div>
+          </div>`;
+      }
+
+      return `
+      <style>@keyframes slideUp { to { opacity:1; transform:translateY(0); } }</style>
+      <div class="sticky-header" style="justify-content:space-between;">
+         <div style="display:flex; align-items:center; gap:16px;">
+             <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
+             
+             <select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; fetchTrackerData();">
+                 <option value="furlough" ${!isCoach?'selected':''}>Time-Off Tracker</option>
+                 <option value="coaching" ${isCoach?'selected':''}>Coaching Tracker</option>
+             </select>
+
+             <select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerRange=this.value; fetchTrackerData();">
+                 <option value="day" ${d.mode==='day'?'selected':''}>Daily</option>
+                 <option value="week" ${d.mode==='week'?'selected':''}>Weekly</option>
+                 <option value="month" ${d.mode==='month'?'selected':''}>Monthly</option>
+             </select>
+
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; fetchTrackerData();">
+         </div>
+      </div>
+      
+      ${gridHtml}
+
+      <div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;">
+         
+         <div style="display:flex; flex-direction:column; gap:24px;">
+             <div class="aether-card" style="padding:24px;">
+                <div style="text-align:center; margin-bottom:20px;">
+                    <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div>
+                    <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals.all.toFixed(2)}</div>
+                </div>
+                <div class="chart-3d-container" style="height:220px; width:100%; display:flex; justify-content:center;">
+                    <canvas id="tracker-chart"></canvas>
+                </div>
+             </div>
+             
+             <div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px;">
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.morning.toFixed(1)}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.evening.toFixed(1)}h</div></div>
+             </div>
+         </div>
+
+         <div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;">
+             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
+                 <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+                    <span>Detailed Log</span>
+                    <input type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="state.trackerSearch=this.value; render();" value="${state.trackerSearch}">
+                 </div>
+             </div>
+             <div style="flex:1; overflow-y:auto; padding:0 10px;">
+                 ${eventLogs}
+             </div>
+         </div>
+      </div>
+      `;
+  }
+
   window.openComposeMode = () => { document.getElementById('compose-area').style.display='block'; document.getElementById('compose-overlay').style.display='block'; state.editingId = null; document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; document.getElementById('new-script-cat').value=""; };
   window.closeComposeMode = () => { document.getElementById('compose-area').style.display='none'; document.getElementById('compose-overlay').style.display='none'; state.editingId = null; };
 
@@ -739,7 +868,25 @@
   window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
-  window.runImportAction = () => { const t=document.getElementById('import-text').value; if(!t)return; closeImportModal(); showToast("Syncing..."); if(typeof google!=='undefined') google.script.run.withSuccessHandler(r=>{showToast(r);fetchData();}).runImport(t); };
+  // UPDATED IMPORT ACTION: Handles both Floor and Tracker
+  window.runImportAction = () => { 
+      const t = document.getElementById('import-text').value; 
+      if(!t) return; 
+      closeImportModal(); 
+      showToast("Syncing Database..."); 
+      if(typeof google !== 'undefined') {
+          // Import into Floor Schedule
+          google.script.run.withSuccessHandler(r => {
+             showToast(r);
+             fetchData();
+          }).runImport(t);
+          
+          // Simultaneously Import into Tracker Database
+          google.script.run.withSuccessHandler(() => {
+             fetchTrackerData();
+          }).importWorkforceData(t, t); // Send to both, backend will parse correctly
+      } 
+  };
   
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
 
@@ -753,8 +900,88 @@
       document.getElementById('event-modal').classList.add('open');
   };
   
-  // INSIGHTS CHARTS (Same as before)
+  // CHARTS INITIALIZATION
   let charts = {};
+
+  function initTrackerChart() {
+      if (typeof Chart === 'undefined' || !state.trackerData) return;
+      const ctx = document.getElementById('tracker-chart');
+      if (!ctx) return;
+
+      if (charts.tracker) charts.tracker.destroy();
+
+      const d = state.trackerData;
+      const isCoach = d.trackerType === 'coaching';
+
+      // Custom Plugin to draw a drop shadow directly on the canvas elements
+      const shadowPlugin = {
+          id: 'shadowPlugin',
+          beforeDraw: (chart) => {
+              const ctx = chart.ctx;
+              ctx.save();
+              ctx.shadowColor = document.body.classList.contains('dark') ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.2)';
+              ctx.shadowBlur = 15;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 10;
+          },
+          afterDraw: (chart) => { chart.ctx.restore(); }
+      };
+
+      if (!isCoach) {
+          charts.tracker = new Chart(ctx, {
+              type: 'doughnut',
+              plugins: [shadowPlugin],
+              data: {
+                  labels: ['Morning', 'Evening', 'Night'],
+                  datasets: [{
+                      data: [d.totals.morning, d.totals.evening, d.totals.night],
+                      backgroundColor: ['#fbbf24', '#f97316', '#818cf8'],
+                      borderWidth: 0,
+                      hoverOffset: 15,
+                      borderRadius: 10
+                  }]
+              },
+              options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  cutout: '75%',
+                  plugins: { legend: { display: false } },
+                  animation: { animateScale: true, animateRotate: true, duration: 1000, easing: 'easeOutQuart' }
+              }
+          });
+      } else {
+          const activityCount = {};
+          d.events.forEach(e => {
+              let name = e.activityName || 'Unknown';
+              activityCount[name] = (activityCount[name] || 0) + e.hours;
+          });
+          const sortedNames = Object.keys(activityCount).sort((a,b) => activityCount[b] - activityCount[a]).slice(0, 5);
+          const sortedData = sortedNames.map(n => activityCount[n]);
+
+          charts.tracker = new Chart(ctx, {
+              type: 'bar',
+              plugins: [shadowPlugin],
+              data: {
+                  labels: sortedNames.map(n => n.length > 15 ? n.substring(0,15)+'...' : n),
+                  datasets: [{
+                      data: sortedData,
+                      backgroundColor: '#818cf8',
+                      borderRadius: 8,
+                      borderWidth: 0
+                  }]
+              },
+              options: {
+                  indexAxis: 'y',
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: { legend: { display: false } },
+                  scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { weight: 'bold', color: document.body.classList.contains('dark')?'#94a3b8':'#475569' } } } },
+                  animation: { duration: 1200, easing: 'easeOutBounce' }
+              }
+          });
+      }
+  }
+
   function initCharts() {
       if (typeof Chart === 'undefined') return;
       if(charts.rolesHist) charts.rolesHist.destroy();
