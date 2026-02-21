@@ -2,6 +2,7 @@
  * MODULE: AGENT MONITOR (V4.4)
  * - 30 Minute Lookahead
  * - Captures exact Break Start/End for display
+ * - Dynamically generates Epochs for Overtime Agents
  */
 
 const AgentMonitor = {
@@ -15,7 +16,6 @@ const AgentMonitor = {
   },
   syncFromRaw: function() { return "Synced"; }
 };
-
 function getFloorStatus() { return compileFloorData(); }
 function updateAgentStatus(name, type, value) { return AgentMonitor.setStatus(name, type, value); }
 function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBreaks(name, jsonBreaks); }
@@ -28,7 +28,6 @@ function compileFloorData() {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
-  
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
@@ -42,7 +41,6 @@ function compileFloorData() {
     const persistentData = sheetOverrides.get(cleanName) || {};
     const fastData = fastOverrides[cleanName] || {};
     
-    // Row Mapping: 0=Name, 1=ID, 2=Date, 3=Start, 4=End, 5=Shift, 6=Region, 7=Breaks, 8=Role, 9=Absent, 10=EpStart, 11=EpEnd
     let role = (fastData.role !== undefined) ? fastData.role : (persistentData.role || (row ? row[8] : ""));
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
@@ -56,9 +54,34 @@ function compileFloorData() {
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
+    
+    let dateStr = row ? row[2] : "";
+    let shiftStr = "";
 
-    // --- LOOKAHEAD FILTER (30 MINS) ---
-    const LOOKAHEAD = 60 * 60 * 1000; // 60 Minutes
+    // --- FIX: GENERATE EPOCHS FOR OFF-SHIFT OT AGENTS ---
+    if (isOT && (!startEpoch || !endEpoch)) {
+       let today = new Date();
+       let otStart = otList[0].start;
+       let otEnd = otList[0].end;
+       
+       let parseOTTime = (timeStr, baseDate) => {
+           let d = new Date(baseDate.getTime());
+           let parts = timeStr.match(/(\d{1,2}):(\d{2})/);
+           if (parts) { d.setHours(parseInt(parts[1]), parseInt(parts[2]), 0, 0); }
+           return d;
+       };
+       
+       let sDate = parseOTTime(otStart, today);
+       let eDate = parseOTTime(otEnd, today);
+       if (eDate < sDate) eDate.setDate(eDate.getDate() + 1); // Overnight OT
+       
+       startEpoch = sDate.getTime();
+       endEpoch = eDate.getTime();
+       shiftType = "OT";
+       if (!dateStr) dateStr = Utilities.formatDate(today, "America/Toronto", "yyyy-MM-dd");
+    }
+
+    const LOOKAHEAD = 60 * 60 * 1000;
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
     if (startEpoch && endEpoch) {
@@ -66,8 +89,6 @@ function compileFloorData() {
        if (startEpoch > (now + LOOKAHEAD) && !isOT) return;
     }
 
-    let dateStr = row ? row[2] : "";
-    let shiftStr = "";
     if(startEpoch && endEpoch) {
        const sFmt = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "HH:mm");
        const eFmt = Utilities.formatDate(new Date(endEpoch), "America/Toronto", "HH:mm");
@@ -85,7 +106,7 @@ function compileFloorData() {
 
     const enrichedBreaks = [];
     let nextBreakStr = null;
-    let currentBreakStr = null; // IMPORTANT: Used for "Ends at 14:15"
+    let currentBreakStr = null;
     let onBreakNow = false;
     let breakTimer = "";
     let breakLabel = "";
@@ -118,17 +139,13 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
-             
-             // IS ON BREAK NOW?
              if (now >= bs && now <= be) {
                  onBreakNow = true;
                  const rem = Math.ceil((be - now)/60000);
                  breakTimer = `${rem}m`;
                  breakLabel = displayLabel;
-                 currentBreakStr = `${b.start} - ${b.end}`; // Capture EXACT time range
+                 currentBreakStr = `${b.start} - ${b.end}`;
              }
-             
-             // IS BREAK STARTING SOON? (Next 30 mins)
              if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
                  breakStartsIn = Math.ceil((bs - now)/60000) + "m";
@@ -138,8 +155,7 @@ function compileFloorData() {
     }
 
     let category = "active";
-    let subStatus = role || ""; 
-
+    let subStatus = role || "";
     if (absentType) {
         const upper = absentType.toUpperCase();
         if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
@@ -159,20 +175,18 @@ function compileFloorData() {
     }
 
     if (category === "active" && onBreakNow) subStatus = breakLabel || "On Break";
-    
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
       isModified: isModified, breakTimeStr: nextBreakStr, 
-      currentBreakStr: currentBreakStr, // Pass to frontend
+      currentBreakStr: currentBreakStr, 
       timer: breakTimer, 
       auxLabel: "Remaining", startsIn: breakStartsIn,
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
-
     if (category === 'active' && nextBreakStr) {
        let upAgent = {...agent};
-       upAgent.timer = nextBreakStr; 
+       upAgent.timer = nextBreakStr;
        upAgent.auxLabel = "Starts Soon";
        emptyFloor.upcomingBreak.push(upAgent);
     }
@@ -195,6 +209,7 @@ function compileFloorData() {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else emptyFloor.active.push(item.agent);
+      
       const r = (item.agent.role || "").toUpperCase();
       if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
       if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
