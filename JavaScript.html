@@ -687,7 +687,7 @@
       if (!state.trackerData || state.trackerData.error || !state.trackerData.events) {
           let errMsg = "Initializing Database...";
           if (state.trackerData && state.trackerData.error) errMsg = state.trackerData.error;
-          else if (state.trackerData && !state.trackerData.events) errMsg = "Backend module not fully loaded. Make sure WorkforceTracker.gs is saved in Apps Script.";
+          else if (state.trackerData && !state.trackerData.events) errMsg = "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
           
           return `<div class="aether-card" style="padding:40px; text-align:center;">
               <h2 style="color:var(--text-main);">Workforce DB Empty</h2>
@@ -873,23 +873,27 @@
   window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
-  // UPDATED IMPORT ACTION: Handles both Floor and Tracker
+  // UPDATED IMPORT ACTION: Handles both Floor and Tracker safely
   window.runImportAction = () => { 
       const t = document.getElementById('import-text').value; 
       if(!t) return; 
       closeImportModal(); 
       showToast("Syncing Database..."); 
       if(typeof google !== 'undefined') {
-          // Import into Floor Schedule
-          google.script.run.withSuccessHandler(r => {
-             showToast(r);
-             fetchData();
-          }).runImport(t);
+          // 1. Import into Floor Schedule
+          google.script.run.runImport(t);
           
-          // Simultaneously Import into Tracker Database
-          google.script.run.withSuccessHandler(() => {
-             fetchTrackerData();
-          }).importWorkforceData(t, t); // Send to both, backend will parse correctly
+          // 2. Import into Tracker Database (With Error Catching)
+          google.script.run
+             .withSuccessHandler((trackerResult) => {
+                 showToast(trackerResult); 
+                 fetchData();
+                 fetchTrackerData(); // Refresh the grid
+             })
+             .withFailureHandler((err) => {
+                 showToast("Error: " + err.message);
+             })
+             .importWorkforceData(t, t); 
       } 
   };
   
