@@ -95,7 +95,7 @@
   .grid-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   .grid-masonry { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
   
-  /* --- NEW: SLIM AGENT ROW (High Density) --- */
+  /* --- SLIM AGENT ROW (High Density) --- */
   .agent-list-view { display: flex; flex-direction: column; gap: 4px; }
   
   .agent-row {
@@ -184,7 +184,7 @@
   .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
   .group-header i { opacity: 0.7; }
 
-  /* Break Room Grid (Keeping Cards for Breaks) */
+  /* Break Room Grid */
   .break-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
   .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
   .break-card::before { content:''; position:absolute; top:0; left:0; right:0; height:6px; background: var(--status-break); }
@@ -240,4 +240,22 @@
   .feed-text { font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); }
   .feed-dot.critical { background: var(--status-alert); box-shadow: 0 0 10px rgba(220,38,38,0.3); }
   .feed-dot.weather { background: var(--region-on); }
+
+  /* --- NEW: WORKFORCE TRACKER STYLES --- */
+  .heatmap-cell {
+      border-radius: 8px;
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 8px 0;
+  }
+  .heatmap-cell:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10; }
+  .status-surplus { background: rgba(5, 150, 105, 0.15); color: var(--status-active); border: 1px solid rgba(5, 150, 105, 0.2); }
+  .status-risk { background: rgba(220, 38, 38, 0.15); color: var(--status-alert); border: 1px solid rgba(220, 38, 38, 0.2); }
+  .status-neutral { background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--glass-border); }
+  
+  .chart-3d-container {
+      position: relative;
+      filter: drop-shadow(0 15px 25px rgba(0,0,0,0.15));
+  }
+  body.dark .chart-3d-container { filter: drop-shadow(0 15px 25px rgba(0,0,0,0.5)); }
 </style>
