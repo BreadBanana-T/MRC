@@ -8,12 +8,25 @@ const WorkforceTracker = {
   // --- 1. IMPORT LOGIC ---
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // 1. Ensure sheets exist locally
     ['WF_SCHEDULE', 'WF_IDP', 'WF_FURLOUGH'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
+
+    // 2. Ensure sheets exist in Master DB (For Archiving)
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try {
+            const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
+            ['WF_SCHEDULE', 'WF_IDP', 'WF_FURLOUGH'].forEach(n => {
+               if(!masterSS.getSheetByName(n)) masterSS.insertSheet(n);
+            });
+        } catch(e) { console.warn("Master DB Init Error: " + e.message); }
+    }
+    
     let msg = [];
 
-    // Schedule Parser
+    // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -57,22 +70,30 @@ const WorkforceTracker = {
       }
     }
 
-    // IDP Parser
+    // --- IDP PARSER ---
     if (idpRaw && idpRaw.trim().length > 0) {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
-      let headerIdx = lines.findIndex(l => l.toLowerCase().includes('req') && l.toLowerCase().includes('open'));
+      
+      // Robust Bilingual Header Search
+      let headerIdx = lines.findIndex(l => {
+         const lower = l.toLowerCase();
+         const hasReq = lower.includes('req') || lower.includes('besoin');
+         const hasOpen = lower.includes('open') || lower.includes('ouvert') || lower.includes('dispo');
+         return hasReq && hasOpen;
+      });
 
       if (headerIdx > -1) {
         let headers = this._parseCSVLine(lines[headerIdx]);
         let colMap = {}; 
+        
         headers.forEach((h, i) => {
           let lower = h.toLowerCase();
           let dateMatch = h.match(/(\w+\s\d{1,2},?\s\d{4})/);
           if (dateMatch) {
             let dateStr = this._parseDate(dateMatch[1]);
-            if (lower.includes('req')) colMap[i] = { date: dateStr, type: 'req' };
-            else if (lower.includes('open') && !lower.includes('+/-')) colMap[i] = { date: dateStr, type: 'open' };
+            if (lower.includes('req') || lower.includes('besoin')) colMap[i] = { date: dateStr, type: 'req' };
+            else if ((lower.includes('open') || lower.includes('ouvert')) && !lower.includes('+/-')) colMap[i] = { date: dateStr, type: 'open' };
           }
         });
 
@@ -87,7 +108,10 @@ const WorkforceTracker = {
                  let info = colMap[idx];
                  if (!dataByDay[info.date]) dataByDay[info.date] = {};
                  if (!dataByDay[info.date][tNorm]) dataByDay[info.date][tNorm] = { req:0, open:0 };
+                 
+                 // Clean string to pure number
                  let val = parseFloat(String(cols[idx]).replace(/,/g, '')) || 0;
+                 
                  if (info.type === 'req') dataByDay[info.date][tNorm].req = val;
                  if (info.type === 'open') dataByDay[info.date][tNorm].open = val;
                }
@@ -104,7 +128,11 @@ const WorkforceTracker = {
         if (cleanIDP.length > 0) {
           this._upsertData('WF_IDP', cleanIDP, 0, ['Day', 'Interval', 'Required', 'Open']);
           msg.push(`✔ IDP: Imported ${cleanIDP.length} intervals.`);
+        } else {
+          msg.push(`❌ IDP found headers but no grid data matched.`);
         }
+      } else {
+         msg.push(`❌ IDP missing valid headers (Requirements/Open).`);
       }
     }
     return msg.length ? msg.join('\n') : "No valid data found to import.";
@@ -137,8 +165,8 @@ const WorkforceTracker = {
     const startStr = this._formatDate(startDate);
     const endStr = this._formatDate(endDate);
 
-    const idpData = dbIDP.getDataRange().getValues(); idpData.shift();
-    const schedData = dbSched.getDataRange().getValues(); schedData.shift();
+    const idpData = dbIDP.getLastRow() > 1 ? dbIDP.getDataRange().getValues().slice(1) : [];
+    const schedData = dbSched.getLastRow() > 1 ? dbSched.getDataRange().getValues().slice(1) : [];
 
     let buckets = [];
     let combinedEvents = [];
@@ -226,17 +254,54 @@ const WorkforceTracker = {
     });
   },
 
-  // --- UTILS ---
+  // --- DUAL-UPSERT UTILS (Local & Master Archive) ---
+  
   _upsertData: function(sheetName, newRows, dateColIdx, headersArray) {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-    const incomingDates = new Set(newRows.map(row => String(row[dateColIdx]).trim()));
-    const existingData = sheet.getDataRange().getValues();
-    const headers = existingData.length > 0 ? existingData.shift() : headersArray;
-    const retainedRows = existingData.filter(row => !incomingDates.has(String(this._parseDate(row[dateColIdx])).trim()));
-    const combined = retainedRows.concat(newRows);
-    sheet.clearContents(); sheet.appendRow(headers);
-    if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
+    // 1. Local Data Refresh (Fast for UI)
+    const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
+    this._executeUpsert(ssLocal, sheetName, newRows, dateColIdx, headersArray);
+
+    // 2. Master DB Archive Sync
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try {
+            const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
+            this._executeUpsert(ssMaster, sheetName, newRows, dateColIdx, headersArray);
+        } catch(e) {
+            console.warn("Failed to archive to Master DB: " + e.message);
+        }
+    }
   },
+
+  _executeUpsert: function(targetSpreadsheet, sheetName, newRows, dateColIdx, headersArray) {
+    let sheet = targetSpreadsheet.getSheetByName(sheetName);
+    if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
+
+    const incomingDates = new Set(newRows.map(row => String(row[dateColIdx]).trim()));
+    
+    let existingData = [];
+    if (sheet.getLastRow() > 0) existingData = sheet.getDataRange().getValues();
+    
+    // Safety check for brand new empty sheets
+    if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
+
+    const headers = existingData.length > 0 ? existingData.shift() : headersArray;
+    
+    // Keep old data that DOES NOT match the newly imported dates
+    const retainedRows = existingData.filter(row => {
+       if(!row[dateColIdx]) return true;
+       return !incomingDates.has(String(this._parseDate(row[dateColIdx])).trim());
+    });
+    
+    const combined = retainedRows.concat(newRows);
+    
+    // Rewrite sheet cleanly
+    sheet.clearContents(); 
+    sheet.appendRow(headers);
+    if (combined.length > 0) {
+        sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
+    }
+  },
+
   _parseCSVLine: function(text) {
     if (text.includes('\t')) return text.split('\t').map(s => s.trim());
     let ret = [], inQuote = false, token = "";
