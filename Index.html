@@ -33,6 +33,7 @@
                 <button class="nav-btn" id="btn-scripts" onclick="setView('scripts')">Scripts</button>
                 <button class="nav-btn" id="btn-weather" onclick="setView('weather')">Weather</button>
                 <button class="nav-btn" id="btn-calc" onclick="setView('calc')">Calc</button>
+                <button class="nav-btn" id="btn-tracker" onclick="setView('tracker')">Tracker</button>
             </nav>
 
             <div class="action-group">
@@ -75,7 +76,7 @@
     <div id="import-modal" class="modal-blur">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data</h2>
-          <textarea id="import-text" class="input-aether mb-6" rows="8" placeholder="Paste WFM schedule text here..."></textarea>
+          <textarea id="import-text" class="input-aether mb-6" rows="8" placeholder="Paste WFM schedule text here... (Also accepts IDP paste for the Tracker)"></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
