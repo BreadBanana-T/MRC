@@ -1,15 +1,9 @@
 /**
  * MODULE: IMPORT HANDLER (SMART WFM)
- * - Based on your "Old Working Code" for stability.
- * - Adds ID-based Offshore detection (ID starts with 3).
- * - Handles Partial Sick vs Full Sick.
- * - Supports MULTIPLE Roles natively (appends SAFE, ICL, ULC together).
  */
 
 const ImportHandler = {
-  run: function(text, date) {
-    return processWFMImport(text, date);
-  }
+  run: function(text, date) { return processWFMImport(text, date); }
 };
 
 function processWFMImport(rawText, forcedDate) {
@@ -30,15 +24,12 @@ function processWFMImport(rawText, forcedDate) {
   let currentID = null;
   let buffer = resetBuffer();
   
-  if (!forcedDate) {
-     forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-  }
-  
+  if (!forcedDate) forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
 
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
-  const rgxAnyDateLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})/;
-  const rgxShiftLine = /(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
+  const rgxAnyDateLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
+  const rgxShiftLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
   const rgxActivityLine = /(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)\s*$/i;
 
   for (let i = 0; i < lines.length; i++) {
@@ -48,10 +39,8 @@ function processWFMImport(rawText, forcedDate) {
     let agentMatch = line.match(rgxAgent);
     if (agentMatch) {
       if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-      currentID = agentMatch[1];
-      currentAgent = agentMatch[2].replace(/["',]/g, "").trim(); 
-      buffer = resetBuffer();
-      continue;
+      currentID = agentMatch[1]; currentAgent = agentMatch[2].replace(/["',]/g, "").trim(); 
+      buffer = resetBuffer(); continue;
     }
 
     if (currentAgent) {
@@ -65,42 +54,20 @@ function processWFMImport(rawText, forcedDate) {
        }
 
        let shiftMatch = line.match(rgxShiftLine);
-       if (shiftMatch) {
-          buffer.dateStr = shiftMatch[1];
-          buffer.start = shiftMatch[2];
-          buffer.end = shiftMatch[3];
-          buffer.isOff = false; 
-       } 
-       else if (line.includes("Off") && !buffer.start) {
-          if (dateMatch) buffer.dateStr = dateMatch[1];
-          buffer.isOff = true;
-       }
+       if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.isOff = false; } 
+       else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
        const upper = line.toUpperCase();
-       
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
        
-       // --- MULTIPLE ROLE DETECTION (APPEND LOGIC) ---
-       if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) {
-           if (!buffer.role.includes("SAFE")) buffer.role = (buffer.role + " SAFE").trim();
-       }
-       if (upper.includes("ICL") || upper.includes("INCIDENT")) {
-           if (!buffer.role.includes("ICL")) buffer.role = (buffer.role + " ICL").trim();
-       }
-       if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
-           if (!buffer.role.includes("ULC FIRE")) buffer.role = (buffer.role + " ULC FIRE").trim();
-       }
-       if (upper.includes("COACHING") || upper.includes("TRN")) {
-           if (!buffer.role.includes("Training")) buffer.role = (buffer.role + " Training").trim();
-       }
+       if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) { if (!buffer.role.includes("SAFE")) buffer.role = (buffer.role + " SAFE").trim(); }
+       if (upper.includes("ICL") || upper.includes("INCIDENT")) { if (!buffer.role.includes("ICL")) buffer.role = (buffer.role + " ICL").trim(); }
+       if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) { if (!buffer.role.includes("ULC FIRE")) buffer.role = (buffer.role + " ULC FIRE").trim(); }
+       if (upper.includes("COACHING") || upper.includes("TRN")) { if (!buffer.role.includes("Training")) buffer.role = (buffer.role + " Training").trim(); }
 
-       // Absence Detection
        if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
-           if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) {
-               buffer.absentType = "Medical Leave";
-           } else {
-               buffer.absentType = "SICK";
-           }
+           if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) buffer.absentType = "Medical Leave";
+           else buffer.absentType = "SICK";
        }
        else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
        else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
@@ -108,21 +75,16 @@ function processWFMImport(rawText, forcedDate) {
        
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
-           const actStart = actMatch[1];
-           const actEnd = actMatch[2];
-
+           const actStart = actMatch[1], actEnd = actMatch[2];
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
-           } 
-           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
+           } else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
                buffer.hasWork = true;
            }
 
            if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL"))) {
-               if (compareTimeStrings(actEnd, buffer.end)) {
-                   buffer.end = actStart;
-               }
+               if (compareTimeStrings(actEnd, buffer.end)) buffer.end = actStart;
            }
        }
     }
@@ -137,42 +99,29 @@ function processWFMImport(rawText, forcedDate) {
   return "No valid data found.";
 }
 
-function resetBuffer() {
-  return { 
-      breaks: [], start: null, end: null, dateStr: null, 
-      absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false 
-  };
-}
+function resetBuffer() { return { breaks: [], start: null, end: null, dateStr: null, absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false }; }
 
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
   if (!buf.start && !buf.isOff && !buf.absentType) return;
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
 
-  if (String(id).startsWith("3")) {
-      buf.isOffshore = true;
-  }
-
+  if (String(id).startsWith("3")) buf.isOffshore = true;
   if (buf.hasWork) {
       if (buf.absentType === "VACATION") buf.absentType = "";
       if (buf.absentType === "SICK") buf.absentType = "Leaving Early (Sick)";
   }
 
-  let startEpoch = "", endEpoch = "";
-  let finalDateStr = buf.dateStr;
+  let startEpoch = "", endEpoch = "", finalDateStr = buf.dateStr;
   if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`; 
 
   if (buf.start && buf.end) {
      let y, m, d;
      if (buf.dateStr) {
         const parts = buf.dateStr.split('/');
-        m = parseInt(parts[0]);
-        d = parseInt(parts[1]);
-        y = parseInt(parts[2]);
+        m = parseInt(parts[0]); d = parseInt(parts[1]); y = parseInt(parts[2]);
         if (y < 100) y += 2000;
-     } else {
-        y = defY; m = defM; d = defD;
-     }
+     } else { y = defY; m = defM; d = defD; }
 
      const sObj = parseTime(buf.start);
      const eObj = parseTime(buf.end);
@@ -180,21 +129,14 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
         let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
         let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
         if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
-        startEpoch = sDate.getTime();
-        endEpoch = eDate.getTime();
+        startEpoch = sDate.getTime(); endEpoch = eDate.getTime();
      }
   }
 
-  // FIX: Midpoint Shift Math for Floor Tracking
   let type = "Off";
   if (startEpoch && endEpoch) {
      let midEpoch = (startEpoch + endEpoch) / 2;
      const h = new Date(midEpoch).getHours();
-     if (h >= 23 || h < 7) type = "Night";
-     else if (h >= 15 && h < 23) type = "Evening";
-     else type = "Morning";
-  } else if (startEpoch) {
-     const h = new Date(startEpoch).getHours();
      if (h >= 23 || h < 7) type = "Night";
      else if (h >= 15 && h < 23) type = "Evening";
      else type = "Morning";
@@ -206,28 +148,16 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
      if(parts.length === 2) cleanName = `${parts[1].trim()} ${parts[0].trim()}`;
   }
 
-  roster.push([
-    cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, 
-    buf.isOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks),
-    buf.role, buf.absentType, startEpoch, endEpoch
-  ]);
+  roster.push([cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, buf.isOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks), buf.role, buf.absentType, startEpoch, endEpoch]);
 }
 
 function parseTime(tStr) {
-   if(!tStr) return null;
-   const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
-   if(!match) return null;
-   let h = parseInt(match[1]);
-   let m = parseInt(match[2]);
-   let amp = match[3].toUpperCase();
-   if (amp === "PM" && h < 12) h += 12;
-   if (amp === "AM" && h === 12) h = 0;
-   return { h, m };
+   if(!tStr) return null; const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i); if(!match) return null;
+   let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3].toUpperCase();
+   if (amp === "PM" && h < 12) h += 12; if (amp === "AM" && h === 12) h = 0; return { h, m };
 }
-
 function compareTimeStrings(t1, t2) {
     if (!t1 || !t2) return false;
-    const n1 = t1.replace(/\s+/g, '').replace(/^0/, '');
-    const n2 = t2.replace(/\s+/g, '').replace(/^0/, '');
+    const n1 = t1.replace(/\s+/g, '').replace(/^0/, ''), n2 = t2.replace(/\s+/g, '').replace(/^0/, '');
     return n1 === n2;
 }
