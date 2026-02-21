@@ -86,3 +86,11 @@ function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return 
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
 function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
+
+// --- WORKFORCE TRACKER EXPORTS ---
+function getWorkforceAnalytics(mode, date, type) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type) : "{}"; 
+}
+function importWorkforceData(sched, idp) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error"; 
+}
