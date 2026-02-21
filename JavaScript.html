@@ -27,7 +27,7 @@
       appUrl: "", 
       insightMode: 'day', 
       selectedDate: new Date().toISOString().split('T')[0],
-      // NEW: WORKFORCE TRACKER STATE
+      // WORKFORCE TRACKER STATE
       trackerData: null,
       trackerMode: 'furlough', // 'furlough' or 'coaching'
       trackerDate: new Date().toISOString().split('T')[0],
@@ -74,7 +74,7 @@
     fetchData(); 
     fetchNotifications();
     fetchCalendar();
-    fetchTrackerData(); // NEW: Initial fetch for the tracker
+    fetchTrackerData(); // Initial fetch for the tracker
   }
 
   // --- NAVIGATION ---
@@ -82,7 +82,7 @@
       state.view = v; 
       if(v==='scripts') fetchScripts(); 
       if(v==='insights') fetchInsightData(); 
-      if(v==='tracker') fetchTrackerData(); // NEW: Refresh tracker on view
+      if(v==='tracker') fetchTrackerData(); 
       render(); 
   };
   
@@ -159,7 +159,7 @@
       }
   }
 
-  // NEW: FETCH WORKFORCE TRACKER DATA
+  // FETCH WORKFORCE TRACKER DATA
   function fetchTrackerData() {
       if (typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(res => {
@@ -201,14 +201,14 @@
      else if (state.view === 'calc') h = renderCalc();
      else if (state.view === 'scripts') h = renderScripts();
      else if (state.view === 'insights') h = renderInsights();
-     else if (state.view === 'tracker') h = renderTracker(); // NEW VIEW ROUTE
+     else if (state.view === 'tracker') h = renderTracker();
      
      c.innerHTML = h; refreshIcons();
      const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
      
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
-     if(state.view === 'tracker') initTrackerChart(); // NEW CHART INIT
+     if(state.view === 'tracker') initTrackerChart(); 
   }
 
   // --- RENDER POPOUT ---
@@ -681,12 +681,17 @@
      </div>`;
   }
   
-  // NEW: WORKFORCE TRACKER UI RENDERER
+  // --- NEW: WORKFORCE TRACKER UI RENDERER (Bulletproofed) ---
   function renderTracker() {
-      if (!state.trackerData || state.trackerData.error) {
+      // 1. SAFE CHECK: If data hasn't loaded or returned an empty shell, don't crash.
+      if (!state.trackerData || state.trackerData.error || !state.trackerData.events) {
+          let errMsg = "Initializing Database...";
+          if (state.trackerData && state.trackerData.error) errMsg = state.trackerData.error;
+          else if (state.trackerData && !state.trackerData.events) errMsg = "Backend module not fully loaded. Make sure WorkforceTracker.gs is saved in Apps Script.";
+          
           return `<div class="aether-card" style="padding:40px; text-align:center;">
               <h2 style="color:var(--text-main);">Workforce DB Empty</h2>
-              <p style="color:var(--text-muted); margin-bottom:20px;">${state.trackerData ? state.trackerData.error : "Loading data..."}</p>
+              <p style="color:var(--text-muted); margin-bottom:20px;">${errMsg}</p>
               <button class="btn btn-primary" onclick="openImportModal()">Import WFM Schedule</button>
           </div>`;
       }
@@ -904,7 +909,8 @@
   let charts = {};
 
   function initTrackerChart() {
-      if (typeof Chart === 'undefined' || !state.trackerData) return;
+      // SAFE CHECK: Do not build chart if events didn't load
+      if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.events) return;
       const ctx = document.getElementById('tracker-chart');
       if (!ctx) return;
 
