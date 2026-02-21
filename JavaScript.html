@@ -27,13 +27,12 @@
       appUrl: "", 
       insightMode: 'day', 
       selectedDate: new Date().toISOString().split('T')[0],
-      // WORKFORCE TRACKER STATE
       trackerData: null,
-      trackerMode: 'furlough', // 'furlough' or 'coaching'
+      trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
       trackerRange: 'day',
       trackerSearch: '',
-      trackerLoading: true // NEW: Loading state
+      trackerLoading: true
   };
 
   document.addEventListener('mousemove', e => {
@@ -75,10 +74,9 @@
     fetchData(); 
     fetchNotifications();
     fetchCalendar();
-    fetchTrackerData(); // Initial fetch for the tracker
+    fetchTrackerData(); 
   }
 
-  // --- NAVIGATION ---
   window.setView = (v) => { 
       state.view = v; 
       if(v==='scripts') fetchScripts(); 
@@ -92,7 +90,6 @@
   window.handleDateChange = (val) => { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = () => { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
   
-  // --- ACTIONS ---
   window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
   window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
   window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
@@ -130,7 +127,6 @@
   function handleSearch(v) { state.searchTerm = v; render(); }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
-  // --- DATA FETCHING ---
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{
@@ -160,11 +156,8 @@
       }
   }
 
-  // --- NEW: FETCH WORKFORCE TRACKER DATA (WITH LOADER) ---
   function fetchTrackerData() {
       if (typeof google === 'undefined') return;
-      
-      // Trigger loader and immediately update UI
       state.trackerLoading = true;
       if (state.view === 'tracker') render(); 
       
@@ -189,7 +182,6 @@
      }
   }
 
-  // --- RENDER MAIN ROUTER ---
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
@@ -220,7 +212,6 @@
      if(state.view === 'tracker') initTrackerChart(); 
   }
 
-  // --- RENDER POPOUT ---
   function renderPopout(mode) {
      const c = document.getElementById('content');
      if(!c) return; 
@@ -259,7 +250,6 @@
      refreshIcons();
   }
   
-  // --- AGENTS VIEW (FLOOR) ---
   function renderAgents() {
       const tab = state.agentTab;
       const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
@@ -372,8 +362,8 @@
      let statusColor = "var(--text-secondary)";
      
      if (a.role && a.role.includes('SAFE')) { statusColor = "var(--status-active)"; }
-     else if (a.role && a.role.includes('ICL')) { statusColor = "var(--status-role)"; }
-     else if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { statusColor = "var(--status-ulc)"; }
+     if (a.role && a.role.includes('ICL')) { statusColor = "var(--status-role)"; }
+     if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { statusColor = "var(--status-ulc)"; }
      
      if (a.onBreakNow) {
          statusColor = "var(--status-break)";
@@ -446,7 +436,6 @@
       navigator.clipboard.writeText(text).then(() => showToast(`Copied: ${text}`));
   }
 
-  // --- MODAL FUNCTIONS ---
   window.openBreakModal = () => {
       closeMenu();
       const name = state.selectedAgent;
@@ -481,7 +470,6 @@
       document.getElementById('ot-modal').classList.add('open');
   };
 
-  // --- STANDARD RENDER FUNCTIONS ---
   function renderOverview() {
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
@@ -690,11 +678,10 @@
      </div>`;
   }
   
-  // --- NEW: WORKFORCE TRACKER UI RENDERER (With Loading State) ---
+  // --- NEW: WORKFORCE TRACKER UI RENDERER (Bulletproofed + Night Added) ---
   function renderTracker() {
       const isCoach = state.trackerMode === 'coaching';
 
-      // 1. ALWAYS RENDER HEADER SO USER CAN SWITCH TABS WHILE LOADING
       const headerHtml = `
       <style>
           @keyframes spin { to { transform: rotate(360deg); } }
@@ -719,7 +706,6 @@
          </div>
       </div>`;
 
-      // 2. LOADING STATE UI (REPLACES GRAPHS WHILE FETCHING)
       if (state.trackerLoading) {
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:450px; animation: slideUp 0.3s ease forwards; opacity:0; transform:translateY(10px);">
@@ -729,7 +715,6 @@
           </div>`;
       }
 
-      // 3. SAFE CHECK: Empty DB
       if (!state.trackerData || state.trackerData.error || !state.trackerData.events) {
           let errMsg = "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
           if (state.trackerData && state.trackerData.error) errMsg = state.trackerData.error;
@@ -743,7 +728,6 @@
           </div>`;
       }
 
-      // 4. NORMAL RENDER WITH DATA
       const d = state.trackerData;
       
       const filteredEvents = d.events.filter(e => 
@@ -805,9 +789,10 @@
                 </div>
              </div>
              
-             <div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px;">
+             <div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;">
                  <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.morning.toFixed(1)}h</div></div>
                  <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.evening.toFixed(1)}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.night.toFixed(1)}h</div></div>
              </div>
          </div>
 
@@ -901,22 +886,18 @@
   window.copyScript = (i) => { navigator.clipboard.writeText(state.scripts[i].body); showToast("Copied"); };
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
-  // UPDATED IMPORT ACTION: Handles both Floor and Tracker safely
   window.runImportAction = () => { 
       const t = document.getElementById('import-text').value; 
       if(!t) return; 
       closeImportModal(); 
       showToast("Syncing Database..."); 
       if(typeof google !== 'undefined') {
-          // 1. Import into Floor Schedule
           google.script.run.runImport(t);
-          
-          // 2. Import into Tracker Database (With Error Catching)
           google.script.run
              .withSuccessHandler((trackerResult) => {
                  showToast(trackerResult); 
                  fetchData();
-                 fetchTrackerData(); // Refresh the grid
+                 fetchTrackerData(); 
              })
              .withFailureHandler((err) => {
                  showToast("Error: " + err.message);
@@ -927,7 +908,6 @@
   
   window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
 
-  // EVENT DETAILS MODAL
   window.openEventModal = (idx) => {
       const e = state.calendarEvents[idx];
       if(!e) return;
@@ -941,7 +921,6 @@
   let charts = {};
 
   function initTrackerChart() {
-      // SAFE CHECK: Do not build chart if still loading or if events didn't load
       if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.events || state.trackerLoading) return;
       const ctx = document.getElementById('tracker-chart');
       if (!ctx) return;
@@ -951,7 +930,6 @@
       const d = state.trackerData;
       const isCoach = d.trackerType === 'coaching';
 
-      // Custom Plugin to draw a drop shadow directly on the canvas elements
       const shadowPlugin = {
           id: 'shadowPlugin',
           beforeDraw: (chart) => {
@@ -1101,7 +1079,6 @@
       });
   }
 
-  // INSIGHTS RENDERER
   function renderInsights() {
       const isWeek = state.insightMode === 'week';
       
