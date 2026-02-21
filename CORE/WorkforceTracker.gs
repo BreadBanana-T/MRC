@@ -5,16 +5,12 @@
 
 const WorkforceTracker = {
 
-  // --- 1. IMPORT LOGIC ---
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    // 1. Ensure sheets exist locally
     ['WF_SCHEDULE', 'WF_IDP', 'WF_FURLOUGH'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
 
-    // 2. Ensure sheets exist in Master DB (For Archiving)
     if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
         try {
             const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
@@ -26,11 +22,14 @@ const WorkforceTracker = {
     
     let msg = [];
 
-    // --- SCHEDULE PARSER ---
+    // --- SCHEDULE PARSER (With Overnight Rollover) ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
-      let currentAgent = "", currentDate = "";
+      let currentAgent = "", currentDateStr = "", currentBaseDate = null;
+      let lastTimeMins = -1;
+      let daysAdded = 0;
+      
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
 
@@ -51,14 +50,33 @@ const WorkforceTracker = {
         }
 
         let dMatch = text.match(dateRegex);
-        if (dMatch) currentDate = this._parseDate(dMatch[1]);
+        if (dMatch) {
+            currentDateStr = this._parseDate(dMatch[1]);
+            currentBaseDate = new Date(currentDateStr + "T00:00:00");
+            lastTimeMins = -1;
+            daysAdded = 0;
+        }
 
-        if (currentAgent && currentDate) {
+        if (currentAgent && currentBaseDate) {
           let segMatch = text.match(segmentRegex);
           if (segMatch) {
             let act = this._cleanActivity(segMatch[1].trim());
+            let tStart = segMatch[2].trim();
+            let tEnd = segMatch[3].trim();
+            
+            let tStartMins = this._timeToMins(tStart);
+            // If the start time is EARLIER than the last activity, we crossed midnight
+            if (lastTimeMins > -1 && tStartMins < lastTimeMins) {
+                daysAdded++;
+            }
+            lastTimeMins = tStartMins;
+
+            let actDate = new Date(currentBaseDate.getTime());
+            actDate.setDate(actDate.getDate() + daysAdded);
+            let actDateStr = this._formatDate(actDate);
+
             if (!act.toLowerCase().match(/^activity|^scheduled/)) {
-               cleanSched.push([currentAgent, currentDate, act, segMatch[2].trim(), segMatch[3].trim()]);
+               cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd]);
             }
           }
         }
@@ -75,7 +93,6 @@ const WorkforceTracker = {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       
-      // Robust Bilingual Header Search
       let headerIdx = lines.findIndex(l => {
          const lower = l.toLowerCase();
          const hasReq = lower.includes('req') || lower.includes('besoin');
@@ -109,9 +126,7 @@ const WorkforceTracker = {
                  if (!dataByDay[info.date]) dataByDay[info.date] = {};
                  if (!dataByDay[info.date][tNorm]) dataByDay[info.date][tNorm] = { req:0, open:0 };
                  
-                 // Clean string to pure number
                  let val = parseFloat(String(cols[idx]).replace(/,/g, '')) || 0;
-                 
                  if (info.type === 'req') dataByDay[info.date][tNorm].req = val;
                  if (info.type === 'open') dataByDay[info.date][tNorm].open = val;
                }
@@ -138,7 +153,6 @@ const WorkforceTracker = {
     return msg.length ? msg.join('\n') : "No valid data found to import.";
   },
 
-  // --- 2. ANALYTICS API ---
   getAnalytics: function(mode, refDate, trackerType) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
@@ -146,7 +160,6 @@ const WorkforceTracker = {
     
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Database missing. Please run WFM Import first." });
 
-    // Date Bounds
     const dateObj = new Date(refDate + 'T00:00:00');
     let startDate = new Date(dateObj), endDate = new Date(dateObj), label = "";
 
@@ -171,7 +184,6 @@ const WorkforceTracker = {
     let buckets = [];
     let combinedEvents = [];
 
-    // --- COACHING MODE ---
     if (trackerType === 'coaching') {
         const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
         
@@ -191,9 +203,7 @@ const WorkforceTracker = {
                 }
             }
         });
-    } 
-    // --- FURLOUGH MODE ---
-    else {
+    } else {
         if (mode === 'day') {
           buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
           idpData.forEach(row => {
@@ -231,7 +241,6 @@ const WorkforceTracker = {
           }
         });
 
-        // Deduct Supply
         if (mode === 'day') {
            combinedEvents.forEach(f => {
               for (let i = f.startIdx; i < f.endIdx; i++) if (i >= 0 && i < 96) buckets[i].supply = Math.max(0, buckets[i].supply - 1);
@@ -254,54 +263,46 @@ const WorkforceTracker = {
     });
   },
 
-  // --- DUAL-UPSERT UTILS (Local & Master Archive) ---
-  
   _upsertData: function(sheetName, newRows, dateColIdx, headersArray) {
-    // 1. Local Data Refresh (Fast for UI)
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._executeUpsert(ssLocal, sheetName, newRows, dateColIdx, headersArray);
 
-    // 2. Master DB Archive Sync
     if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
         try {
             const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
             this._executeUpsert(ssMaster, sheetName, newRows, dateColIdx, headersArray);
-        } catch(e) {
-            console.warn("Failed to archive to Master DB: " + e.message);
-        }
+        } catch(e) { console.warn("Failed to archive: " + e.message); }
     }
   },
-
   _executeUpsert: function(targetSpreadsheet, sheetName, newRows, dateColIdx, headersArray) {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
 
     const incomingDates = new Set(newRows.map(row => String(row[dateColIdx]).trim()));
-    
     let existingData = [];
     if (sheet.getLastRow() > 0) existingData = sheet.getDataRange().getValues();
-    
-    // Safety check for brand new empty sheets
     if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
 
     const headers = existingData.length > 0 ? existingData.shift() : headersArray;
-    
-    // Keep old data that DOES NOT match the newly imported dates
     const retainedRows = existingData.filter(row => {
        if(!row[dateColIdx]) return true;
        return !incomingDates.has(String(this._parseDate(row[dateColIdx])).trim());
     });
     
     const combined = retainedRows.concat(newRows);
-    
-    // Rewrite sheet cleanly
     sheet.clearContents(); 
     sheet.appendRow(headers);
-    if (combined.length > 0) {
-        sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
-    }
+    if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
   },
 
+  _timeToMins: function(tStr) {
+       let match = String(tStr).match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
+       if (!match) return 0;
+       let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
+       if (amp === 'PM' && h < 12) h += 12;
+       if (amp === 'AM' && h === 12) h = 0;
+       return (h * 60) + m;
+  },
   _parseCSVLine: function(text) {
     if (text.includes('\t')) return text.split('\t').map(s => s.trim());
     let ret = [], inQuote = false, token = "";
