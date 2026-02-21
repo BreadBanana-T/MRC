@@ -185,12 +185,19 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
      }
   }
 
+  // FIX: Midpoint Shift Math for Floor Tracking
   let type = "Off";
-  if (startEpoch) {
+  if (startEpoch && endEpoch) {
+     let midEpoch = (startEpoch + endEpoch) / 2;
+     const h = new Date(midEpoch).getHours();
+     if (h >= 23 || h < 7) type = "Night";
+     else if (h >= 15 && h < 23) type = "Evening";
+     else type = "Morning";
+  } else if (startEpoch) {
      const h = new Date(startEpoch).getHours();
-     if (h >= 21 || h < 5) type = "Night";
-     else if (h >= 14) type = "Evening";
-     else type = "Day";
+     if (h >= 23 || h < 7) type = "Night";
+     else if (h >= 15 && h < 23) type = "Evening";
+     else type = "Morning";
   }
 
   let cleanName = name;
