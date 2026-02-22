@@ -1,15 +1,14 @@
 /**
- * WEATHER MODULE (Powered by Open-Meteo)
- * Replaces EC RSS to bypass Google IP blocking.
- * V3: Removes Gusts (User Request) & Adds Null Safety.
+ * WEATHER MODULE (Hybrid Engine)
+ * - Weather Data: Open-Meteo (Bypasses Google IP blocks)
+ * - Alerts Data: Environment Canada RSS (Wrapped in fail-safes)
  */
 
 const WeatherService = {
-  fetch: function() { return fetchWeatherOpenMeteo(); }
+  fetch: function() { return fetchHybridWeather(); }
 };
 
-function fetchWeatherOpenMeteo() {
-  // Mapping Cities to Lat/Lon for Open-Meteo
+function fetchHybridWeather() {
   const cities = [
     { name: "Toronto",       lat: 43.70, lon: -79.42, province: "ON", code: "on-143" },
     { name: "Ottawa",        lat: 45.42, lon: -75.70, province: "ON", code: "on-118" },
@@ -20,71 +19,84 @@ function fetchWeatherOpenMeteo() {
     { name: "Montreal",      lat: 45.50, lon: -73.57, province: "QC", code: "qc-147" },
     { name: "Quebec City",   lat: 46.81, lon: -71.21, province: "QC", code: "qc-133" }
   ];
-
-  const weatherData = {};
   
+  const weatherData = {};
+  let activeAlerts = [];
+  
+  // 1. Fetch Environment Canada Alerts (Wrapped safely)
+  try {
+      const alertRequests = cities.map(c => ({
+          url: `https://weather.gc.ca/rss/warning/${c.code}_e.xml`,
+          muteHttpExceptions: true
+      }));
+      
+      const alertResponses = UrlFetchApp.fetchAll(alertRequests);
+      
+      alertResponses.forEach((res, i) => {
+          if (res.getResponseCode() === 200) {
+              const xml = res.getContentText();
+              // Check if there's actually an active alert
+              if (xml.includes("WARNING") || xml.includes("WATCH") || xml.includes("STATEMENT")) {
+                  const entries = xml.split("<entry>");
+                  for(let j=1; j<entries.length; j++) {
+                      const titleMatch = entries[j].match(/<title>(.*?)<\/title>/);
+                      if (titleMatch) {
+                          const text = titleMatch[1].replace(" - " + cities[i].name, "").trim();
+                          if (!text.toLowerCase().includes("no watches or warnings")) {
+                              activeAlerts.push({ province: cities[i].name, type: text, count: 1 });
+                          }
+                      }
+                  }
+              }
+          }
+      });
+  } catch (e) {
+      console.warn("EC Alerts blocked or failed: " + e.message);
+  }
+
+  // 2. Fetch Open-Meteo Standard Weather
   cities.forEach(city => {
     if (!weatherData[city.province]) weatherData[city.province] = [];
 
     try {
-      // Fetch Current (Speed Only) + Daily Forecast
-      // Removed 'wind_gusts_10m' to ensure clean data for spreadsheet copy
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto`;
-      
       const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
       if (res.getResponseCode() !== 200) throw new Error("API Error " + res.getResponseCode());
       
       const data = JSON.parse(res.getContentText());
-      
-      // 1. Current Conditions
       const current = data.current || {};
       const curCode = current.weather_code !== undefined ? current.weather_code : 0;
       const curTemp = Math.round(current.temperature_2m || 0);
-      
-      // Wind Logic: Speed ONLY (No Gusts), defaulted to 0 to prevent 'NaN' or errors
       const speed = Math.round(current.wind_speed_10m || 0);
       const windStr = speed.toString();
       
-      // 2. Forecast (Next 3 days)
       const daily = data.daily || {};
       const forecastData = [];
       
       if (daily.time) {
         for (let i = 1; i <= 3; i++) {
            if (!daily.time[i]) break;
-           
            const dDate = new Date(daily.time[i] + "T00:00:00");
            const dayName = Utilities.formatDate(dDate, "America/Toronto", "EEEE");
            const high = Math.round(daily.temperature_2m_max[i]);
            const fSpeed = Math.round(daily.wind_speed_10m_max[i] || 0).toString();
            
-           forecastData.push({
-             day: dayName,
-             temp: `${high}°`,
-             wind: fSpeed
-           });
+           forecastData.push({ day: dayName, temp: `${high}°`, wind: fSpeed });
         }
       }
 
       weatherData[city.province].push({ 
-          id: city.code, 
-          name: city.name, 
-          temp: curTemp, 
-          wind: windStr, // Pure speed string (e.g. "20")
-          condition: wmoToCondition(curCode),
-          forecast: forecastData 
+          id: city.code, name: city.name, temp: curTemp, wind: windStr, 
+          condition: wmoToCondition(curCode), forecast: forecastData 
       });
-
     } catch (e) {
-      console.warn(`Weather fail for ${city.name}: ${e.message}`);
       weatherData[city.province].push({ 
-        id: city.code, name: city.name, 
-        temp: "--", wind: "ERR", condition: "Offline", forecast: [] 
+        id: city.code, name: city.name, temp: "--", wind: "ERR", condition: "Offline", forecast: [] 
       });
     }
   });
 
-  return { weather: weatherData, alerts: [] };
+  return { weather: weatherData, alerts: activeAlerts };
 }
 
 function wmoToCondition(code) {
