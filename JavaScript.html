@@ -31,6 +31,7 @@
       trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
       trackerRange: 'day',
+      trackerRegion: 'All', 
       trackerSearch: '',
       trackerLoading: true
   };
@@ -169,7 +170,7 @@
           state.trackerLoading = false;
           if (state.view === 'tracker') render();
           showToast("Data error: " + err.message);
-      }).getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode);
+      }).getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode, state.trackerRegion);
   }
 
   function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
@@ -678,7 +679,7 @@
      </div>`;
   }
   
-  // --- NEW: WORKFORCE TRACKER UI RENDERER (Bulletproofed + Night Added) ---
+  // --- NEW: WORKFORCE TRACKER UI RENDERER ---
   function renderTracker() {
       const isCoach = state.trackerMode === 'coaching';
 
@@ -691,6 +692,12 @@
          <div style="display:flex; align-items:center; gap:16px;">
              <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
              
+             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border); margin-right:12px;">
+                <button class="nav-btn ${state.trackerRegion==='All'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='All'; fetchTrackerData();">All</button>
+                <button class="nav-btn ${state.trackerRegion==='Onshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='Onshore'; fetchTrackerData();">Onshore</button>
+                <button class="nav-btn ${state.trackerRegion==='Offshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='Offshore'; fetchTrackerData();">Offshore</button>
+             </div>
+
              <select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; fetchTrackerData();">
                  <option value="furlough" ${!isCoach?'selected':''}>Furlough Tracker</option>
                  <option value="coaching" ${isCoach?'selected':''}>Coaching Tracker</option>
