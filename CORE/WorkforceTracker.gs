@@ -24,7 +24,7 @@ const WorkforceTracker = {
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
-      let currentAgent = "", currentDateStr = "";
+      let currentAgent = "", currentID = "", currentRegion = "Onshore", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
       let lastTimeMins = -1, daysAdded = 0;
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
@@ -36,11 +36,18 @@ const WorkforceTracker = {
 
         if (text.includes('Agent:')) {
           let parts = text.split(':');
-          if (parts.length > 1) currentAgent = parts[1].replace(/^\s*\d+\s+/, '').trim();
+          if (parts.length > 1) {
+              let agentData = parts[1].trim();
+              let idMatch = agentData.match(/^(\d+)/);
+              currentID = idMatch ? idMatch[1] : "";
+              currentAgent = agentData.replace(/^\d+\s+/, '').trim();
+              // Capture Region
+              currentRegion = (currentID.startsWith("3") || agentData.toUpperCase().includes("TI ") || agentData.toUpperCase().includes("OFFSHORE")) ? "Offshore" : "Onshore";
+          }
           return;
         } else if (text.includes('"') && text.includes(',')) {
           let csvParts = this._parseCSVLine(text);
-          if (csvParts.length >= 5) { cleanSched.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4]]); return; }
+          if (csvParts.length >= 5) { cleanSched.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], currentRegion]); return; }
         }
 
         let dMatch = text.match(dateRegex);
@@ -64,13 +71,14 @@ const WorkforceTracker = {
             let actDate = new Date(currentY, currentM - 1, currentD + daysAdded);
             let actDateStr = Utilities.formatDate(actDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
             if (!act.toLowerCase().match(/^activity|^scheduled/)) {
-               cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd]);
+               // Append Region to end
+               cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd, currentRegion]);
             }
           }
         }
       });
       if (cleanSched.length > 0) {
-        this._upsertData('WF_SCHEDULE', cleanSched, 1, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time']);
+        this._upsertData('WF_SCHEDULE', cleanSched, 1, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
         msg.push(`✔ Schedule: Imported ${cleanSched.length} blocks.`);
       }
     }
@@ -129,7 +137,7 @@ const WorkforceTracker = {
     return msg.length ? msg.join('\n') : "No valid data found to import.";
   },
 
-  getAnalytics: function(mode, refDate, trackerType) {
+  getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All') {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
     const dbSched = ss.getSheetByName('WF_SCHEDULE');
@@ -137,12 +145,14 @@ const WorkforceTracker = {
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Database missing. Please run WFM Import first." });
     const dateObj = new Date(refDate + 'T00:00:00');
     let startDate = new Date(dateObj), endDate = new Date(dateObj), label = "";
+    
     if (mode === 'day') {
       label = this._formatDate(startDate);
     } else if (mode === 'week') {
-      let day = startDate.getDay();
-      let diff = startDate.getDate() - day + (day == 0 ? -6 : 1); 
-      startDate.setDate(diff); endDate = new Date(startDate);
+      let day = startDate.getDay(); // Sunday is 0, Wednesday is 3
+      let offset = (day >= 3) ? (3 - day) : -(day + 4); // Maps to nearest Wednesday backwards
+      startDate.setDate(startDate.getDate() + offset);
+      endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + 6);
       label = `Week of ${this._formatDate(startDate)}`;
     } else if (mode === 'month') {
@@ -177,11 +187,15 @@ const WorkforceTracker = {
     }
 
     const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
-    const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary']; // Exact array matching your setup
+    const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary']; 
 
     schedData.forEach(row => {
         let rowDateStr = this._formatDate(row[1]);
         
+        // REGION FILTER
+        let rowRegion = row[5] ? String(row[5]).trim() : 'Onshore';
+        if (regionFilter !== 'All' && rowRegion !== regionFilter) return;
+
         // USE WIDENED SEARCH WINDOW
         if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
             let agent = String(row[0]).trim();
@@ -198,9 +212,16 @@ const WorkforceTracker = {
                 // Split shifts at 07:00, 15:00, 23:00
                 let splits = this._getShiftSplits(startMins, endMins);
 
+                // --- PERFORMANCE OPTIMIZATION ---
+                // Pre-calculate physical days to avoid V8 Date instantiation loop bottleneck
+                let day0Str = rowDateStr;
+                let d1 = new Date(rowDateStr + "T12:00:00"); d1.setDate(d1.getDate() + 1);
+                let day1Str = this._formatDate(d1);
+                let d2 = new Date(rowDateStr + "T12:00:00"); d2.setDate(d2.getDate() + 2);
+                let day2Str = this._formatDate(d2);
+
                 splits.forEach(split => {
                     // EFFECTIVE DATE MAPPING
-                    // Shifts starting at 23:00 (1380 mins) are Night shifts belonging to the NEXT calendar day.
                     let effDateObj = new Date(rowDateStr + "T12:00:00");
                     if (split.shift === "Night" && split.startMins >= 1380) {
                         effDateObj.setDate(effDateObj.getDate() + 1);
@@ -210,13 +231,13 @@ const WorkforceTracker = {
                     // Only process if the Effective Date falls within the user's selected viewing window
                     if (effDateStr >= startStr && effDateStr <= endStr) {
                     
-                        // Grid Deduction (Flawless Physical Date Math)
+                        // Grid Deduction (Optimized Physical Math)
                         if (isFurlough && mode === 'day') {
                             for (let min = split.startMins; min < split.endMins; min += 15) {
-                                // Calculate the physical date of this specific 15-minute block
-                                let blockDateObj = new Date(rowDateStr + "T12:00:00");
-                                blockDateObj.setDate(blockDateObj.getDate() + Math.floor(min / 1440));
-                                let blockDateStr = this._formatDate(blockDateObj);
+                                let daysAdded = Math.floor(min / 1440);
+                                let blockDateStr = day0Str;
+                                if (daysAdded === 1) blockDateStr = day1Str;
+                                else if (daysAdded === 2) blockDateStr = day2Str;
                                 
                                 // Only deduct from the heatmap if the block physically occurs on the selected day
                                 if (blockDateStr === startStr) {
@@ -278,15 +299,9 @@ const WorkforceTracker = {
           let shiftType = "";
           let nextBoundary = 0;
           let timeOfDay = current % 1440;
-          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBoundary = current - timeOfDay + 900;
-          } 
-          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening";
-            nextBoundary = current - timeOfDay + 1380; } 
-          else {
-              shiftType = "Night";
-              if (timeOfDay >= 1380) nextBoundary = current - timeOfDay + 1860;
-              else nextBoundary = current - timeOfDay + 420;
-          }
+          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBoundary = current - timeOfDay + 900; } 
+          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening"; nextBoundary = current - timeOfDay + 1380; } 
+          else { shiftType = "Night"; if (timeOfDay >= 1380) nextBoundary = current - timeOfDay + 1860; else nextBoundary = current - timeOfDay + 420; }
 
           let chunkEnd = Math.min(endMins, nextBoundary);
           splits.push({ shift: shiftType, hours: (chunkEnd - current) / 60, startMins: current, endMins: chunkEnd });
@@ -295,10 +310,8 @@ const WorkforceTracker = {
       return splits;
   },
   _minsToTime: function(mins) {
-      let m = mins % 1440;
-      let h = Math.floor(m / 60); let mm = m % 60;
-      let hh = h < 10 ? '0'+h : h; let mmm = mm < 10 ? '0'+mm : mm;
-      return `${hh}:${mmm}`;
+      let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60;
+      return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`;
   },
   _upsertData: function(sheetName, newRows, dateColIdx, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
