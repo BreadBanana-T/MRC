@@ -10,7 +10,6 @@ const WorkforceTracker = {
     ['WF_SCHEDULE', 'WF_IDP', 'WF_FURLOUGH'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
-
     if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
         try {
             const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
@@ -21,7 +20,6 @@ const WorkforceTracker = {
     }
     
     let msg = [];
-
     // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
@@ -29,7 +27,6 @@ const WorkforceTracker = {
       let currentAgent = "", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
       let lastTimeMins = -1, daysAdded = 0;
-      
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
 
@@ -64,17 +61,14 @@ const WorkforceTracker = {
             let tStartMins = this._timeToMins(tStart);
             if (lastTimeMins > -1 && tStartMins < lastTimeMins) daysAdded++;
             lastTimeMins = tStartMins;
-
             let actDate = new Date(currentY, currentM - 1, currentD + daysAdded);
             let actDateStr = Utilities.formatDate(actDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-
             if (!act.toLowerCase().match(/^activity|^scheduled/)) {
                cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd]);
             }
           }
         }
       });
-
       if (cleanSched.length > 0) {
         this._upsertData('WF_SCHEDULE', cleanSched, 1, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time']);
         msg.push(`✔ Schedule: Imported ${cleanSched.length} blocks.`);
@@ -90,11 +84,9 @@ const WorkforceTracker = {
          const lower = l.toLowerCase();
          return (lower.includes('req') || lower.includes('besoin')) && (lower.includes('open') || lower.includes('ouvert') || lower.includes('dispo'));
       });
-
       if (headerIdx > -1) {
         let headers = this._parseCSVLine(lines[headerIdx]);
-        let colMap = {}; 
-        
+        let colMap = {};
         headers.forEach((h, i) => {
           let lower = h.toLowerCase();
           let dateMatch = h.match(/(\w+\s\d{1,2},?\s\d{4})/);
@@ -104,7 +96,6 @@ const WorkforceTracker = {
             else if ((lower.includes('open') || lower.includes('ouvert')) && !lower.includes('+/-')) colMap[i] = { date: dateStr, type: 'open' };
           }
         });
-
         let dataByDay = {};
         for (let i = headerIdx + 1; i < lines.length; i++) {
           let cols = this._parseCSVLine(lines[i]);
@@ -129,7 +120,6 @@ const WorkforceTracker = {
             cleanIDP.push([day, time, dataByDay[day][time].req, dataByDay[day][time].open]);
           });
         });
-
         if (cleanIDP.length > 0) {
           this._upsertData('WF_IDP', cleanIDP, 0, ['Day', 'Interval', 'Required', 'Open']);
           msg.push(`✔ IDP: Imported ${cleanIDP.length} intervals.`);
@@ -145,23 +135,29 @@ const WorkforceTracker = {
     const dbSched = ss.getSheetByName('WF_SCHEDULE');
     
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Database missing. Please run WFM Import first." });
-
     const dateObj = new Date(refDate + 'T00:00:00');
     let startDate = new Date(dateObj), endDate = new Date(dateObj), label = "";
-
     if (mode === 'day') {
       label = this._formatDate(startDate);
     } else if (mode === 'week') {
-      let day = startDate.getDay(); let diff = startDate.getDate() - day + (day == 0 ? -6 : 1); 
-      startDate.setDate(diff); endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6);
+      let day = startDate.getDay();
+      let diff = startDate.getDate() - day + (day == 0 ? -6 : 1); 
+      startDate.setDate(diff); endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
       label = `Week of ${this._formatDate(startDate)}`;
     } else if (mode === 'month') {
-      startDate.setDate(1); endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+      startDate.setDate(1);
+      endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
       label = Utilities.formatDate(startDate, Session.getScriptTimeZone(), "MMMM yyyy");
     }
 
     const startStr = this._formatDate(startDate);
     const endStr = this._formatDate(endDate);
+
+    // EXPAND SEARCH WINDOW BY 1 DAY PRIOR TO CATCH 23:00 SHIFTS
+    let searchStartDate = new Date(startDate);
+    searchStartDate.setDate(searchStartDate.getDate() - 1);
+    const searchStartStr = this._formatDate(searchStartDate);
 
     const idpData = dbIDP.getLastRow() > 1 ? dbIDP.getDataRange().getValues().slice(1) : [];
     const schedData = dbSched.getLastRow() > 1 ? dbSched.getDataRange().getValues().slice(1) : [];
@@ -181,11 +177,13 @@ const WorkforceTracker = {
     }
 
     const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
-    const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+    const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary']; // Exact array matching your setup
 
     schedData.forEach(row => {
-        let sDateStr = this._formatDate(row[1]);
-        if (sDateStr >= startStr && sDateStr <= endStr) {
+        let rowDateStr = this._formatDate(row[1]);
+        
+        // USE WIDENED SEARCH WINDOW
+        if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
             let agent = String(row[0]).trim();
             let act = String(row[2]).toLowerCase();
             
@@ -201,33 +199,51 @@ const WorkforceTracker = {
                 let splits = this._getShiftSplits(startMins, endMins);
 
                 splits.forEach(split => {
-                    // Grid Deduction
-                    if (isFurlough && mode === 'day') {
-                        let sStartBuck = Math.floor((split.startMins % 1440) / 15);
-                        let sEndBuck = Math.floor((split.endMins % 1440) / 15);
-                        let buckEnd = split.endMins > split.startMins && sEndBuck <= sStartBuck ? sEndBuck + 96 : sEndBuck;
-                        
-                        for (let i = sStartBuck; i < buckEnd; i++) {
-                            let idx = i % 96;
-                            buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
-                        }
+                    // EFFECTIVE DATE MAPPING
+                    // Shifts starting at 23:00 (1380 mins) are Night shifts belonging to the NEXT calendar day.
+                    let effDateObj = new Date(rowDateStr + "T12:00:00");
+                    if (split.shift === "Night" && split.startMins >= 1380) {
+                        effDateObj.setDate(effDateObj.getDate() + 1);
                     }
+                    let effDateStr = this._formatDate(effDateObj);
 
-                    // Aggregation UI Logic
-                    let groupKey = `${agent}_${sDateStr}_${split.shift}`;
-                    if (isCoach) groupKey += `_${row[2]}`;
+                    // Only process if the Effective Date falls within the user's selected viewing window
+                    if (effDateStr >= startStr && effDateStr <= endStr) {
+                    
+                        // Grid Deduction (Flawless Physical Date Math)
+                        if (isFurlough && mode === 'day') {
+                            for (let min = split.startMins; min < split.endMins; min += 15) {
+                                // Calculate the physical date of this specific 15-minute block
+                                let blockDateObj = new Date(rowDateStr + "T12:00:00");
+                                blockDateObj.setDate(blockDateObj.getDate() + Math.floor(min / 1440));
+                                let blockDateStr = this._formatDate(blockDateObj);
+                                
+                                // Only deduct from the heatmap if the block physically occurs on the selected day
+                                if (blockDateStr === startStr) {
+                                    let idx = Math.floor((min % 1440) / 15);
+                                    if (idx >= 0 && idx < 96) {
+                                        buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
+                                    }
+                                }
+                            }
+                        }
 
-                    if (!groupedLogs[groupKey]) {
-                        groupedLogs[groupKey] = {
-                            date: sDateStr, agent: agent,
-                            activityName: isCoach ? row[2] : "Time Off",
-                            shift: split.shift, hours: split.hours,
-                            timeStart: this._minsToTime(split.startMins),
-                            timeEnd: this._minsToTime(split.endMins)
-                        };
-                    } else {
-                        groupedLogs[groupKey].hours += split.hours;
-                        groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
+                        // Aggregation UI Logic (using Effective Date)
+                        let groupKey = `${agent}_${effDateStr}_${split.shift}`;
+                        if (isCoach) groupKey += `_${row[2]}`;
+
+                        if (!groupedLogs[groupKey]) {
+                            groupedLogs[groupKey] = {
+                                date: effDateStr, agent: agent,
+                                activityName: isCoach ? row[2] : "Time Off",
+                                shift: split.shift, hours: split.hours,
+                                timeStart: this._minsToTime(split.startMins),
+                                timeEnd: this._minsToTime(split.endMins)
+                            };
+                        } else {
+                            groupedLogs[groupKey].hours += split.hours;
+                            groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
+                        }
                     }
                 });
             }
@@ -242,7 +258,7 @@ const WorkforceTracker = {
         date: g.date, agent: g.agent, activityName: g.activityName, shift: g.shift,
         hours: parseFloat(g.hours.toFixed(2)), time: `${g.timeStart} - ${g.timeEnd}`
     }));
-
+    
     let totals = { all: 0, morning: 0, evening: 0, night: 0, count: combinedEvents.length };
     combinedEvents.forEach(f => {
         totals.all += f.hours;
@@ -250,7 +266,7 @@ const WorkforceTracker = {
         else if (f.shift === 'Evening') totals.evening += f.hours;
         else totals.night += f.hours;
     });
-
+    
     return JSON.stringify({ mode: mode, trackerType: trackerType, label: label, grid: buckets, events: combinedEvents, totals: totals });
   },
 
@@ -262,9 +278,10 @@ const WorkforceTracker = {
           let shiftType = "";
           let nextBoundary = 0;
           let timeOfDay = current % 1440;
-          
-          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBoundary = current - timeOfDay + 900; } 
-          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening"; nextBoundary = current - timeOfDay + 1380; } 
+          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBoundary = current - timeOfDay + 900;
+          } 
+          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening";
+            nextBoundary = current - timeOfDay + 1380; } 
           else {
               shiftType = "Night";
               if (timeOfDay >= 1380) nextBoundary = current - timeOfDay + 1860;
@@ -278,7 +295,8 @@ const WorkforceTracker = {
       return splits;
   },
   _minsToTime: function(mins) {
-      let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60;
+      let m = mins % 1440;
+      let h = Math.floor(m / 60); let mm = m % 60;
       let hh = h < 10 ? '0'+h : h; let mmm = mm < 10 ? '0'+mm : mm;
       return `${hh}:${mmm}`;
   },
@@ -286,7 +304,8 @@ const WorkforceTracker = {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._executeUpsert(ssLocal, sheetName, newRows, dateColIdx, headersArray);
     if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try { const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID); this._executeUpsert(ssMaster, sheetName, newRows, dateColIdx, headersArray); } catch(e) {}
+        try { const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
+        this._executeUpsert(ssMaster, sheetName, newRows, dateColIdx, headersArray); } catch(e) {}
     }
   },
   _executeUpsert: function(targetSpreadsheet, sheetName, newRows, dateColIdx, headersArray) {
@@ -308,14 +327,16 @@ const WorkforceTracker = {
        let match = String(tStr).match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
        if (!match) return 0;
        let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
-       if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0;
+       if (amp === 'PM' && h < 12) h += 12;
+       if (amp === 'AM' && h === 12) h = 0;
        return (h * 60) + m;
   },
   _parseCSVLine: function(text) {
     if (text.includes('\t')) return text.split('\t').map(s => s.trim());
     let ret = [], inQuote = false, token = "";
     for(let i=0; i<text.length; i++) {
-      let char = text[i]; if(char === '"') { inQuote = !inQuote; continue; }
+      let char = text[i];
+      if(char === '"') { inQuote = !inQuote; continue; }
       if(char === ',' && !inQuote) { ret.push(token.trim()); token = ""; } else token += char;
     }
     ret.push(token.trim()); return ret;
@@ -331,7 +352,8 @@ const WorkforceTracker = {
     let parts = String(val).match(/(\d+):(\d+)\s?([AP]M)?/i);
     if (parts) {
       let h = parseInt(parts[1]), m = parseInt(parts[2]), amp = parts[3] ? parts[3].toUpperCase() : null;
-      if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0; return (h * 4) + Math.floor(m / 15);
+      if (amp === 'PM' && h < 12) h += 12;
+      if (amp === 'AM' && h === 12) h = 0; return (h * 4) + Math.floor(m / 15);
     } return -1;
   },
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; }
