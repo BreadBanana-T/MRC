@@ -1,6 +1,6 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Shift Splitter Engine & UI Aggregator
+ * Features: Shift Splitter Engine, Region Parsing, & Grand Unified Tracker
  */
 
 const WorkforceTracker = {
@@ -24,7 +24,7 @@ const WorkforceTracker = {
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
-      let currentAgent = "", currentID = "", currentRegion = "Onshore", currentDateStr = "";
+      let currentAgent = "", currentRegion = "Onshore", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
       let lastTimeMins = -1, daysAdded = 0;
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
@@ -38,16 +38,22 @@ const WorkforceTracker = {
           let parts = text.split(':');
           if (parts.length > 1) {
               let agentData = parts[1].trim();
-              let idMatch = agentData.match(/^(\d+)/);
-              currentID = idMatch ? idMatch[1] : "";
               currentAgent = agentData.replace(/^\d+\s+/, '').trim();
-              // Capture Region
-              currentRegion = (currentID.startsWith("3") || agentData.toUpperCase().includes("TI ") || agentData.toUpperCase().includes("OFFSHORE")) ? "Offshore" : "Onshore";
+              // Look for Region Tags in Header
+              currentRegion = "Onshore";
+              if (agentData.toUpperCase().includes("TI ") || agentData.toUpperCase().includes("OFFSHORE")) {
+                  currentRegion = "Offshore";
+              }
           }
           return;
         } else if (text.includes('"') && text.includes(',')) {
           let csvParts = this._parseCSVLine(text);
           if (csvParts.length >= 5) { cleanSched.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], currentRegion]); return; }
+        }
+
+        // Dynamically catch TI/Offshore if it appears on a schedule line instead of header
+        if (text.toUpperCase().includes("TI ") || text.toUpperCase().includes("OFFSHORE")) {
+            currentRegion = "Offshore";
         }
 
         let dMatch = text.match(dateRegex);
@@ -71,7 +77,6 @@ const WorkforceTracker = {
             let actDate = new Date(currentY, currentM - 1, currentD + daysAdded);
             let actDateStr = Utilities.formatDate(actDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
             if (!act.toLowerCase().match(/^activity|^scheduled/)) {
-               // Append Region to end
                cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd, currentRegion]);
             }
           }
@@ -149,8 +154,8 @@ const WorkforceTracker = {
     if (mode === 'day') {
       label = this._formatDate(startDate);
     } else if (mode === 'week') {
-      let day = startDate.getDay(); // Sunday is 0, Wednesday is 3
-      let offset = (day >= 3) ? (3 - day) : -(day + 4); // Maps to nearest Wednesday backwards
+      let day = startDate.getDay(); 
+      let offset = (day >= 3) ? (3 - day) : -(day + 4); 
       startDate.setDate(startDate.getDate() + offset);
       endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + 6);
@@ -164,7 +169,6 @@ const WorkforceTracker = {
     const startStr = this._formatDate(startDate);
     const endStr = this._formatDate(endDate);
 
-    // EXPAND SEARCH WINDOW BY 1 DAY PRIOR TO CATCH 23:00 SHIFTS
     let searchStartDate = new Date(startDate);
     searchStartDate.setDate(searchStartDate.getDate() - 1);
     const searchStartStr = this._formatDate(searchStartDate);
@@ -174,7 +178,7 @@ const WorkforceTracker = {
 
     let buckets = [];
     let combinedEvents = [];
-    let groupedLogs = {}; // Aggregator
+    let groupedLogs = {}; 
 
     if (mode === 'day' && trackerType === 'furlough') {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
@@ -191,29 +195,26 @@ const WorkforceTracker = {
 
     schedData.forEach(row => {
         let rowDateStr = this._formatDate(row[1]);
-        
-        // REGION FILTER
         let rowRegion = row[5] ? String(row[5]).trim() : 'Onshore';
         if (regionFilter !== 'All' && rowRegion !== regionFilter) return;
 
-        // USE WIDENED SEARCH WINDOW
         if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
             let agent = String(row[0]).trim();
             let act = String(row[2]).toLowerCase();
             
-            let isCoach = trackerType === 'coaching' && COACHING_CODES.some(c => act.includes(c));
+            // STRICT BLOCK FOR TEAM LEAD WORK
+            let isTeamLead = act.includes('team lead') || act.includes('équipe /');
+            
+            let isCoach = trackerType === 'coaching' && !isTeamLead && COACHING_CODES.some(c => act.includes(c));
             let isFurlough = trackerType === 'furlough' && ACSU_CODES.some(c => act.includes(c));
 
             if (isCoach || isFurlough) {
                 let startMins = this._timeToMins(row[3]);
                 let endMinsRaw = this._timeToMins(row[4]);
-                let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; // Carry overnight
+                let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
-                // Split shifts at 07:00, 15:00, 23:00
                 let splits = this._getShiftSplits(startMins, endMins);
 
-                // --- PERFORMANCE OPTIMIZATION ---
-                // Pre-calculate physical days to avoid V8 Date instantiation loop bottleneck
                 let day0Str = rowDateStr;
                 let d1 = new Date(rowDateStr + "T12:00:00"); d1.setDate(d1.getDate() + 1);
                 let day1Str = this._formatDate(d1);
@@ -221,17 +222,13 @@ const WorkforceTracker = {
                 let day2Str = this._formatDate(d2);
 
                 splits.forEach(split => {
-                    // EFFECTIVE DATE MAPPING
                     let effDateObj = new Date(rowDateStr + "T12:00:00");
                     if (split.shift === "Night" && split.startMins >= 1380) {
                         effDateObj.setDate(effDateObj.getDate() + 1);
                     }
                     let effDateStr = this._formatDate(effDateObj);
 
-                    // Only process if the Effective Date falls within the user's selected viewing window
                     if (effDateStr >= startStr && effDateStr <= endStr) {
-                    
-                        // Grid Deduction (Optimized Physical Math)
                         if (isFurlough && mode === 'day') {
                             for (let min = split.startMins; min < split.endMins; min += 15) {
                                 let daysAdded = Math.floor(min / 1440);
@@ -239,7 +236,6 @@ const WorkforceTracker = {
                                 if (daysAdded === 1) blockDateStr = day1Str;
                                 else if (daysAdded === 2) blockDateStr = day2Str;
                                 
-                                // Only deduct from the heatmap if the block physically occurs on the selected day
                                 if (blockDateStr === startStr) {
                                     let idx = Math.floor((min % 1440) / 15);
                                     if (idx >= 0 && idx < 96) {
@@ -249,7 +245,6 @@ const WorkforceTracker = {
                             }
                         }
 
-                        // Aggregation UI Logic (using Effective Date)
                         let groupKey = `${agent}_${effDateStr}_${split.shift}`;
                         if (isCoach) groupKey += `_${row[2]}`;
 
@@ -289,6 +284,135 @@ const WorkforceTracker = {
     });
     
     return JSON.stringify({ mode: mode, trackerType: trackerType, label: label, grid: buckets, events: combinedEvents, totals: totals });
+  },
+
+  // --- GRAND UNIFIED TRACKER ---
+  getUnifiedWeeklyReport: function(refDateStr) {
+        const target = new Date(refDateStr + "T12:00:00");
+        let day = target.getDay(); 
+        let offset = (day >= 3) ? (3 - day) : -(day + 4);
+        
+        let startWed = new Date(target);
+        startWed.setDate(startWed.getDate() + offset);
+        let endWed = new Date(startWed);
+        endWed.setDate(endWed.getDate() + 7);
+
+        const startStr = this._formatDate(startWed);
+        const endStr = this._formatDate(endWed);
+
+        // Base Date Math (Feb 18, 2026 = Week B)
+        const baseDate = new Date("2026-02-18T12:00:00");
+        const diffDays = Math.round((startWed - baseDate) / (1000 * 60 * 60 * 24));
+        const diffWeeks = Math.floor(diffDays / 7);
+        const isWeekB = (Math.abs(diffWeeks) % 2 === 0); 
+        const cycleName = isWeekB ? "WEEK B" : "WEEK A";
+
+        let report = { cycle: cycleName, period: `${startStr} to ${endStr}`, agents: {} };
+
+        const getAg = (name) => {
+            let n = String(name).trim();
+            n = n.replace(/\b\w/g, c => c.toUpperCase()); // Clean capitalization
+            if(!report.agents[n]) report.agents[n] = { name: n, acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, total: 0 };
+            return report.agents[n];
+        };
+
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        
+        // 1. Crunch WFM Text (Furlough & Coachings)
+        const dbSched = ss.getSheetByName('WF_SCHEDULE');
+        if (dbSched && dbSched.getLastRow() > 1) {
+            const schedData = dbSched.getDataRange().getValues().slice(1);
+            const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
+            const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+
+            schedData.forEach(row => {
+                let rowDateStr = this._formatDate(row[1]);
+                let effDateObj = new Date(rowDateStr + "T12:00:00");
+                let startMins = this._timeToMins(row[3]);
+                let endMinsRaw = this._timeToMins(row[4]);
+                let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
+                
+                this._getShiftSplits(startMins, endMins).forEach(split => {
+                    let splitDateObj = new Date(effDateObj);
+                    if (split.shift === "Night" && split.startMins >= 1380) {
+                        splitDateObj.setDate(splitDateObj.getDate() + 1); // Push to next day
+                    }
+                    let splitDateStr = this._formatDate(splitDateObj);
+                    
+                    // Enforce Wednesday-to-Wednesday Boundary
+                    if (splitDateStr >= startStr && splitDateStr < endStr) {
+                        let act = String(row[2]).toLowerCase();
+                        let isTeamLead = act.includes('team lead') || act.includes('équipe /');
+                        
+                        if (ACSU_CODES.some(c => act.includes(c))) {
+                            getAg(row[0]).acsu += split.hours; getAg(row[0]).total += split.hours;
+                        } else if (!isTeamLead && COACHING_CODES.some(c => act.includes(c))) {
+                            getAg(row[0]).coach += split.hours; getAg(row[0]).total += split.hours;
+                        }
+                    }
+                });
+            });
+        }
+
+        // 2. Crunch Live Roles (SAFE, ICL, ULC)
+        const dbSess = ss.getSheetByName('DB_Sessions');
+        if (dbSess && dbSess.getLastRow() > 1) {
+            const sessData = dbSess.getDataRange().getValues().slice(1);
+            sessData.forEach(row => {
+                let sStart = new Date(row[3]);
+                let sDateStr = this._formatDate(sStart);
+                
+                if (sDateStr >= startStr && sDateStr < endStr) {
+                    let role = String(row[2]).toUpperCase();
+                    let hours = Number(row[6]) || 0; // Col G is calculated hours
+                    
+                    if (role.includes('SAFE')) { getAg(row[1]).safe += hours; getAg(row[1]).total += hours; }
+                    else if (role.includes('ICL')) { getAg(row[1]).icl += hours; getAg(row[1]).total += hours; }
+                    else if (role.includes('ULC') || role.includes('FIRE')) { getAg(row[1]).ulc += hours; getAg(row[1]).total += hours; }
+                }
+            });
+        }
+
+        let finalArr = Object.values(report.agents).filter(a => a.total > 0);
+        finalArr.forEach(a => {
+            a.acsu = parseFloat(a.acsu.toFixed(2));
+            a.coach = parseFloat(a.coach.toFixed(2));
+            a.safe = parseFloat(a.safe.toFixed(2));
+            a.icl = parseFloat(a.icl.toFixed(2));
+            a.ulc = parseFloat(a.ulc.toFixed(2));
+            a.total = parseFloat(a.total.toFixed(2));
+        });
+        
+        report.data = finalArr.sort((a,b) => b.total - a.total);
+        return JSON.stringify(report);
+  },
+
+  archiveUnifiedWeek: function(refDateStr) {
+      const reportStr = this.getUnifiedWeeklyReport(refDateStr);
+      const report = JSON.parse(reportStr);
+      
+      const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
+      let archiveSheet = ssLocal.getSheetByName('Weekly_Archives');
+      if (!archiveSheet) {
+          archiveSheet = ssLocal.insertSheet('Weekly_Archives');
+          archiveSheet.appendRow(["Timestamp", "Cycle", "Period", "Agent Name", "ACSU", "Coaching", "SAFE", "ICL", "ULC FIRE", "Total Off-Phone"]);
+          archiveSheet.getRange(1,1,1,10).setFontWeight("bold");
+      }
+
+      // Delete existing rows for this exact period to prevent duplicates if archived twice
+      const data = archiveSheet.getDataRange().getValues();
+      for (let i = data.length - 1; i >= 1; i--) {
+          if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
+      }
+
+      // Push fresh batch
+      const now = new Date();
+      const rowsToPush = report.data.map(a => [
+          now, report.cycle, report.period, a.name, a.acsu, a.coach, a.safe, a.icl, a.ulc, a.total
+      ]);
+      if (rowsToPush.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rowsToPush.length, 10).setValues(rowsToPush);
+
+      return `Successfully archived ${rowsToPush.length} agents for ${report.cycle} (${report.period}).`;
   },
 
   // --- ENGINE UTILS ---
