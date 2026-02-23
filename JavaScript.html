@@ -27,6 +27,7 @@
       appUrl: "", 
       insightMode: 'day', 
       selectedDate: new Date().toISOString().split('T')[0],
+      unifiedReport: null,
       trackerData: null,
       trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
@@ -128,6 +129,15 @@
   function handleSearch(v) { state.searchTerm = v; render(); }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
+  // --- NEW: Tracker Debounce Search ---
+  window.handleTrackerSearch = (val) => { 
+      clearTimeout(searchTimeout); 
+      searchTimeout = setTimeout(() => { 
+          state.trackerSearch = val; 
+          render(); 
+      }, 300); 
+  };
+
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{
@@ -146,15 +156,13 @@
   
   function fetchInsightData() {
       if(typeof google === 'undefined') return;
-      const roleHandler = (res) => { try { state.roleLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
-      const statsHandler = (res) => { try { state.statsLogs = JSON.parse(res); if (state.view === 'insights') render(); } catch(e) {} };
+      state.unifiedReport = null; 
+      if (state.view === 'insights') render();
 
-      if (state.insightMode === 'week') {
-          google.script.run.withSuccessHandler(roleHandler).getWeeklyRoleLogs(state.selectedDate);
-      } else {
-          google.script.run.withSuccessHandler(roleHandler).getDailyRoleLogs(state.selectedDate);
-          google.script.run.withSuccessHandler(statsHandler).getDailyStatsLog(state.selectedDate);
-      }
+      google.script.run.withSuccessHandler(res => {
+          try { state.unifiedReport = JSON.parse(res); } catch(e) {}
+          if (state.view === 'insights') render();
+      }).getUnifiedWeeklyReport(state.selectedDate);
   }
 
   function fetchTrackerData() {
@@ -186,6 +194,9 @@
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
+     // Capture active element to restore focus safely
+     const activeId = document.activeElement ? document.activeElement.id : null;
+
      const sl = document.getElementById('hdr-sl');
      if(sl) sl.innerText = state.currentSL;
      
@@ -211,6 +222,17 @@
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
      if(state.view === 'tracker') initTrackerChart(); 
+
+     if (activeId) {
+         const el = document.getElementById(activeId);
+         if (el && el.focus) {
+             el.focus();
+             if (el.setSelectionRange && el.value) {
+                 const len = el.value.length;
+                 el.setSelectionRange(len, len);
+             }
+         }
+     }
   }
 
   function renderPopout(mode) {
@@ -566,7 +588,7 @@
       if (!state.weather || Object.keys(state.weather).length === 0) {
          return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
       }
-      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-glass" onclick="fillWindsAction()"><i data-lucide="save" width="16"></i> Fill Sheet</button><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       if (state.alerts && state.alerts.length > 0) {
          html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
          state.alerts.forEach(a => html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province}: ${a.type} (${a.count})</div>`);
@@ -679,7 +701,6 @@
      </div>`;
   }
   
-  // --- NEW: WORKFORCE TRACKER UI RENDERER ---
   function renderTracker() {
       const isCoach = state.trackerMode === 'coaching';
 
@@ -807,7 +828,7 @@
              <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                  <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
                     <span>Detailed Log</span>
-                    <input type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="state.trackerSearch=this.value; render();" value="${state.trackerSearch}">
+                    <input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="${state.trackerSearch}">
                  </div>
              </div>
              <div style="flex:1; overflow-y:auto; padding:0 10px;">
@@ -816,6 +837,89 @@
          </div>
       </div>
       `;
+  }
+
+  window.archiveCurrentWeek = () => {
+      if(confirm("Freeze and Archive this specific Wednesday-to-Wednesday cycle?")) {
+          showToast("Crunching data & archiving...");
+          if(typeof google!=='undefined') {
+              google.script.run.withSuccessHandler(res => {
+                  showToast(res);
+              }).archiveUnifiedWeek(state.selectedDate);
+          }
+      }
+  };
+
+  function renderInsights() {
+      const u = state.unifiedReport;
+      
+      const headerHtml = `
+      <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+      </style>
+      <div class="sticky-header" style="justify-content:space-between;">
+         <div style="display:flex; align-items:center; gap:16px;">
+             <h2 style="margin:0;">Master Operations Tracker</h2>
+             
+             <div class="nav-island" style="background:var(--accent-primary); border:none; padding:4px 16px; border-radius:12px;">
+                <span style="font-weight:800; font-size:0.8rem; color:white; letter-spacing:1px;">
+                    ${u ? u.cycle : 'CALCULATING...'}
+                </span>
+             </div>
+
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
+         </div>
+         <div style="display:flex; gap:12px;">
+             <button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>
+         </div>
+      </div>`;
+
+      if (!u) {
+          return headerHtml + `
+          <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;">
+              <div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div>
+              <h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Wednesday Cycle...</h3>
+              <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Furloughs, Coachings, and Special Roles.</p>
+          </div>`;
+      }
+
+      const rowsHtml = u.data.map(a => `
+          <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
+              <td style="padding:16px; font-weight:700; color:var(--text-main);">${a.name}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace;">${a.acsu > 0 ? a.acsu + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace;">${a.coach > 0 ? a.coach + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-active);">${a.safe > 0 ? a.safe + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-weight:800; font-size:1.1rem; color:var(--text-main);">${a.total}h</td>
+          </tr>
+      `).join('') || `<tr><td colspan="7" style="padding:40px; text-align:center; color:var(--text-muted);">No off-phone activity found for this cycle.</td></tr>`;
+
+      return `
+      ${headerHtml}
+      <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
+          <div style="background:rgba(0,0,0,0.02); padding:16px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-weight:700; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;">
+                  Cycle Range: <span style="color:var(--text-main);">${u.period}</span>
+              </div>
+          </div>
+          <div style="overflow-y:auto; flex:1;">
+              <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                 <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
+                     <tr>
+                         <th style="padding:16px; text-align:left;">Agent Name</th>
+                         <th style="padding:16px; text-align:right;">ACSU</th>
+                         <th style="padding:16px; text-align:right;">Coaching</th>
+                         <th style="padding:16px; text-align:right;">SAFE</th>
+                         <th style="padding:16px; text-align:right;">ICL</th>
+                         <th style="padding:16px; text-align:right;">ULC FIRE</th>
+                         <th style="padding:16px; text-align:right; color:var(--text-main);">Total Hours</th>
+                     </tr>
+                 </thead>
+                 <tbody>${rowsHtml}</tbody>
+              </table>
+          </div>
+      </div>`;
   }
 
   window.openComposeMode = () => { document.getElementById('compose-area').style.display='block'; document.getElementById('compose-overlay').style.display='block'; state.editingId = null; document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; document.getElementById('new-script-cat').value=""; };
@@ -912,8 +1016,6 @@
              .importWorkforceData(t, t); 
       } 
   };
-  
-  window.fillWindsAction = () => { if(confirm("Write current winds to the Daily Sheet?")) { if(typeof google !== 'undefined') { showToast("Writing to Sheet..."); google.script.run.withSuccessHandler(res => { showToast(res); }).fillWindsToSheet(); } } };
 
   window.openEventModal = (idx) => {
       const e = state.calendarEvents[idx];
@@ -1005,50 +1107,7 @@
       }
   }
 
-  function initCharts() {
-      if (typeof Chart === 'undefined') return;
-      if(charts.rolesHist) charts.rolesHist.destroy();
-
-      const roleData = { 'SAFE': 0, 'ICL': 0, 'ULC': 0 };
-      state.roleLogs.forEach(log => {
-          if (log.role.includes('SAFE')) roleData.SAFE += (log.duration/60);
-          else if (log.role.includes('ICL')) roleData.ICL += (log.duration/60);
-          else if (log.role.includes('ULC') || log.role.includes('FIRE')) roleData.ULC += (log.duration/60);
-      });
-
-      ['safe','icl','ulc'].forEach(g => {
-          if(state.agents[g]) {
-              state.agents[g].forEach(a => {
-                  if (a.role && a.role.includes('SAFE')) roleData.SAFE += 0.5;
-                  if (a.role && a.role.includes('ICL')) roleData.ICL += 0.5;
-                  if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) roleData.ULC += 0.5;
-              });
-          }
-      });
-
-      const ctx2 = document.getElementById('chart-roles-hist');
-      if(ctx2) {
-          charts.rolesHist = new Chart(ctx2, {
-              type: 'bar',
-              data: {
-                  labels: ['SAFE', 'ICL', 'ULC'],
-                  datasets: [{
-                      label: 'Hours',
-                      data: [roleData.SAFE, roleData.ICL, roleData.ULC],
-                      backgroundColor: ['#059669', '#7c3aed', '#f97316'],
-                      borderRadius: 6
-                  }]
-              },
-              options: { 
-                  responsive: true, 
-                  maintainAspectRatio: false, 
-                  plugins: { legend: { display: false } },
-                  scales: { y: { beginAtZero: true } }
-              }
-          });
-      }
-  }
-
+  function initCharts() {}
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
       
@@ -1086,140 +1145,4 @@
       });
   }
 
-  function renderInsights() {
-      const isWeek = state.insightMode === 'week';
-      
-      let activeRoles = [];
-      if (!isWeek && state.selectedDate === new Date().toISOString().split('T')[0]) {
-          ['icl','safe','ulc','active'].forEach(group => {
-              if (state.agents[group]) {
-                  state.agents[group].forEach(a => {
-                      if (a.role && a.role !== 'Active') {
-                          activeRoles.push({ agent: a.name, role: a.role, status: 'LIVE' });
-                      }
-                  });
-              }
-          });
-      }
-
-      const activeRows = activeRoles.map(r => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--glass-surface); border-radius:12px; margin-bottom:10px; border:1px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-              <div style="font-weight:700; color:var(--text-main);">${r.agent}</div>
-              <div style="display:flex; align-items:center; gap:12px;">
-                  <span class="agent-pill ${r.role.includes('SAFE')?'role-safe':(r.role.includes('ICL')?'role-icl':'role-ulc')}" style="font-size:0.8rem; padding:4px 10px;">${r.role}</span>
-                  <div style="color:var(--status-active); font-weight:800; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; animation:pulse 2s infinite;">● LIVE</div>
-              </div>
-          </div>
-      `).join('');
-
-      const tableRows = state.roleLogs.map(log => `
-          <tr style="border-bottom:1px solid var(--glass-border);">
-              ${isWeek ? `<td style="padding:12px; color:var(--text-muted); font-size:0.8rem;">${log.date.substring(5)}</td>` : ''}
-              <td style="padding:12px; font-weight:700;">${log.agent}</td>
-              <td style="padding:12px;"><span class="agent-pill ${log.role.includes('SAFE')?'role-safe':(log.role.includes('ICL')?'role-icl':'role-ulc')}" style="width:fit-content; font-size:0.75rem; padding:4px 8px;">${log.role}</span></td>
-              <td style="padding:12px; text-align:right; font-weight:700;">${log.duration} min</td>
-              <td style="padding:12px; text-align:right; color:var(--text-muted); font-family:monospace; font-size:0.85rem;">${log.start} - ${log.end}</td>
-          </tr>
-      `).join('');
-
-      const statsRows = state.statsLogs.map(s => `
-          <tr style="border-bottom:1px solid var(--glass-border);">
-              <td style="padding:12px; font-family:monospace; font-weight:700;">${s.time}</td>
-              <td style="padding:12px; color:${parseFloat(s.svl)<80?'var(--status-alert)':'var(--status-active)'}; font-weight:700;">${s.svl}</td>
-              <td style="padding:12px;">${s.ack}s</td>
-          </tr>
-      `).join('');
-
-      const flagged = (state.agents.unplanned||[]).map(a => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border);">
-             <span style="font-weight:700;">${a.name}</span>
-             <span style="color:var(--status-alert); font-weight:700; background:rgba(220,38,38,0.1); padding:4px 8px; border-radius:6px; font-size:0.8rem;">${a.subStatus}</span>
-          </div>`).join('') || '<div style="padding:24px; color:var(--text-muted); text-align:center;">No active flags today</div>';
-
-      return `
-      <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
-      <div class="sticky-header" style="justify-content:space-between;">
-         <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0;">Operations Insight</h2>
-             
-             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${!isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('day')">Daily</button>
-                <button class="nav-btn ${isWeek?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setInsightMode('week')">Weekly</button>
-             </div>
-
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
-         </div>
-         <div style="display:flex; gap:16px;">
-             <div class="kpi-box" style="text-align:right;">
-                 <h4 style="margin:0; color:var(--text-muted);">Current SVL</h4>
-                 <div style="font-size:1.5rem; font-weight:800; color:var(--accent-primary);">${state.currentSL}</div>
-             </div>
-         </div>
-      </div>
-      
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:24px;">
-         
-         <div style="display:flex; flex-direction:column; gap:24px;">
-             <div class="aether-card">
-                 <div class="section-header" style="color:var(--status-active);">Active Roles (Live)</div>
-                 <div style="max-height:300px; overflow-y:auto;">
-                    ${activeRows || '<div style="color:var(--text-muted); text-align:center; padding:20px;">No agents currently in special roles.</div>'}
-                 </div>
-             </div>
-             
-             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:400px;">
-                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; color:var(--status-alert);">
-                     ⚠️ Active Flags
-                 </div>
-                 <div style="flex:1; overflow-y:auto;">
-                     ${flagged}
-                 </div>
-             </div>
-         </div>
-         
-         <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; max-height:800px; border:2px solid var(--accent-primary);">
-             <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0; background:var(--accent-primary); color:white;">
-                 Completed Sessions (Roles)
-             </div>
-             <div style="overflow-y:auto; flex:1;">
-                 <table style="width:100%; border-collapse:collapse; font-size:0.8rem;">
-                    <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                        <tr>
-                            ${isWeek ? '<th style="padding:10px;">Date</th>' : ''}
-                            <th style="padding:10px; text-align:left;">Agent</th>
-                            <th style="padding:10px; text-align:left;">Role</th>
-                            <th style="padding:10px; text-align:right;">Mins</th>
-                            <th style="padding:10px; text-align:right;">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody>${tableRows}</tbody>
-                 </table>
-             </div>
-         </div>
-
-         <div style="display:flex; flex-direction:column; gap:24px;">
-             <div class="aether-card">
-                 <div class="section-header">Total Hours</div>
-                 <div style="height:160px; width:100%;"><canvas id="chart-roles-hist"></canvas></div>
-             </div>
-
-             <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; flex:1; min-height:300px;">
-                 <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
-                     Stats Updates
-                 </div>
-                 <div style="overflow-y:auto; flex:1;">
-                     <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                        <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase;">
-                            <tr><th style="padding:10px; text-align:left;">Time</th><th style="padding:10px; text-align:left;">SVL</th><th style="padding:10px; text-align:left;">ACK</th></tr>
-                        </thead>
-                        <tbody>
-                            ${statsRows || '<tr><td colspan="3" style="padding:30px; text-align:center; color:var(--text-muted);">No stats recorded.</td></tr>'}
-                        </tbody>
-                     </table>
-                 </div>
-             </div>
-         </div>
-      </div>
-      `;
-  }
 </script>
