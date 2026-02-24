@@ -80,7 +80,7 @@
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     
     fetchData(); 
-    fetchStats(); // Fetch static chart data ONCE at launch
+    fetchStats(); 
     fetchArchiveList();
     fetchNotifications();
     fetchCalendar();
@@ -225,7 +225,6 @@
     }
   }
 
-  // --- NEW: DEDICATED STATIC STATS FETCHER ---
   function fetchStats() {
       if(typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(j => {
@@ -239,6 +238,9 @@
                   
                   const slEl = document.getElementById('hdr-sl');
                   if(slEl) slEl.innerText = state.currentSL;
+                  
+                  const ackEl = document.getElementById('hdr-ack');
+                  if(ackEl) ackEl.innerText = state.currentACK;
 
                   if(state.view === 'overview') updateOverviewDOM();
               }
@@ -301,7 +303,6 @@
      }
   }
 
-  // --- NEW: SMOOTH DOM UPDATER ---
   function updateOverviewDOM() {
       const unplanCount = (state.agents.unplanned||[]).length;
       const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
@@ -322,12 +323,11 @@
       updateEl('ov-icl', iclCount);
       updateEl('ov-ulc', ulcCount);
 
-      // Smoothly update the chart without tearing down the Canvas
       if (charts.overview) {
           charts.overview.data.labels = state.slHistory.map(d => d.name);
           charts.overview.data.datasets[0].data = state.slHistory.map(d => d.val);
           charts.overview.data.datasets[1].data = state.slHistory.map(d => d.ack);
-          charts.overview.update('none'); // Disables animation for a seamless update
+          charts.overview.update('none'); 
       }
 
       const agendaEl = document.getElementById('ov-agenda');
@@ -351,10 +351,10 @@
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
-     const activeId = document.activeElement ? document.activeElement.id : null;
-
      const sl = document.getElementById('hdr-sl');
      if(sl) sl.innerText = state.currentSL;
+     const ackEl = document.getElementById('hdr-ack');
+     if(ackEl) ackEl.innerText = state.currentACK;
      
      const c = document.getElementById('content');
      if(!c) return;
@@ -363,7 +363,6 @@
      const b = document.getElementById('btn-'+state.view); 
      if(b) b.classList.add('active');
 
-     // Intercept rendering if Dashboard is already drawn to avoid wiping the Canvas!
      if (state.view === 'overview' && document.getElementById('chart-overview')) {
          updateOverviewDOM();
          refreshIcons();
@@ -385,17 +384,6 @@
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
      if(state.view === 'tracker') initTrackerChart(); 
-
-     if (activeId) {
-         const el = document.getElementById(activeId);
-         if (el && el.focus) {
-             el.focus();
-             if (el.setSelectionRange && el.value) {
-                 const len = el.value.length;
-                 el.setSelectionRange(len, len);
-             }
-         }
-     }
   }
 
   function renderPopout(mode) {
@@ -1139,7 +1127,7 @@
              const d=JSON.parse(r); 
              state.currentSL=d.svl; 
              state.currentReport = d.report; 
-             fetchStats(); // Force static chart update!
+             fetchStats(); 
              render(); 
          }).runCalculator(i, o); 
      } else { 
