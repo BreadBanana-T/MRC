@@ -1,6 +1,6 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Smart Upsert, DB Splitting, Offshore Optimization, Quarterly Bounds, & Archives
+ * Features: Smart Upsert, DB Splitting, Offshore Optimization, Quarterly Bounds, & Master DB Archives
  */
 
 const WorkforceTracker = {
@@ -54,7 +54,6 @@ const WorkforceTracker = {
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]); 
-              // OPTIMIZATION: Completely skip importing Furloughs for Offshore agents
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
           });
           agentBuffer = [];
@@ -214,7 +213,6 @@ const WorkforceTracker = {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
     
-    // DB Routing Optimization
     let dbSched;
     if (trackerType === 'coaching') dbSched = ss.getSheetByName('WF_COACHING');
     else if (trackerType === 'furlough') dbSched = ss.getSheetByName('WF_FURLOUGH');
@@ -316,7 +314,6 @@ const WorkforceTracker = {
         const sStr = Utilities.formatDate(searchStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
         const eStr = Utilities.formatDate(new Date(bounds.end), Session.getScriptTimeZone(), "yyyy-MM-dd");
 
-        // Optimized parsing routine for both sheets
         const parseDB = (sheetName, metricName) => {
             const db = ss.getSheetByName(sheetName);
             if (!db || db.getLastRow() < 2) return;
@@ -359,43 +356,70 @@ const WorkforceTracker = {
   archiveUnifiedWeek: function(refDateStr) {
       const reportStr = this.getUnifiedWeeklyReport(refDateStr);
       const report = JSON.parse(reportStr);
+      
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
-      let archiveSheet = ssLocal.getSheetByName('Weekly_Archives');
-      if (!archiveSheet) { archiveSheet = ssLocal.insertSheet('Weekly_Archives'); archiveSheet.appendRow(["Timestamp", "Cycle", "Period", "Agent Name", "ACSU", "Coaching", "SAFE", "ICL", "ULC FIRE", "Total Off-Phone"]); archiveSheet.getRange(1,1,1,10).setFontWeight("bold"); }
+      
+      // Dual-Write Archive Engine: Saves to Local RAM Sheet AND Master DB automatically
+      const writeToArchiveSheet = (spreadsheet) => {
+          let archiveSheet = spreadsheet.getSheetByName('Weekly_Archives');
+          if (!archiveSheet) { 
+              archiveSheet = spreadsheet.insertSheet('Weekly_Archives'); 
+              archiveSheet.appendRow(["Timestamp", "Cycle", "Period", "Agent Name", "ACSU", "Coaching", "SAFE", "ICL", "ULC FIRE", "Total Off-Phone"]); 
+              archiveSheet.getRange(1,1,1,10).setFontWeight("bold"); 
+          }
 
-      const data = archiveSheet.getDataRange().getValues();
-      for (let i = data.length - 1; i >= 1; i--) if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
+          const data = archiveSheet.getDataRange().getValues();
+          // Remove old entries for this exact period to allow clean overwriting
+          for (let i = data.length - 1; i >= 1; i--) {
+              if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
+          }
 
-      const rows = report.data.map(a => [ new Date(), report.cycle, report.period, a.name, a.acsu, a.coach, a.safe, a.icl, a.ulc, a.total ]);
-      if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
-      return `Successfully archived ${rows.length} agents for ${report.cycle} (${report.period}).`;
+          const rows = report.data.map(a => [ new Date(), report.cycle, report.period, a.name, a.acsu, a.coach, a.safe, a.icl, a.ulc, a.total ]);
+          if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
+      };
+
+      // 1. Write to Local
+      writeToArchiveSheet(ssLocal);
+      
+      // 2. Write to Master DB (For Permanence)
+      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+          try {
+             writeToArchiveSheet(SpreadsheetApp.openById(MasterConnector.DB_ID));
+          } catch(e) { console.error("Master DB Archive Sync Failed", e); }
+      }
+
+      return `Successfully archived ${report.data.length} agents for ${report.cycle} (${report.period}).`;
   },
 
-  // --- ARCHIVE RETRIEVAL ENGINE ---
   getArchiveList: function() {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sheet = ss.getSheetByName('Weekly_Archives');
+      let sheet;
+      // ALWAYS pull the Archive list from the Master DB so it's immortal
+      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+          try { sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('Weekly_Archives'); } catch(e) {}
+      }
+      if (!sheet) { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Weekly_Archives'); }
+      
       if (!sheet || sheet.getLastRow() < 2) return "[]";
       
       const data = sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getValues(); 
       const unique = [];
       const seen = new Set();
       
-      // Reverse to show newest first in the dropdown
       for (let i = data.length - 1; i >= 0; i--) {
           const cycle = data[i][0];
           const period = data[i][1];
-          if (!seen.has(period)) {
-              seen.add(period);
-              unique.push({ cycle: cycle, period: period });
-          }
+          if (!seen.has(period)) { seen.add(period); unique.push({ cycle: cycle, period: period }); }
       }
       return JSON.stringify(unique);
   },
 
   getArchivedReport: function(targetPeriod) {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sheet = ss.getSheetByName('Weekly_Archives');
+      let sheet;
+      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+          try { sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('Weekly_Archives'); } catch(e) {}
+      }
+      if (!sheet) { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Weekly_Archives'); }
+      
       if (!sheet || sheet.getLastRow() < 2) return "{}";
       
       const data = sheet.getDataRange().getValues();
@@ -404,19 +428,10 @@ const WorkforceTracker = {
       for (let i = 1; i < data.length; i++) {
           if (data[i][2] === targetPeriod) {
               report.cycle = data[i][1];
-              report.data.push({
-                  name: data[i][3],
-                  acsu: data[i][4],
-                  coach: data[i][5],
-                  safe: data[i][6],
-                  icl: data[i][7],
-                  ulc: data[i][8],
-                  total: data[i][9]
-              });
+              report.data.push({ name: data[i][3], acsu: data[i][4], coach: data[i][5], safe: data[i][6], icl: data[i][7], ulc: data[i][8], total: data[i][9] });
           }
       }
       
-      // Sort by highest total
       report.data.sort((a,b) => b.total - a.total);
       return JSON.stringify(report);
   },
@@ -437,7 +452,6 @@ const WorkforceTracker = {
   },
   _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
   
-  // SMART COMPOSITE UPSERT (Prevents data duplication and allows cumulative merging)
   _upsertData: function(sheetName, newRows, keyIndices, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._executeUpsert(ssLocal, sheetName, newRows, keyIndices, headersArray);
@@ -450,7 +464,6 @@ const WorkforceTracker = {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
     
-    // Create Composite Keys (e.g. Agent Name + Date)
     const makeKey = (row) => keyIndices.map(i => String(row[i]).trim().toLowerCase()).join('_');
     const incomingKeys = new Set(newRows.map(makeKey));
     
@@ -460,7 +473,6 @@ const WorkforceTracker = {
     
     const headers = existingData.length > 0 ? existingData.shift() : headersArray;
     
-    // Drop all old data for the Agents & Dates that are in the new import
     const retainedRows = existingData.filter(row => {
        if(!row[keyIndices[0]]) return true; 
        return !incomingKeys.has(makeKey(row));
