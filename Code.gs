@@ -6,8 +6,9 @@ function doGet(e) {
   template.appUrl = ScriptApp.getService().getUrl();
   template.popoutParam = (e && e.parameter && e.parameter.popout) ? "true" : "false";
   template.modeParam = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : "";
+  
   return template.evaluate()
-      .setTitle('MRC Command Center')
+      .setTitle('MRC Operations Portal')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
@@ -95,10 +96,16 @@ function importWorkforceData(sched, idp) {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error"; 
 }
 
-// --- GRAND UNIFIED TRACKER EXPORTS ---
+// --- GRAND UNIFIED TRACKER & ARCHIVES ---
 function getUnifiedWeeklyReport(dateStr) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getUnifiedWeeklyReport(dateStr) : "{}"; 
 }
 function archiveUnifiedWeek(dateStr) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.archiveUnifiedWeek(dateStr) : "Error"; 
+}
+function getArchiveList() { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchiveList() : "[]"; 
+}
+function getArchivedReport(period) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period) : "{}"; 
 }
