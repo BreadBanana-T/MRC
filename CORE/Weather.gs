@@ -1,7 +1,7 @@
 /**
  * WEATHER MODULE (Hybrid Engine)
- * - Weather Data: Open-Meteo (Bypasses Google IP blocks)
- * - Alerts Data: Environment Canada RSS (Wrapped in fail-safes)
+ * - Weather Data: Open-Meteo (Concurrent Array Fetch for Stability)
+ * - Alerts Data: Environment Canada RSS
  */
 
 const WeatherService = {
@@ -23,19 +23,14 @@ function fetchHybridWeather() {
   const weatherData = {};
   let activeAlerts = [];
   
-  // 1. Fetch Environment Canada Alerts (Wrapped safely)
+  // 1. Fetch Environment Canada Alerts safely
   try {
-      const alertRequests = cities.map(c => ({
-          url: `https://weather.gc.ca/rss/warning/${c.code}_e.xml`,
-          muteHttpExceptions: true
-      }));
-      
+      const alertRequests = cities.map(c => ({ url: `https://weather.gc.ca/rss/warning/${c.code}_e.xml`, muteHttpExceptions: true }));
       const alertResponses = UrlFetchApp.fetchAll(alertRequests);
       
       alertResponses.forEach((res, i) => {
           if (res.getResponseCode() === 200) {
               const xml = res.getContentText();
-              // Check if there's actually an active alert
               if (xml.includes("WARNING") || xml.includes("WATCH") || xml.includes("STATEMENT")) {
                   const entries = xml.split("<entry>");
                   for(let j=1; j<entries.length; j++) {
@@ -50,51 +45,50 @@ function fetchHybridWeather() {
               }
           }
       });
-  } catch (e) {
-      console.warn("EC Alerts blocked or failed: " + e.message);
+  } catch (e) {}
+
+  // 2. Fetch Open-Meteo using High-Speed Concurrent Fetch
+  cities.forEach(c => { weatherData[c.province] = []; });
+
+  try {
+      const weatherReqs = cities.map(c => ({
+          url: `https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=America%2FToronto`,
+          muteHttpExceptions: true
+      }));
+      
+      const weatherResponses = UrlFetchApp.fetchAll(weatherReqs);
+      
+      weatherResponses.forEach((res, i) => {
+          let city = cities[i];
+          if (res.getResponseCode() === 200) {
+              const data = JSON.parse(res.getContentText());
+              const current = data.current || {};
+              const curCode = current.weather_code !== undefined ? current.weather_code : 0;
+              const curTemp = current.temperature_2m !== undefined ? Math.round(current.temperature_2m) : "--";
+              const windStr = current.wind_speed_10m !== undefined ? Math.round(current.wind_speed_10m).toString() : "0";
+              
+              const daily = data.daily || {};
+              const forecastData = [];
+              if (daily.time) {
+                  for (let j = 1; j <= 3; j++) {
+                     if (!daily.time[j]) break;
+                     const dDate = new Date(daily.time[j] + "T00:00:00");
+                     const dayName = Utilities.formatDate(dDate, "America/Toronto", "EEEE");
+                     const high = daily.temperature_2m_max[j] !== undefined ? Math.round(daily.temperature_2m_max[j]) : "--";
+                     const fSpeed = daily.wind_speed_10m_max[j] !== undefined ? Math.round(daily.wind_speed_10m_max[j]).toString() : "0";
+                     forecastData.push({ day: dayName, temp: `${high}°`, wind: fSpeed });
+                  }
+              }
+              weatherData[city.province].push({ id: city.code, name: city.name, temp: curTemp, wind: windStr, condition: wmoToCondition(curCode), forecast: forecastData });
+          } else {
+              weatherData[city.province].push({ id: city.code, name: city.name, temp: "--", wind: "ERR", condition: "Offline", forecast: [] });
+          }
+      });
+  } catch(e) {
+      cities.forEach(city => {
+          if(weatherData[city.province].length === 0) weatherData[city.province].push({ id: city.code, name: city.name, temp: "--", wind: "ERR", condition: "Offline", forecast: [] });
+      });
   }
-
-  // 2. Fetch Open-Meteo Standard Weather
-  cities.forEach(city => {
-    if (!weatherData[city.province]) weatherData[city.province] = [];
-
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto`;
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      if (res.getResponseCode() !== 200) throw new Error("API Error " + res.getResponseCode());
-      
-      const data = JSON.parse(res.getContentText());
-      const current = data.current || {};
-      const curCode = current.weather_code !== undefined ? current.weather_code : 0;
-      const curTemp = Math.round(current.temperature_2m || 0);
-      const speed = Math.round(current.wind_speed_10m || 0);
-      const windStr = speed.toString();
-      
-      const daily = data.daily || {};
-      const forecastData = [];
-      
-      if (daily.time) {
-        for (let i = 1; i <= 3; i++) {
-           if (!daily.time[i]) break;
-           const dDate = new Date(daily.time[i] + "T00:00:00");
-           const dayName = Utilities.formatDate(dDate, "America/Toronto", "EEEE");
-           const high = Math.round(daily.temperature_2m_max[i]);
-           const fSpeed = Math.round(daily.wind_speed_10m_max[i] || 0).toString();
-           
-           forecastData.push({ day: dayName, temp: `${high}°`, wind: fSpeed });
-        }
-      }
-
-      weatherData[city.province].push({ 
-          id: city.code, name: city.name, temp: curTemp, wind: windStr, 
-          condition: wmoToCondition(curCode), forecast: forecastData 
-      });
-    } catch (e) {
-      weatherData[city.province].push({ 
-        id: city.code, name: city.name, temp: "--", wind: "ERR", condition: "Offline", forecast: [] 
-      });
-    }
-  });
 
   return { weather: weatherData, alerts: activeAlerts };
 }
