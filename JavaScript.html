@@ -27,7 +27,13 @@
       appUrl: "", 
       insightMode: 'day', 
       selectedDate: new Date().toISOString().split('T')[0],
+      insightSearch: '',
       unifiedReport: null,
+      
+      // NEW ARCHIVE STATE
+      archiveList: [],
+      selectedArchive: 'LIVE',
+
       trackerData: null,
       trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
@@ -75,6 +81,7 @@
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     
     fetchData(); 
+    fetchArchiveList();
     fetchNotifications();
     fetchCalendar();
     fetchTrackerData(); 
@@ -138,7 +145,14 @@
       }, 300); 
   };
 
-  // --- NEW: CALENDAR DRIVER (Works off selected date) ---
+  window.handleInsightSearch = (val) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+          state.insightSearch = val;
+          render();
+      }, 300);
+  };
+
   window.handleRangeChange = (val) => {
       state.trackerRange = val;
       state.trackerCycleFilter = 'ALL'; 
@@ -146,7 +160,7 @@
       let [y, m, d] = state.trackerDate.split('-').map(Number);
       let selDate = new Date(y, m-1, d, 12, 0, 0); 
       
-      if (val === 'month') {
+      if (val === 'month' || val === 'quarter') {
           selDate.setDate(1); 
           state.trackerDate = selDate.toISOString().split('T')[0];
       } 
@@ -162,7 +176,6 @@
       render();
   };
 
-  // --- NEW: SMART CYCLE FILTER (Date Jumper vs. View Filter) ---
   window.toggleCycleFilter = (targetCycle) => {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
@@ -186,7 +199,7 @@
           state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
           state.trackerCycleFilter = 'ALL';
       } 
-      else if (state.trackerRange === 'month') {
+      else if (state.trackerRange === 'month' || state.trackerRange === 'quarter') {
           if (state.trackerCycleFilter === targetCycle) state.trackerCycleFilter = 'ALL';
           else state.trackerCycleFilter = targetCycle;
       }
@@ -205,6 +218,13 @@
       google.script.run.withSuccessHandler(j=>{ try{ const h=JSON.parse(j); if(h && h.length){ state.slHistory=h; const latest=h[h.length-1]; state.currentSL=latest.val+"%"; state.currentACK=latest.ack+"s"; if(state.view==='overview') render(); } }catch(e){} }).getStatsHistory();
     }
   }
+
+  function fetchArchiveList() {
+      if(typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(res => {
+          try { state.archiveList = JSON.parse(res); if(state.view === 'insights') render(); } catch(e) {}
+      }).getArchiveList();
+  }
   
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
   function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); const dot = document.getElementById('notif-dot'); if(dot) dot.style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
@@ -215,10 +235,17 @@
       state.unifiedReport = null; 
       if (state.view === 'insights') render();
 
-      google.script.run.withSuccessHandler(res => {
-          try { state.unifiedReport = JSON.parse(res); } catch(e) {}
-          if (state.view === 'insights') render();
-      }).getUnifiedWeeklyReport(state.selectedDate);
+      if (state.selectedArchive === 'LIVE') {
+          google.script.run.withSuccessHandler(res => {
+              try { state.unifiedReport = JSON.parse(res); } catch(e) {}
+              if (state.view === 'insights') render();
+          }).getUnifiedWeeklyReport(state.selectedDate);
+      } else {
+          google.script.run.withSuccessHandler(res => {
+              try { state.unifiedReport = JSON.parse(res); } catch(e) {}
+              if (state.view === 'insights') render();
+          }).getArchivedReport(state.selectedArchive);
+      }
   }
 
   function fetchTrackerData() {
@@ -337,8 +364,8 @@
          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
              <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
-                <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
+                 <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
+                 <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
              </div>
              
              <button class="btn btn-glass" style="height:34px;" onclick="window.open('https://sharepoint.tsl.telus.com/sites/NSE/CAM/Lists/Queue_Manager/AllItems.aspx', '_blank')">
@@ -773,7 +800,7 @@
                  ${state.trackerRange === 'week' ? `
                  <button onclick="toggleCycleFilter('WEEK A');" style="background:${d && d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
                  <button onclick="toggleCycleFilter('WEEK B');" style="background:${d && d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
-                 ` : (state.trackerRange === 'month' ? `
+                 ` : ((state.trackerRange === 'month' || state.trackerRange === 'quarter') ? `
                  <button onclick="toggleCycleFilter('WEEK A');" style="background:${state.trackerCycleFilter === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerCycleFilter === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${state.trackerCycleFilter === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
                  <button onclick="toggleCycleFilter('WEEK B');" style="background:${state.trackerCycleFilter === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerCycleFilter === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${state.trackerCycleFilter === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
                  ${state.trackerCycleFilter !== 'ALL' ? `<button onclick="toggleCycleFilter('ALL');" style="background:transparent; color:var(--text-muted); border:none; padding:4px 8px; font-size:0.75rem; cursor:pointer; text-decoration:underline;">Clear Filter</button>` : ''}
@@ -796,6 +823,7 @@
                  <option value="day" ${state.trackerRange==='day'?'selected':''}>Daily</option>
                  <option value="week" ${state.trackerRange==='week'?'selected':''}>Weekly</option>
                  <option value="month" ${state.trackerRange==='month'?'selected':''}>Monthly</option>
+                 <option value="quarter" ${state.trackerRange==='quarter'?'selected':''}>Quarterly</option>
              </select>
 
              <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">
@@ -911,6 +939,7 @@
           if(typeof google!=='undefined') {
               google.script.run.withSuccessHandler(res => {
                   showToast(res);
+                  fetchArchiveList(); // REFRESH THE DROPDOWN LIST AUTOMATICALLY
               }).archiveUnifiedWeek(state.selectedDate);
           }
       }
@@ -927,16 +956,22 @@
          <div style="display:flex; align-items:center; gap:16px;">
              <h2 style="margin:0;">Master Operations Tracker</h2>
              
-             <div class="nav-island" style="background:var(--accent-primary); border:none; padding:4px 16px; border-radius:12px;">
-                <span style="font-weight:800; font-size:0.8rem; color:white; letter-spacing:1px;">
+             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px;">
+                <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
                     ${u ? u.cycle : 'CALCULATING...'}
                 </span>
              </div>
 
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">
+             <select class="input-aether" style="width:auto; height:34px; font-weight:700;" onchange="state.selectedArchive=this.value; fetchInsightData();">
+                 <option value="LIVE" ${state.selectedArchive === 'LIVE' ? 'selected' : ''}>🔴 Live Calculation Engine</option>
+                 ${state.archiveList.map(a => \`<option value="\${a.period}" \${state.selectedArchive === a.period ? 'selected' : ''}>💾 \${a.cycle}: \${a.period}</option>\`).join('')}
+             </select>
+
+             ${state.selectedArchive === 'LIVE' ? \`<input type="date" class="input-aether" style="width:auto; height:34px;" value="\${state.selectedDate}" onchange="handleDateChange(this.value)">\` : ''}
          </div>
          <div style="display:flex; gap:12px;">
-             <button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>
+             <input id="insight-search" type="text" class="input-aether" style="width:200px; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${state.insightSearch || ''}">
+             ${state.selectedArchive === 'LIVE' ? \`<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>\` : \`<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>\`}
          </div>
       </div>`;
 
@@ -948,8 +983,14 @@
               <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Furloughs, Coachings, and Special Roles.</p>
           </div>`;
       }
+      
+      let displayData = u.data || [];
+      if (state.insightSearch) {
+          const term = state.insightSearch.toLowerCase();
+          displayData = displayData.filter(a => a.name.toLowerCase().includes(term));
+      }
 
-      const rowsHtml = u.data.map(a => `
+      const rowsHtml = displayData.map(a => `
           <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
               <td style="padding:16px; font-weight:700; color:var(--text-main);">${a.name}</td>
               <td style="padding:16px; text-align:right; font-family:monospace;">${a.acsu > 0 ? a.acsu + 'h' : '-'}</td>
