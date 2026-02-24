@@ -32,7 +32,7 @@
       trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
       trackerRange: 'day',
-      trackerRegion: 'All', 
+      trackerRegion: 'Onshore', 
       trackerSearch: '',
       trackerLoading: true
   };
@@ -129,13 +129,62 @@
   function handleSearch(v) { state.searchTerm = v; render(); }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
-  // --- NEW: Tracker Debounce Search ---
   window.handleTrackerSearch = (val) => { 
       clearTimeout(searchTimeout); 
       searchTimeout = setTimeout(() => { 
           state.trackerSearch = val; 
           render(); 
       }, 300); 
+  };
+
+  // --- NEW: AUTO-JUMP CALENDAR LOGIC (Current Date Defaulting) ---
+  window.handleRangeChange = (val) => {
+      state.trackerRange = val;
+      let today = new Date(); 
+      
+      if (val === 'day') {
+          state.trackerDate = today.toISOString().split('T')[0];
+      } 
+      else if (val === 'month') {
+          today.setDate(1); 
+          state.trackerDate = today.toISOString().split('T')[0];
+      } 
+      else if (val === 'week') {
+          let day = today.getDay();
+          let offset = (day >= 4) ? (4 - day) : -(day + 3); // Finds current Wed/Thu boundary
+          today.setDate(today.getDate() + offset);
+          let ny = today.getFullYear(); let nm = today.getMonth() + 1; let nd = today.getDate();
+          state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
+      }
+      
+      fetchTrackerData();
+      render();
+  };
+
+  // --- NEW: WEEK A/B GLOBAL SNAPPER ---
+  window.jumpToCycle = (targetCycle) => { 
+      state.trackerRange = 'week'; 
+      
+      let [y, m, d] = state.trackerDate.split('-').map(Number);
+      let dObj = new Date(y, m-1, d, 12, 0, 0); 
+      
+      let day = dObj.getDay();
+      let offset = (day >= 4) ? (4 - day) : -(day + 3);
+      dObj.setDate(dObj.getDate() + offset);
+      
+      const baseDate = new Date(2026, 0, 29, 12, 0, 0); 
+      let diffWeeks = Math.floor(Math.round((dObj - baseDate) / 86400000) / 7);
+      let isWeekB = (Math.abs(diffWeeks) % 2 === 1);
+      let currentCycle = isWeekB ? 'WEEK B' : 'WEEK A';
+
+      if (targetCycle === 'WEEK A' && currentCycle === 'WEEK B') dObj.setDate(dObj.getDate() - 7);
+      else if (targetCycle === 'WEEK B' && currentCycle === 'WEEK A') dObj.setDate(dObj.getDate() - 7);
+      
+      let ny = dObj.getFullYear(); let nm = dObj.getMonth() + 1; let nd = dObj.getDate();
+      state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
+
+      fetchTrackerData();
+      render();
   };
 
   function fetchData() {
@@ -194,7 +243,6 @@
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
-     // Capture active element to restore focus safely
      const activeId = document.activeElement ? document.activeElement.id : null;
 
      const sl = document.getElementById('hdr-sl');
@@ -703,6 +751,7 @@
   
   function renderTracker() {
       const isCoach = state.trackerMode === 'coaching';
+      const d = state.trackerData;
 
       const headerHtml = `
       <style>
@@ -713,24 +762,30 @@
          <div style="display:flex; align-items:center; gap:16px;">
              <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
              
+             <div style="display:flex; gap:8px; margin-right:12px;">
+                 <button onclick="jumpToCycle('WEEK A');" style="background:${state.trackerRange === 'week' && d && d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerRange === 'week' && d && d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${state.trackerRange === 'week' && d && d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
+                 <button onclick="jumpToCycle('WEEK B');" style="background:${state.trackerRange === 'week' && d && d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerRange === 'week' && d && d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${state.trackerRange === 'week' && d && d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
+             </div>
+
+             ${isCoach ? `
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border); margin-right:12px;">
                 <button class="nav-btn ${state.trackerRegion==='All'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='All'; fetchTrackerData();">All</button>
                 <button class="nav-btn ${state.trackerRegion==='Onshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='Onshore'; fetchTrackerData();">Onshore</button>
                 <button class="nav-btn ${state.trackerRegion==='Offshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='Offshore'; fetchTrackerData();">Offshore</button>
-             </div>
+             </div>` : ''}
 
-             <select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; fetchTrackerData();">
+             <select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value==='furlough') state.trackerRegion='Onshore'; fetchTrackerData();">
                  <option value="furlough" ${!isCoach?'selected':''}>Furlough Tracker</option>
                  <option value="coaching" ${isCoach?'selected':''}>Coaching Tracker</option>
              </select>
 
-             <select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerRange=this.value; fetchTrackerData();">
+             <select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);">
                  <option value="day" ${state.trackerRange==='day'?'selected':''}>Daily</option>
                  <option value="week" ${state.trackerRange==='week'?'selected':''}>Weekly</option>
                  <option value="month" ${state.trackerRange==='month'?'selected':''}>Monthly</option>
              </select>
 
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; fetchTrackerData();">
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">
          </div>
       </div>`;
 
@@ -739,13 +794,13 @@
           <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:450px; animation: slideUp 0.3s ease forwards; opacity:0; transform:translateY(10px);">
               <div style="width: 50px; height: 50px; border: 4px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite; margin-bottom: 24px; box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);"></div>
               <h3 style="color:var(--text-main); margin:0 0 8px 0; font-size:1.4rem;">Analyzing Database...</h3>
-              <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Crunching overlapping intervals and calculating exact hours.</p>
+              <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Crunching exact shift epochs and boundary crossing.</p>
           </div>`;
       }
 
-      if (!state.trackerData || state.trackerData.error || !state.trackerData.events) {
+      if (!d || d.error || !d.events) {
           let errMsg = "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
-          if (state.trackerData && state.trackerData.error) errMsg = state.trackerData.error;
+          if (d && d.error) errMsg = d.error;
           
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; min-height:400px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
@@ -755,8 +810,6 @@
               <button class="btn btn-primary" onclick="openImportModal()">Import WFM Schedule</button>
           </div>`;
       }
-
-      const d = state.trackerData;
       
       const filteredEvents = d.events.filter(e => 
           !state.trackerSearch || 
