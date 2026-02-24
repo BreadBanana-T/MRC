@@ -49,13 +49,10 @@ const StatsTracker = {
      let sheet = ss.getSheetByName(this.IDP_SHEET);
      if (!sheet || sheet.getLastRow() < 2) return "[]";
      
-     // Get today's data or last 24h
      const data = sheet.getDataRange().getValues().slice(1);
      const tz = ss.getSpreadsheetTimeZone();
      
-     // Sort by time
      data.sort((a,b) => new Date(a[0]) - new Date(b[0]));
-     
      const history = data.slice(-20).map(r => ({
          name: Utilities.formatDate(new Date(r[0]), tz, "HH:mm"),
          val: r[1]
@@ -64,37 +61,69 @@ const StatsTracker = {
   },
 
   /**
-   * Retrieves historical stats, SORTED by time.
+   * Retrieves historical stats, SORTED by time, directly from MASTER DB.
    */
   getHistory: function() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(this.SHEET_NAME);
+    let sheet;
+    
+    // 1. Tries to Read from the Master DB's Stats_Log FIRST
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try {
+            const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
+            sheet = ssMaster.getSheetByName("Stats_Log");
+        } catch(e) {}
+    }
+    
+    // 2. Fallback to Local Sheet if Master DB fails
+    if (!sheet) {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        sheet = ss.getSheetByName(this.SHEET_NAME);
+    }
+
     if (!sheet || sheet.getLastRow() < 2) {
       return JSON.stringify([]);
     }
 
     const lastRow = sheet.getLastRow();
-    // Grab more rows to ensure we cover the 24h window, then filter
     const startRow = Math.max(2, lastRow - 48);
     const numRows = lastRow - startRow + 1;
     
+    // Columns might be different in Master DB (Timestamp, SVL, ACK, LAW, IDP)
+    // We only need the first 3 columns.
     const data = sheet.getRange(startRow, 1, numRows, 3).getValues();
-    // 1. Map to Objects
-    let history = data.map(row => ({
-      time: new Date(row[0]), // Keep full Date object for sorting
-      label: "",
-      val: parseFloat(row[1]) || 0,
-      ack: parseFloat(row[2]) || 0
-    }));
-    // 2. SORT Chronologically (Fixes the "jumping time" bug)
+
+    let history = data.map(row => {
+      let svlRaw = parseFloat(row[1]) || 0;
+      let ackRaw = String(row[2]).replace(/[^\d.]/g, ''); // Strips out "s" safely
+      ackRaw = parseFloat(ackRaw) || 0;
+
+      // Clean decimals (e.g., 0.87 -> 87)
+      if (svlRaw > 0 && svlRaw <= 1) {
+          svlRaw = Math.round(svlRaw * 100);
+      }
+
+      return {
+        time: new Date(row[0]),
+        label: "",
+        val: svlRaw,
+        ack: ackRaw
+      };
+    });
+
+    // Clean out any corrupt dates
+    history = history.filter(h => !isNaN(h.time.getTime()));
+    
+    // Sort Chronologically
     history.sort((a, b) => a.time - b.time);
-    // 3. Slice to last 24 points and Format Label
+    
+    // Slice to the last 24 points
     history = history.slice(-this.MAX_HISTORY_POINTS);
-    // 4. Create readable labels (HH:mm)
-    const tz = ss.getSpreadsheetTimeZone();
+    
+    const tz = Session.getScriptTimeZone();
     history.forEach(h => {
         h.label = Utilities.formatDate(h.time, tz, "HH:mm");
     });
+
     return JSON.stringify(history.map(h => ({ name: h.label, val: h.val, ack: h.ack })));
   }
 };
