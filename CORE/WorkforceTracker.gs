@@ -1,6 +1,6 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Ultra-Lean Import Filter & Unified Epoch Aggregator (23:00 Boundary)
+ * Features: Ultra-Lean Import Filter, WFM Monthly Calendar, & Epoch Boundaries
  */
 
 const WorkforceTracker = {
@@ -181,7 +181,14 @@ const WorkforceTracker = {
     return msg.length ? msg.join('\n') : "No valid data found to import.";
   },
 
-  // --- MATHEMATICAL EPOCH ENGINE (23:00 Boundary) ---
+  _getCycleForEpoch: function(epoch) {
+      // Anchored to Jan 28, 2026 @ 23:00 (Week A)
+      let baseA = new Date(2026, 0, 28, 23, 0, 0, 0).getTime();
+      let diffWeeks = Math.floor((epoch - baseA) / (7 * 24 * 60 * 60 * 1000));
+      return (Math.abs(diffWeeks) % 2 === 1) ? "WEEK B" : "WEEK A";
+  },
+
+  // --- MATHEMATICAL EPOCH ENGINE (WFM Calendar) ---
   _calculateEpochBoundaries: function(mode, refDateStr) {
       let [tY, tM, tD] = refDateStr.split('-').map(Number);
       let tObj = new Date(tY, tM-1, tD, 12, 0, 0, 0); 
@@ -193,9 +200,9 @@ const WorkforceTracker = {
           targetStartEpoch = dObj.getTime();
           targetEndEpoch = targetStartEpoch + 86400000;
           label = this._formatDate(dObj);
+          cycleName = this._getCycleForEpoch(targetStartEpoch);
       } 
       else if (mode === 'week') {
-          // Find Wednesday 23:00 boundary
           let dayOfWeek = tObj.getDay(); 
           let diffToThu = (dayOfWeek >= 4) ? (4 - dayOfWeek) : -(dayOfWeek + 3);
           let thuDate = new Date(tObj);
@@ -203,30 +210,44 @@ const WorkforceTracker = {
           
           let wedDate = new Date(thuDate);
           wedDate.setDate(thuDate.getDate() - 1);
-          wedDate.setHours(23, 0, 0, 0);
+          wedDate.setHours(23, 0, 0, 0); // Exact 23:00 Boundary
           
           targetStartEpoch = wedDate.getTime();
           targetEndEpoch = targetStartEpoch + (7 * 24 * 60 * 60 * 1000);
           
-          // Jan 28, 2026 @ 23:00 = Week A (Base A)
-          let baseA = new Date(2026, 0, 28, 23, 0, 0, 0).getTime(); 
-          let diffWeeks = Math.floor((targetStartEpoch - baseA) / (7 * 24 * 60 * 60 * 1000));
-          cycleName = (Math.abs(diffWeeks) % 2 === 1) ? "WEEK B" : "WEEK A";
-
+          cycleName = this._getCycleForEpoch(targetStartEpoch);
           label = `${Utilities.formatDate(new Date(targetStartEpoch), Session.getScriptTimeZone(), "MMM dd")} to ${Utilities.formatDate(new Date(targetEndEpoch), Session.getScriptTimeZone(), "MMM dd")}`;
       } 
       else if (mode === 'month') {
-          let mObj = new Date(tY, tM-1, 1, 0, 0, 0, 0);
-          targetStartEpoch = mObj.getTime();
-          let mEnd = new Date(tY, tM, 1, 0, 0, 0, 0);
-          targetEndEpoch = mEnd.getTime();
-          label = Utilities.formatDate(mObj, Session.getScriptTimeZone(), "MMMM yyyy");
+          // TRUE WFM MONTH: Finds the Wed 23:00 before the 1st of the month
+          let firstOfMonth = new Date(tY, tM-1, 1, 12, 0, 0);
+          let day = firstOfMonth.getDay();
+          let offsetToWed = (day >= 3) ? (3 - day) : -(day + 4);
+          if (offsetToWed > 0) offsetToWed -= 7;
+          let startWed = new Date(firstOfMonth);
+          startWed.setDate(firstOfMonth.getDate() + offsetToWed);
+          startWed.setHours(23, 0, 0, 0);
+          
+          targetStartEpoch = startWed.getTime();
+          
+          // Finds the next Wed 23:00 boundary for the end of the month
+          let firstOfNextMonth = new Date(tY, tM, 1, 12, 0, 0);
+          let dayNext = firstOfNextMonth.getDay();
+          let offsetToNextWed = (dayNext >= 3) ? (3 - dayNext) : -(dayNext + 4);
+          if (offsetToNextWed > 0) offsetToNextWed -= 7;
+          let endWed = new Date(firstOfNextMonth);
+          endWed.setDate(firstOfNextMonth.getDate() + offsetToNextWed);
+          endWed.setHours(23, 0, 0, 0);
+          
+          targetEndEpoch = endWed.getTime();
+          label = `WFM Month: ${Utilities.formatDate(new Date(targetStartEpoch), Session.getScriptTimeZone(), "MMM dd")} to ${Utilities.formatDate(new Date(targetEndEpoch), Session.getScriptTimeZone(), "MMM dd")}`;
+          cycleName = "MONTH"; // Month acts as an aggregate
       }
 
       return { start: targetStartEpoch, end: targetEndEpoch, label: label, cycle: cycleName, startStr: Utilities.formatDate(new Date(targetStartEpoch), Session.getScriptTimeZone(), "yyyy-MM-dd") };
   },
 
-  getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All') {
+  getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All', cycleFilter = 'ALL') {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
     const dbSched = ss.getSheetByName('WF_SCHEDULE');
@@ -234,7 +255,6 @@ const WorkforceTracker = {
 
     const bounds = this._calculateEpochBoundaries(mode, refDate);
     
-    // Fetch an extra day back to catch cross-midnight lines visually
     let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
     const searchStartStr = Utilities.formatDate(searchStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
     const endStr = Utilities.formatDate(new Date(bounds.end), Session.getScriptTimeZone(), "yyyy-MM-dd");
@@ -285,8 +305,14 @@ const WorkforceTracker = {
                     sObj.setHours(Math.floor(split.startMins/60), split.startMins%60, 0, 0);
                     let splitStartEpoch = sObj.getTime();
 
-                    // EXACT MATHEMATICAL BOUNDARY: >= Wed 23:00 && < Next Wed 23:00
+                    // EXACT MATHEMATICAL BOUNDARY
                     if (splitStartEpoch >= bounds.start && splitStartEpoch < bounds.end) {
+                        
+                        // MONTHLY SMART FILTER: Skips data that doesn't match the selected Week A/B view
+                        if (mode === 'month' && cycleFilter !== 'ALL') {
+                            let eventCycle = this._getCycleForEpoch(splitStartEpoch);
+                            if (eventCycle !== cycleFilter) return;
+                        }
                         
                         let effDateStr = Utilities.formatDate(sObj, Session.getScriptTimeZone(), "yyyy-MM-dd");
 
