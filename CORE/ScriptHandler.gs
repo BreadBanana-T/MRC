@@ -1,44 +1,34 @@
 /**
  * MODULE: SCRIPT HANDLER
- * Manages shared clipboard scripts for the team.
+ * Dual-Write enabled: Reads locally for speed, saves/deletes to BOTH Local and Master DB.
  */
 
 const ScriptHandler = {
   SHEET_NAME: "Team_Scripts",
 
-  _getSheet: function() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+  _getSheet: function(ss) {
+    if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(this.SHEET_NAME);
     
     if (!sheet) {
-      // Create new if missing
       sheet = ss.insertSheet(this.SHEET_NAME);
       sheet.appendRow(["Title", "Script Body", "Category"]);
       sheet.getRange(1, 1, 1, 3).setFontWeight("bold");
-      sheet.appendRow(["Long Call Check", "Hi, I noticed you've been on this call for 15+ mins. Do you need supervisor assistance?", "Quality"]);
     } 
     
-    // --- SELF-REPAIR: Ensure Column C (Category) exists ---
     const maxCols = sheet.getMaxColumns();
-    if (maxCols < 3) {
-       sheet.insertColumnsAfter(maxCols, 3 - maxCols);
-    }
-    
-    // Ensure Header is correct
-    const header = sheet.getRange(1, 3).getValue();
-    if (header !== "Category") {
-       sheet.getRange(1, 3).setValue("Category").setFontWeight("bold");
-    }
+    if (maxCols < 3) sheet.insertColumnsAfter(maxCols, 3 - maxCols);
+    if (sheet.getRange(1, 3).getValue() !== "Category") sheet.getRange(1, 3).setValue("Category").setFontWeight("bold");
     
     return sheet;
   },
 
   getAll: function() {
-    const sheet = this._getSheet();
+    // Reading uses the FAST Local RAM Sheet
+    const sheet = this._getSheet(SpreadsheetApp.getActiveSpreadsheet());
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
     
-    // Safe Read: Grab all available columns, handle missing data in JS
     const numCols = sheet.getLastColumn();
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
     
@@ -46,33 +36,54 @@ const ScriptHandler = {
       index: index,
       title: row[0] || "",
       body: row[1] || "",
-      category: row[2] || "General" // Default if column is empty/missing
+      category: row[2] || "General"
     }));
   },
 
   save: function(index, title, body, category) {
     if(!title || !body) return "Missing Info";
-    const sheet = this._getSheet();
     const catVal = category || "General";
+    
+    // Dual Write Logic
+    const writeToSheet = (spreadsheet) => {
+        const sheet = this._getSheet(spreadsheet);
+        if (index !== null && index !== undefined && index !== "") {
+           const row = parseInt(index) + 2;
+           if (row <= sheet.getLastRow()) {
+              sheet.getRange(row, 1, 1, 3).setValues([[title, body, catVal]]);
+              return;
+           }
+        }
+        sheet.appendRow([title, body, catVal]);
+    };
 
-    // UPDATE EXISTING
-    if (index !== null && index !== undefined && index !== "") {
-       const row = parseInt(index) + 2; 
-       if (row <= sheet.getLastRow()) {
-          // Force write to first 3 columns
-          sheet.getRange(row, 1, 1, 3).setValues([[title, body, catVal]]);
-          return "Updated";
-       }
+    // 1. Write Local
+    writeToSheet(SpreadsheetApp.getActiveSpreadsheet());
+    
+    // 2. Write Master DB
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try { writeToSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
     }
 
-    // CREATE NEW
-    sheet.appendRow([title, body, catVal]);
     return "Saved";
   },
 
   delete: function(index) {
-    const sheet = this._getSheet();
-    sheet.deleteRow(parseInt(index) + 2);
+    const rowToDelete = parseInt(index) + 2;
+
+    const deleteFromSheet = (spreadsheet) => {
+        const sheet = this._getSheet(spreadsheet);
+        if (rowToDelete <= sheet.getLastRow()) sheet.deleteRow(rowToDelete);
+    };
+
+    // 1. Local Delete
+    deleteFromSheet(SpreadsheetApp.getActiveSpreadsheet());
+    
+    // 2. Master DB Delete
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try { deleteFromSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
+    }
+
     return "Deleted";
   }
 };
