@@ -33,7 +33,7 @@
       trackerDate: new Date().toISOString().split('T')[0],
       trackerRange: 'day',
       trackerRegion: 'Onshore', 
-      trackerCycleFilter: 'ALL', // NEW SMART FILTER
+      trackerCycleFilter: 'ALL',
       trackerSearch: '',
       trackerLoading: true
   };
@@ -138,23 +138,23 @@
       }, 300); 
   };
 
+  // --- NEW: CALENDAR DRIVER (Works off selected date) ---
   window.handleRangeChange = (val) => {
       state.trackerRange = val;
-      state.trackerCycleFilter = 'ALL'; // Reset filter when changing views
-      let today = new Date(); 
+      state.trackerCycleFilter = 'ALL'; 
       
-      if (val === 'day') {
-          state.trackerDate = today.toISOString().split('T')[0];
-      } 
-      else if (val === 'month') {
-          today.setDate(1); 
-          state.trackerDate = today.toISOString().split('T')[0];
+      let [y, m, d] = state.trackerDate.split('-').map(Number);
+      let selDate = new Date(y, m-1, d, 12, 0, 0); 
+      
+      if (val === 'month') {
+          selDate.setDate(1); 
+          state.trackerDate = selDate.toISOString().split('T')[0];
       } 
       else if (val === 'week') {
-          let day = today.getDay();
+          let day = selDate.getDay();
           let offset = (day >= 4) ? (4 - day) : -(day + 3); 
-          today.setDate(today.getDate() + offset);
-          let ny = today.getFullYear(); let nm = today.getMonth() + 1; let nd = today.getDate();
+          selDate.setDate(selDate.getDate() + offset);
+          let ny = selDate.getFullYear(); let nm = selDate.getMonth() + 1; let nd = selDate.getDate();
           state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
       }
       
@@ -162,11 +162,11 @@
       render();
   };
 
+  // --- NEW: SMART CYCLE FILTER (Date Jumper vs. View Filter) ---
   window.toggleCycleFilter = (targetCycle) => {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
           
-          // SNAP THE DATE CALENDAR
           let [y, m, d] = state.trackerDate.split('-').map(Number);
           let dObj = new Date(y, m-1, d, 12, 0, 0); 
           
@@ -174,7 +174,7 @@
           let offset = (day >= 4) ? (4 - day) : -(day + 3);
           dObj.setDate(dObj.getDate() + offset);
           
-          const baseDate = new Date(2026, 0, 29, 12, 0, 0); // Base Thursday for Wed 23:00 Math
+          const baseDate = new Date(2026, 0, 29, 12, 0, 0); 
           let diffWeeks = Math.floor(Math.round((dObj - baseDate) / 86400000) / 7);
           let isWeekB = (Math.abs(diffWeeks) % 2 === 1);
           let currentCycle = isWeekB ? 'WEEK B' : 'WEEK A';
@@ -187,12 +187,8 @@
           state.trackerCycleFilter = 'ALL';
       } 
       else if (state.trackerRange === 'month') {
-          // FILTER THE CURRENT VIEW (DO NOT SNAP DATE)
-          if (state.trackerCycleFilter === targetCycle) {
-              state.trackerCycleFilter = 'ALL';
-          } else {
-              state.trackerCycleFilter = targetCycle;
-          }
+          if (state.trackerCycleFilter === targetCycle) state.trackerCycleFilter = 'ALL';
+          else state.trackerCycleFilter = targetCycle;
       }
       fetchTrackerData();
       render();
@@ -802,7 +798,7 @@
                  <option value="month" ${state.trackerRange==='month'?'selected':''}>Monthly</option>
              </select>
 
-             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; fetchTrackerData();">
+             <input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.trackerDate}" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">
          </div>
       </div>`;
 
