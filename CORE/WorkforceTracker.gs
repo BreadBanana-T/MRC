@@ -1,9 +1,24 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Smart Upsert, DB Splitting, Offshore Optimization, Quarterly Bounds, & Master DB Archives
+ * Features: Smart Upsert, DB Splitting, Master DB Routing, & Quarterly Bounds
  */
 
-const WorkforceTracker = {
+var WorkforceTracker = {
+
+  // --- SMART DB ROUTER ---
+  // Automatically pulls from Master DB if the local RAM sheet is empty/cleared
+  _getDB: function(sheetName) {
+      const local = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+      if (local && local.getLastRow() > 1) return local;
+
+      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+          try { 
+              const mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName(sheetName);
+              if (mSheet && mSheet.getLastRow() > 1) return mSheet;
+          } catch(e) { console.error("Master DB Fallback Failed", e); }
+      }
+      return local;
+  },
 
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -54,6 +69,7 @@ const WorkforceTracker = {
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]); 
+              // OPTIMIZATION: Completely skip importing Furloughs for Offshore agents
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
           });
           agentBuffer = [];
@@ -210,12 +226,12 @@ const WorkforceTracker = {
   },
 
   getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All', cycleFilter = 'ALL') {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const dbIDP = ss.getSheetByName('WF_IDP');
     
+    // Automatically fall back to Master DB if local RAM sheet is wiped
+    const dbIDP = this._getDB('WF_IDP');
     let dbSched;
-    if (trackerType === 'coaching') dbSched = ss.getSheetByName('WF_COACHING');
-    else if (trackerType === 'furlough') dbSched = ss.getSheetByName('WF_FURLOUGH');
+    if (trackerType === 'coaching') dbSched = this._getDB('WF_COACHING');
+    else if (trackerType === 'furlough') dbSched = this._getDB('WF_FURLOUGH');
     
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Databases missing. Please run WFM Import first." });
     
@@ -235,6 +251,7 @@ const WorkforceTracker = {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
       idpData.forEach(row => {
         let rowDateStr = this._formatDate(row[0]);
+        if (!rowDateStr) return;
         let [rY, rM, rD] = rowDateStr.split('-').map(Number);
         let mins = this._timeToMins(row[1]);
         let blockTime = new Date(rY, rM-1, rD, Math.floor(mins/60), mins%60, 0, 0).getTime();
@@ -248,6 +265,7 @@ const WorkforceTracker = {
 
     schedData.forEach(row => {
         let rowDateStr = this._formatDate(row[1]);
+        if (!rowDateStr) return;
         let rowRegion = row[5] ? String(row[5]).trim() : 'Onshore';
         if (regionFilter !== 'All' && rowRegion !== regionFilter) return;
 
@@ -309,13 +327,12 @@ const WorkforceTracker = {
             return report.agents[n];
         };
 
-        const ss = SpreadsheetApp.getActiveSpreadsheet();
         let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
         const sStr = Utilities.formatDate(searchStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
         const eStr = Utilities.formatDate(new Date(bounds.end), Session.getScriptTimeZone(), "yyyy-MM-dd");
 
         const parseDB = (sheetName, metricName) => {
-            const db = ss.getSheetByName(sheetName);
+            const db = this._getDB(sheetName);
             if (!db || db.getLastRow() < 2) return;
             db.getDataRange().getValues().slice(1).forEach(row => {
                 let dStr = this._formatDate(row[1]);
@@ -334,7 +351,7 @@ const WorkforceTracker = {
         parseDB('WF_COACHING', 'coach');
         parseDB('WF_FURLOUGH', 'acsu');
 
-        const dbSess = ss.getSheetByName('DB_Sessions');
+        const dbSess = this._getDB('DB_Sessions');
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getValues().slice(1).forEach(row => {
                 let sessionEpoch = new Date(row[3]).getTime();
@@ -359,7 +376,6 @@ const WorkforceTracker = {
       
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
       
-      // Dual-Write Archive Engine: Saves to Local RAM Sheet AND Master DB automatically
       const writeToArchiveSheet = (spreadsheet) => {
           let archiveSheet = spreadsheet.getSheetByName('Weekly_Archives');
           if (!archiveSheet) { 
@@ -369,7 +385,6 @@ const WorkforceTracker = {
           }
 
           const data = archiveSheet.getDataRange().getValues();
-          // Remove old entries for this exact period to allow clean overwriting
           for (let i = data.length - 1; i >= 1; i--) {
               if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
           }
@@ -378,10 +393,8 @@ const WorkforceTracker = {
           if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
       };
 
-      // 1. Write to Local
       writeToArchiveSheet(ssLocal);
       
-      // 2. Write to Master DB (For Permanence)
       if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
           try {
              writeToArchiveSheet(SpreadsheetApp.openById(MasterConnector.DB_ID));
@@ -392,13 +405,7 @@ const WorkforceTracker = {
   },
 
   getArchiveList: function() {
-      let sheet;
-      // ALWAYS pull the Archive list from the Master DB so it's immortal
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('Weekly_Archives'); } catch(e) {}
-      }
-      if (!sheet) { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Weekly_Archives'); }
-      
+      let sheet = this._getDB('Weekly_Archives');
       if (!sheet || sheet.getLastRow() < 2) return "[]";
       
       const data = sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getValues(); 
@@ -414,12 +421,7 @@ const WorkforceTracker = {
   },
 
   getArchivedReport: function(targetPeriod) {
-      let sheet;
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('Weekly_Archives'); } catch(e) {}
-      }
-      if (!sheet) { sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Weekly_Archives'); }
-      
+      let sheet = this._getDB('Weekly_Archives');
       if (!sheet || sheet.getLastRow() < 2) return "{}";
       
       const data = sheet.getDataRange().getValues();
@@ -450,7 +452,6 @@ const WorkforceTracker = {
       }
       return splits;
   },
-  _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
   
   _upsertData: function(sheetName, newRows, keyIndices, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
@@ -460,6 +461,7 @@ const WorkforceTracker = {
         this._executeUpsert(ssMaster, sheetName, newRows, keyIndices, headersArray); } catch(e) {}
     }
   },
+  
   _executeUpsert: function(targetSpreadsheet, sheetName, newRows, keyIndices, headersArray) {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
@@ -482,7 +484,12 @@ const WorkforceTracker = {
     sheet.clearContents(); sheet.appendRow(headers);
     if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
   },
+  
+  // Date-Aware fail safes restored
+  _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
   _timeToMins: function(tStr) {
+       if (!tStr) return 0;
+       if (tStr instanceof Date) return (tStr.getHours() * 60) + tStr.getMinutes();
        let match = String(tStr).match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); if (!match) return 0;
        let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
        if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0; return (h * 60) + m;
@@ -498,10 +505,15 @@ const WorkforceTracker = {
     ret.push(token.trim()); return ret;
   },
   _parseDate: function(s) { let d=new Date(s); return isNaN(d)?s:Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd'); },
-  _formatDate: function(d) { return (d instanceof Date) ? Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(d).substring(0,10); },
+  _formatDate: function(d) { 
+      if (!d) return "";
+      return (d instanceof Date) ? Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(d).substring(0,10); 
+  },
   _formatTimeStr: function(t) { let d=new Date(`2000/01/01 ${t}`); return isNaN(d)?t:Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm'); },
   _cleanActivity: function(s) { return s.replace(/\d{2}\s?[AP]M/gi, '').trim(); },
   _timeToBucket: function(val) {
+    if (!val) return -1;
+    if (val instanceof Date) return (val.getHours()*4) + Math.floor(val.getMinutes()/15);
     let parts = String(val).match(/(\d+):(\d+)\s?([AP]M)?/i);
     if (parts) {
       let h = parseInt(parts[1]), m = parseInt(parts[2]), amp = parts[3] ? parts[3].toUpperCase() : null;
