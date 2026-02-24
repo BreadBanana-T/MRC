@@ -88,8 +88,8 @@ function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHand
 function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
 
 // --- WORKFORCE TRACKER EXPORTS ---
-function getWorkforceAnalytics(mode, date, type, region) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region) : "{}"; 
+function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 
 }
 function importWorkforceData(sched, idp) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error"; 
