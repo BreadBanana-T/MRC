@@ -1,8 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V4.4)
- * - 30 Minute Lookahead
- * - Captures exact Break Start/End for display
- * - Dynamically generates Epochs for Overtime Agents
+ * MODULE: AGENT MONITOR (V4.6)
+ * - Rock Solid Date Math
+ * - Intraday ACSU Snapping
  */
 
 const AgentMonitor = {
@@ -16,6 +15,7 @@ const AgentMonitor = {
   },
   syncFromRaw: function() { return "Synced"; }
 };
+
 function getFloorStatus() { return compileFloorData(); }
 function updateAgentStatus(name, type, value) { return AgentMonitor.setStatus(name, type, value); }
 function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBreaks(name, jsonBreaks); }
@@ -28,12 +28,14 @@ function compileFloorData() {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
+
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
   const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   const now = new Date().getTime();
   const agentMap = new Map();
+
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
@@ -54,11 +56,9 @@ function compileFloorData() {
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
-    
     let dateStr = row ? row[2] : "";
     let shiftStr = "";
 
-    // --- FIX: GENERATE EPOCHS FOR OFF-SHIFT OT AGENTS ---
     if (isOT && (!startEpoch || !endEpoch)) {
        let today = new Date();
        let otStart = otList[0].start;
@@ -67,13 +67,13 @@ function compileFloorData() {
        let parseOTTime = (timeStr, baseDate) => {
            let d = new Date(baseDate.getTime());
            let parts = timeStr.match(/(\d{1,2}):(\d{2})/);
-           if (parts) { d.setHours(parseInt(parts[1]), parseInt(parts[2]), 0, 0); }
+           if (parts) d.setHours(parseInt(parts[1]), parseInt(parts[2]), 0, 0);
            return d;
        };
        
        let sDate = parseOTTime(otStart, today);
        let eDate = parseOTTime(otEnd, today);
-       if (eDate < sDate) eDate.setDate(eDate.getDate() + 1); // Overnight OT
+       if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
        
        startEpoch = sDate.getTime();
        endEpoch = eDate.getTime();
@@ -98,6 +98,7 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
+    
     if (isOT) {
        otList.forEach(o => {
            if(o.bStart && o.bStart !== "-" && o.bEnd && o.bEnd !== "-") rawBreaks.push({ type: "OT Break", start: o.bStart, end: o.bEnd });
@@ -108,9 +109,11 @@ function compileFloorData() {
     let nextBreakStr = null;
     let currentBreakStr = null;
     let onBreakNow = false;
+    let inTrainingNow = false;
+    let onAcsuNow = false;
     let breakTimer = "";
-    let breakLabel = "";
-    let breakStartsIn = ""; 
+    let activeIntradayLabel = "";
+    let breakStartsIn = "";
 
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
@@ -127,11 +130,14 @@ function compileFloorData() {
           }
           let bs = 0, be = 0;
           try {
-             const bStart24 = Utilities.parseDate(`${shiftDateStr} ${b.start}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
-             const bEnd24 = Utilities.parseDate(`${shiftDateStr} ${b.end}`, "America/Toronto", "yyyy-MM-dd hh:mm a");
-             if(bStart24 && bEnd24) {
-                 bs = bStart24.getTime();
-                 be = bEnd24.getTime();
+             let pStart = parseTime(b.start);
+             let pEnd = parseTime(b.end);
+             if(pStart && pEnd) {
+                 let [y, mo, d] = shiftDateStr.split('-').map(Number);
+                 let bDateStart = new Date(y, mo - 1, d, pStart.h, pStart.m, 0);
+                 let bDateEnd = new Date(y, mo - 1, d, pEnd.h, pEnd.m, 0);
+                 bs = bDateStart.getTime();
+                 be = bDateEnd.getTime();
                  if (startEpoch && bs < startEpoch) { bs += 86400000; be += 86400000; }
                  if (be < bs) be += 86400000;
              }
@@ -140,13 +146,20 @@ function compileFloorData() {
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
              if (now >= bs && now <= be) {
-                 onBreakNow = true;
-                 const rem = Math.ceil((be - now)/60000);
-                 breakTimer = `${rem}m`;
-                 breakLabel = displayLabel;
+                 if (b.type === "Training") {
+                     inTrainingNow = true;
+                     activeIntradayLabel = displayLabel;
+                 } else if (b.type === "ACSU") {
+                     onAcsuNow = true;
+                     activeIntradayLabel = "Furlough (ACSU)";
+                 } else {
+                     onBreakNow = true;
+                     activeIntradayLabel = displayLabel;
+                 }
+                 breakTimer = `${Math.ceil((be - now)/60000)}m`;
                  currentBreakStr = `${b.start} - ${b.end}`;
              }
-             if (bs > now && !nextBreakStr && (bs - now < 1800000)) { 
+             if (bs > now && !nextBreakStr && (bs - now < 1800000) && b.type !== "Training" && b.type !== "ACSU") { 
                  nextBreakStr = `${b.start} - ${b.end}`;
                  breakStartsIn = Math.ceil((bs - now)/60000) + "m";
              }
@@ -156,15 +169,13 @@ function compileFloorData() {
 
     let category = "active";
     let subStatus = role || "";
+
     if (absentType) {
         const upper = absentType.toUpperCase();
         if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
         else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
-        else if (upper.match(/TRAIN|TRN|COACH/)) { category = "training"; subStatus = "Training"; }
         else { category = "vacation"; subStatus = absentType; }
-    } else if (role.includes("Training")) {
-        category = "training";
-    }
+    } 
 
     if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
         if (startEpoch && startEpoch > now) {
@@ -174,16 +185,21 @@ function compileFloorData() {
         }
     }
 
-    if (category === "active" && onBreakNow) subStatus = breakLabel || "On Break";
+    // Live Intraday Overrides (This moves them dynamically out of Active!)
+    if (category === "active") {
+        if (onAcsuNow) { category = "unplanned"; subStatus = activeIntradayLabel; }
+        else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
+        else if (onBreakNow) subStatus = activeIntradayLabel;
+    }
+
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
-      isModified: isModified, breakTimeStr: nextBreakStr, 
-      currentBreakStr: currentBreakStr, 
-      timer: breakTimer, 
-      auxLabel: "Remaining", startsIn: breakStartsIn,
+      isModified: isModified, breakTimeStr: nextBreakStr, currentBreakStr: currentBreakStr, 
+      timer: breakTimer, auxLabel: "Remaining", startsIn: breakStartsIn,
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
+
     if (category === 'active' && nextBreakStr) {
        let upAgent = {...agent};
        upAgent.timer = nextBreakStr;
@@ -204,7 +220,7 @@ function compileFloorData() {
   sheetOverrides.forEach((val, key) => {
       if (!agentMap.has(key) && !agentMap.has(toTitleCase(key)) && val.ot.length > 0) processEntry(toTitleCase(key), null); 
   });
-  
+
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
@@ -215,19 +231,24 @@ function compileFloorData() {
       if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
       if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
   });
+
   return JSON.stringify(emptyFloor);
 }
 
 function parseBreaksSafe(j) { try { return JSON.parse(j); } catch(e){return[];} }
 function parseTimeValue(tStr) {
    if(!tStr) return 9999;
-   const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+   const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
    if(!match) return 9999;
-   let h = parseInt(match[1]);
-   let m = parseInt(match[2]);
-   let amp = match[3].toUpperCase();
+   let h = parseInt(match[1]); let m = parseInt(match[2]); let amp = match[3] ? match[3].toUpperCase() : null;
    if (amp === "PM" && h < 12) h += 12;
    if (amp === "AM" && h === 12) h = 0;
    return (h * 60) + m;
+}
+function parseTime(tStr) {
+   if(!tStr) return null; const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); if(!match) return null;
+   let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
+   if (amp === "PM" && h < 12) h += 12;
+   if (amp === "AM" && h === 12) h = 0; return { h, m };
 }
 function toTitleCase(str) { return str.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();}); }
