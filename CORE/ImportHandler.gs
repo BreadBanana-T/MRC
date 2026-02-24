@@ -1,5 +1,5 @@
 /**
- * MODULE: IMPORT HANDLER (SMART WFM)
+ * MODULE: IMPORT HANDLER (SMART WFM + MASTER DB BACKUP)
  */
 
 const ImportHandler = {
@@ -10,7 +10,6 @@ function processWFMImport(rawText, forcedDate) {
   if (!rawText) return "Error: No text provided.";
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.setSpreadsheetTimeZone("America/Toronto");
-  
   let sheet = ss.getSheetByName("Raw Schedule");
   if (!sheet) { sheet = ss.insertSheet("Raw Schedule"); }
   
@@ -26,7 +25,7 @@ function processWFMImport(rawText, forcedDate) {
   
   if (!forcedDate) forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
-
+  
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
   const rgxAnyDateLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
   const rgxShiftLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
@@ -40,7 +39,9 @@ function processWFMImport(rawText, forcedDate) {
     if (agentMatch) {
       if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
       currentID = agentMatch[1]; currentAgent = agentMatch[2].replace(/["',]/g, "").trim(); 
-      buffer = resetBuffer(); continue;
+      buffer = resetBuffer(); 
+      if (String(currentID).startsWith("3")) buffer.isOffshore = true;
+      continue;
     }
 
     if (currentAgent) {
@@ -49,7 +50,9 @@ function processWFMImport(rawText, forcedDate) {
           const foundDate = dateMatch[1];
           if ((buffer.dateStr && buffer.dateStr !== foundDate) || (buffer.isOff && !buffer.dateStr)) {
              pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
+             let wasOffshore = buffer.isOffshore;
              buffer = resetBuffer();
+             buffer.isOffshore = wasOffshore;
           }
        }
 
@@ -58,12 +61,12 @@ function processWFMImport(rawText, forcedDate) {
        else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
        const upper = line.toUpperCase();
+       
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
        
        if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) { if (!buffer.role.includes("SAFE")) buffer.role = (buffer.role + " SAFE").trim(); }
        if (upper.includes("ICL") || upper.includes("INCIDENT")) { if (!buffer.role.includes("ICL")) buffer.role = (buffer.role + " ICL").trim(); }
        if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) { if (!buffer.role.includes("ULC FIRE")) buffer.role = (buffer.role + " ULC FIRE").trim(); }
-       if (upper.includes("COACHING") || upper.includes("TRN")) { if (!buffer.role.includes("Training")) buffer.role = (buffer.role + " Training").trim(); }
 
        if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
            if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) buffer.absentType = "Medical Leave";
@@ -71,15 +74,22 @@ function processWFMImport(rawText, forcedDate) {
        }
        else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
        else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
-       else if (upper.includes("TRAINING") || upper.includes("TRN")) buffer.absentType = "TRAINING";
-       
+
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
            const actStart = actMatch[1], actEnd = actMatch[2];
+           
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
-           } else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
+           } 
+           else if (upper.includes("COACH") || upper.includes("TRN") || upper.includes("TRAINING") || upper.includes("HUDDLE") || upper.includes("MEET") || upper.includes("ONE ON ONE") || upper.includes("QUAL")) {
+               buffer.breaks.push({ type: "Training", start: actStart, end: actEnd });
+           }
+           else if (upper.includes("ACSU") || upper.includes("SOLICITED") || upper.includes("VOLUNTARY") || upper.includes("LIBÉRATION")) {
+               buffer.breaks.push({ type: "ACSU", start: actStart, end: actEnd });
+           }
+           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
                buffer.hasWork = true;
            }
 
@@ -92,9 +102,27 @@ function processWFMImport(rawText, forcedDate) {
 
   if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
   if (rosterData.length > 0) {
+    
+    // 1. FAST LOCAL RAM SAVE
     sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
+    
+    // 2. MASTER DB SILENT BACKUP (Dual-Mirroring)
+    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+        try {
+            const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
+            let mSheet = masterSS.getSheetByName("Raw Schedule");
+            if (!mSheet) { mSheet = masterSS.insertSheet("Raw Schedule"); }
+            mSheet.clear();
+            mSheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
+            mSheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+            mSheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
+        } catch(e) {
+            console.error("Master DB Sync failed: ", e);
+        }
+    }
+
     if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
-    return `Synced ${rosterData.length} entries.`;
+    return `Synced ${rosterData.length} entries successfully to RAM and Master DB.`;
   }
   return "No valid data found.";
 }
@@ -106,28 +134,21 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf.start && !buf.isOff && !buf.absentType) return;
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
 
-  if (String(id).startsWith("3")) buf.isOffshore = true;
   if (buf.hasWork) {
       if (buf.absentType === "VACATION") buf.absentType = "";
       if (buf.absentType === "SICK") buf.absentType = "Leaving Early (Sick)";
   }
 
-  let startEpoch = "", endEpoch = "", finalDateStr = buf.dateStr;
-  if (!finalDateStr) finalDateStr = `${defM}/${defD}/${defY}`; 
+  let finalDateObj = safeParseDateStr(buf.dateStr, defY, defM, defD);
+  let finalDateStr = finalDateObj.str;
+  let startEpoch = "", endEpoch = "";
 
   if (buf.start && buf.end) {
-     let y, m, d;
-     if (buf.dateStr) {
-        const parts = buf.dateStr.split('/');
-        m = parseInt(parts[0]); d = parseInt(parts[1]); y = parseInt(parts[2]);
-        if (y < 100) y += 2000;
-     } else { y = defY; m = defM; d = defD; }
-
      const sObj = parseTime(buf.start);
      const eObj = parseTime(buf.end);
      if (sObj && eObj) {
-        let sDate = new Date(y, m - 1, d, sObj.h, sObj.m, 0);
-        let eDate = new Date(y, m - 1, d, eObj.h, eObj.m, 0);
+        let sDate = new Date(finalDateObj.y, finalDateObj.m - 1, finalDateObj.d, sObj.h, sObj.m, 0);
+        let eDate = new Date(finalDateObj.y, finalDateObj.m - 1, finalDateObj.d, eObj.h, eObj.m, 0);
         if (eDate < sDate) eDate.setDate(eDate.getDate() + 1);
         startEpoch = sDate.getTime(); endEpoch = eDate.getTime();
      }
@@ -151,10 +172,23 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
   roster.push([cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, buf.isOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks), buf.role, buf.absentType, startEpoch, endEpoch]);
 }
 
+function safeParseDateStr(ds, defY, defM, defD) {
+    if (!ds) return { y: defY, m: defM, d: defD, str: `${defY}-${defM < 10 ? '0'+defM : defM}-${defD < 10 ? '0'+defD : defD}` };
+    let y = defY, m = defM, d = defD;
+    let parts = ds.includes('-') ? ds.split('-') : ds.split('/');
+    if (parts.length === 3) {
+        if (parts[0].length === 4) { y = parseInt(parts[0]); m = parseInt(parts[1]); d = parseInt(parts[2]); }
+        else { y = parseInt(parts[2]); m = parseInt(parts[0]); d = parseInt(parts[1]); }
+    }
+    if (y < 100) y += 2000;
+    return { y, m, d, str: `${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}` };
+}
+
 function parseTime(tStr) {
-   if(!tStr) return null; const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i); if(!match) return null;
-   let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3].toUpperCase();
-   if (amp === "PM" && h < 12) h += 12; if (amp === "AM" && h === 12) h = 0; return { h, m };
+   if(!tStr) return null; const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); if(!match) return null;
+   let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
+   if (amp === "PM" && h < 12) h += 12;
+   if (amp === "AM" && h === 12) h = 0; return { h, m };
 }
 function compareTimeStrings(t1, t2) {
     if (!t1 || !t2) return false;
