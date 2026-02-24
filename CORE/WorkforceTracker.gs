@@ -1,6 +1,6 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Shift Splitter Engine, Region Parsing, & Grand Unified Tracker
+ * Features: Ultra-Lean Import Filter & Unified Epoch Aggregator (23:00 Boundary)
  */
 
 const WorkforceTracker = {
@@ -20,40 +20,76 @@ const WorkforceTracker = {
     }
     
     let msg = [];
-    // --- SCHEDULE PARSER ---
+    
+    // --- SCHEDULE PARSER (ULTRA-LEAN) ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanSched = [];
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
-      let currentAgent = "", currentRegion = "Onshore", currentDateStr = "";
+      let currentAgent = "", currentID = "", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
       let lastTimeMins = -1, daysAdded = 0;
+      let agentBuffer = []; 
+      
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
+
+      const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
+      const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+
+      const flushAgentBuffer = () => {
+          if (agentBuffer.length === 0) return;
+          
+          let isOffshore = false;
+          if (currentID && String(currentID).startsWith("3")) isOffshore = true;
+          for (let obj of agentBuffer) {
+              if (obj.raw.toUpperCase().includes("TI ") || obj.raw.toUpperCase().includes("OFFSHORE")) {
+                  isOffshore = true; break;
+              }
+          }
+          let reg = isOffshore ? "Offshore" : "Onshore";
+          
+          agentBuffer.forEach(obj => { 
+              let actLower = obj.act.toLowerCase();
+              let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
+              let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
+              let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
+              
+              if (isCoach || isFurlough) {
+                  cleanSched.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]); 
+              }
+          });
+          agentBuffer = [];
+      };
 
       lines.forEach(line => {
         let text = line.trim();
         if(text.startsWith('Agent Name') || text.startsWith('"Agent Name"')) return;
 
         if (text.includes('Agent:')) {
+          flushAgentBuffer();
           let parts = text.split(':');
           if (parts.length > 1) {
               let agentData = parts[1].trim();
+              let idMatch = agentData.match(/^(\d+)/);
+              currentID = idMatch ? idMatch[1] : "";
               currentAgent = agentData.replace(/^\d+\s+/, '').trim();
-              // Look for Region Tags in Header
-              currentRegion = "Onshore";
-              if (agentData.toUpperCase().includes("TI ") || agentData.toUpperCase().includes("OFFSHORE")) {
-                  currentRegion = "Offshore";
+          }
+          return;
+        } 
+        
+        if (text.includes('"') && text.includes(',')) {
+          flushAgentBuffer(); 
+          let csvParts = this._parseCSVLine(text);
+          if (csvParts.length >= 6) { 
+              let actLower = this._cleanActivity(csvParts[2]).toLowerCase();
+              let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
+              let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
+              let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
+              if (isCoach || isFurlough) {
+                  cleanSched.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]); 
               }
           }
           return;
-        } else if (text.includes('"') && text.includes(',')) {
-          let csvParts = this._parseCSVLine(text);
-          if (csvParts.length >= 5) { cleanSched.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], currentRegion]); return; }
-        }
-
-        // Dynamically catch TI/Offshore if it appears on a schedule line instead of header
-        if (text.toUpperCase().includes("TI ") || text.toUpperCase().includes("OFFSHORE")) {
-            currentRegion = "Offshore";
         }
 
         let dMatch = text.match(dateRegex);
@@ -76,15 +112,18 @@ const WorkforceTracker = {
             lastTimeMins = tStartMins;
             let actDate = new Date(currentY, currentM - 1, currentD + daysAdded);
             let actDateStr = Utilities.formatDate(actDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+            
             if (!act.toLowerCase().match(/^activity|^scheduled/)) {
-               cleanSched.push([currentAgent, actDateStr, act, tStart, tEnd, currentRegion]);
+               agentBuffer.push({ raw: text, dateStr: actDateStr, act: act, start: tStart, end: tEnd });
             }
           }
         }
       });
+      flushAgentBuffer(); 
+      
       if (cleanSched.length > 0) {
         this._upsertData('WF_SCHEDULE', cleanSched, 1, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
-        msg.push(`✔ Schedule: Imported ${cleanSched.length} blocks.`);
+        msg.push(`✔ Schedule: Imported ${cleanSched.length} tracked events (Junk filtered).`);
       }
     }
 
@@ -142,36 +181,63 @@ const WorkforceTracker = {
     return msg.length ? msg.join('\n') : "No valid data found to import.";
   },
 
+  // --- MATHEMATICAL EPOCH ENGINE (23:00 Boundary) ---
+  _calculateEpochBoundaries: function(mode, refDateStr) {
+      let [tY, tM, tD] = refDateStr.split('-').map(Number);
+      let tObj = new Date(tY, tM-1, tD, 12, 0, 0, 0); 
+      
+      let targetStartEpoch = 0, targetEndEpoch = 0, label = "", cycleName = "";
+
+      if (mode === 'day') {
+          let dObj = new Date(tY, tM-1, tD, 0, 0, 0, 0);
+          targetStartEpoch = dObj.getTime();
+          targetEndEpoch = targetStartEpoch + 86400000;
+          label = this._formatDate(dObj);
+      } 
+      else if (mode === 'week') {
+          // Find Wednesday 23:00 boundary
+          let dayOfWeek = tObj.getDay(); 
+          let diffToThu = (dayOfWeek >= 4) ? (4 - dayOfWeek) : -(dayOfWeek + 3);
+          let thuDate = new Date(tObj);
+          thuDate.setDate(tObj.getDate() + diffToThu);
+          
+          let wedDate = new Date(thuDate);
+          wedDate.setDate(thuDate.getDate() - 1);
+          wedDate.setHours(23, 0, 0, 0);
+          
+          targetStartEpoch = wedDate.getTime();
+          targetEndEpoch = targetStartEpoch + (7 * 24 * 60 * 60 * 1000);
+          
+          // Jan 28, 2026 @ 23:00 = Week A (Base A)
+          let baseA = new Date(2026, 0, 28, 23, 0, 0, 0).getTime(); 
+          let diffWeeks = Math.floor((targetStartEpoch - baseA) / (7 * 24 * 60 * 60 * 1000));
+          cycleName = (Math.abs(diffWeeks) % 2 === 1) ? "WEEK B" : "WEEK A";
+
+          label = `${Utilities.formatDate(new Date(targetStartEpoch), Session.getScriptTimeZone(), "MMM dd")} to ${Utilities.formatDate(new Date(targetEndEpoch), Session.getScriptTimeZone(), "MMM dd")}`;
+      } 
+      else if (mode === 'month') {
+          let mObj = new Date(tY, tM-1, 1, 0, 0, 0, 0);
+          targetStartEpoch = mObj.getTime();
+          let mEnd = new Date(tY, tM, 1, 0, 0, 0, 0);
+          targetEndEpoch = mEnd.getTime();
+          label = Utilities.formatDate(mObj, Session.getScriptTimeZone(), "MMMM yyyy");
+      }
+
+      return { start: targetStartEpoch, end: targetEndEpoch, label: label, cycle: cycleName, startStr: Utilities.formatDate(new Date(targetStartEpoch), Session.getScriptTimeZone(), "yyyy-MM-dd") };
+  },
+
   getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All') {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = ss.getSheetByName('WF_IDP');
     const dbSched = ss.getSheetByName('WF_SCHEDULE');
-    
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Database missing. Please run WFM Import first." });
-    const dateObj = new Date(refDate + 'T00:00:00');
-    let startDate = new Date(dateObj), endDate = new Date(dateObj), label = "";
+
+    const bounds = this._calculateEpochBoundaries(mode, refDate);
     
-    if (mode === 'day') {
-      label = this._formatDate(startDate);
-    } else if (mode === 'week') {
-      let day = startDate.getDay(); 
-      let offset = (day >= 3) ? (3 - day) : -(day + 4); 
-      startDate.setDate(startDate.getDate() + offset);
-      endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 6);
-      label = `Week of ${this._formatDate(startDate)}`;
-    } else if (mode === 'month') {
-      startDate.setDate(1);
-      endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
-      label = Utilities.formatDate(startDate, Session.getScriptTimeZone(), "MMMM yyyy");
-    }
-
-    const startStr = this._formatDate(startDate);
-    const endStr = this._formatDate(endDate);
-
-    let searchStartDate = new Date(startDate);
-    searchStartDate.setDate(searchStartDate.getDate() - 1);
-    const searchStartStr = this._formatDate(searchStartDate);
+    // Fetch an extra day back to catch cross-midnight lines visually
+    let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
+    const searchStartStr = Utilities.formatDate(searchStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    const endStr = Utilities.formatDate(new Date(bounds.end), Session.getScriptTimeZone(), "yyyy-MM-dd");
 
     const idpData = dbIDP.getLastRow() > 1 ? dbIDP.getDataRange().getValues().slice(1) : [];
     const schedData = dbSched.getLastRow() > 1 ? dbSched.getDataRange().getValues().slice(1) : [];
@@ -183,7 +249,7 @@ const WorkforceTracker = {
     if (mode === 'day' && trackerType === 'furlough') {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
       idpData.forEach(row => {
-        if (this._formatDate(row[0]) === startStr) { 
+        if (this._formatDate(row[0]) === bounds.startStr) { 
           let idx = this._timeToBucket(row[1]);
           if (idx > -1) { buckets[idx].demand += Number(row[2] || 0); buckets[idx].supply += Number(row[3] || 0); }
         }
@@ -202,45 +268,35 @@ const WorkforceTracker = {
             let agent = String(row[0]).trim();
             let act = String(row[2]).toLowerCase();
             
-            // STRICT BLOCK FOR TEAM LEAD WORK
-            let isTeamLead = act.includes('team lead') || act.includes('équipe /');
-            
+            let isTeamLead = act.includes('team lead') || act.includes('équipe') || act.includes('equipe');
             let isCoach = trackerType === 'coaching' && !isTeamLead && COACHING_CODES.some(c => act.includes(c));
             let isFurlough = trackerType === 'furlough' && ACSU_CODES.some(c => act.includes(c));
 
             if (isCoach || isFurlough) {
+                let [rY, rM, rD] = rowDateStr.split('-').map(Number);
                 let startMins = this._timeToMins(row[3]);
                 let endMinsRaw = this._timeToMins(row[4]);
                 let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
                 let splits = this._getShiftSplits(startMins, endMins);
 
-                let day0Str = rowDateStr;
-                let d1 = new Date(rowDateStr + "T12:00:00"); d1.setDate(d1.getDate() + 1);
-                let day1Str = this._formatDate(d1);
-                let d2 = new Date(rowDateStr + "T12:00:00"); d2.setDate(d2.getDate() + 2);
-                let day2Str = this._formatDate(d2);
-
                 splits.forEach(split => {
-                    let effDateObj = new Date(rowDateStr + "T12:00:00");
-                    if (split.shift === "Night" && split.startMins >= 1380) {
-                        effDateObj.setDate(effDateObj.getDate() + 1);
-                    }
-                    let effDateStr = this._formatDate(effDateObj);
+                    let sObj = new Date(rY, rM-1, rD);
+                    sObj.setHours(Math.floor(split.startMins/60), split.startMins%60, 0, 0);
+                    let splitStartEpoch = sObj.getTime();
 
-                    if (effDateStr >= startStr && effDateStr <= endStr) {
+                    // EXACT MATHEMATICAL BOUNDARY: >= Wed 23:00 && < Next Wed 23:00
+                    if (splitStartEpoch >= bounds.start && splitStartEpoch < bounds.end) {
+                        
+                        let effDateStr = Utilities.formatDate(sObj, Session.getScriptTimeZone(), "yyyy-MM-dd");
+
                         if (isFurlough && mode === 'day') {
                             for (let min = split.startMins; min < split.endMins; min += 15) {
-                                let daysAdded = Math.floor(min / 1440);
-                                let blockDateStr = day0Str;
-                                if (daysAdded === 1) blockDateStr = day1Str;
-                                else if (daysAdded === 2) blockDateStr = day2Str;
-                                
-                                if (blockDateStr === startStr) {
+                                let blockObj = new Date(rY, rM-1, rD);
+                                blockObj.setHours(Math.floor(min/60), min%60, 0, 0);
+                                if (blockObj.getTime() >= bounds.start && blockObj.getTime() < bounds.end) {
                                     let idx = Math.floor((min % 1440) / 15);
-                                    if (idx >= 0 && idx < 96) {
-                                        buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
-                                    }
+                                    if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
                                 }
                             }
                         }
@@ -283,88 +339,70 @@ const WorkforceTracker = {
         else totals.night += f.hours;
     });
     
-    return JSON.stringify({ mode: mode, trackerType: trackerType, label: label, grid: buckets, events: combinedEvents, totals: totals });
+    return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals });
   },
 
-  // --- GRAND UNIFIED TRACKER ---
   getUnifiedWeeklyReport: function(refDateStr) {
-        const target = new Date(refDateStr + "T12:00:00");
-        let day = target.getDay(); 
-        let offset = (day >= 3) ? (3 - day) : -(day + 4);
-        
-        let startWed = new Date(target);
-        startWed.setDate(startWed.getDate() + offset);
-        let endWed = new Date(startWed);
-        endWed.setDate(endWed.getDate() + 7);
-
-        const startStr = this._formatDate(startWed);
-        const endStr = this._formatDate(endWed);
-
-        // Base Date Math (Feb 18, 2026 = Week B)
-        const baseDate = new Date("2026-02-18T12:00:00");
-        const diffDays = Math.round((startWed - baseDate) / (1000 * 60 * 60 * 24));
-        const diffWeeks = Math.floor(diffDays / 7);
-        const isWeekB = (Math.abs(diffWeeks) % 2 === 0); 
-        const cycleName = isWeekB ? "WEEK B" : "WEEK A";
-
-        let report = { cycle: cycleName, period: `${startStr} to ${endStr}`, agents: {} };
+        const bounds = this._calculateEpochBoundaries("week", refDateStr);
+        let report = { cycle: bounds.cycle, period: bounds.label, agents: {} };
 
         const getAg = (name) => {
             let n = String(name).trim();
-            n = n.replace(/\b\w/g, c => c.toUpperCase()); // Clean capitalization
+            n = n.replace(/\b\w/g, c => c.toUpperCase()); 
             if(!report.agents[n]) report.agents[n] = { name: n, acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, total: 0 };
             return report.agents[n];
         };
 
         const ss = SpreadsheetApp.getActiveSpreadsheet();
         
-        // 1. Crunch WFM Text (Furlough & Coachings)
         const dbSched = ss.getSheetByName('WF_SCHEDULE');
         if (dbSched && dbSched.getLastRow() > 1) {
             const schedData = dbSched.getDataRange().getValues().slice(1);
             const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
             const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
 
+            let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
+            const searchStartStr = Utilities.formatDate(searchStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+            const endStr = Utilities.formatDate(new Date(bounds.end), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
             schedData.forEach(row => {
                 let rowDateStr = this._formatDate(row[1]);
-                let effDateObj = new Date(rowDateStr + "T12:00:00");
-                let startMins = this._timeToMins(row[3]);
-                let endMinsRaw = this._timeToMins(row[4]);
-                let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
-                
-                this._getShiftSplits(startMins, endMins).forEach(split => {
-                    let splitDateObj = new Date(effDateObj);
-                    if (split.shift === "Night" && split.startMins >= 1380) {
-                        splitDateObj.setDate(splitDateObj.getDate() + 1); // Push to next day
-                    }
-                    let splitDateStr = this._formatDate(splitDateObj);
+                if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
+                    let [rY, rM, rD] = rowDateStr.split('-').map(Number);
+                    let startMins = this._timeToMins(row[3]);
+                    let endMinsRaw = this._timeToMins(row[4]);
+                    let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
                     
-                    // Enforce Wednesday-to-Wednesday Boundary
-                    if (splitDateStr >= startStr && splitDateStr < endStr) {
-                        let act = String(row[2]).toLowerCase();
-                        let isTeamLead = act.includes('team lead') || act.includes('équipe /');
+                    this._getShiftSplits(startMins, endMins).forEach(split => {
+                        let sObj = new Date(rY, rM-1, rD);
+                        sObj.setHours(Math.floor(split.startMins/60), split.startMins%60, 0, 0);
+                        let splitStartEpoch = sObj.getTime();
                         
-                        if (ACSU_CODES.some(c => act.includes(c))) {
-                            getAg(row[0]).acsu += split.hours; getAg(row[0]).total += split.hours;
-                        } else if (!isTeamLead && COACHING_CODES.some(c => act.includes(c))) {
-                            getAg(row[0]).coach += split.hours; getAg(row[0]).total += split.hours;
+                        if (splitStartEpoch >= bounds.start && splitStartEpoch < bounds.end) {
+                            let act = String(row[2]).toLowerCase();
+                            let isTeamLead = act.includes('team lead') || act.includes('équipe') || act.includes('equipe');
+                            
+                            if (ACSU_CODES.some(c => act.includes(c))) {
+                                getAg(row[0]).acsu += split.hours; getAg(row[0]).total += split.hours;
+                            } else if (!isTeamLead && COACHING_CODES.some(c => act.includes(c))) {
+                                getAg(row[0]).coach += split.hours; getAg(row[0]).total += split.hours;
+                            }
                         }
-                    }
-                });
+                    });
+                }
             });
         }
 
-        // 2. Crunch Live Roles (SAFE, ICL, ULC)
         const dbSess = ss.getSheetByName('DB_Sessions');
         if (dbSess && dbSess.getLastRow() > 1) {
             const sessData = dbSess.getDataRange().getValues().slice(1);
             sessData.forEach(row => {
                 let sStart = new Date(row[3]);
-                let sDateStr = this._formatDate(sStart);
+                let sessionEpoch = sStart.getTime();
                 
-                if (sDateStr >= startStr && sDateStr < endStr) {
+                if (sessionEpoch >= bounds.start && sessionEpoch < bounds.end) {
                     let role = String(row[2]).toUpperCase();
-                    let hours = Number(row[6]) || 0; // Col G is calculated hours
+                    let hours = Number(row[6]) || 0; 
                     
                     if (role.includes('SAFE')) { getAg(row[1]).safe += hours; getAg(row[1]).total += hours; }
                     else if (role.includes('ICL')) { getAg(row[1]).icl += hours; getAg(row[1]).total += hours; }
@@ -399,13 +437,11 @@ const WorkforceTracker = {
           archiveSheet.getRange(1,1,1,10).setFontWeight("bold");
       }
 
-      // Delete existing rows for this exact period to prevent duplicates if archived twice
       const data = archiveSheet.getDataRange().getValues();
       for (let i = data.length - 1; i >= 1; i--) {
           if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
       }
 
-      // Push fresh batch
       const now = new Date();
       const rowsToPush = report.data.map(a => [
           now, report.cycle, report.period, a.name, a.acsu, a.coach, a.safe, a.icl, a.ulc, a.total
@@ -415,7 +451,6 @@ const WorkforceTracker = {
       return `Successfully archived ${rowsToPush.length} agents for ${report.cycle} (${report.period}).`;
   },
 
-  // --- ENGINE UTILS ---
   _getShiftSplits: function(startMins, endMins) {
       let splits = [];
       let current = startMins;
