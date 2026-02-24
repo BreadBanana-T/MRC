@@ -30,7 +30,6 @@
       insightSearch: '',
       unifiedReport: null,
       
-      // NEW ARCHIVE STATE
       archiveList: [],
       selectedArchive: 'LIVE',
 
@@ -215,7 +214,18 @@
 
     if(state.view !== 'popout-view') {
       google.script.run.withSuccessHandler(r=>{ try{ const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r); state.weather=d.weather||d; state.alerts=d.alerts||[]; if(state.view.match(/overview|weather/)) render(); }catch(e){} }).getLiveDashboardData();
-      google.script.run.withSuccessHandler(j=>{ try{ const h=JSON.parse(j); if(h && h.length){ state.slHistory=h; const latest=h[h.length-1]; state.currentSL=latest.val+"%"; state.currentACK=latest.ack+"s"; if(state.view==='overview') render(); } }catch(e){} }).getStatsHistory();
+      google.script.run.withSuccessHandler(j=>{ 
+          try { 
+              const h=JSON.parse(j); 
+              if(h && h.length){ 
+                  state.slHistory=h; 
+                  const latest=h[h.length-1]; 
+                  state.currentSL=latest.val+"%"; 
+                  state.currentACK=latest.ack+"s"; 
+                  if(state.view==='overview') render(); 
+              } 
+          } catch(e){} 
+      }).getStatsHistory();
     }
   }
 
@@ -939,7 +949,7 @@
           if(typeof google!=='undefined') {
               google.script.run.withSuccessHandler(res => {
                   showToast(res);
-                  fetchArchiveList(); // REFRESH THE DROPDOWN LIST AUTOMATICALLY
+                  fetchArchiveList(); 
               }).archiveUnifiedWeek(state.selectedDate);
           }
       }
@@ -1228,40 +1238,164 @@
   }
 
   function initCharts() {}
+
+  // -------------------------------------------------------------
+  // MASTER OVERVIEW CHART (Deep Gradients, Glowing Lines, Smooth Curves)
+  // -------------------------------------------------------------
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
       
-      const ctx = document.getElementById('chart-overview');
-      if (!ctx) return;
+      const canvas = document.getElementById('chart-overview');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
 
       const labels = state.slHistory.map(d => d.name);
-      const dataPoints = state.slHistory.map(d => d.val);
+      const slData = state.slHistory.map(d => d.val);
+      const ackData = state.slHistory.map(d => d.ack);
 
       if (charts.overview) {
           charts.overview.destroy();
           charts.overview = null;
       }
+
+      // Beautiful Indigo to Cyan Gradient for SL Fill
+      const gradientSL = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      gradientSL.addColorStop(0, 'rgba(99, 102, 241, 0.4)');
+      gradientSL.addColorStop(1, 'rgba(99, 102, 241, 0.0)'); 
       
+      // Beautiful Rose Gradient for ACK Fill
+      const gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      gradientACK.addColorStop(0, 'rgba(244, 63, 94, 0.4)'); 
+      gradientACK.addColorStop(1, 'rgba(244, 63, 94, 0.0)');
+
+      const isDark = document.body.classList.contains('dark');
+      const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+      const textColor = isDark ? '#94a3b8' : '#64748b';
+
+      // Advanced Floating Shadow Plugin
+      const shadowPlugin = {
+          id: 'shadowPluginLine',
+          beforeDatasetsDraw: (chart) => {
+              const ctx = chart.ctx;
+              ctx.save();
+              ctx.shadowColor = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(99, 102, 241, 0.3)';
+              ctx.shadowBlur = 12;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 6;
+          },
+          afterDatasetsDraw: (chart) => {
+              chart.ctx.restore();
+          }
+      };
+
       charts.overview = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Service Level',
-                data: dataPoints,
-                borderColor: '#4f46e5',
-                backgroundColor: 'rgba(79, 70, 229, 0.1)',
-                fill: true,
-                tension: 0.4
-            }]
-        },
-        options: { 
-            responsive: true, 
-            maintainAspectRatio: false,
-            scales: { y: { min: 0, max: 100 } },
-            plugins: { legend: { display: false } },
-            animation: false 
-        }
+          type: 'line',
+          plugins: [shadowPlugin],
+          data: {
+              labels: labels,
+              datasets: [
+                  {
+                      label: 'Service Level (%)',
+                      data: slData,
+                      borderColor: '#4f46e5',
+                      backgroundColor: gradientSL,
+                      borderWidth: 3,
+                      fill: true,
+                      tension: 0.4, // Master curve smoothing
+                      pointRadius: 0, 
+                      pointHoverRadius: 6,
+                      pointBackgroundColor: '#4f46e5',
+                      pointBorderColor: '#fff',
+                      pointBorderWidth: 2,
+                      yAxisID: 'y'
+                  },
+                  {
+                      label: 'Response Time (s)',
+                      data: ackData,
+                      borderColor: '#f43f5e',
+                      backgroundColor: gradientACK,
+                      borderWidth: 3,
+                      borderDash: [6, 4], // Stylish dotted line
+                      fill: true,
+                      tension: 0.4,
+                      pointRadius: 0,
+                      pointHoverRadius: 6,
+                      pointBackgroundColor: '#f43f5e',
+                      pointBorderColor: '#fff',
+                      pointBorderWidth: 2,
+                      yAxisID: 'y1'
+                  }
+              ]
+          },
+          options: { 
+              responsive: true, 
+              maintainAspectRatio: false,
+              interaction: {
+                  mode: 'index',
+                  intersect: false,
+              },
+              plugins: { 
+                  legend: { 
+                      display: true, 
+                      position: 'top', 
+                      align: 'end',
+                      labels: { 
+                          usePointStyle: true, 
+                          boxWidth: 8,
+                          boxHeight: 8,
+                          font: { family: "'Outfit', sans-serif", weight: '700', size: 11 },
+                          color: textColor
+                      } 
+                  },
+                  tooltip: {
+                      backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                      titleColor: isDark ? '#fff' : '#0f172a',
+                      bodyColor: isDark ? '#cbd5e1' : '#475569',
+                      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                      borderWidth: 1,
+                      titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' },
+                      bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' },
+                      padding: 12,
+                      cornerRadius: 12,
+                      boxPadding: 6,
+                      usePointStyle: true,
+                      callbacks: {
+                          label: function(context) {
+                              let label = context.dataset.label || '';
+                              if (label) { label = label.replace(' (%)', '').replace(' (s)', '') + ': '; }
+                              if (context.datasetIndex === 0) label += context.parsed.y + '%';
+                              else label += context.parsed.y + 's';
+                              return label;
+                          }
+                      }
+                  }
+              },
+              scales: {
+                  x: {
+                      grid: { display: false, drawBorder: false },
+                      ticks: { font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                  },
+                  y: {
+                      type: 'linear',
+                      display: true,
+                      position: 'left',
+                      min: 0,
+                      max: 100,
+                      grid: { color: gridColor, drawBorder: false, borderDash: [5, 5] },
+                      ticks: { callback: value => value + '%', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
+                  },
+                  y1: {
+                      type: 'linear',
+                      display: true,
+                      position: 'right',
+                      min: 0,
+                      suggestedMax: Math.max(...ackData, 60) * 1.2, // Prevents ACK from hitting the roof
+                      grid: { display: false, drawBorder: false },
+                      ticks: { callback: value => value + 's', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
+                  }
+              },
+              animation: { duration: 1500, easing: 'easeOutQuart' }
+          }
       });
   }
 
