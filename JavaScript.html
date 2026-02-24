@@ -948,6 +948,19 @@
   function renderInsights() {
       const u = state.unifiedReport;
       
+      let archiveOptionsHtml = state.archiveList.map(a => {
+         return `<option value="${a.period}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${a.cycle}: ${a.period}</option>`;
+      }).join('');
+
+      let rightSideHtml = '';
+      let datePickerHtml = '';
+      if (state.selectedArchive === 'LIVE') {
+          datePickerHtml = `<input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">`;
+          rightSideHtml = `<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>`;
+      } else {
+          rightSideHtml = `<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>`;
+      }
+
       const headerHtml = `
       <style>
           @keyframes spin { to { transform: rotate(360deg); } }
@@ -964,14 +977,14 @@
 
              <select class="input-aether" style="width:auto; height:34px; font-weight:700;" onchange="state.selectedArchive=this.value; fetchInsightData();">
                  <option value="LIVE" ${state.selectedArchive === 'LIVE' ? 'selected' : ''}>🔴 Live Calculation Engine</option>
-                 ${state.archiveList.map(a => \`<option value="\${a.period}" \${state.selectedArchive === a.period ? 'selected' : ''}>💾 \${a.cycle}: \${a.period}</option>\`).join('')}
+                 ${archiveOptionsHtml}
              </select>
 
-             ${state.selectedArchive === 'LIVE' ? \`<input type="date" class="input-aether" style="width:auto; height:34px;" value="\${state.selectedDate}" onchange="handleDateChange(this.value)">\` : ''}
+             ${datePickerHtml}
          </div>
          <div style="display:flex; gap:12px;">
              <input id="insight-search" type="text" class="input-aether" style="width:200px; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${state.insightSearch || ''}">
-             ${state.selectedArchive === 'LIVE' ? \`<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>\` : \`<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>\`}
+             ${rightSideHtml}
          </div>
       </div>`;
 
