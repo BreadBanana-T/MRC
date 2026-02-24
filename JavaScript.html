@@ -80,6 +80,7 @@
     setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
     
     fetchData(); 
+    fetchStats(); // Fetch static chart data ONCE at launch
     fetchArchiveList();
     fetchNotifications();
     fetchCalendar();
@@ -209,24 +210,40 @@
   function fetchData() {
     if(typeof google==='undefined') return;
     google.script.run.withSuccessHandler(j=>{
-        try{ const d=JSON.parse(j); if(d){ state.agents={...state.agents,...d}; applyPendingUpdates(); if(!['scripts', 'calc', 'insights', 'tracker'].includes(state.view)) render(); } }catch(e){}
+        try{ 
+            const d=JSON.parse(j); 
+            if(d){ 
+                state.agents={...state.agents,...d}; 
+                applyPendingUpdates(); 
+                if(!['scripts', 'calc', 'insights', 'tracker'].includes(state.view)) render(); 
+            } 
+        } catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
       google.script.run.withSuccessHandler(r=>{ try{ const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r); state.weather=d.weather||d; state.alerts=d.alerts||[]; if(state.view.match(/overview|weather/)) render(); }catch(e){} }).getLiveDashboardData();
-      google.script.run.withSuccessHandler(j=>{ 
-          try { 
-              const h=JSON.parse(j); 
-              if(h && h.length){ 
-                  state.slHistory=h; 
-                  const latest=h[h.length-1]; 
-                  state.currentSL=latest.val+"%"; 
-                  state.currentACK=latest.ack+"s"; 
-                  if(state.view==='overview') render(); 
-              } 
-          } catch(e){} 
-      }).getStatsHistory();
     }
+  }
+
+  // --- NEW: DEDICATED STATIC STATS FETCHER ---
+  function fetchStats() {
+      if(typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(j => {
+          try {
+              const h = JSON.parse(j);
+              if(h && h.length){
+                  state.slHistory = h;
+                  const latest = h[h.length-1];
+                  state.currentSL = latest.val + "%";
+                  state.currentACK = latest.ack + "s";
+                  
+                  const slEl = document.getElementById('hdr-sl');
+                  if(slEl) slEl.innerText = state.currentSL;
+
+                  if(state.view === 'overview') updateOverviewDOM();
+              }
+          } catch(e) {}
+      }).getStatsHistory();
   }
 
   function fetchArchiveList() {
@@ -284,6 +301,53 @@
      }
   }
 
+  // --- NEW: SMOOTH DOM UPDATER ---
+  function updateOverviewDOM() {
+      const unplanCount = (state.agents.unplanned||[]).length;
+      const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
+      const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
+      const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
+      
+      const safeCount = (state.agents.safe||[]).length;
+      const iclCount = (state.agents.icl||[]).length;
+      const ulcCount = (state.agents.ulc||[]).length;
+
+      const updateEl = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val; };
+      updateEl('ov-sl-text', state.currentSL);
+      updateEl('ov-ack-text', state.currentACK);
+      updateEl('ov-unplanned', unplanCount);
+      updateEl('ov-shrink', shrinkPct + '%');
+      updateEl('ov-planned', planCount);
+      updateEl('ov-safe', safeCount);
+      updateEl('ov-icl', iclCount);
+      updateEl('ov-ulc', ulcCount);
+
+      // Smoothly update the chart without tearing down the Canvas
+      if (charts.overview) {
+          charts.overview.data.labels = state.slHistory.map(d => d.name);
+          charts.overview.data.datasets[0].data = state.slHistory.map(d => d.val);
+          charts.overview.data.datasets[1].data = state.slHistory.map(d => d.ack);
+          charts.overview.update('none'); // Disables animation for a seamless update
+      }
+
+      const agendaEl = document.getElementById('ov-agenda');
+      if (agendaEl) {
+          const eventsHtml = state.calendarEvents.map((e, i) => `
+              <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
+                 <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
+                 <div style="flex:1;">
+                     <div style="font-weight:700; font-size:0.9rem;">${e.title}</div>
+                     <div style="font-size:0.75rem; color:var(--text-muted);">
+                         <span style="color:var(--text-main); font-weight:700;">${e.date}</span> • ${e.startTime} - ${e.endTime}
+                     </div>
+                 </div>
+              </div>
+          `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
+          
+          if (agendaEl.innerHTML !== eventsHtml) agendaEl.innerHTML = eventsHtml;
+      }
+  }
+
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
@@ -298,6 +362,13 @@
      document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
      const b = document.getElementById('btn-'+state.view); 
      if(b) b.classList.add('active');
+
+     // Intercept rendering if Dashboard is already drawn to avoid wiping the Canvas!
+     if (state.view === 'overview' && document.getElementById('chart-overview')) {
+         updateOverviewDOM();
+         refreshIcons();
+         return;
+     }
 
      let h = '';
      if (state.view === 'overview') h = renderOverview();
@@ -594,26 +665,14 @@
       const safeCount = (state.agents.safe||[]).length;
       const iclCount = (state.agents.icl||[]).length;
       const ulcCount = (state.agents.ulc||[]).length;
-      
-      const eventsHtml = state.calendarEvents.map((e, i) => `
-          <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
-             <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
-             <div style="flex:1;">
-                 <div style="font-weight:700; font-size:0.9rem;">${e.title}</div>
-                 <div style="font-size:0.75rem; color:var(--text-muted);">
-                     <span style="color:var(--text-main); font-weight:700;">${e.date}</span> • ${e.startTime} - ${e.endTime}
-                 </div>
-             </div>
-          </div>
-      `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
 
       return `
       <style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>
       <div class="grid-bento">
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div></div>
-                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentACK}</div></div>
+                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div></div>
+                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentACK}</div></div>
             </div>
             <div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;">
                 <canvas id="chart-overview" style="width:100%; height:120px;"></canvas>
@@ -625,12 +684,12 @@
                 <span style="font-weight:700; color:var(--status-alert);">Unplanned</span>
                 <i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i>
             </div>
-            <div style="font-size:2rem; font-weight:800; color:var(--status-alert);">${(state.agents.unplanned||[]).length}</div>
+            <div id="ov-unplanned" style="font-size:2rem; font-weight:800; color:var(--status-alert);">${unplanCount}</div>
          </div>
 
          <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
             <h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Shrinkage</h4>
-            <div style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
+            <div id="ov-shrink" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">${shrinkPct}%</div>
          </div>
          
          <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s;">
@@ -638,7 +697,7 @@
                 <span style="font-weight:700;">Planned</span>
                 <i data-lucide="calendar" class="text-muted" width="20"></i>
             </div>
-            <div style="font-size:2rem; font-weight:800; color:var(--text-main);">${planCount}</div>
+            <div id="ov-planned" style="font-size:2rem; font-weight:800; color:var(--text-main);">${planCount}</div>
          </div>
 
          <div class="aether-card" onclick="setView('agents')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;">
@@ -649,17 +708,17 @@
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="text-align:center;">
                     <div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${safeCount}</div>
+                    <div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">${safeCount}</div>
                 </div>
                 <div style="width:1px; height:30px; background:var(--glass-border);"></div>
                 <div style="text-align:center;">
                     <div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${iclCount}</div>
+                    <div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">${iclCount}</div>
                 </div>
                 <div style="width:1px; height:30px; background:var(--glass-border);"></div>
                 <div style="text-align:center;">
                     <div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div>
-                    <div style="font-size:1.8rem; font-weight:800; line-height:1;">${ulcCount}</div>
+                    <div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">${ulcCount}</div>
                 </div>
             </div>
          </div>
@@ -669,9 +728,7 @@
                 Agenda
                 <i data-lucide="calendar" class="text-muted" width="16"></i>
             </div>
-            <div style="overflow-y:auto; max-height:200px;">
-                ${eventsHtml}
-            </div>
+            <div id="ov-agenda" style="overflow-y:auto; max-height:200px;"></div>
          </div>
       </div>`;
   }
@@ -1082,6 +1139,7 @@
              const d=JSON.parse(r); 
              state.currentSL=d.svl; 
              state.currentReport = d.report; 
+             fetchStats(); // Force static chart update!
              render(); 
          }).runCalculator(i, o); 
      } else { 
