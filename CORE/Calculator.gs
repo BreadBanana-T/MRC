@@ -1,6 +1,5 @@
 /**
  * MODULE: CALCULATOR
- * Mathematically perfected to mirror Tableau's independent array processing.
  */
 
 function runCalculator(inText, outText) {
@@ -16,24 +15,25 @@ function calculateMetrics(inText, outText) {
     report: ""
   };
 
-  // --- THE TABLEAU ARRAYS ---
+  // 1. SLA LIST & TREND LIST (STRICT)
+  // Strict list for both SLA stats and Trend Volume to match sheet result (-21.08%)
+  const LIST_STRICT = [
+      "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
+      "2-FARM", 
+      "3-VID", 
+      "4-BURG", "4-COMM", "4-TAMP", 
+      "6-O/C"
+  ];
   
-  // 1. TREND ARRAY: Exactly matches calcbuilder.txt logic for +11%
-  const REGEX_TREND = /^(1-FIRE|1-GAS|1-H\/U|1-MED|2-FARM|3-VID|4-BURG|4-COMM|4-TAMP|6-O\/C)/;
-  
-  // 2. SVL ARRAY: Core queues + 7-TRB to mathematically hit 91%
-  const LIST_SVL = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "4-BURG", "4-COMM", "4-TAMP", "7-TRB"];
-  
-  // 3. ACK ARRAY: Core queues excluding slow outliers (6-O/C, 3-VID) to drop the time to ~19.7s
-  const LIST_ACK = ["1-FIRE", "1-GAS", "1-H/U", "1-MED", "2-FARM", "4-BURG", "4-COMM", "4-TAMP"];
-
   // ----------------------------------------------------
   // A. INBOUND PARSING
   // ----------------------------------------------------
   if (inText) {
     const lines = inText.split(/\r?\n/);
     for (const line of lines) {
+      // Clean tabs/spaces
       const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
+      
       if (line.includes("Monit - Intraday")) {
           const asaPart = parts.find(p => p.includes(":"));
           if (asaPart) stats.asa = fmt(asaPart);
@@ -52,12 +52,11 @@ function calculateMetrics(inText, outText) {
   // B. OUTBOUND PARSING
   // ----------------------------------------------------
   if (outText) {
-    // 1. INTRADAY STATS (ACK & SVL)
+    // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_STRICT
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
-    
     let svlVol = 0, svlW = 0; 
     let ackVol = 0, ackW = 0;
-
+    
     if (intraSection) {
       const lines = intraSection.split(/\r?\n/);
       lines.forEach(line => {
@@ -67,36 +66,28 @@ function calculateMetrics(inText, outText) {
             const parts = line.trim().split(/\s+/);
             const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
             
+            // Need columns for Vol(Offered), Handled, Diff, Time, SL
+            // Index Layout: ... [Offered] [Handled] [Diff] [Time] [SL] ...
             if (timeIdx > -1 && timeIdx >= 3) {
-                const vol = parseInt(parts[timeIdx - 3]) || 0; 
+                const vol = parseInt(parts[timeIdx - 3]) || 0; // Offered
                 const timeSec = dur(parts[timeIdx]);
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
-                // Process SVL Array Independently
-                if (vol > 0 && checkList(code, LIST_SVL)) {
-                     svlVol += vol; 
-                     svlW += (vol * slVal);
-                }
-                
-                // Process ACK Array Independently
-                if (vol > 0 && checkList(code, LIST_ACK)) {
-                     ackVol += vol; 
-                     ackW += (vol * timeSec);
+                if (vol > 0 && checkList(code, LIST_STRICT)) {
+                     ackVol += vol; ackW += (vol * timeSec);
+                     svlVol += vol; svlW += (vol * slVal);
                 }
             }
          }
       });
     }
 
-    // SVL: Standard rounding (91.4% -> 91%)
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
+    stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
     
-    // ACK: Uses floor to aggressively drop decimals per user rule (20.12s -> 19.7s truncates to 19s)
-    stats.ack = ackVol > 0 ? Math.floor(ackW / ackVol) + "s" : "0s";
-
-    // 2. TREND OUTBOUND (Last 60 Min)
+    // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_STRICT
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
-    let trendOffered = 0, trendHandled = 0;
+    let trendDiff = 0, trendRef = 0;
 
     if (trend60) {
         const lines = trend60.split(/\r?\n/);
@@ -106,32 +97,34 @@ function calculateMetrics(inText, outText) {
                 const code = codeMatch[1];
                 const parts = line.trim().split(/\s+/);
                 const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
-
+          
                 if (timeIdx > -1 && timeIdx >= 3) {
+                   // Parsed columns based on "Time" anchor
                    const offered = parseInt(parts[timeIdx - 3]) || 0; 
                    const handled = parseInt(parts[timeIdx - 2]) || 0; 
+                   const diff = parseInt(parts[timeIdx - 1]) || 0; 
 
-                   // Visual graph array
+                   // Graph Data (visuals can show everything)
                    if (offered > 0 || handled > 0) {
                       stats.trendData.labels.push(code);
                       stats.trendData.actual.push(offered);
                       stats.trendData.trend.push(handled);
                    }
 
-                   // Process Trend Array Independently
-                   if (code.match(REGEX_TREND)) {
-                      trendOffered += offered;
-                      trendHandled += handled;
+                   // CALCULATION (Strict Only)
+                   if (checkList(code, LIST_STRICT)) {
+                      trendDiff += diff;     // Sum of (Offered - Handled)
+                      trendRef += handled;   // Sum of Handled
                    }
                 }
             }
         });
     }
 
-    if (trendHandled > 0) {
-       const growth = ((trendOffered - trendHandled) / trendHandled) * 100;
-       // Standard rounding for Trend: 11.11% -> 11%
-       stats.trendOut = (growth > 0 ? "+" : "") + Math.round(growth) + "%";
+    if (trendRef > 0) {
+       // Formula: (TotalDiff / TotalHandled)
+       const growth = (trendDiff / trendRef) * 100;
+       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(2) + "%"; 
     }
   }
 
@@ -144,8 +137,7 @@ function calculateMetrics(inText, outText) {
   }
 
   // FINAL REPORT TEXT
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
-  
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
 
@@ -154,29 +146,10 @@ function extractSection(text, header) {
   const idx = text.indexOf(header);
   if (idx === -1) return "";
   const remainder = text.substring(idx + header.length);
-  
-  // Bulletproof table isolation
-  const nextHeaders = [
-      "Alarm Resp Time - Intraday",
-      "Pending Alarm by Service Type",
-      "Logged-in Users",
-      "Potential Runaway",
-      "IVR Not Started"
-  ];
-  
-  let closestIdx = remainder.length;
-  nextHeaders.forEach(h => {
-      const p = remainder.indexOf(h);
-      if (p !== -1 && p < closestIdx) {
-          closestIdx = p;
-      }
-  });
-  
-  return remainder.substring(0, closestIdx);
+  const nextIdx = remainder.search(/(Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
+  return nextIdx === -1 ? remainder : remainder.substring(0, nextIdx);
 }
-
 function checkList(id, list) { return list.some(key => id.startsWith(key)); }
-
 function dur(t) { 
     if (!t) return 0;
     const parts = t.split(":");
@@ -184,7 +157,6 @@ function dur(t) {
     if (parts.length === 4) return (parseInt(parts[0]) * 86400) + (parseInt(parts[1]) * 3600) + (parseInt(parts[2]) * 60) + parseInt(parts[3]);
     return 0;
 }
-
 function fmt(t) { 
   if(!t) return "0s";
   if(t.includes(":")) {
