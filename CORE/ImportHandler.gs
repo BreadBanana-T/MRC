@@ -25,7 +25,6 @@ function processWFMImport(rawText, forcedDate) {
   
   if (!forcedDate) forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
-  
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
   const rgxAnyDateLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
   const rgxShiftLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
@@ -61,12 +60,7 @@ function processWFMImport(rawText, forcedDate) {
        else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
        const upper = line.toUpperCase();
-       
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
-       
-       if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) { if (!buffer.role.includes("SAFE")) buffer.role = (buffer.role + " SAFE").trim(); }
-       if (upper.includes("ICL") || upper.includes("INCIDENT")) { if (!buffer.role.includes("ICL")) buffer.role = (buffer.role + " ICL").trim(); }
-       if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) { if (!buffer.role.includes("ULC FIRE")) buffer.role = (buffer.role + " ULC FIRE").trim(); }
 
        if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
            if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) buffer.absentType = "Medical Leave";
@@ -78,7 +72,6 @@ function processWFMImport(rawText, forcedDate) {
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
            const actStart = actMatch[1], actEnd = actMatch[2];
-           
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
@@ -88,6 +81,16 @@ function processWFMImport(rawText, forcedDate) {
            }
            else if (upper.includes("ACSU") || upper.includes("SOLICITED") || upper.includes("VOLUNTARY") || upper.includes("LIBÉRATION")) {
                buffer.breaks.push({ type: "ACSU", start: actStart, end: actEnd });
+           }
+           // --- NEW: EXACT INTRADAY TIMELINES FOR SPECIAL ROLES ---
+           else if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) {
+               buffer.breaks.push({ type: "SAFE", start: actStart, end: actEnd });
+           }
+           else if (upper.includes("ICL") || upper.includes("INCIDENT")) {
+               buffer.breaks.push({ type: "ICL", start: actStart, end: actEnd });
+           }
+           else if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
+               buffer.breaks.push({ type: "ULC FIRE", start: actStart, end: actEnd });
            }
            else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
                buffer.hasWork = true;
@@ -142,7 +145,6 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
   let finalDateObj = safeParseDateStr(buf.dateStr, defY, defM, defD);
   let finalDateStr = finalDateObj.str;
   let startEpoch = "", endEpoch = "";
-
   if (buf.start && buf.end) {
      const sObj = parseTime(buf.start);
      const eObj = parseTime(buf.end);
