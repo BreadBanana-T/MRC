@@ -6,7 +6,6 @@
 var WorkforceTracker = {
 
   // --- SMART DB ROUTER ---
-  // Automatically pulls from Master DB if the local RAM sheet is empty/cleared
   _getDB: function(sheetName) {
       const local = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
       if (local && local.getLastRow() > 1) return local;
@@ -226,9 +225,9 @@ var WorkforceTracker = {
   },
 
   getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All', cycleFilter = 'ALL') {
-    
-    // Automatically fall back to Master DB if local RAM sheet is wiped
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const dbIDP = this._getDB('WF_IDP');
+    
     let dbSched;
     if (trackerType === 'coaching') dbSched = this._getDB('WF_COACHING');
     else if (trackerType === 'furlough') dbSched = this._getDB('WF_FURLOUGH');
@@ -296,13 +295,23 @@ var WorkforceTracker = {
                         }
                     }
 
-                    let groupKey = `${agent}_${effDateStr}_${split.shift}`;
+                    // FIX: Make groupKey truly unique by adding the raw start time (row[3])
+                    // This prevents multiple distinct furlough blocks from combining into one visually misleading entry.
+                    let rawStartStr = String(row[3]).trim();
+                    let groupKey = `${agent}_${effDateStr}_${split.shift}_${rawStartStr}`;
                     if (trackerType === 'coaching') groupKey += `_${row[2]}`;
 
                     if (!groupedLogs[groupKey]) {
-                        groupedLogs[groupKey] = { date: effDateStr, agent: agent, activityName: trackerType === 'coaching' ? row[2] : "Time Off", shift: split.shift, hours: split.hours, timeStart: this._minsToTime(split.startMins), timeEnd: this._minsToTime(split.endMins) };
+                        groupedLogs[groupKey] = { 
+                            date: effDateStr, agent: agent, 
+                            activityName: trackerType === 'coaching' ? row[2] : "Time Off", 
+                            shift: split.shift, hours: split.hours, 
+                            timeStart: this._minsToTime(split.startMins), 
+                            timeEnd: this._minsToTime(split.endMins) 
+                        };
                     } else {
-                        groupedLogs[groupKey].hours += split.hours; groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
+                        groupedLogs[groupKey].hours += split.hours; 
+                        groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
                     }
                 }
             });
@@ -466,7 +475,19 @@ var WorkforceTracker = {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
     
-    const makeKey = (row) => keyIndices.map(i => String(row[i]).trim().toLowerCase()).join('_');
+    // FIX: Safely handles both Strings AND native Google Sheet Date/Time Objects so matching is identical
+    const makeKey = (row) => keyIndices.map(i => {
+        let val = row[i];
+        if (val instanceof Date) {
+            // Checks if it is specifically a Time object (often stored with an 1899 year base)
+            if (val.getFullYear() < 1950) {
+                return Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
+            }
+            return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        }
+        return String(val).trim().toLowerCase();
+    }).join('_');
+
     const incomingKeys = new Set(newRows.map(makeKey));
     
     let existingData = [];
@@ -485,7 +506,6 @@ var WorkforceTracker = {
     if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
   },
   
-  // Date-Aware fail safes restored
   _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
   _timeToMins: function(tStr) {
        if (!tStr) return 0;
