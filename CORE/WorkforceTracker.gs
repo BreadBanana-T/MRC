@@ -1,6 +1,6 @@
 /**
  * MODULE: WORKFORCE TRACKER
- * Features: Smart Upsert, DB Splitting, Master DB Routing, & Quarterly Bounds
+ * Features: Smart Upsert, DB Splitting, Master DB Routing, Quarterly Bounds, & Scheduled Roles Tracking
  */
 
 var WorkforceTracker = {
@@ -21,13 +21,13 @@ var WorkforceTracker = {
 
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    ['WF_COACHING', 'WF_FURLOUGH', 'WF_IDP'].forEach(n => {
+    ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
     if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
         try {
             const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
-            ['WF_COACHING', 'WF_FURLOUGH', 'WF_IDP'].forEach(n => {
+            ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
                if(!masterSS.getSheetByName(n)) masterSS.insertSheet(n);
             });
         } catch(e) {}
@@ -35,10 +35,12 @@ var WorkforceTracker = {
     
     let msg = [];
     
-    // --- SCHEDULE PARSER (ULTRA-LEAN WITH DB SPLITTING) ---
+    // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanCoach = [];
       let cleanFurlough = [];
+      let cleanRoles = [];
+      
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let currentAgent = "", currentID = "", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
@@ -49,6 +51,7 @@ var WorkforceTracker = {
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
       const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
       const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+      const ROLE_CODES = ['safe onqueue', 'safe en ligne', 'icl', 'incident', 'ulc', 'fire', 'feu'];
 
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
@@ -64,12 +67,21 @@ var WorkforceTracker = {
           agentBuffer.forEach(obj => { 
               let actLower = obj.act.toLowerCase();
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
+              
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
+              let isRole = ROLE_CODES.some(c => actLower.includes(c));
+              
+              let roleType = "";
+              if (isRole) {
+                  if (actLower.includes('safe')) roleType = "SAFE";
+                  else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
+                  else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
+              }
               
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]); 
-              // OPTIMIZATION: Completely skip importing Furloughs for Offshore agents
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
+              if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg]);
           });
           agentBuffer = [];
       };
@@ -96,12 +108,23 @@ var WorkforceTracker = {
           if (csvParts.length >= 6) { 
               let actLower = this._cleanActivity(csvParts[2]).toLowerCase();
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
+              
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
+              let isRole = ROLE_CODES.some(c => actLower.includes(c));
+              
+              let roleType = "";
+              if (isRole) {
+                  if (actLower.includes('safe')) roleType = "SAFE";
+                  else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
+                  else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
+              }
+
               let isOff = csvParts[5] && csvParts[5].includes("Offshore");
               
               if (isCoach) cleanCoach.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
               if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], this._parseDate(csvParts[1]), this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
+              if (isRole) cleanRoles.push([csvParts[0], this._parseDate(csvParts[1]), roleType, csvParts[3], csvParts[4], csvParts[5]]);
           }
           return;
         }
@@ -129,12 +152,16 @@ var WorkforceTracker = {
       flushAgentBuffer(); 
       
       if (cleanCoach.length > 0) {
-        this._upsertData('WF_COACHING', cleanCoach, [0, 1], ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
-        msg.push(`✔ Coaching DB: Processed ${cleanCoach.length} records.`);
+        this._upsertData('WF_COACHING', cleanCoach, [0, 1, 3], ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
+        msg.push(`Coaching`);
       }
       if (cleanFurlough.length > 0) {
-        this._upsertData('WF_FURLOUGH', cleanFurlough, [0, 1], ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
-        msg.push(`✔ Furlough DB: Processed ${cleanFurlough.length} records.`);
+        this._upsertData('WF_FURLOUGH', cleanFurlough, [0, 1, 3], ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
+        msg.push(`Furloughs`);
+      }
+      if (cleanRoles.length > 0) {
+        this._upsertData('WF_ROLES', cleanRoles, [0, 1, 3], ['Agent Name', 'Date', 'Role', 'Start Time', 'End Time', 'Region']);
+        msg.push(`Roles`);
       }
     }
 
@@ -172,11 +199,13 @@ var WorkforceTracker = {
         Object.keys(dataByDay).forEach(day => Object.keys(dataByDay[day]).forEach(time => cleanIDP.push([day, time, dataByDay[day][time].req, dataByDay[day][time].open])));
         if (cleanIDP.length > 0) {
           this._upsertData('WF_IDP', cleanIDP, [0, 1], ['Day', 'Interval', 'Required', 'Open']);
-          msg.push(`✔ IDP: Imported ${cleanIDP.length} intervals.`);
+          msg.push(`IDP`);
         }
       }
     }
-    return msg.length ? msg.join('\n') : "No valid data found to import.";
+    
+    if (msg.length === 0) return "Basic Schedule Synced.";
+    return `Synced: ${msg.join(' | ')}`;
   },
 
   _getCycleForEpoch: function(epoch) {
@@ -225,12 +254,12 @@ var WorkforceTracker = {
   },
 
   getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All', cycleFilter = 'ALL') {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const dbIDP = this._getDB('WF_IDP');
     
+    const dbIDP = this._getDB('WF_IDP');
     let dbSched;
     if (trackerType === 'coaching') dbSched = this._getDB('WF_COACHING');
     else if (trackerType === 'furlough') dbSched = this._getDB('WF_FURLOUGH');
+    else if (trackerType === 'roles') dbSched = this._getDB('WF_ROLES');
     
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Databases missing. Please run WFM Import first." });
     
@@ -295,16 +324,17 @@ var WorkforceTracker = {
                         }
                     }
 
-                    // FIX: Make groupKey truly unique by adding the raw start time (row[3])
-                    // This prevents multiple distinct furlough blocks from combining into one visually misleading entry.
                     let rawStartStr = String(row[3]).trim();
                     let groupKey = `${agent}_${effDateStr}_${split.shift}_${rawStartStr}`;
-                    if (trackerType === 'coaching') groupKey += `_${row[2]}`;
+                    
+                    let actName = "Time Off";
+                    if (trackerType === 'coaching' || trackerType === 'roles') actName = row[2];
+                    groupKey += `_${actName}`;
 
                     if (!groupedLogs[groupKey]) {
                         groupedLogs[groupKey] = { 
                             date: effDateStr, agent: agent, 
-                            activityName: trackerType === 'coaching' ? row[2] : "Time Off", 
+                            activityName: actName, 
                             shift: split.shift, hours: split.hours, 
                             timeStart: this._minsToTime(split.startMins), 
                             timeEnd: this._minsToTime(split.endMins) 
@@ -360,6 +390,28 @@ var WorkforceTracker = {
         parseDB('WF_COACHING', 'coach');
         parseDB('WF_FURLOUGH', 'acsu');
 
+        const dbRoles = this._getDB('WF_ROLES');
+        if (dbRoles && dbRoles.getLastRow() > 1) {
+            dbRoles.getDataRange().getValues().slice(1).forEach(row => {
+                let dStr = this._formatDate(row[1]);
+                if (dStr >= sStr && dStr <= eStr) {
+                    let [rY, rM, rD] = dStr.split('-').map(Number);
+                    let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
+                    let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
+                    let roleType = String(row[2]).toUpperCase();
+                    
+                    this._getShiftSplits(sMins, eMins).forEach(s => {
+                        let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
+                        if (epoch >= bounds.start && epoch < bounds.end) { 
+                            if (roleType.includes('SAFE')) { getAg(row[0]).safe += s.hours; getAg(row[0]).total += s.hours; }
+                            else if (roleType.includes('ICL')) { getAg(row[0]).icl += s.hours; getAg(row[0]).total += s.hours; }
+                            else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(row[0]).ulc += s.hours; getAg(row[0]).total += s.hours; }
+                        }
+                    });
+                }
+            });
+        }
+
         const dbSess = this._getDB('DB_Sessions');
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getValues().slice(1).forEach(row => {
@@ -382,7 +434,6 @@ var WorkforceTracker = {
   archiveUnifiedWeek: function(refDateStr) {
       const reportStr = this.getUnifiedWeeklyReport(refDateStr);
       const report = JSON.parse(reportStr);
-      
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
       
       const writeToArchiveSheet = (spreadsheet) => {
@@ -392,24 +443,16 @@ var WorkforceTracker = {
               archiveSheet.appendRow(["Timestamp", "Cycle", "Period", "Agent Name", "ACSU", "Coaching", "SAFE", "ICL", "ULC FIRE", "Total Off-Phone"]); 
               archiveSheet.getRange(1,1,1,10).setFontWeight("bold"); 
           }
-
           const data = archiveSheet.getDataRange().getValues();
-          for (let i = data.length - 1; i >= 1; i--) {
-              if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1);
-          }
-
+          for (let i = data.length - 1; i >= 1; i--) { if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1); }
           const rows = report.data.map(a => [ new Date(), report.cycle, report.period, a.name, a.acsu, a.coach, a.safe, a.icl, a.ulc, a.total ]);
           if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
       };
 
       writeToArchiveSheet(ssLocal);
-      
       if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try {
-             writeToArchiveSheet(SpreadsheetApp.openById(MasterConnector.DB_ID));
-          } catch(e) { console.error("Master DB Archive Sync Failed", e); }
+          try { writeToArchiveSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) { console.error("Master DB Archive Sync Failed", e); }
       }
-
       return `Successfully archived ${report.data.length} agents for ${report.cycle} (${report.period}).`;
   },
 
@@ -420,10 +463,8 @@ var WorkforceTracker = {
       const data = sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getValues(); 
       const unique = [];
       const seen = new Set();
-      
       for (let i = data.length - 1; i >= 0; i--) {
-          const cycle = data[i][0];
-          const period = data[i][1];
+          const cycle = data[i][0]; const period = data[i][1];
           if (!seen.has(period)) { seen.add(period); unique.push({ cycle: cycle, period: period }); }
       }
       return JSON.stringify(unique);
@@ -435,14 +476,12 @@ var WorkforceTracker = {
       
       const data = sheet.getDataRange().getValues();
       let report = { cycle: "ARCHIVED", period: targetPeriod, data: [] };
-      
       for (let i = 1; i < data.length; i++) {
           if (data[i][2] === targetPeriod) {
               report.cycle = data[i][1];
               report.data.push({ name: data[i][3], acsu: data[i][4], coach: data[i][5], safe: data[i][6], icl: data[i][7], ulc: data[i][8], total: data[i][9] });
           }
       }
-      
       report.data.sort((a,b) => b.total - a.total);
       return JSON.stringify(report);
   },
@@ -475,14 +514,10 @@ var WorkforceTracker = {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
     
-    // FIX: Safely handles both Strings AND native Google Sheet Date/Time Objects so matching is identical
     const makeKey = (row) => keyIndices.map(i => {
         let val = row[i];
         if (val instanceof Date) {
-            // Checks if it is specifically a Time object (often stored with an 1899 year base)
-            if (val.getFullYear() < 1950) {
-                return Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
-            }
+            if (val.getFullYear() < 1950) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
             return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
         }
         return String(val).trim().toLowerCase();
@@ -495,7 +530,6 @@ var WorkforceTracker = {
     if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
     
     const headers = existingData.length > 0 ? existingData.shift() : headersArray;
-    
     const retainedRows = existingData.filter(row => {
        if(!row[keyIndices[0]]) return true; 
        return !incomingKeys.has(makeKey(row));
