@@ -14,22 +14,31 @@ function calculateMetrics(inText, outText) {
     asa: "0s", inSVL: "0%",
     report: ""
   };
-  // 1. SLA LIST & TREND LIST (STRICT)
-  // Strict list for both SLA stats and Trend Volume to match sheet result (-21.08%)
-  const LIST_STRICT = [
+
+  // 1. SLA LIST (Strictly Priorities 1-4 ONLY)
+  // EXCLUDES 4-COMM and 6-O/C to ensure ACK and SVL are pinpoint accurate
+  const LIST_SVL_ACK = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
-      "2-FARM", 
-      "3-VID", 
+      "2-CCM", "2-FARM", 
+      "3-LWK", "3-VID", 
+      "4-BURG", "4-TAMP"
+  ];
+
+  // 2. TREND LIST (Includes COMM and O/C for overall volume forecasting)
+  const LIST_TREND = [
+      "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
+      "2-CCM", "2-FARM", 
+      "3-LWK", "3-VID", 
       "4-BURG", "4-COMM", "4-TAMP", 
       "6-O/C"
   ];
+
   // ----------------------------------------------------
   // A. INBOUND PARSING
   // ----------------------------------------------------
   if (inText) {
     const lines = inText.split(/\r?\n/);
     for (const line of lines) {
-      // Clean tabs/spaces
       const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
       if (line.includes("Monit - Intraday")) {
           const asaPart = parts.find(p => p.includes(":"));
@@ -49,10 +58,11 @@ function calculateMetrics(inText, outText) {
   // B. OUTBOUND PARSING
   // ----------------------------------------------------
   if (outText) {
-    // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_STRICT
+    // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_SVL_ACK
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
     let svlVol = 0, svlW = 0; 
     let ackVol = 0, ackW = 0;
+
     if (intraSection) {
       const lines = intraSection.split(/\r?\n/);
       lines.forEach(line => {
@@ -62,14 +72,12 @@ function calculateMetrics(inText, outText) {
             const parts = line.trim().split(/\s+/);
             const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
             
-            // Need columns for Vol(Offered), Handled, Diff, Time, SL
-            // Index Layout: ... [Offered] [Handled] [Diff] [Time] [SL] ...
             if (timeIdx > -1 && timeIdx >= 3) {
-                const vol = parseInt(parts[timeIdx - 3]) || 0; // Offered
+                const vol = parseInt(parts[timeIdx - 3]) || 0; // Actual Handled
                 const timeSec = dur(parts[timeIdx]);
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
-                if (vol > 0 && checkList(code, LIST_STRICT)) {
+                if (vol > 0 && checkList(code, LIST_SVL_ACK)) {
                      ackVol += vol; ackW += (vol * timeSec);
                      svlVol += vol; svlW += (vol * slVal);
                 }
@@ -80,7 +88,8 @@ function calculateMetrics(inText, outText) {
 
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
-    // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_STRICT
+
+    // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_TREND
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
 
@@ -92,24 +101,21 @@ function calculateMetrics(inText, outText) {
                 const code = codeMatch[1];
                 const parts = line.trim().split(/\s+/);
                 const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
-          
+
                 if (timeIdx > -1 && timeIdx >= 3) {
-                   // Parsed columns based on "Time" anchor
                    const offered = parseInt(parts[timeIdx - 3]) || 0; 
                    const handled = parseInt(parts[timeIdx - 2]) || 0; 
                    const diff = parseInt(parts[timeIdx - 1]) || 0; 
 
-                   // Graph Data (visuals can show everything)
                    if (offered > 0 || handled > 0) {
                       stats.trendData.labels.push(code);
                       stats.trendData.actual.push(offered);
                       stats.trendData.trend.push(handled);
                    }
 
-                   // CALCULATION (Strict Only)
-                   if (checkList(code, LIST_STRICT)) {
-                      trendDiff += diff; // Sum of (Offered - Handled)
-                      trendRef += handled; // Sum of Handled
+                   if (checkList(code, LIST_TREND)) {
+                      trendDiff += diff;
+                      trendRef += handled;
                    }
                 }
             }
@@ -117,9 +123,8 @@ function calculateMetrics(inText, outText) {
     }
 
     if (trendRef > 0) {
-       // Formula: (TotalDiff / TotalHandled)
        const growth = (trendDiff / trendRef) * 100;
-       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(2) + "%";
+       stats.trendOut = formatTrend(growth);
     }
   }
 
@@ -131,7 +136,6 @@ function calculateMetrics(inText, outText) {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  // FINAL REPORT TEXT (UPDATED WITH SAFE)
   stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
@@ -141,10 +145,40 @@ function extractSection(text, header) {
   const idx = text.indexOf(header);
   if (idx === -1) return "";
   const remainder = text.substring(idx + header.length);
-  const nextIdx = remainder.search(/(Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
+  const nextIdx = remainder.search(/(Alarm Resp Time|Pending Alarm|Logged-in Users|Potential Runaway|IVR Not Started)/);
   return nextIdx === -1 ? remainder : remainder.substring(0, nextIdx);
 }
-function checkList(id, list) { return list.some(key => id.startsWith(key)); }
+
+function checkList(id, list) { 
+  return list.some(key => id.startsWith(key)); 
+}
+
+// CUSTOM ROUNDING: 
+// If first decimal is >= 5, keeps only the first decimal (truncating the rest). 
+// If first decimal is < 5, drops decimals completely.
+function formatTrend(val) {
+  if (val === 0) return "0%";
+  const isNeg = val < 0;
+  
+  // Get absolute value to handle math safely
+  const absVal = Math.abs(val);
+  const intPart = Math.floor(absVal);
+  
+  // Extract just the first decimal digit (e.g., for 11.79, this extracts 7)
+  const tenths = Math.floor((absVal * 10) % 10);
+  
+  let finalString;
+  if (tenths >= 5) {
+     // Keep the integer and exactly the first decimal
+     finalString = intPart + "." + tenths; 
+  } else {
+     // Drop decimals entirely
+     finalString = intPart; 
+  }
+  
+  return (isNeg ? "-" : "+") + finalString + "%";
+}
+
 function dur(t) { 
     if (!t) return 0;
     const parts = t.split(":");
@@ -152,6 +186,7 @@ function dur(t) {
     if (parts.length === 4) return (parseInt(parts[0]) * 86400) + (parseInt(parts[1]) * 3600) + (parseInt(parts[2]) * 60) + parseInt(parts[3]);
     return 0;
 }
+
 function fmt(t) { 
   if(!t) return "0s";
   if(t.includes(":")) {
