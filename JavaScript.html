@@ -17,6 +17,7 @@
       searchTerm: "", 
       regionFilter: 'All', 
       notifications: [], 
+      knownNotifs: new Set(),
       dismissedNotifs: new Set(), 
       notifOpen: false, 
       scripts: [], 
@@ -29,10 +30,8 @@
       selectedDate: new Date().toISOString().split('T')[0],
       insightSearch: '',
       unifiedReport: null,
-      
       archiveList: [],
       selectedArchive: 'LIVE',
-
       trackerData: null,
       trackerMode: 'furlough', 
       trackerDate: new Date().toISOString().split('T')[0],
@@ -43,7 +42,6 @@
       trackerLoading: true
   };
 
-  // RAM OPTIMIZATION: Only calculate glow effect on the specifically hovered card 
   document.addEventListener('mousemove', e => {
       requestAnimationFrame(() => {
           const card = e.target.closest('.aether-card');
@@ -90,22 +88,13 @@
     fetchTrackerData(); 
   }
 
-  // --- IFRAME CLIPBOARD BYPASS ENGINE ---
   function fallbackCopyTextToClipboard(text, successMsg) {
       const textArea = document.createElement("textarea");
       textArea.value = text;
-      textArea.style.top = "0";
-      textArea.style.left = "0";
-      textArea.style.position = "fixed"; 
+      textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed"; 
       document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      try { 
-          document.execCommand('copy'); 
-          showToast(successMsg || "Copied"); 
-      } catch (err) { 
-          showToast("Copy Failed"); 
-      }
+      textArea.focus(); textArea.select();
+      try { document.execCommand('copy'); showToast(successMsg || "Copied"); } catch (err) { showToast("Copy Failed"); }
       document.body.removeChild(textArea);
   }
 
@@ -166,54 +155,30 @@
   function handleSearch(v) { state.searchTerm = v; render(); }
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
-  window.handleTrackerSearch = (val) => { 
-      clearTimeout(searchTimeout); 
-      searchTimeout = setTimeout(() => { 
-          state.trackerSearch = val; 
-          render(); 
-      }, 300); 
-  };
-
-  window.handleInsightSearch = (val) => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-          state.insightSearch = val;
-          render();
-      }, 300);
-  };
+  window.handleTrackerSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.trackerSearch = val; render(); }, 300); };
+  window.handleInsightSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.insightSearch = val; render(); }, 300); };
 
   window.handleRangeChange = (val) => {
-      state.trackerRange = val;
-      state.trackerCycleFilter = 'ALL'; 
-      
+      state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
       let [y, m, d] = state.trackerDate.split('-').map(Number);
       let selDate = new Date(y, m-1, d, 12, 0, 0); 
       
-      if (val === 'month' || val === 'quarter') {
-          selDate.setDate(1); 
-          state.trackerDate = selDate.toISOString().split('T')[0];
-      } 
+      if (val === 'month' || val === 'quarter') { selDate.setDate(1); state.trackerDate = selDate.toISOString().split('T')[0]; } 
       else if (val === 'week') {
-          let day = selDate.getDay();
-          let offset = (day >= 4) ? (4 - day) : -(day + 3); 
+          let day = selDate.getDay(); let offset = (day >= 4) ? (4 - day) : -(day + 3); 
           selDate.setDate(selDate.getDate() + offset);
           let ny = selDate.getFullYear(); let nm = selDate.getMonth() + 1; let nd = selDate.getDate();
           state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
       }
-      
-      fetchTrackerData();
-      render();
+      fetchTrackerData(); render();
   };
 
   window.toggleCycleFilter = (targetCycle) => {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
-          
           let [y, m, d] = state.trackerDate.split('-').map(Number);
           let dObj = new Date(y, m-1, d, 12, 0, 0); 
-          
-          let day = dObj.getDay();
-          let offset = (day >= 4) ? (4 - day) : -(day + 3);
+          let day = dObj.getDay(); let offset = (day >= 4) ? (4 - day) : -(day + 3);
           dObj.setDate(dObj.getDate() + offset);
           
           const baseDate = new Date(2026, 0, 29, 12, 0, 0); 
@@ -232,8 +197,7 @@
           if (state.trackerCycleFilter === targetCycle) state.trackerCycleFilter = 'ALL';
           else state.trackerCycleFilter = targetCycle;
       }
-      fetchTrackerData();
-      render();
+      fetchTrackerData(); render();
   };
 
   function fetchData() {
@@ -252,6 +216,85 @@
     if(state.view !== 'popout-view') {
       google.script.run.withSuccessHandler(r=>{ try{ const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r); state.weather=d.weather||d; state.alerts=d.alerts||[]; if(state.view.match(/overview|weather/)) render(); }catch(e){} }).getLiveDashboardData();
     }
+  }
+
+  // --- NOTIFICATION ENGINE ---
+  function fetchNotifications() { 
+      if(typeof google==='undefined') return; 
+      google.script.run.withSuccessHandler(j=>{
+          try{
+              const fetched = JSON.parse(j);
+              const activeNotifs = fetched.filter(n => !state.dismissedNotifs.has(String(n.id)));
+              
+              activeNotifs.forEach(n => {
+                  if(!state.knownNotifs.has(n.id)) {
+                      state.knownNotifs.add(n.id);
+                      showToast("🔔 " + n.text); 
+                      
+                      // LIVE AUTO-RELOAD (If another manager syncs data, your screen updates instantly)
+                      if (n.text.includes("Dashboards refreshed")) {
+                          fetchData();
+                          if (state.view === 'tracker') fetchTrackerData();
+                          if (state.view === 'insights') fetchInsightData();
+                      }
+                  }
+              });
+
+              state.notifications = activeNotifs;
+              const dot = document.getElementById('notif-dot'); 
+              if(dot) dot.style.display = state.notifications.length ? 'block' : 'none'; 
+              if(state.notifOpen) renderNotifList(); 
+          } catch(e) {}
+      }).getSystemNotifications(); 
+  }
+
+  window.renderNotifList = () => {
+      const list = document.getElementById('notif-list');
+      if(!list) return;
+      list.innerHTML = state.notifications.map(n => `
+          <div style="padding:16px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02); border-radius:8px; margin-bottom:8px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">${n.time}</div>
+              <div style="font-weight:700; font-size:0.9rem; margin-bottom:8px;">${n.text}</div>
+              <div style="display:flex; justify-content:flex-end;">
+                  <button class="btn-glass" style="font-size:0.75rem; padding:4px 12px;" onclick="dismissNotif('${n.id}')">Dismiss</button>
+              </div>
+          </div>
+      `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted);">No new notifications.</div>';
+  };
+            
+  window.dismissNotif = (id) => {
+      state.dismissedNotifs.add(String(id));
+      renderNotifList();
+      if(typeof google !== 'undefined') google.script.run.dismissSystemNotification(id);
+      const dot = document.getElementById('notif-dot'); 
+      const count = state.notifications.filter(n=>!state.dismissedNotifs.has(String(n.id))).length;
+      if(dot) dot.style.display = count ? 'block' : 'none';
+  };
+
+  function fetchCalendar() { 
+      if(typeof google==='undefined') return; 
+      google.script.run.withSuccessHandler(j=>{
+          try {
+              state.calendarEvents = JSON.parse(j); 
+              if(state.view === 'overview') render(); 
+              
+              // MAINTENANCE WARNING (Scans agenda for upcoming downtime)
+              const now = new Date();
+              state.calendarEvents.forEach(e => {
+                  if(e.type === 'maintenance') {
+                      let parts = e.startTime.match(/(\d{1,2}):(\d{2})/);
+                      if(parts) {
+                          let evTime = new Date();
+                          evTime.setHours(parseInt(parts[1]), parseInt(parts[2]), 0, 0);
+                          let diffMins = (evTime - now) / 60000;
+                          if(diffMins > 0 && diffMins <= 15) {
+                              showToast(`⚠️ Maintenance starts in ${Math.ceil(diffMins)} mins!`);
+                          }
+                      }
+                  }
+              });
+          } catch(e) {}
+      }).getDailyCalendarEvents(); 
   }
 
   function fetchStats() {
@@ -285,8 +328,6 @@
   }
   
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
-  function fetchNotifications() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.notifications=JSON.parse(j).filter(n=>!state.dismissedNotifs.has(String(n.id))); const dot = document.getElementById('notif-dot'); if(dot) dot.style.display=state.notifications.length?'block':'none'; if(state.notifOpen) renderNotifList(); }catch(e){}}).getSystemNotifications(); }
-  function fetchCalendar() { if(typeof google==='undefined') return; google.script.run.withSuccessHandler(j=>{try{state.calendarEvents=JSON.parse(j); if(state.view==='overview') render(); }catch(e){}}).getDailyCalendarEvents(); }
   
   function fetchInsightData() {
       if(typeof google === 'undefined') return;
@@ -616,12 +657,13 @@
       let timeDisplay = "";
       let subLabel = "";
 
+      // ENRICHED UI: Shows the specific Break Type ("Lunch", "1st Break") clearly
       if (isNow) {
-          timeDisplay = a.timer; // "5m"
-          subLabel = `<span style="opacity:0.7">Ends at</span> ${a.currentBreakStr ? a.currentBreakStr.split('-')[1] : '??:??'}`;
+          timeDisplay = a.timer; 
+          subLabel = `<span style="font-weight:800; color:var(--text-main);">${a.subStatus}</span> • Ends at ${a.currentBreakStr ? a.currentBreakStr.split('-')[1].trim() : '??:??'}`;
       } else {
           timeDisplay = `<span style="font-size:1.5rem">In ${a.startsIn || '?'}</span>`;
-          subLabel = a.timer; // "10:00 - 10:15"
+          subLabel = `<span style="font-weight:800; color:var(--text-main);">${a.nextBreakType || 'Break'}</span> • ${a.timer}`; 
       }
 
       return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.8; border-top:none;' : ''}">
@@ -629,7 +671,7 @@
          <div class="break-timer" style="${!isNow ? 'font-size:1.2rem; margin:8px 0;' : ''}">
             ${timeDisplay}
          </div>
-         <div class="break-label" style="font-family:monospace; font-size:0.9rem;">${subLabel}</div>
+         <div class="break-label" style="font-size:0.9rem;">${subLabel}</div>
       </div>`;
   }
   
@@ -1215,6 +1257,7 @@
 
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
+  // LIVE AUTO-RELOAD ENGINE
   window.runImportAction = () => { 
       const t = document.getElementById('import-text').value; 
       if(!t) return; 
@@ -1227,13 +1270,20 @@
              .withSuccessHandler((trackerResult) => {
                  let finalMsg = trackerResult.includes("Error") ? "Schedule Synced" : trackerResult;
                  showToast(finalMsg); 
+                 
+                 // Instantly refresh local dashboards
                  fetchData();
-                 fetchTrackerData(); 
+                 if (state.view === 'tracker') fetchTrackerData(); 
+                 if (state.view === 'insights') fetchInsightData();
+
+                 // Fire a global ping so all other active users refresh automatically
+                 google.script.run.addGlobalNotification("Global Update: A manager synced new WFM Data. Dashboards refreshed.");
              })
              .withFailureHandler((err) => {
                  showToast("Schedule Synced");
                  fetchData();
-                 fetchTrackerData();
+                 if (state.view === 'tracker') fetchTrackerData(); 
+                 if (state.view === 'insights') fetchInsightData();
              })
              .importWorkforceData(t, t); 
       } 
