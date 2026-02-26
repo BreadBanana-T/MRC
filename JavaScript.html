@@ -231,7 +231,7 @@
                       state.knownNotifs.add(n.id);
                       showToast("🔔 " + n.text); 
                       
-                      // LIVE AUTO-RELOAD (If another manager syncs data, your screen updates instantly)
+                      // LIVE AUTO-RELOAD
                       if (n.text.includes("Dashboards refreshed")) {
                           fetchData();
                           if (state.view === 'tracker') fetchTrackerData();
@@ -278,7 +278,7 @@
               state.calendarEvents = JSON.parse(j); 
               if(state.view === 'overview') render(); 
               
-              // MAINTENANCE WARNING (Scans agenda for upcoming downtime)
+              // MAINTENANCE WARNING
               const now = new Date();
               state.calendarEvents.forEach(e => {
                   if(e.type === 'maintenance') {
@@ -495,17 +495,12 @@
   }
   
   function renderAgents() {
-      const tab = state.agentTab;
       const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
       
       return `
       <div class="sticky-header">
          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
              <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
-             <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border);">
-                 <button class="nav-btn ${tab==='floor'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('floor')">Floor</button>
-                 <button class="nav-btn ${tab==='break'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="setAgentTab('break')">Break</button>
-             </div>
              
              <button class="btn btn-glass" style="height:34px;" onclick="window.open('https://sharepoint.tsl.telus.com/sites/NSE/CAM/Lists/Queue_Manager/AllItems.aspx', '_blank')">
                  <i data-lucide="radio" width="16"></i> Tower Control
@@ -519,7 +514,7 @@
              </div>
          </div>
       </div>
-      ${tab === 'floor' ? renderFloorLayout(upMap) : renderBreakLayout(upMap)}`;
+      ${renderFloorLayout(upMap)}`;
   }
   
   function renderFloorLayout(upMap) {
@@ -611,74 +606,41 @@
      
      if (a.onBreakNow) {
          statusColor = "var(--status-break)";
-         if(statusText === "On Break" && a.rawBreaks) {
-             const brk = a.rawBreaks.find(b => b.type.includes('Break'));
-             if(brk) statusText = brk.type; 
-         }
+         statusText = a.subStatus; 
      }
 
+     // INJECTED BREAK HTML
+     let breakHtml = "";
+     if (a.onBreakNow && a.currentBreakStr) {
+         breakHtml = `<div style="font-size:0.75rem; opacity:0.8; margin-top:4px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
+     } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) {
+         breakHtml = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
+     }
+
+     // PREFIXED CLICKABLE ID
+     let prefix = a.region.includes('Onshore') ? 'T' : 'x';
+     let formattedId = prefix + a.id;
+
      return `
-     <div class="agent-row" onclick="openMenu(event, '${a.name}')">
+     <div class="agent-row" onclick="openMenu(event, '${a.name}')" style="align-items:center;">
         <div class="status-strip ${stripClass}"></div>
         <div class="row-name" data-full-name="${a.name}">${a.name}</div>
         
-        <div style="display:flex; align-items:center; width:70px;">
-           <span class="row-id" style="margin-right:4px;">${a.id}</span>
-           <button class="btn-icon-sm" style="width:16px; height:16px;" onclick="copyAgentInfo(event, '${a.name}', '${a.id}')" title="Copy">
-               <i data-lucide="copy" width="10"></i>
-           </button>
+        <div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, '${formattedId}')" title="Click to Copy ID">
+           <span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color='var(--accent-primary)'" onmouseout="this.style.color='var(--text-muted)'">${formattedId}</span>
         </div>
 
-        <div class="row-status" style="color:${statusColor}">${statusText} ${a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px;">OT</span>' : ''}</div>
+        <div class="row-status" style="color:${statusColor}; display:flex; flex-direction:column; justify-content:center; line-height:1.2;">
+           <div><span style="font-weight:700;">${statusText}</span> ${a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : ''}</div>
+           ${breakHtml}
+        </div>
         <div class="row-time">${start}-${end}</div>
      </div>`;
   }
   
-  function renderBreakLayout(upMap) {
-      const onBreakList = (state.agents.active||[]).filter(a => a.onBreakNow);
-      return `
-      <div>
-         <div class="section-header">
-             Currently on Break <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem; margin-left:8px;">${onBreakList.length}</span>
-             <button class="btn-popout" title="Popout Break Room" onclick="openPopout('Breaks')"><i data-lucide="external-link" width="14"></i></button>
-         </div>
-         <div class="break-grid" style="margin-bottom:40px;">
-            ${onBreakList.map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">Break Room Empty</div>'}
-         </div>
-         <div class="section-header">Upcoming Breaks <span class="count-badge" style="background:var(--card-bg); padding:2px 8px; border-radius:12px; font-size:0.8rem;">${(state.agents.upcomingBreak||[]).length}</span></div>
-         <div class="break-grid">
-            ${(state.agents.upcomingBreak||[]).map(a => renderBreakCard(a)).join('') || '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:40px;">No Upcoming Breaks</div>'}
-         </div>
-      </div>`;
-  }
-  
-  function renderBreakCard(a) {
-      const isNow = a.onBreakNow;
-      let timeDisplay = "";
-      let subLabel = "";
-
-      // ENRICHED UI: Shows the specific Break Type ("Lunch", "1st Break") clearly
-      if (isNow) {
-          timeDisplay = a.timer; 
-          subLabel = `<span style="font-weight:800; color:var(--text-main);">${a.subStatus}</span> • Ends at ${a.currentBreakStr ? a.currentBreakStr.split('-')[1].trim() : '??:??'}`;
-      } else {
-          timeDisplay = `<span style="font-size:1.5rem">In ${a.startsIn || '?'}</span>`;
-          subLabel = `<span style="font-weight:800; color:var(--text-main);">${a.nextBreakType || 'Break'}</span> • ${a.timer}`; 
-      }
-
-      return `<div class="break-card" onclick="openMenu(event, '${a.name}')" style="${!isNow ? 'opacity:0.8; border-top:none;' : ''}">
-         <div class="break-name">${a.name}</div>
-         <div class="break-timer" style="${!isNow ? 'font-size:1.2rem; margin:8px 0;' : ''}">
-            ${timeDisplay}
-         </div>
-         <div class="break-label" style="font-size:0.9rem;">${subLabel}</div>
-      </div>`;
-  }
-  
-  function copyAgentInfo(e, name, id) {
+  function copyAgentInfo(e, idText) {
       e.stopPropagation(); 
-      const text = `${name} (${id})`;
-      fallbackCopyTextToClipboard(text, `Copied: ${text}`);
+      fallbackCopyTextToClipboard(idText, `Copied: ${idText}`);
   }
 
   window.openBreakModal = () => {
@@ -814,23 +776,23 @@
              }).join('');
              html += `
              <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
-                <div class="flex-between" style="margin-bottom:16px;">
-                    <span style="font-weight:800; font-size:1.1rem;">${c.name}</span>
-                    <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
-                </div>
-                <div class="flex-between" style="align-items:flex-end;">
-                    <div>
-                        <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp}°</div>
-                        <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition}</div>
-                    </div>
-                    <div style="text-align:right;">
-                        <div style="font-size:1.4rem; font-weight:700;">${c.wind}</div>
-                        <div class="kpi-label">KM/H</div>
-                    </div>
-                </div>
-                <div class="weather-mini-row">
-                    ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
-                </div>
+                 <div class="flex-between" style="margin-bottom:16px;">
+                     <span style="font-weight:800; font-size:1.1rem;">${c.name}</span>
+                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
+                 </div>
+                 <div class="flex-between" style="align-items:flex-end;">
+                     <div>
+                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp}°</div>
+                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition}</div>
+                     </div>
+                     <div style="text-align:right;">
+                         <div style="font-size:1.4rem; font-weight:700;">${c.wind}</div>
+                         <div class="kpi-label">KM/H</div>
+                     </div>
+                 </div>
+                 <div class="weather-mini-row">
+                     ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
+                 </div>
              </div>`;
          });
       });
@@ -1097,9 +1059,9 @@
              <h2 style="margin:0;">Master Operations Tracker</h2>
              
              <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px;">
-                <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
+                 <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
                     ${u ? u.cycle : 'CALCULATING...'}
-                </span>
+                 </span>
              </div>
 
              <select class="input-aether" style="width:auto; height:34px; font-weight:700;" onchange="state.selectedArchive=this.value; fetchInsightData();">
