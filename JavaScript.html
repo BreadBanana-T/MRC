@@ -961,7 +961,7 @@
                     <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div>
                     <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals.all.toFixed(2)}</div>
                 </div>
-                <div class="chart-3d-container" style="height:220px; width:100%; display:flex; justify-content:center;">
+                <div class="chart-3d-container" style="height:260px; width:100%; display:flex; justify-content:center; padding: 10px;">
                     <canvas id="tracker-chart"></canvas>
                 </div>
              </div>
@@ -1207,20 +1207,23 @@
 
   function initTrackerChart() {
       if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.events || state.trackerLoading) return;
-      const ctx = document.getElementById('tracker-chart');
-      if (!ctx) return;
+      const canvas = document.getElementById('tracker-chart');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
 
-      if (charts.tracker) charts.tracker.destroy();
+      if (charts.tracker) { charts.tracker.destroy(); charts.tracker = null; }
 
       const d = state.trackerData;
       const isCoach = d.trackerType === 'coaching';
+      const isDark = document.body.classList.contains('dark');
+      const textColor = isDark ? '#94a3b8' : '#64748b';
 
       const shadowPlugin = {
           id: 'shadowPlugin',
           beforeDraw: (chart) => {
               const ctx = chart.ctx;
               ctx.save();
-              ctx.shadowColor = document.body.classList.contains('dark') ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.2)';
+              ctx.shadowColor = isDark ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.2)';
               ctx.shadowBlur = 15;
               ctx.shadowOffsetX = 0;
               ctx.shadowOffsetY = 10;
@@ -1228,29 +1231,83 @@
           afterDraw: (chart) => { chart.ctx.restore(); }
       };
 
+      // Plugin to draw text inside the pie slices
+      const insideLabelsPlugin = {
+          id: 'insideLabels',
+          afterDatasetsDraw(chart) {
+              const { ctx, data } = chart;
+              chart.getDatasetMeta(0).data.forEach((datapoint, index) => {
+                  const value = data.datasets[0].data[index];
+                  if (value <= 0) return; 
+                  
+                  const label = data.labels[index];
+                  const { x, y } = datapoint.tooltipPosition();
+                  
+                  ctx.save();
+                  ctx.font = "bold 12px 'Outfit', sans-serif";
+                  ctx.fillStyle = 'white';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                  ctx.shadowBlur = 4;
+                  ctx.shadowOffsetX = 0;
+                  ctx.shadowOffsetY = 1;
+                  
+                  ctx.fillText(label, x, y - 8);
+                  ctx.font = "800 14px 'Outfit', sans-serif";
+                  ctx.fillText(value.toFixed(1) + 'h', x, y + 8);
+                  ctx.restore();
+              });
+          }
+      };
+
       if (!isCoach) {
+          // Rich Gradients
+          const g1 = ctx.createLinearGradient(0,0,0,300); g1.addColorStop(0, '#fde68a'); g1.addColorStop(1, '#d97706'); // Morning
+          const g2 = ctx.createLinearGradient(0,0,0,300); g2.addColorStop(0, '#fdba74'); g2.addColorStop(1, '#c2410c'); // Evening
+          const g3 = ctx.createLinearGradient(0,0,0,300); g3.addColorStop(0, '#a5b4fc'); g3.addColorStop(1, '#4338ca'); // Night
+
           charts.tracker = new Chart(ctx, {
-              type: 'doughnut',
-              plugins: [shadowPlugin],
+              type: 'pie',
+              plugins: [shadowPlugin, insideLabelsPlugin],
               data: {
                   labels: ['Morning', 'Evening', 'Night'],
                   datasets: [{
                       data: [d.totals.morning, d.totals.evening, d.totals.night],
-                      backgroundColor: ['#fbbf24', '#f97316', '#818cf8'],
-                      borderWidth: 0,
-                      hoverOffset: 15,
-                      borderRadius: 10
+                      backgroundColor: [g1, g2, g3],
+                      borderColor: isDark ? '#1e293b' : '#ffffff',
+                      borderWidth: 2,
+                      hoverOffset: 15
                   }]
               },
               options: {
                   responsive: true,
                   maintainAspectRatio: false,
-                  cutout: '75%',
-                  plugins: { legend: { display: false } },
-                  animation: { animateScale: true, animateRotate: true, duration: 1000, easing: 'easeOutQuart' }
+                  layout: { padding: 25 },
+                  plugins: { 
+                      legend: { display: false },
+                      tooltip: {
+                          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                          titleColor: isDark ? '#fff' : '#0f172a',
+                          bodyColor: isDark ? '#cbd5e1' : '#475569',
+                          borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                          borderWidth: 1,
+                          titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' },
+                          bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' },
+                          padding: 12,
+                          cornerRadius: 12,
+                          displayColors: true,
+                          callbacks: { label: function(context) { return ` ${context.parsed}h Total`; } }
+                      }
+                  },
+                  animation: { animateScale: true, animateRotate: true, duration: 1200, easing: 'easeOutQuart' }
               }
           });
       } else {
+          const gBar = ctx.createLinearGradient(0,0,300,0);
+          gBar.addColorStop(0, '#818cf8');
+          gBar.addColorStop(1, '#4f46e5');
+
           const activityCount = {};
           d.events.forEach(e => {
               let name = e.activityName || 'Unknown';
@@ -1266,17 +1323,36 @@
                   labels: sortedNames.map(n => n.length > 15 ? n.substring(0,15)+'...' : n),
                   datasets: [{
                       data: sortedData,
-                      backgroundColor: '#818cf8',
+                      backgroundColor: gBar,
                       borderRadius: 8,
-                      borderWidth: 0
+                      borderWidth: 0,
+                      barThickness: 'flex',
+                      maxBarThickness: 30
                   }]
               },
               options: {
                   indexAxis: 'y',
                   responsive: true,
                   maintainAspectRatio: false,
-                  plugins: { legend: { display: false } },
-                  scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { weight: 'bold', color: document.body.classList.contains('dark')?'#94a3b8':'#475569' } } } },
+                  layout: { padding: { right: 20 } },
+                  plugins: { 
+                      legend: { display: false },
+                      tooltip: {
+                          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                          titleColor: isDark ? '#fff' : '#0f172a',
+                          bodyColor: isDark ? '#cbd5e1' : '#475569',
+                          borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                          borderWidth: 1,
+                          titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' },
+                          bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' },
+                          padding: 12,
+                          cornerRadius: 12
+                      }
+                  },
+                  scales: { 
+                      x: { display: false }, 
+                      y: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: 'bold'}, color: textColor } } 
+                  },
                   animation: { duration: 1200, easing: 'easeOutBounce' }
               }
           });
