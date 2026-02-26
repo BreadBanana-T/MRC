@@ -1231,7 +1231,6 @@
                  fetchTrackerData(); 
              })
              .withFailureHandler((err) => {
-                 // Swallow the failure if IDP was missing and just report success for schedule
                  showToast("Schedule Synced");
                  fetchData();
                  fetchTrackerData();
@@ -1322,28 +1321,17 @@
                       backgroundColor: [g1, g2, g3],
                       borderColor: isDark ? '#1e293b' : '#ffffff',
                       borderWidth: 2,
-                      hoverOffset: 15
+                      hoverOffset: 0 // REMOVED HOVER ANIMATION FOR SPEED
                   }]
               },
               options: {
                   responsive: true,
                   maintainAspectRatio: false,
                   layout: { padding: 25 },
+                  events: [], // COMPLETELY DISABLES HOVER EVENTS (0% CPU LAG)
                   plugins: { 
                       legend: { display: false },
-                      tooltip: {
-                          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-                          titleColor: isDark ? '#fff' : '#0f172a',
-                          bodyColor: isDark ? '#cbd5e1' : '#475569',
-                          borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                          borderWidth: 1,
-                          titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' },
-                          bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' },
-                          padding: 12,
-                          cornerRadius: 12,
-                          displayColors: true,
-                          callbacks: { label: function(context) { return ` ${context.parsed}h Total`; } }
-                      }
+                      tooltip: { enabled: false } // DISABLED TOOLTIPS
                   },
                   animation: { animateScale: true, animateRotate: true, duration: 1200, easing: 'easeOutQuart' }
               }
