@@ -1,10 +1,10 @@
 /**
- * MODULE: AGENT MONITOR (V4.6)
- * - Rock Solid Date Math
- * - Intraday ACSU Snapping
+ * MODULE: AGENT MONITOR (V4.7)
+ * - Furlough/ACSU off-floor snapping (Removes from Shrinkage)
+ * - Break Room UI Enrichment
  */
 
-const AgentMonitor = {
+var AgentMonitor = {
   getPayload: function() { return compileFloorData(); },
   setStatus: function(n, t, v) { return RoleManager.setStatus(n, t, v); },
   updateAgentBreaks: function(n, j) { return StatusTracker.updateBreaks(n, j); },
@@ -22,8 +22,18 @@ function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBr
 function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.logOvertime(name, start, end, bStart, bEnd); }
 
 function compileFloorData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Raw Schedule");
+  let sheet;
+  const localSS = SpreadsheetApp.getActiveSpreadsheet();
+  const localSheet = localSS.getSheetByName("Raw Schedule");
+  
+  if (localSheet && localSheet.getLastRow() > 1) {
+      sheet = localSheet;
+  } else if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
+      try {
+          sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName("Raw Schedule");
+      } catch (e) { }
+  }
+
   const emptyFloor = {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
@@ -43,7 +53,7 @@ function compileFloorData() {
     const persistentData = sheetOverrides.get(cleanName) || {};
     const fastData = fastOverrides[cleanName] || {};
     
-    let role = (fastData.role !== undefined) ? fastData.role : (persistentData.role || (row ? row[8] : ""));
+    let manualRole = (fastData.role !== undefined) ? fastData.role : (persistentData.role || "");
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
     let region = row ? row[6] : "Offshore";
@@ -52,10 +62,12 @@ function compileFloorData() {
     let originalBreaksJson = row ? row[7] : "[]";
     let agentID = row ? row[1] : "";
 
-    if (role && role !== "") absentType = "";
+    if (manualRole && manualRole !== "") absentType = "";
+
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
+
     let dateStr = row ? row[2] : "";
     let shiftStr = "";
 
@@ -82,8 +94,10 @@ function compileFloorData() {
     }
 
     const LOOKAHEAD = 60 * 60 * 1000;
+
     if ((shiftType === "Off" || region === "Off") && !isOT) return;
     if ((!startEpoch || !endEpoch) && !isOT) return;
+
     if (startEpoch && endEpoch) {
        if (endEpoch <= now && !isOT) return;
        if (startEpoch > (now + LOOKAHEAD) && !isOT) return;
@@ -98,7 +112,7 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
-    
+
     if (isOT) {
        otList.forEach(o => {
            if(o.bStart && o.bStart !== "-" && o.bEnd && o.bEnd !== "-") rawBreaks.push({ type: "OT Break", start: o.bStart, end: o.bEnd });
@@ -107,6 +121,7 @@ function compileFloorData() {
 
     const enrichedBreaks = [];
     let nextBreakStr = null;
+    let nextBreakType = null;
     let currentBreakStr = null;
     let onBreakNow = false;
     let inTrainingNow = false;
@@ -114,6 +129,8 @@ function compileFloorData() {
     let breakTimer = "";
     let activeIntradayLabel = "";
     let breakStartsIn = "";
+    
+    let dynamicRoleNow = ""; 
 
     if((startEpoch || isOT) && rawBreaks.length > 0) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
@@ -152,23 +169,30 @@ function compileFloorData() {
                  } else if (b.type === "ACSU") {
                      onAcsuNow = true;
                      activeIntradayLabel = "Furlough (ACSU)";
+                 } else if (["SAFE", "ICL", "ULC FIRE"].includes(b.type)) {
+                     dynamicRoleNow = b.type;
+                     activeIntradayLabel = b.type;
                  } else {
                      onBreakNow = true;
                      activeIntradayLabel = displayLabel;
                  }
-                 breakTimer = `${Math.ceil((be - now)/60000)}m`;
                  currentBreakStr = `${b.start} - ${b.end}`;
+                 breakTimer = `${Math.ceil((be - now)/60000)}m`;
              }
-             if (bs > now && !nextBreakStr && (bs - now < 1800000) && b.type !== "Training" && b.type !== "ACSU") { 
+             
+             if (bs > now && !nextBreakStr && (bs - now < 1800000) && !["Training", "ACSU", "SAFE", "ICL", "ULC FIRE"].includes(b.type)) { 
                  nextBreakStr = `${b.start} - ${b.end}`;
                  breakStartsIn = Math.ceil((bs - now)/60000) + "m";
+                 nextBreakType = displayLabel;
              }
           }
        });
     }
 
+    let effectiveRole = manualRole || dynamicRoleNow;
+
     let category = "active";
-    let subStatus = role || "";
+    let subStatus = effectiveRole || "";
 
     if (absentType) {
         const upper = absentType.toUpperCase();
@@ -185,18 +209,23 @@ function compileFloorData() {
         }
     }
 
-    // Live Intraday Overrides (This moves them dynamically out of Active!)
+    // Live Intraday Overrides
     if (category === "active") {
-        if (onAcsuNow) { category = "unplanned"; subStatus = activeIntradayLabel; }
+        if (onAcsuNow) { 
+            // FIX: Treats Furloughs as completely Off to immediately drop them from Shrinkage math
+            category = "off"; 
+            subStatus = activeIntradayLabel; 
+        }
         else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
         else if (onBreakNow) subStatus = activeIntradayLabel;
+        else if (dynamicRoleNow) subStatus = activeIntradayLabel;
     }
 
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
-      dateStr: dateStr, subStatus: subStatus, role: role, rawBreaks: enrichedBreaks, 
+      dateStr: dateStr, subStatus: subStatus, role: effectiveRole, rawBreaks: enrichedBreaks, 
       isModified: isModified, breakTimeStr: nextBreakStr, currentBreakStr: currentBreakStr, 
-      timer: breakTimer, auxLabel: "Remaining", startsIn: breakStartsIn,
+      timer: breakTimer, auxLabel: "Remaining", startsIn: breakStartsIn, nextBreakType: nextBreakType,
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
     };
 
@@ -208,6 +237,7 @@ function compileFloorData() {
     }
 
     const newScore = SCORES[category] || 0;
+
     if (agentMap.has(rawName)) {
        const existing = agentMap.get(rawName);
        if (newScore > SCORES[existing.category]) agentMap.set(rawName, { agent, category });
@@ -224,7 +254,7 @@ function compileFloorData() {
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
-      else emptyFloor.active.push(item.agent);
+      else if (targetCat !== "off") emptyFloor.active.push(item.agent); // Prevents Furloughed agents from showing on the floor
       
       const r = (item.agent.role || "").toUpperCase();
       if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
