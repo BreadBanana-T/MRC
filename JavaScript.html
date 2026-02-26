@@ -150,13 +150,14 @@
 
   function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
+  // --- SEARCH BAR DEBOUNCING (Speed Optimization) ---
   let searchTimeout;
+  window.handleSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
   window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
-  function handleSearch(v) { state.searchTerm = v; render(); }
-  function setRegionFilter(v) { state.regionFilter=v; render(); }
+  window.handleTrackerSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.trackerSearch = val; render(); }, 200); };
+  window.handleInsightSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.insightSearch = val; render(); }, 200); };
 
-  window.handleTrackerSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.trackerSearch = val; render(); }, 300); };
-  window.handleInsightSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.insightSearch = val; render(); }, 300); };
+  function setRegionFilter(v) { state.regionFilter=v; render(); }
 
   window.handleRangeChange = (val) => {
       state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
@@ -421,6 +422,12 @@
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
+     // --- NEW: Cursor Memory (Fixes Focus Stealing) ---
+     const activeEl = document.activeElement;
+     const activeId = activeEl ? activeEl.id : null;
+     const cursorStart = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionStart : null;
+     const cursorEnd = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionEnd : null;
+
      const sl = document.getElementById('hdr-sl');
      if(sl) sl.innerText = state.currentSL;
      const ackEl = document.getElementById('hdr-ack');
@@ -449,7 +456,17 @@
      else if (state.view === 'tracker') h = renderTracker();
      
      c.innerHTML = h; refreshIcons();
-     const search = document.getElementById('agent-search'); if(state.view === 'agents' && search && state.searchTerm && document.activeElement !== search) search.value = state.searchTerm;
+     
+     // --- NEW: Restore Cursor Focus ---
+     if (activeId) {
+         const reFocus = document.getElementById(activeId);
+         if (reFocus) {
+             reFocus.focus();
+             if (cursorStart !== null) {
+                 try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {}
+             }
+         }
+     }
      
      if(state.view === 'insights') initCharts();
      if(state.view === 'overview') initOverviewChart();
@@ -609,7 +626,6 @@
          statusText = a.subStatus; 
      }
 
-     // INJECTED BREAK HTML
      let breakHtml = "";
      if (a.onBreakNow && a.currentBreakStr) {
          breakHtml = `<div style="font-size:0.75rem; opacity:0.8; margin-top:4px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
@@ -617,7 +633,6 @@
          breakHtml = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
      }
 
-     // PREFIXED CLICKABLE ID
      let prefix = a.region.includes('Onshore') ? 'T' : 'x';
      let formattedId = prefix + a.id;
 
