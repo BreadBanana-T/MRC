@@ -14,7 +14,6 @@ function calculateMetrics(inText, outText) {
     asa: "0s", inSVL: "0%",
     report: ""
   };
-
   // 1. SLA LIST & TREND LIST (STRICT)
   // Strict list for both SLA stats and Trend Volume to match sheet result (-21.08%)
   const LIST_STRICT = [
@@ -24,7 +23,6 @@ function calculateMetrics(inText, outText) {
       "4-BURG", "4-COMM", "4-TAMP", 
       "6-O/C"
   ];
-  
   // ----------------------------------------------------
   // A. INBOUND PARSING
   // ----------------------------------------------------
@@ -33,7 +31,6 @@ function calculateMetrics(inText, outText) {
     for (const line of lines) {
       // Clean tabs/spaces
       const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
-      
       if (line.includes("Monit - Intraday")) {
           const asaPart = parts.find(p => p.includes(":"));
           if (asaPart) stats.asa = fmt(asaPart);
@@ -56,7 +53,6 @@ function calculateMetrics(inText, outText) {
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
     let svlVol = 0, svlW = 0; 
     let ackVol = 0, ackW = 0;
-    
     if (intraSection) {
       const lines = intraSection.split(/\r?\n/);
       lines.forEach(line => {
@@ -84,7 +80,6 @@ function calculateMetrics(inText, outText) {
 
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
-    
     // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_STRICT
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
@@ -113,8 +108,8 @@ function calculateMetrics(inText, outText) {
 
                    // CALCULATION (Strict Only)
                    if (checkList(code, LIST_STRICT)) {
-                      trendDiff += diff;     // Sum of (Offered - Handled)
-                      trendRef += handled;   // Sum of Handled
+                      trendDiff += diff; // Sum of (Offered - Handled)
+                      trendRef += handled; // Sum of Handled
                    }
                 }
             }
@@ -124,7 +119,7 @@ function calculateMetrics(inText, outText) {
     if (trendRef > 0) {
        // Formula: (TotalDiff / TotalHandled)
        const growth = (trendDiff / trendRef) * 100;
-       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(2) + "%"; 
+       stats.trendOut = (growth > 0 ? "+" : "") + growth.toFixed(2) + "%";
     }
   }
 
@@ -136,8 +131,8 @@ function calculateMetrics(inText, outText) {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  // FINAL REPORT TEXT
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
+  // FINAL REPORT TEXT (UPDATED WITH SAFE)
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
 
