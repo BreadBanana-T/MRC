@@ -1,8 +1,8 @@
 /**
  * MODULE: AGENT MONITOR (V4.9)
  * - Shadow Roster Shrinkage Fix (Strict Time Overrides)
+ * - Role Wiping for Off-Shift Agents
  * - Furlough/ACSU off-floor snapping
- * - Break Room UI Enrichment
  */
 
 var AgentMonitor = {
@@ -205,13 +205,13 @@ function compileFloorData() {
     let category = "active";
     let subStatus = effectiveRole || "";
 
-    // --- SHRINKAGE FIX: Time evaluates BEFORE Absence ---
+    // --- SHRINKAGE & ROLE WIPE FIX: Time evaluates BEFORE Absence ---
     if (isInactiveTime) {
-        // Drop them straight to the shadow roster so they don't count towards shrinkage
+        // Drop them straight to the shadow roster
         category = "off";
         subStatus = absentType ? `${absentType} (Off Shift)` : inactiveReason;
+        effectiveRole = ""; // Wipes any old manual roles off the UI so they don't get stuck in SAFE/ICL after their shift ends
     } else {
-        // Actively scheduled today within timeline
         if (absentType) {
             const upper = absentType.toUpperCase();
             if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
@@ -227,10 +227,9 @@ function compileFloorData() {
             }
         }
 
-        // Live Intraday Overrides
         if (category === "active") {
             if (onAcsuNow) { 
-                category = "off"; // Removes Intraday Furloughs from Shrinkage
+                category = "off"; 
                 subStatus = activeIntradayLabel; 
             }
             else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
@@ -274,10 +273,13 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
-      const r = (item.agent.role || "").toUpperCase();
-      if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
-      if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
-      if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
+      // DOUBLE SECURITY: Physically block offline agents from entering Special Role arrays
+      if (targetCat !== "off") {
+          const r = (item.agent.role || "").toUpperCase();
+          if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
+          if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
+          if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
+      }
   });
 
   return JSON.stringify(emptyFloor);
