@@ -533,7 +533,6 @@
          </div>`;
      }
 
-     // --- SHADOW ROSTER UI REVEAL ---
      let offHtml = '';
      if (state.searchTerm && state.searchTerm.trim() !== '') {
          const offAgents = state.agents.off || [];
@@ -611,6 +610,7 @@
       return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
   }
 
+  // --- NEW: SHIFT ENDING SOON UI ADDED HERE ---
   function renderAgentRow(a, upInfo) {
      let start = "00:00", end = "00:00";
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
@@ -633,15 +633,18 @@
 
      let breakHtml = "";
      if (a.onBreakNow && a.currentBreakStr) {
-         breakHtml = `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
+         breakHtml += `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
      } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) {
-         breakHtml = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
+         breakHtml += `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
+     }
+
+     if (a.shiftEndsIn) {
+         breakHtml += `<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">${a.shiftEndsIn}</span></div>`;
      }
 
      let prefix = a.region.includes('Onshore') ? 'T' : 'x';
      let formattedId = prefix + a.id;
      
-     // Cleanly display "OFF" for shift times if they aren't working
      let timeDisplay = `${start}-${end}`;
      if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') {
          timeDisplay = "OFF";
@@ -1359,17 +1362,17 @@
                       backgroundColor: [g1, g2, g3],
                       borderColor: isDark ? '#1e293b' : '#ffffff',
                       borderWidth: 2,
-                      hoverOffset: 0
+                      hoverOffset: 0 // REMOVED HOVER ANIMATION FOR SPEED
                   }]
               },
               options: {
                   responsive: true,
                   maintainAspectRatio: false,
                   layout: { padding: 25 },
-                  events: [], 
+                  events: [], // COMPLETELY DISABLES HOVER EVENTS (0% CPU LAG)
                   plugins: { 
                       legend: { display: false },
-                      tooltip: { enabled: false } 
+                      tooltip: { enabled: false } // DISABLED TOOLTIPS
                   },
                   animation: { animateScale: true, animateRotate: true, duration: 1200, easing: 'easeOutQuart' }
               }
