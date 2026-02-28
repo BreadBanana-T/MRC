@@ -208,7 +208,6 @@
     }
   }
 
-  // --- NOTIFICATION ENGINE ---
   function fetchNotifications() { 
       if(typeof google==='undefined') return; 
       google.script.run.withSuccessHandler(j=>{
@@ -221,7 +220,6 @@
                       state.knownNotifs.add(n.id);
                       showToast("🔔 " + n.text); 
                       
-                      // LIVE AUTO-RELOAD
                       if (n.text.includes("Dashboards refreshed")) {
                           fetchData();
                           if (state.view === 'tracker') fetchTrackerData();
@@ -238,7 +236,6 @@
       }).getSystemNotifications(); 
   }
 
-  // --- BUG FIX: Instant UI filter for dismissed notifications ---
   window.renderNotifList = () => {
       const list = document.getElementById('notif-list');
       if(!list) return;
@@ -259,7 +256,7 @@
             
   window.dismissNotif = (id) => {
       state.dismissedNotifs.add(String(id));
-      renderNotifList(); // UI updates instantly now!
+      renderNotifList(); 
       if(typeof google !== 'undefined') google.script.run.dismissSystemNotification(id);
       
       const dot = document.getElementById('notif-dot'); 
@@ -536,6 +533,20 @@
          </div>`;
      }
 
+     // --- SHADOW ROSTER UI REVEAL ---
+     let offHtml = '';
+     if (state.searchTerm && state.searchTerm.trim() !== '') {
+         const offAgents = state.agents.off || [];
+         const offRendered = renderGroup(offAgents, upMap);
+         if (offRendered) {
+             offHtml = `
+             <div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div>
+             <div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">
+                 ${offRendered}
+             </div>`;
+         }
+     }
+
      return `
      ${startingHtml}
 
@@ -584,7 +595,9 @@
      <div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div>
      <div class="agent-list-view" style="margin-bottom:30px;">
         ${renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>'}
-     </div>`;
+     </div>
+     
+     ${offHtml}`;
   }
   
   function renderGroup(list, upMap) {
@@ -603,7 +616,7 @@
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      
      let stripClass = a.region.includes('Onshore') ? 'on' : 'off';
-     if(a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
+     if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
 
      let statusText = a.subStatus || "Active";
@@ -627,9 +640,15 @@
 
      let prefix = a.region.includes('Onshore') ? 'T' : 'x';
      let formattedId = prefix + a.id;
+     
+     // Cleanly display "OFF" for shift times if they aren't working
+     let timeDisplay = `${start}-${end}`;
+     if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') {
+         timeDisplay = "OFF";
+     }
 
      return `
-     <div class="agent-row" onclick="openMenu(event, '${a.name}')" style="align-items:center;">
+     <div class="agent-row" onclick="openMenu(event, '${a.name}')">
         <div class="status-strip ${stripClass}"></div>
         <div class="row-name" data-full-name="${a.name}">${a.name}</div>
         
@@ -641,7 +660,7 @@
            <div><span style="font-weight:700;">${statusText}</span> ${a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : ''}</div>
            ${breakHtml}
         </div>
-        <div class="row-time">${start}-${end}</div>
+        <div class="row-time">${timeDisplay}</div>
      </div>`;
   }
   
