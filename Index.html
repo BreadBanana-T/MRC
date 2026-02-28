@@ -81,8 +81,8 @@
     <div id="import-modal" class="modal-blur">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data</h2>
-          <textarea id="import-text" class="input-aether mb-6" rows="8" placeholder="Paste WFM schedule text here... (Also accepts IDP paste for the Tracker)"></textarea>
-          <div style="display:flex; justify-content:flex-end; gap:16px; margin-top:16px;">
+          <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 24px;" placeholder="Paste WFM schedule text here... (Also accepts IDP paste for the Tracker)"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
           </div>
@@ -94,7 +94,7 @@
             <h2 style="margin-top:0;">Compose Script</h2>
             <input id="new-script-title" class="input-aether" placeholder="Title" style="margin-bottom:12px;">
             <input id="new-script-cat" class="input-aether" placeholder="Category (Optional)" style="margin-bottom:12px;">
-            <textarea id="new-script-body" class="input-aether" style="height:150px; margin-bottom:16px;" placeholder="Script content..."></textarea>
+            <textarea id="new-script-body" class="input-aether" style="height:150px; padding-top: 12px; resize: none; margin-bottom:16px;" placeholder="Script content..."></textarea>
             <div style="display:flex; justify-content:flex-end; gap:12px;">
                 <button class="btn btn-glass" onclick="closeComposeMode()">Cancel</button>
                 <button class="btn btn-primary" onclick="addScript()">Save</button>
