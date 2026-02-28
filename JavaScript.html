@@ -42,16 +42,8 @@
       trackerLoading: true
   };
 
-  document.addEventListener('mousemove', e => {
-      requestAnimationFrame(() => {
-          const card = e.target.closest('.aether-card');
-          if (!card) return;
-          const rect = card.getBoundingClientRect();
-          card.style.setProperty('--x', `${e.clientX - rect.left}px`);
-          card.style.setProperty('--y', `${e.clientY - rect.top}px`);
-      });
-  });
-  
+  // ⚠️ CPU FIX: The heavy mouse-move listener has been completely deleted here to restore maximum browser performance.
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
 
   function initApp() {
@@ -150,7 +142,6 @@
 
   function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
-  // --- SEARCH BAR DEBOUNCING (Speed Optimization) ---
   let searchTimeout;
   window.handleSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
   window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
@@ -219,7 +210,6 @@
     }
   }
 
-  // --- NOTIFICATION ENGINE ---
   function fetchNotifications() { 
       if(typeof google==='undefined') return; 
       google.script.run.withSuccessHandler(j=>{
@@ -232,7 +222,6 @@
                       state.knownNotifs.add(n.id);
                       showToast("🔔 " + n.text); 
                       
-                      // LIVE AUTO-RELOAD
                       if (n.text.includes("Dashboards refreshed")) {
                           fetchData();
                           if (state.view === 'tracker') fetchTrackerData();
@@ -279,7 +268,6 @@
               state.calendarEvents = JSON.parse(j); 
               if(state.view === 'overview') render(); 
               
-              // MAINTENANCE WARNING
               const now = new Date();
               state.calendarEvents.forEach(e => {
                   if(e.type === 'maintenance') {
@@ -422,7 +410,6 @@
   function render() {
      if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
-     // --- NEW: Cursor Memory (Fixes Focus Stealing) ---
      const activeEl = document.activeElement;
      const activeId = activeEl ? activeEl.id : null;
      const cursorStart = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionStart : null;
@@ -457,7 +444,6 @@
      
      c.innerHTML = h; refreshIcons();
      
-     // --- NEW: Restore Cursor Focus ---
      if (activeId) {
          const reFocus = document.getElementById(activeId);
          if (reFocus) {
@@ -628,16 +614,16 @@
 
      let breakHtml = "";
      if (a.onBreakNow && a.currentBreakStr) {
-         breakHtml = `<div style="font-size:0.75rem; opacity:0.8; margin-top:4px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
+         breakHtml = `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
      } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) {
-         breakHtml = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
+         breakHtml = `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
      }
 
      let prefix = a.region.includes('Onshore') ? 'T' : 'x';
      let formattedId = prefix + a.id;
 
      return `
-     <div class="agent-row" onclick="openMenu(event, '${a.name}')" style="align-items:center;">
+     <div class="agent-row" onclick="openMenu(event, '${a.name}')">
         <div class="status-strip ${stripClass}"></div>
         <div class="row-name" data-full-name="${a.name}">${a.name}</div>
         
@@ -645,7 +631,7 @@
            <span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color='var(--accent-primary)'" onmouseout="this.style.color='var(--text-muted)'">${formattedId}</span>
         </div>
 
-        <div class="row-status" style="color:${statusColor}; display:flex; flex-direction:column; justify-content:center; line-height:1.2;">
+        <div class="row-status" style="color:${statusColor};">
            <div><span style="font-weight:700;">${statusText}</span> ${a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : ''}</div>
            ${breakHtml}
         </div>
@@ -1348,17 +1334,17 @@
                       backgroundColor: [g1, g2, g3],
                       borderColor: isDark ? '#1e293b' : '#ffffff',
                       borderWidth: 2,
-                      hoverOffset: 0 // REMOVED HOVER ANIMATION FOR SPEED
+                      hoverOffset: 0
                   }]
               },
               options: {
                   responsive: true,
                   maintainAspectRatio: false,
                   layout: { padding: 25 },
-                  events: [], // COMPLETELY DISABLES HOVER EVENTS (0% CPU LAG)
+                  events: [], 
                   plugins: { 
                       legend: { display: false },
-                      tooltip: { enabled: false } // DISABLED TOOLTIPS
+                      tooltip: { enabled: false } 
                   },
                   animation: { animateScale: true, animateRotate: true, duration: 1200, easing: 'easeOutQuart' }
               }
