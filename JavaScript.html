@@ -610,7 +610,6 @@
       return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
   }
 
-  // --- NEW: SHIFT ENDING SOON UI ADDED HERE ---
   function renderAgentRow(a, upInfo) {
      let start = "00:00", end = "00:00";
      if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
@@ -1435,6 +1434,7 @@
 
   function initCharts() {}
 
+  // --- SMART CEILING LOGIC ADDED HERE ---
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
       
@@ -1579,7 +1579,9 @@
                       display: true,
                       position: 'right',
                       min: 0,
-                      suggestedMax: Math.max(...ackData, 60) * 1.2, 
+                      // SMART CEILING: If a spike hits > 120s, lock the visual scale at 120s
+                      max: Math.max(...ackData) > 120 ? 120 : undefined,
+                      suggestedMax: Math.max(...ackData, 40) * 1.2, 
                       grid: { display: false, drawBorder: false },
                       ticks: { callback: value => value + 's', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
                   }
