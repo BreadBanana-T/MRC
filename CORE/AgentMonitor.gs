@@ -1,5 +1,6 @@
 /**
- * MODULE: AGENT MONITOR (V4.9)
+ * MODULE: AGENT MONITOR (V5.0)
+ * - Shift Ending Soon Tracker
  * - Shadow Roster Shrinkage Fix (Strict Time Overrides)
  * - Role Wiping for Off-Shift Agents
  * - Furlough/ACSU off-floor snapping
@@ -102,7 +103,6 @@ function compileFloorData() {
        shiftStr = `${sFmt} - ${eFmt}`;
     }
 
-    // --- SHADOW ROSTER: Classify off-shift agents ---
     let isInactiveTime = false;
     let inactiveReason = "";
 
@@ -205,12 +205,10 @@ function compileFloorData() {
     let category = "active";
     let subStatus = effectiveRole || "";
 
-    // --- SHRINKAGE & ROLE WIPE FIX: Time evaluates BEFORE Absence ---
     if (isInactiveTime) {
-        // Drop them straight to the shadow roster
         category = "off";
         subStatus = absentType ? `${absentType} (Off Shift)` : inactiveReason;
-        effectiveRole = ""; // Wipes any old manual roles off the UI so they don't get stuck in SAFE/ICL after their shift ends
+        effectiveRole = ""; 
     } else {
         if (absentType) {
             const upper = absentType.toUpperCase();
@@ -238,12 +236,18 @@ function compileFloorData() {
         }
     }
 
+    // --- SHIFT ENDING TRACKER (Calculates if <= 30 mins remaining) ---
+    let shiftEndsIn = null;
+    if (category !== "off" && endEpoch && endEpoch > now && (endEpoch - now) <= 1800000) {
+        shiftEndsIn = Math.ceil((endEpoch - now) / 60000) + "m";
+    }
+
     let agent = {
       name: rawName, id: agentID, region: region, shift: shiftStr, shiftType: shiftType,
       dateStr: dateStr, subStatus: subStatus, role: effectiveRole, rawBreaks: enrichedBreaks, 
       isModified: isModified, breakTimeStr: nextBreakStr, currentBreakStr: currentBreakStr, 
       timer: breakTimer, auxLabel: "Remaining", startsIn: breakStartsIn, nextBreakType: nextBreakType,
-      onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT 
+      onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn
     };
 
     if (category === 'active' && nextBreakStr) {
@@ -273,7 +277,6 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
-      // DOUBLE SECURITY: Physically block offline agents from entering Special Role arrays
       if (targetCat !== "off") {
           const r = (item.agent.role || "").toUpperCase();
           if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
