@@ -1,5 +1,6 @@
 /**
- * MODULE: AGENT MONITOR (V4.7)
+ * MODULE: AGENT MONITOR (V4.8)
+ * - Shadow Roster (Captures Off-Shift for Search)
  * - Furlough/ACSU off-floor snapping (Removes from Shrinkage)
  * - Break Room UI Enrichment
  */
@@ -94,19 +95,31 @@ function compileFloorData() {
     }
 
     const LOOKAHEAD = 60 * 60 * 1000;
-
-    if ((shiftType === "Off" || region === "Off") && !isOT) return;
-    if ((!startEpoch || !endEpoch) && !isOT) return;
-
-    if (startEpoch && endEpoch) {
-       if (endEpoch <= now && !isOT) return;
-       if (startEpoch > (now + LOOKAHEAD) && !isOT) return;
-    }
-
+    
     if(startEpoch && endEpoch) {
        const sFmt = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "HH:mm");
        const eFmt = Utilities.formatDate(new Date(endEpoch), "America/Toronto", "HH:mm");
        shiftStr = `${sFmt} - ${eFmt}`;
+    }
+
+    // --- SHADOW ROSTER: Classify off-shift agents instead of dropping them ---
+    let isInactiveTime = false;
+    let inactiveReason = "";
+
+    if ((shiftType === "Off" || region === "Off") && !isOT) { 
+        isInactiveTime = true; 
+        inactiveReason = "Scheduled Off"; 
+    } else if ((!startEpoch || !endEpoch) && !isOT) { 
+        isInactiveTime = true; 
+        inactiveReason = "Not Scheduled"; 
+    } else if (startEpoch && endEpoch) {
+       if (endEpoch <= now && !isOT) { 
+           isInactiveTime = true; 
+           inactiveReason = "Shift Ended"; 
+       } else if (startEpoch > (now + LOOKAHEAD) && !isOT) { 
+           isInactiveTime = true; 
+           inactiveReason = `Starts at ${shiftStr.split('-')[0].trim()}`; 
+       }
     }
 
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
@@ -129,10 +142,9 @@ function compileFloorData() {
     let breakTimer = "";
     let activeIntradayLabel = "";
     let breakStartsIn = "";
-    
     let dynamicRoleNow = ""; 
 
-    if((startEpoch || isOT) && rawBreaks.length > 0) {
+    if((startEpoch || isOT) && rawBreaks.length > 0 && !isInactiveTime) {
        const baseTime = startEpoch ? new Date(startEpoch) : new Date();
        const shiftDateStr = Utilities.formatDate(baseTime, "America/Toronto", "yyyy-MM-dd");
        
@@ -190,16 +202,19 @@ function compileFloorData() {
     }
 
     let effectiveRole = manualRole || dynamicRoleNow;
-
     let category = "active";
     let subStatus = effectiveRole || "";
 
     if (absentType) {
         const upper = absentType.toUpperCase();
-        if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
+        if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1 && !isInactiveTime) category = "active";
         else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
         else { category = "vacation"; subStatus = absentType; }
-    } 
+    } else if (isInactiveTime) {
+        // Routes completely off-shift agents straight to the shadow roster
+        category = "off";
+        subStatus = inactiveReason;
+    }
 
     if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
         if (startEpoch && startEpoch > now) {
@@ -212,7 +227,7 @@ function compileFloorData() {
     // Live Intraday Overrides
     if (category === "active") {
         if (onAcsuNow) { 
-            // FIX: Treats Furloughs as completely Off to immediately drop them from Shrinkage math
+            // Removes intraday Furloughs from Active so they don't count towards Shrinkage
             category = "off"; 
             subStatus = activeIntradayLabel; 
         }
@@ -254,7 +269,7 @@ function compileFloorData() {
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
-      else if (targetCat !== "off") emptyFloor.active.push(item.agent); // Prevents Furloughed agents from showing on the floor
+      else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
       const r = (item.agent.role || "").toUpperCase();
       if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
