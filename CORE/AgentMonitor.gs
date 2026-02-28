@@ -1,7 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V4.8)
- * - Shadow Roster (Captures Off-Shift for Search)
- * - Furlough/ACSU off-floor snapping (Removes from Shrinkage)
+ * MODULE: AGENT MONITOR (V4.9)
+ * - Shadow Roster Shrinkage Fix (Strict Time Overrides)
+ * - Furlough/ACSU off-floor snapping
  * - Break Room UI Enrichment
  */
 
@@ -102,7 +102,7 @@ function compileFloorData() {
        shiftStr = `${sFmt} - ${eFmt}`;
     }
 
-    // --- SHADOW ROSTER: Classify off-shift agents instead of dropping them ---
+    // --- SHADOW ROSTER: Classify off-shift agents ---
     let isInactiveTime = false;
     let inactiveReason = "";
 
@@ -205,35 +205,38 @@ function compileFloorData() {
     let category = "active";
     let subStatus = effectiveRole || "";
 
-    if (absentType) {
-        const upper = absentType.toUpperCase();
-        if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1 && !isInactiveTime) category = "active";
-        else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
-        else { category = "vacation"; subStatus = absentType; }
-    } else if (isInactiveTime) {
-        // Routes completely off-shift agents straight to the shadow roster
+    // --- SHRINKAGE FIX: Time evaluates BEFORE Absence ---
+    if (isInactiveTime) {
+        // Drop them straight to the shadow roster so they don't count towards shrinkage
         category = "off";
-        subStatus = inactiveReason;
-    }
+        subStatus = absentType ? `${absentType} (Off Shift)` : inactiveReason;
+    } else {
+        // Actively scheduled today within timeline
+        if (absentType) {
+            const upper = absentType.toUpperCase();
+            if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
+            else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
+            else { category = "vacation"; subStatus = absentType; }
+        } 
 
-    if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
-        if (startEpoch && startEpoch > now) {
-             category = "startingSoon";
-             const diff = startEpoch - now;
-             subStatus = `In ${Math.ceil(diff/60000)}m`;
+        if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
+            if (startEpoch && startEpoch > now) {
+                 category = "startingSoon";
+                 const diff = startEpoch - now;
+                 subStatus = `In ${Math.ceil(diff/60000)}m`;
+            }
         }
-    }
 
-    // Live Intraday Overrides
-    if (category === "active") {
-        if (onAcsuNow) { 
-            // Removes intraday Furloughs from Active so they don't count towards Shrinkage
-            category = "off"; 
-            subStatus = activeIntradayLabel; 
+        // Live Intraday Overrides
+        if (category === "active") {
+            if (onAcsuNow) { 
+                category = "off"; // Removes Intraday Furloughs from Shrinkage
+                subStatus = activeIntradayLabel; 
+            }
+            else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
+            else if (onBreakNow) subStatus = activeIntradayLabel;
+            else if (dynamicRoleNow) subStatus = activeIntradayLabel;
         }
-        else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
-        else if (onBreakNow) subStatus = activeIntradayLabel;
-        else if (dynamicRoleNow) subStatus = activeIntradayLabel;
     }
 
     let agent = {
