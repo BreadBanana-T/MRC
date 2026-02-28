@@ -59,7 +59,6 @@
   ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
   .aether-bg { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
-  /* CPU FIX: Removed expensive infinite keyframe animations */
   .blob { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.5; }
   .b1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: var(--bg-blob-1); }
   .b2 { bottom: -10%; right: -10%; width: 60vw; height: 60vw; background: var(--bg-blob-2); }
@@ -95,7 +94,6 @@
   .grid-split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   .grid-masonry { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
   
-  /* --- ADAPTIVE AGENT ROW (No Overflows) --- */
   .agent-list-view { display: flex; flex-direction: column; gap: 4px; }
   
   .agent-row {
@@ -117,14 +115,12 @@
       z-index: 10;
   }
   
-  /* Status Strip (Color Bar) */
   .status-strip { height: 100%; width: 100%; border-radius: 6px 0 0 6px; }
   .status-strip.on { background: var(--region-on); }
   .status-strip.off { background: var(--region-off); }
   .status-strip.break { background: var(--status-break); }
   .status-strip.alert { background: var(--status-alert); }
 
-  /* Name with Tooltip */
   .row-name {
       font-weight: 700;
       color: var(--text-main);
@@ -155,7 +151,6 @@
 
   .row-id { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); opacity: 0.7; }
   
-  /* Status Column (Allows wrapping to prevent blowouts) */
   .row-status { 
       font-weight: 600; 
       font-size: 0.85rem; 
@@ -170,7 +165,6 @@
   }
   .row-time { font-family: monospace; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-align: right; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; justify-self: end; }
 
-  /* --- SECTION HEADERS --- */
   .group-header {
       display: flex;
       align-items: center;
@@ -189,7 +183,6 @@
   .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
   .group-header i { opacity: 0.7; }
 
-  /* Break Room Grid */
   .break-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
   .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
   .break-card::before { content:''; position:absolute; top:0; left:0; right:0; height:6px; background: var(--status-break); }
@@ -231,7 +224,22 @@
   body.dark .modal-window { background: #1e293b; border: 1px solid rgba(255,255,255,0.1); }
   .modal-blur.open .modal-window { transform: scale(1); }
   
-  .drawer { position: fixed; top: 20px; right: 20px; bottom: 20px; width: 360px; max-width: 90%; background: var(--glass-surface); backdrop-filter: blur(30px); border: 1px solid var(--glass-border); border-radius: 24px; transform: translateX(150%); transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 200; display: flex; flex-direction: column; box-shadow: -10px 0 40px rgba(0,0,0,0.2); }
+  /* --- UPGRADED LIQUID GLASS DRAWER --- */
+  .drawer { 
+      position: fixed; top: 20px; right: 20px; bottom: 20px; width: 360px; max-width: 90%; 
+      background: rgba(255, 255, 255, 0.2); 
+      backdrop-filter: blur(40px) saturate(150%); 
+      -webkit-backdrop-filter: blur(40px) saturate(150%);
+      border: 1px solid rgba(255, 255, 255, 0.5); 
+      border-radius: 24px; transform: translateX(150%); 
+      transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 200; display: flex; flex-direction: column; 
+      box-shadow: -10px 10px 40px rgba(31, 38, 135, 0.15), inset 0 0 20px rgba(255, 255, 255, 0.5); 
+  }
+  body.dark .drawer { 
+      background: rgba(15, 23, 42, 0.3); 
+      border: 1px solid rgba(255, 255, 255, 0.1); 
+      box-shadow: -10px 10px 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(255, 255, 255, 0.05); 
+  }
   .drawer.open { transform: translateX(0) !important; }
   
   .ctx-menu { position: fixed; background: var(--bg-root); border: 1px solid var(--glass-border); box-shadow: 0 10px 40px rgba(0,0,0,0.3); border-radius: 16px; padding: 6px; width: 180px; z-index: 500; display: none; flex-direction: column; }
