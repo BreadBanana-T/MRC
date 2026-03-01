@@ -1,6 +1,6 @@
 /**
- * MODULE: WORKFORCE TRACKER (V5.3)
- * Features: Bulletproof Historic Date/Time Parsing, Smart Upsert, DB Splitting, Scheduled Roles & Deduplication
+ * MODULE: WORKFORCE TRACKER (V5.4)
+ * Features: On-The-Fly Deduplication, Serial Date Decrypter, 100% Accurate Charting
  */
 
 var WorkforceTracker = {
@@ -13,7 +13,7 @@ var WorkforceTracker = {
           try { 
               const mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName(sheetName);
               if (mSheet && mSheet.getLastRow() > 1) return mSheet;
-          } catch(e) {}
+          } catch(e) { console.error("Master DB Fallback Failed", e); }
       }
       return local;
   },
@@ -34,7 +34,6 @@ var WorkforceTracker = {
     
     let msg = [];
     
-    // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanCoach = [];
       let cleanFurlough = [];
@@ -164,7 +163,6 @@ var WorkforceTracker = {
       }
     }
 
-    // --- IDP PARSER ---
     if (idpRaw && idpRaw.trim().length > 0) {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -222,7 +220,7 @@ var WorkforceTracker = {
       if (mode === 'day') {
           tStart = new Date(tY, tM-1, tD - 1, 23, 0, 0, 0).getTime();
           tEnd = new Date(tY, tM-1, tD, 23, 0, 0, 0).getTime();
-          label = Utilities.formatDate(tObj, Session.getScriptTimeZone(), "MMM dd");
+          label = Utilities.formatDate(tObj, Session.getScriptTimeZone(), "yyyy-MM-dd");
           cycle = this._getCycleForEpoch(tStart);
       } 
       else if (mode === 'week') {
@@ -230,7 +228,7 @@ var WorkforceTracker = {
           let wDate = new Date(tObj); wDate.setDate(tObj.getDate() + diff - 1); wDate.setHours(23, 0, 0, 0);
           tStart = wDate.getTime(); tEnd = tStart + (7 * 86400000);
           cycle = this._getCycleForEpoch(tStart);
-          label = `${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "MMM dd")} to ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "MMM dd")}`;
+          label = `${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "yyyy-MM-dd")}`;
       } 
       else if (mode === 'month' || mode === 'quarter') {
           let sMonth = (mode === 'month') ? tM - 1 : Math.floor((tM - 1) / 3) * 3;
@@ -246,7 +244,7 @@ var WorkforceTracker = {
           if (eOff > 0) eOff -= 7; eWed.setDate(eWed.getDate() + eOff); eWed.setHours(23, 0, 0, 0);
           tEnd = eWed.getTime();
           
-          label = mode === 'month' ? `WFM Month: ${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "MMM dd")} - ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "MMM dd")}` : `Q${Math.floor((tM - 1) / 3) + 1}: ${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "MMM dd")} - ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "MMM dd")}`;
+          label = mode === 'month' ? `Month: ${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "yyyy-MM-dd")}` : `Q${Math.floor((tM - 1) / 3) + 1}: ${Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), Session.getScriptTimeZone(), "yyyy-MM-dd")}`;
           cycle = mode === 'month' ? "MONTH" : "QUARTER"; 
       }
       return { start: tStart, end: tEnd, label: label, cycle: cycle, startStr: Utilities.formatDate(new Date(tStart), Session.getScriptTimeZone(), "yyyy-MM-dd") };
@@ -277,7 +275,7 @@ var WorkforceTracker = {
     if (mode === 'day' && trackerType === 'furlough') {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
       idpData.forEach(row => {
-        let rowDateStr = this._formatDate(row[0]); // Uses universal parser to fix old "February 20" entries
+        let rowDateStr = this._formatDate(row[0]);
         if (!rowDateStr) return;
         let [rY, rM, rD] = rowDateStr.split('-').map(Number);
         if (isNaN(rY)) return; 
@@ -292,8 +290,11 @@ var WorkforceTracker = {
       });
     }
 
+    // ON-THE-FLY DEDUPLICATOR: Prevents existing ghost database rows from doubling the Furlough/Coaching hours
+    let processedEvents = new Set();
+
     schedData.forEach(row => {
-        let rowDateStr = this._formatDate(row[1]); // Uses universal parser
+        let rowDateStr = this._formatDate(row[1]);
         if (!rowDateStr) return;
         let rowRegion = row[5] ? String(row[5]).trim() : 'Onshore';
         if (regionFilter !== 'All' && rowRegion !== regionFilter) return;
@@ -305,6 +306,12 @@ var WorkforceTracker = {
 
             let startMins = this._timeToMins(row[3]);
             let endMinsRaw = this._timeToMins(row[4]);
+            
+            // Deduplicator Shield
+            let eventHash = `${agent}_${rowDateStr}_${startMins}_${endMinsRaw}_${String(row[2]).trim()}`;
+            if (processedEvents.has(eventHash)) return; 
+            processedEvents.add(eventHash);
+
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
             this._getShiftSplits(startMins, endMins).forEach(split => {
@@ -376,12 +383,22 @@ var WorkforceTracker = {
         const parseDB = (sheetName, metricName) => {
             const db = this._getDB(sheetName);
             if (!db || db.getLastRow() < 2) return;
+            
+            let processedEvents = new Set();
+
             db.getDataRange().getValues().slice(1).forEach(row => {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let [rY, rM, rD] = dStr.split('-').map(Number);
                     if(isNaN(rY)) return;
-                    let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
+                    let agent = String(row[0]).trim();
+                    let sMins = this._timeToMins(row[3]); 
+                    let eMinsR = this._timeToMins(row[4]);
+                    
+                    let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${String(row[2]).trim()}`;
+                    if (processedEvents.has(eventHash)) return; 
+                    processedEvents.add(eventHash);
+
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
@@ -396,12 +413,20 @@ var WorkforceTracker = {
 
         const dbRoles = this._getDB('WF_ROLES');
         if (dbRoles && dbRoles.getLastRow() > 1) {
+            let processedRoles = new Set();
             dbRoles.getDataRange().getValues().slice(1).forEach(row => {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let [rY, rM, rD] = dStr.split('-').map(Number);
                     if(isNaN(rY)) return;
-                    let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
+                    let agent = String(row[0]).trim();
+                    let sMins = this._timeToMins(row[3]); 
+                    let eMinsR = this._timeToMins(row[4]);
+                    
+                    let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${String(row[2]).trim()}`;
+                    if (processedRoles.has(eventHash)) return; 
+                    processedRoles.add(eventHash);
+
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     let roleType = String(row[2]).toUpperCase();
                     
@@ -413,19 +438,6 @@ var WorkforceTracker = {
                             else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(row[0]).ulc += s.hours; getAg(row[0]).total += s.hours; }
                         }
                     });
-                }
-            });
-        }
-
-        const dbSess = this._getDB('DB_Sessions');
-        if (dbSess && dbSess.getLastRow() > 1) {
-            dbSess.getDataRange().getValues().slice(1).forEach(row => {
-                let sessionEpoch = new Date(row[3]).getTime();
-                if (sessionEpoch >= bounds.start && sessionEpoch < bounds.end) {
-                    let role = String(row[2]).toUpperCase(); let h = Number(row[6]) || 0; 
-                    if (role.includes('SAFE')) { getAg(row[1]).safe += h; getAg(row[1]).total += h; }
-                    else if (role.includes('ICL')) { getAg(row[1]).icl += h; getAg(row[1]).total += h; }
-                    else if (role.includes('ULC') || role.includes('FIRE')) { getAg(row[1]).ulc += h; getAg(row[1]).total += h; }
                 }
             });
         }
@@ -578,13 +590,9 @@ var WorkforceTracker = {
   
   _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
   
-  // FIX: Universal Time Parser protects against Google Sheets fractional time values
   _timeToMins: function(tStr) {
        if (tStr == null || tStr === "") return 0;
-       
-       if (typeof tStr === 'number' && !isNaN(tStr)) {
-           return Math.round(tStr * 1440);
-       }
+       if (typeof tStr === 'number' && !isNaN(tStr)) return Math.round(tStr * 1440);
        
        let timeString = String(tStr);
        if (tStr instanceof Date) timeString = Utilities.formatDate(tStr, Session.getScriptTimeZone(), 'HH:mm');
@@ -616,13 +624,19 @@ var WorkforceTracker = {
       return s;
   },
   
-  // FIX: Master Date/Time Fallback. Catches native Dates, text Dates ("February 20"), and regional slashes ("2/20/2026")
+  // MASTER SERIAL DATE DECRYPTER: Fixes Google Sheets hidden Date logic
   _formatDate: function(d) { 
-      if (!d) return "";
+      if (d == null || d === "") return "";
       if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
       
-      let s = String(d).trim();
+      if (typeof d === 'number' || (typeof d === 'string' && !isNaN(d) && Number(d) > 30000)) {
+          let epoch = Math.round((Number(d) - 25569) * 86400 * 1000);
+          let epochDate = new Date(epoch);
+          epochDate.setMinutes(epochDate.getMinutes() + epochDate.getTimezoneOffset());
+          return Utilities.formatDate(epochDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
       
+      let s = String(d).trim();
       let match = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
       if (match) return `${match[1]}-${match[2].padStart(2,'0')}-${match[3].padStart(2,'0')}`;
       
