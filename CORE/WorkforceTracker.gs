@@ -1,11 +1,10 @@
 /**
- * MODULE: WORKFORCE TRACKER
- * Features: Smart Upsert, DB Splitting, Master DB Routing, Quarterly Bounds, & Scheduled Roles Tracking
+ * MODULE: WORKFORCE TRACKER (V5.3)
+ * Features: Bulletproof Historic Date/Time Parsing, Smart Upsert, DB Splitting, Scheduled Roles & Deduplication
  */
 
 var WorkforceTracker = {
 
-  // --- SMART DB ROUTER ---
   _getDB: function(sheetName) {
       const local = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
       if (local && local.getLastRow() > 1) return local;
@@ -14,7 +13,7 @@ var WorkforceTracker = {
           try { 
               const mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName(sheetName);
               if (mSheet && mSheet.getLastRow() > 1) return mSheet;
-          } catch(e) { console.error("Master DB Fallback Failed", e); }
+          } catch(e) {}
       }
       return local;
   },
@@ -278,9 +277,11 @@ var WorkforceTracker = {
     if (mode === 'day' && trackerType === 'furlough') {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
       idpData.forEach(row => {
-        let rowDateStr = this._formatDate(row[0]);
+        let rowDateStr = this._formatDate(row[0]); // Uses universal parser to fix old "February 20" entries
         if (!rowDateStr) return;
         let [rY, rM, rD] = rowDateStr.split('-').map(Number);
+        if (isNaN(rY)) return; 
+        
         let mins = this._timeToMins(row[1]);
         let blockTime = new Date(rY, rM-1, rD, Math.floor(mins/60), mins%60, 0, 0).getTime();
         
@@ -292,7 +293,7 @@ var WorkforceTracker = {
     }
 
     schedData.forEach(row => {
-        let rowDateStr = this._formatDate(row[1]);
+        let rowDateStr = this._formatDate(row[1]); // Uses universal parser
         if (!rowDateStr) return;
         let rowRegion = row[5] ? String(row[5]).trim() : 'Onshore';
         if (regionFilter !== 'All' && rowRegion !== regionFilter) return;
@@ -300,6 +301,8 @@ var WorkforceTracker = {
         if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
             let agent = String(row[0]).trim();
             let [rY, rM, rD] = rowDateStr.split('-').map(Number);
+            if (isNaN(rY)) return;
+
             let startMins = this._timeToMins(row[3]);
             let endMinsRaw = this._timeToMins(row[4]);
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
@@ -377,6 +380,7 @@ var WorkforceTracker = {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let [rY, rM, rD] = dStr.split('-').map(Number);
+                    if(isNaN(rY)) return;
                     let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
@@ -396,6 +400,7 @@ var WorkforceTracker = {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let [rY, rM, rD] = dStr.split('-').map(Number);
+                    if(isNaN(rY)) return;
                     let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     let roleType = String(row[2]).toUpperCase();
@@ -514,40 +519,83 @@ var WorkforceTracker = {
     let sheet = targetSpreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
     
+    let existingData = [];
+    if (sheet.getLastRow() > 0) existingData = sheet.getDataRange().getValues();
+    if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
+    const headers = existingData.length > 0 ? existingData.shift() : headersArray;
+
     const makeKey = (row) => keyIndices.map(i => {
         let val = row[i];
-        if (val instanceof Date) {
-            if (val.getFullYear() < 1950) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
-            return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        let headerName = String(headers[i] || headersArray[i]).toLowerCase();
+        
+        if (headerName.includes('date') || headerName === 'day') {
+            if (val instanceof Date) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            let s = String(val).trim();
+            let match = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+            if (match) return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+            return s;
+        }
+        
+        if (headerName.includes('time') || headerName === 'interval') {
+            let tStr = String(val);
+            if (val instanceof Date) tStr = Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
+            let match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
+            if (match) {
+                let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
+                if (amp === 'PM' && h < 12) h += 12; 
+                if (amp === 'AM' && h === 12) h = 0; 
+                return (h * 60) + m; 
+            }
         }
         return String(val).trim().toLowerCase();
     }).join('_');
 
-    const incomingKeys = new Set(newRows.map(makeKey));
+    let uniqueNewRows = [];
+    let seenNew = new Set();
+    newRows.forEach(r => {
+        let k = makeKey(r);
+        if (!seenNew.has(k)) { seenNew.add(k); uniqueNewRows.push(r); }
+    });
+
+    const incomingKeys = new Set(uniqueNewRows.map(makeKey));
     
-    let existingData = [];
-    if (sheet.getLastRow() > 0) existingData = sheet.getDataRange().getValues();
-    if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
-    
-    const headers = existingData.length > 0 ? existingData.shift() : headersArray;
+    let seenExisting = new Set();
     const retainedRows = existingData.filter(row => {
-       if(!row[keyIndices[0]]) return true; 
-       return !incomingKeys.has(makeKey(row));
+       if(row[keyIndices[0]] === "" || row[keyIndices[0]] == null) return false; 
+       let k = makeKey(row);
+       
+       if (incomingKeys.has(k)) return false; 
+       if (seenExisting.has(k)) return false; 
+       
+       seenExisting.add(k);
+       return true;
     });
     
-    const combined = retainedRows.concat(newRows);
+    const combined = retainedRows.concat(uniqueNewRows);
     sheet.clearContents(); sheet.appendRow(headers);
     if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
   },
   
   _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
+  
+  // FIX: Universal Time Parser protects against Google Sheets fractional time values
   _timeToMins: function(tStr) {
-       if (!tStr) return 0;
-       if (tStr instanceof Date) return (tStr.getHours() * 60) + tStr.getMinutes();
-       let match = String(tStr).match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); if (!match) return 0;
+       if (tStr == null || tStr === "") return 0;
+       
+       if (typeof tStr === 'number' && !isNaN(tStr)) {
+           return Math.round(tStr * 1440);
+       }
+       
+       let timeString = String(tStr);
+       if (tStr instanceof Date) timeString = Utilities.formatDate(tStr, Session.getScriptTimeZone(), 'HH:mm');
+       
+       let match = timeString.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); 
+       if (!match) return 0;
        let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
-       if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0; return (h * 60) + m;
+       if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0; 
+       return (h * 60) + m;
   },
+  
   _parseCSVLine: function(text) {
     if (text.includes('\t')) return text.split('\t').map(s => s.trim());
     let ret = [], inQuote = false, token = "";
@@ -558,21 +606,45 @@ var WorkforceTracker = {
     }
     ret.push(token.trim()); return ret;
   },
-  _parseDate: function(s) { let d=new Date(s); return isNaN(d)?s:Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd'); },
+  
+  _parseDate: function(s) { 
+      let d = new Date(s); 
+      if (!isNaN(d)) {
+          d.setHours(12);
+          return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      return s;
+  },
+  
+  // FIX: Master Date/Time Fallback. Catches native Dates, text Dates ("February 20"), and regional slashes ("2/20/2026")
   _formatDate: function(d) { 
       if (!d) return "";
-      return (d instanceof Date) ? Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(d).substring(0,10); 
+      if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      
+      let s = String(d).trim();
+      
+      let match = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+      if (match) return `${match[1]}-${match[2].padStart(2,'0')}-${match[3].padStart(2,'0')}`;
+      
+      match = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+      if (match) return `${match[3]}-${match[1].padStart(2,'0')}-${match[2].padStart(2,'0')}`;
+
+      let pDate = new Date(s);
+      if (!isNaN(pDate)) {
+           pDate.setHours(12); 
+           return Utilities.formatDate(pDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+
+      return s.substring(0, 10); 
   },
+  
   _formatTimeStr: function(t) { let d=new Date(`2000/01/01 ${t}`); return isNaN(d)?t:Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm'); },
   _cleanActivity: function(s) { return s.replace(/\d{2}\s?[AP]M/gi, '').trim(); },
+  
   _timeToBucket: function(val) {
-    if (!val) return -1;
-    if (val instanceof Date) return (val.getHours()*4) + Math.floor(val.getMinutes()/15);
-    let parts = String(val).match(/(\d+):(\d+)\s?([AP]M)?/i);
-    if (parts) {
-      let h = parseInt(parts[1]), m = parseInt(parts[2]), amp = parts[3] ? parts[3].toUpperCase() : null;
-      if (amp === 'PM' && h < 12) h += 12; if (amp === 'AM' && h === 12) h = 0; return (h * 4) + Math.floor(m / 15);
-    } return -1;
+    let mins = this._timeToMins(val);
+    return mins < 0 ? -1 : Math.floor(mins / 15);
   },
+  
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; }
 };
