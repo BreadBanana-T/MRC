@@ -1,9 +1,8 @@
 /**
- * MODULE: AGENT MONITOR (V5.0)
+ * MODULE: AGENT MONITOR (V5.1)
+ * - Strict Shield Role Filtering (Blocks Sick/Off from Special Roles)
  * - Shift Ending Soon Tracker
- * - Shadow Roster Shrinkage Fix (Strict Time Overrides)
- * - Role Wiping for Off-Shift Agents
- * - Furlough/ACSU off-floor snapping
+ * - Shadow Roster Shrinkage Fix 
  */
 
 var AgentMonitor = {
@@ -236,7 +235,6 @@ function compileFloorData() {
         }
     }
 
-    // --- SHIFT ENDING TRACKER (Calculates if <= 30 mins remaining) ---
     let shiftEndsIn = null;
     if (category !== "off" && endEpoch && endEpoch > now && (endEpoch - now) <= 1800000) {
         shiftEndsIn = Math.ceil((endEpoch - now) / 60000) + "m";
@@ -277,7 +275,8 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
-      if (targetCat !== "off") {
+      // FIX: STRICT SHIELD. Only allows truly active on-floor agents into Special Roles!
+      if (targetCat === "active" || targetCat === "startingSoon") {
           const r = (item.agent.role || "").toUpperCase();
           if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
           if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
