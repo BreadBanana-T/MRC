@@ -388,7 +388,9 @@
       if (charts.overview) {
           charts.overview.data.labels = state.slHistory.map(d => d.name);
           charts.overview.data.datasets[0].data = state.slHistory.map(d => d.val);
-          charts.overview.data.datasets[1].data = state.slHistory.map(d => d.ack);
+          // Update visual data with Smart Ceiling
+          const rawAck = state.slHistory.map(d => d.ack);
+          charts.overview.data.datasets[1].data = rawAck.map(v => v > 120 ? 120 : v);
           charts.overview.update('none'); 
       }
 
@@ -1247,7 +1249,6 @@
 
   window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
   
-  // LIVE AUTO-RELOAD ENGINE
   window.runImportAction = () => { 
       const t = document.getElementById('import-text').value; 
       if(!t) return; 
@@ -1261,12 +1262,10 @@
                  let finalMsg = trackerResult.includes("Error") ? "Schedule Synced" : trackerResult;
                  showToast(finalMsg); 
                  
-                 // Instantly refresh local dashboards
                  fetchData();
                  if (state.view === 'tracker') fetchTrackerData(); 
                  if (state.view === 'insights') fetchInsightData();
 
-                 // Fire a global ping so all other active users refresh automatically
                  google.script.run.addGlobalNotification("Global Update: A manager synced new WFM Data. Dashboards refreshed.");
              })
              .withFailureHandler((err) => {
@@ -1361,17 +1360,17 @@
                       backgroundColor: [g1, g2, g3],
                       borderColor: isDark ? '#1e293b' : '#ffffff',
                       borderWidth: 2,
-                      hoverOffset: 0 // REMOVED HOVER ANIMATION FOR SPEED
+                      hoverOffset: 0
                   }]
               },
               options: {
                   responsive: true,
                   maintainAspectRatio: false,
                   layout: { padding: 25 },
-                  events: [], // COMPLETELY DISABLES HOVER EVENTS (0% CPU LAG)
+                  events: [], 
                   plugins: { 
                       legend: { display: false },
-                      tooltip: { enabled: false } // DISABLED TOOLTIPS
+                      tooltip: { enabled: false } 
                   },
                   animation: { animateScale: true, animateRotate: true, duration: 1200, easing: 'easeOutQuart' }
               }
@@ -1444,7 +1443,10 @@
 
       const labels = state.slHistory.map(d => d.name);
       const slData = state.slHistory.map(d => d.val);
-      const ackData = state.slHistory.map(d => d.ack);
+      
+      // FIX: Maps actual ACK to a visual clamped array so the chart never breaks layout
+      const realAckData = state.slHistory.map(d => d.ack);
+      const visualAckData = realAckData.map(v => v > 120 ? 120 : v);
 
       if (charts.overview) {
           charts.overview.destroy();
@@ -1501,7 +1503,7 @@
                   },
                   {
                       label: 'Response Time (s)',
-                      data: ackData,
+                      data: visualAckData, // Powers the visual graph
                       borderColor: '#f43f5e',
                       backgroundColor: gradientACK,
                       borderWidth: 3,
@@ -1553,8 +1555,12 @@
                           label: function(context) {
                               let label = context.dataset.label || '';
                               if (label) { label = label.replace(' (%)', '').replace(' (s)', '') + ': '; }
-                              if (context.datasetIndex === 0) label += context.parsed.y + '%';
-                              else label += context.parsed.y + 's';
+                              if (context.datasetIndex === 0) {
+                                  label += context.raw + '%';
+                              } else {
+                                  // Bypasses the 120s limit to show the TRUE metric inside the hover tooltip
+                                  label += realAckData[context.dataIndex] + 's';
+                              }
                               return label;
                           }
                       }
@@ -1579,9 +1585,7 @@
                       display: true,
                       position: 'right',
                       min: 0,
-                      // SMART CEILING: If a spike hits > 120s, lock the visual scale at 120s
-                      max: Math.max(...ackData) > 120 ? 120 : undefined,
-                      suggestedMax: Math.max(...ackData, 40) * 1.2, 
+                      suggestedMax: Math.max(...visualAckData, 40) * 1.2, 
                       grid: { display: false, drawBorder: false },
                       ticks: { callback: value => value + 's', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
                   }
