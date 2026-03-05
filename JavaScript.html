@@ -39,7 +39,7 @@
       trackerCycleFilter: 'ALL',
       trackerSearch: '',
       trackerLoading: true,
-      syncMeta: { sched: "Loading...", idp: "Loading..." }
+      syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
@@ -1013,7 +1013,10 @@
       if (!isCoach && state.trackerMode === 'furlough' && d.mode === 'day') {
           gridHtml = `
           <div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;">
-              <div class="section-header">Intraday IDP Heatmap</div>
+              <div class="section-header" style="display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;">
+                  <span>Intraday IDP Heatmap</span>
+                  ${state.syncMeta?.muSet ? `<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ${state.syncMeta.muSet}</span>` : ''}
+              </div>
               <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap:8px;">
                   ${d.grid.map((b, i) => {
                       let cls = 'status-neutral'; 
