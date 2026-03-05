@@ -1,6 +1,6 @@
 /**
- * MODULE: WORKFORCE TRACKER (V6.1)
- * Features: Absolute String Decrypter, MU Set Metadata Extraction, Destructive Overwrites
+ * MODULE: WORKFORCE TRACKER (V6.2)
+ * Features: Absolute String Decrypter, Split Metadata Extraction, Destructive Overwrites
  */
 
 var WorkforceTracker = {
@@ -35,7 +35,7 @@ var WorkforceTracker = {
     let msg = [];
     let schedDates = [];
     let idpDates = [];
-    let muSet = ""; // NEW: Variable to hold the MU Set ID
+    let muSet = ""; 
     
     // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
@@ -175,7 +175,6 @@ var WorkforceTracker = {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       
-      // NEW: Intercept the MU Set Code from the header block
       for (let i = 0; i < Math.min(lines.length, 15); i++) {
           let muMatch = lines[i].match(/MU Set:\s*(\d+)/i);
           if (muMatch) {
@@ -226,14 +225,15 @@ var WorkforceTracker = {
     try {
         const props = PropertiesService.getDocumentProperties();
         const curTime = Utilities.formatDate(new Date(), "America/Toronto", "MMM dd, HH:mm");
+        
         if (schedDates.length > 0) {
             schedDates.sort();
-            props.setProperty('SYNC_SCHED', `WFM Uploaded: ${schedDates[0]} to ${schedDates[schedDates.length-1]} (Synced ${curTime})`);
+            props.setProperty('SYNC_SCHED', `WFM: ${schedDates[0]} to ${schedDates[schedDates.length-1]} (Sync: ${curTime})`);
         }
         if (idpDates.length > 0) {
             idpDates.sort();
-            let muString = muSet ? ` [MU: ${muSet}]` : "";
-            props.setProperty('SYNC_IDP', `IDP Uploaded: ${idpDates[0]} to ${idpDates[idpDates.length-1]}${muString} (Synced ${curTime})`);
+            props.setProperty('SYNC_IDP', `IDP: ${idpDates[0]} to ${idpDates[idpDates.length-1]} (Sync: ${curTime})`);
+            if (muSet) props.setProperty('MU_SET', muSet);
         }
     } catch(e) {}
     
@@ -723,10 +723,11 @@ function fetchSyncMetadata() {
   try {
     const props = PropertiesService.getDocumentProperties();
     return JSON.stringify({
-      sched: props.getProperty('SYNC_SCHED') || "Awaiting first WFM Sync...",
-      idp: props.getProperty('SYNC_IDP') || "Awaiting first IDP Sync..."
+      sched: props.getProperty('SYNC_SCHED') || "Awaiting WFM Sync...",
+      idp: props.getProperty('SYNC_IDP') || "Awaiting IDP Sync...",
+      muSet: props.getProperty('MU_SET') || ""
     });
   } catch(e) {
-    return JSON.stringify({ sched: "Metadata unavailable", idp: "Metadata unavailable" });
+    return JSON.stringify({ sched: "Metadata unavailable", idp: "Metadata unavailable", muSet: "" });
   }
 }
