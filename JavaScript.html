@@ -1,5 +1,4 @@
 <script>
-  // --- INITIALIZATION & GLOBAL STATE ---
   const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
   let state = { 
@@ -39,7 +38,8 @@
       trackerRegion: 'Onshore', 
       trackerCycleFilter: 'ALL',
       trackerSearch: '',
-      trackerLoading: true
+      trackerLoading: true,
+      syncMeta: { sched: "Loading...", idp: "Loading..." }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
@@ -76,6 +76,14 @@
     fetchNotifications();
     fetchCalendar();
     fetchTrackerData(); 
+    fetchMetadata();
+  }
+
+  function fetchMetadata() {
+      if(typeof google==='undefined') return;
+      google.script.run.withSuccessHandler(res => {
+          try { state.syncMeta = JSON.parse(res); render(); } catch(e){}
+      }).fetchSyncMetadata();
   }
 
   function fallbackCopyTextToClipboard(text, successMsg) {
@@ -222,6 +230,7 @@
                       
                       if (n.text.includes("Dashboards refreshed")) {
                           fetchData();
+                          fetchMetadata();
                           if (state.view === 'tracker') fetchTrackerData();
                           if (state.view === 'insights') fetchInsightData();
                       }
@@ -388,7 +397,7 @@
       if (charts.overview) {
           charts.overview.data.labels = state.slHistory.map(d => d.name);
           charts.overview.data.datasets[0].data = state.slHistory.map(d => d.val);
-          // Update visual data with Smart Ceiling
+          
           const rawAck = state.slHistory.map(d => d.ack);
           charts.overview.data.datasets[1].data = rawAck.map(v => v > 120 ? 120 : v);
           charts.overview.update('none'); 
@@ -910,11 +919,17 @@
           @keyframes spin { to { transform: rotate(360deg); } }
           @keyframes slideUp { to { opacity:1; transform:translateY(0); } }
       </style>
-      <div class="sticky-header" style="justify-content:space-between;">
+      <div class="sticky-header" style="justify-content:space-between; align-items:center;">
          <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
+             <div>
+                 <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
+                 <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
+                     <span><i data-lucide="calendar-check" width="10"></i> ${state.syncMeta?.sched || 'Loading...'}</span>
+                     <span><i data-lucide="database" width="10"></i> ${state.syncMeta?.idp || 'Loading...'}</span>
+                 </div>
+             </div>
              
-             <div style="display:flex; gap:8px; margin-right:12px;">
+             <div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">
                  ${state.trackerRange === 'week' ? `
                  <button onclick="toggleCycleFilter('WEEK A');" style="background:${d && d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
                  <button onclick="toggleCycleFilter('WEEK B');" style="background:${d && d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
@@ -925,7 +940,7 @@
                  ` : '')}
              </div>
 
-             ${isCoach || state.trackerMode === 'roles' ? `
+             ${isCoach ? `
              <div class="nav-island" style="background:var(--card-bg); border:var(--glass-border); margin-right:12px;">
                 <button class="nav-btn ${state.trackerRegion==='All'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='All'; fetchTrackerData();">All</button>
                 <button class="nav-btn ${state.trackerRegion==='Onshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion='Onshore'; fetchTrackerData();">Onshore</button>
@@ -935,7 +950,6 @@
              <select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value==='furlough') state.trackerRegion='Onshore'; fetchTrackerData();">
                  <option value="furlough" ${state.trackerMode==='furlough'?'selected':''}>Furlough Tracker</option>
                  <option value="coaching" ${state.trackerMode==='coaching'?'selected':''}>Coaching Tracker</option>
-                 <option value="roles" ${state.trackerMode==='roles'?'selected':''}>Special Roles Tracker</option>
              </select>
 
              <select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);">
@@ -985,7 +999,7 @@
                  </div>
                  <div>
                     <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${f.agent}</div>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date} • ${f.time} ${isCoach || state.trackerMode === 'roles' ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName}</span>` : ''}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date} • ${f.time} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName}</span>` : ''}</div>
                  </div>
              </div>
              <div style="text-align:right;">
@@ -1084,11 +1098,16 @@
       <style>
           @keyframes spin { to { transform: rotate(360deg); } }
       </style>
-      <div class="sticky-header" style="justify-content:space-between;">
+      <div class="sticky-header" style="justify-content:space-between; align-items:center;">
          <div style="display:flex; align-items:center; gap:16px;">
-             <h2 style="margin:0;">Master Operations Tracker</h2>
+             <div>
+                 <h2 style="margin:0;">Master Operations Tracker</h2>
+                 <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
+                     <span><i data-lucide="calendar-check" width="10"></i> ${state.syncMeta?.sched || 'Loading...'}</span>
+                 </div>
+             </div>
              
-             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px;">
+             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px; margin-left:16px;">
                  <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
                     ${u ? u.cycle : 'CALCULATING...'}
                  </span>
@@ -1136,6 +1155,14 @@
 
       return `
       ${headerHtml}
+      
+      <div style="background:rgba(220, 38, 38, 0.05); border-left:4px solid var(--status-alert); padding:16px; margin-bottom:24px; border-radius:8px;">
+          <h3 style="margin:0 0 4px 0; color:var(--status-alert); font-size:1rem; display:flex; align-items:center; gap:8px;">
+              <i data-lucide="alert-triangle" width="18"></i> CUMULATIVE WEEKLY TOTALS
+          </h3>
+          <p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">This tracker displays the combined total hours for the entire Wednesday-to-Wednesday cycle. It is not a daily view.</p>
+      </div>
+
       <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
           <div style="background:rgba(0,0,0,0.02); padding:16px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
               <div style="font-weight:700; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;">
@@ -1147,12 +1174,12 @@
                  <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
                      <tr>
                          <th style="padding:16px; text-align:left;">Agent Name</th>
-                         <th style="padding:16px; text-align:right;">ACSU</th>
-                         <th style="padding:16px; text-align:right;">Coaching</th>
-                         <th style="padding:16px; text-align:right;">SAFE</th>
-                         <th style="padding:16px; text-align:right;">ICL</th>
-                         <th style="padding:16px; text-align:right;">ULC FIRE</th>
-                         <th style="padding:16px; text-align:right; color:var(--text-main);">Total Hours</th>
+                         <th style="padding:16px; text-align:right;">WEEKLY ACSU</th>
+                         <th style="padding:16px; text-align:right;">WEEKLY Coaching</th>
+                         <th style="padding:16px; text-align:right;">WEEKLY SAFE</th>
+                         <th style="padding:16px; text-align:right;">WEEKLY ICL</th>
+                         <th style="padding:16px; text-align:right;">WEEKLY ULC</th>
+                         <th style="padding:16px; text-align:right; color:var(--text-main);">TOTAL WEEKLY</th>
                      </tr>
                  </thead>
                  <tbody>${rowsHtml}</tbody>
@@ -1263,6 +1290,7 @@
                  showToast(finalMsg); 
                  
                  fetchData();
+                 fetchMetadata();
                  if (state.view === 'tracker') fetchTrackerData(); 
                  if (state.view === 'insights') fetchInsightData();
 
@@ -1271,6 +1299,7 @@
              .withFailureHandler((err) => {
                  showToast("Schedule Synced");
                  fetchData();
+                 fetchMetadata();
                  if (state.view === 'tracker') fetchTrackerData(); 
                  if (state.view === 'insights') fetchInsightData();
              })
@@ -1287,7 +1316,6 @@
       document.getElementById('event-modal').classList.add('open');
   };
   
-  // CHARTS INITIALIZATION
   let charts = {};
 
   function initTrackerChart() {
@@ -1433,7 +1461,6 @@
 
   function initCharts() {}
 
-  // --- SMART CEILING LOGIC ADDED HERE ---
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
       
@@ -1443,10 +1470,7 @@
 
       const labels = state.slHistory.map(d => d.name);
       const slData = state.slHistory.map(d => d.val);
-      
-      // FIX: Maps actual ACK to a visual clamped array so the chart never breaks layout
-      const realAckData = state.slHistory.map(d => d.ack);
-      const visualAckData = realAckData.map(v => v > 120 ? 120 : v);
+      const rawAck = state.slHistory.map(d => d.ack);
 
       if (charts.overview) {
           charts.overview.destroy();
@@ -1503,7 +1527,7 @@
                   },
                   {
                       label: 'Response Time (s)',
-                      data: visualAckData, // Powers the visual graph
+                      data: rawAck.map(v => v > 120 ? 120 : v), 
                       borderColor: '#f43f5e',
                       backgroundColor: gradientACK,
                       borderWidth: 3,
@@ -1558,8 +1582,7 @@
                               if (context.datasetIndex === 0) {
                                   label += context.raw + '%';
                               } else {
-                                  // Bypasses the 120s limit to show the TRUE metric inside the hover tooltip
-                                  label += realAckData[context.dataIndex] + 's';
+                                  label += rawAck[context.dataIndex] + 's';
                               }
                               return label;
                           }
@@ -1585,7 +1608,7 @@
                       display: true,
                       position: 'right',
                       min: 0,
-                      suggestedMax: Math.max(...visualAckData, 40) * 1.2, 
+                      suggestedMax: Math.max(...rawAck.map(v => v > 120 ? 120 : v), 40) * 1.2, 
                       grid: { display: false, drawBorder: false },
                       ticks: { callback: value => value + 's', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
                   }
