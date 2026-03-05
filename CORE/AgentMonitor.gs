@@ -1,7 +1,7 @@
 /**
- * MODULE: AGENT MONITOR (V5.1)
+ * MODULE: AGENT MONITOR (V5.2)
+ * - Block Vacation/Sick from Shift Ending Badge
  * - Strict Shield Role Filtering (Blocks Sick/Off from Special Roles)
- * - Shift Ending Soon Tracker
  * - Shadow Roster Shrinkage Fix 
  */
 
@@ -235,8 +235,9 @@ function compileFloorData() {
         }
     }
 
+    // FIX: Only trigger Shift Ending badge if the agent is actively working! (Blocks Vacation/Sick)
     let shiftEndsIn = null;
-    if (category !== "off" && endEpoch && endEpoch > now && (endEpoch - now) <= 1800000) {
+    if (['active', 'training'].includes(category) && endEpoch && endEpoch > now && (endEpoch - now) <= 1800000) {
         shiftEndsIn = Math.ceil((endEpoch - now) / 60000) + "m";
     }
 
@@ -275,7 +276,6 @@ function compileFloorData() {
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
-      // FIX: STRICT SHIELD. Only allows truly active on-floor agents into Special Roles!
       if (targetCat === "active" || targetCat === "startingSoon") {
           const r = (item.agent.role || "").toUpperCase();
           if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
