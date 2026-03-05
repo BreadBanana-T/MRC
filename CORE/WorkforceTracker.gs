@@ -1,6 +1,6 @@
 /**
- * MODULE: WORKFORCE TRACKER (V6.0)
- * Features: Destructive Overwrites, 45-Day Auto-Purge, Live Metadata Sync
+ * MODULE: WORKFORCE TRACKER (V6.1)
+ * Features: Absolute String Decrypter, MU Set Metadata Extraction, Destructive Overwrites
  */
 
 var WorkforceTracker = {
@@ -35,6 +35,7 @@ var WorkforceTracker = {
     let msg = [];
     let schedDates = [];
     let idpDates = [];
+    let muSet = ""; // NEW: Variable to hold the MU Set ID
     
     // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
@@ -169,9 +170,20 @@ var WorkforceTracker = {
       }
     }
 
+    // --- IDP PARSER ---
     if (idpRaw && idpRaw.trim().length > 0) {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
+      
+      // NEW: Intercept the MU Set Code from the header block
+      for (let i = 0; i < Math.min(lines.length, 15); i++) {
+          let muMatch = lines[i].match(/MU Set:\s*(\d+)/i);
+          if (muMatch) {
+              muSet = muMatch[1];
+              break;
+          }
+      }
+
       let headerIdx = lines.findIndex(l => { const low = l.toLowerCase(); return (low.includes('req') || low.includes('besoin')) && (low.includes('open') || low.includes('ouvert') || low.includes('dispo')); });
       if (headerIdx > -1) {
         let headers = this._parseCSVLine(lines[headerIdx]);
@@ -220,7 +232,8 @@ var WorkforceTracker = {
         }
         if (idpDates.length > 0) {
             idpDates.sort();
-            props.setProperty('SYNC_IDP', `IDP Uploaded: ${idpDates[0]} to ${idpDates[idpDates.length-1]} (Synced ${curTime})`);
+            let muString = muSet ? ` [MU: ${muSet}]` : "";
+            props.setProperty('SYNC_IDP', `IDP Uploaded: ${idpDates[0]} to ${idpDates[idpDates.length-1]}${muString} (Synced ${curTime})`);
         }
     } catch(e) {}
     
@@ -228,7 +241,6 @@ var WorkforceTracker = {
     return `Synced: ${msg.join(' | ')}`;
   },
 
-  // NEW: Destructive Overwrite Engine + 45-Day Purge
   _executeDestructiveUpsert: function(sheetName, newRows, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._runDestructiveLogic(ssLocal, sheetName, newRows, headersArray);
@@ -252,7 +264,6 @@ var WorkforceTracker = {
 
       let isIDP = sheetName === 'WF_IDP';
 
-      // 1. Identify what days/agents are in the new data so we can completely destroy their old history
       let wipeKeys = new Set();
       newRows.forEach(r => {
           let dateStr = this._formatDate(r[isIDP ? 0 : 1]);
@@ -260,20 +271,18 @@ var WorkforceTracker = {
           else wipeKeys.add(String(r[0]).trim().toLowerCase() + "_" + dateStr);
       });
 
-      // 2. Setup 45-Day Rolling Purge limit
       let cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 45);
       let cutoffStr = Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
 
-      // 3. Filter existing database
       const retainedRows = existingData.filter(row => {
           if (!row[0]) return false;
           
           let rDate = this._formatDate(row[isIDP ? 0 : 1]);
-          if (!rDate || rDate < cutoffStr) return false; // TRASH OLD DATA
+          if (!rDate || rDate < cutoffStr) return false; 
 
           let k = isIDP ? rDate : String(row[0]).trim().toLowerCase() + "_" + rDate;
-          if (wipeKeys.has(k)) return false; // TRASH DUPLICATES/OLD SHIFTS FOR THIS TARGET
+          if (wipeKeys.has(k)) return false; 
 
           return true;
       });
@@ -379,6 +388,8 @@ var WorkforceTracker = {
       });
     }
 
+    let processedEvents = new Set();
+
     schedData.forEach(row => {
         let rowDateStr = this._formatDate(row[1]);
         if (!rowDateStr) return;
@@ -394,6 +405,12 @@ var WorkforceTracker = {
 
             let startMins = this._timeToMins(row[3]);
             let endMinsRaw = this._timeToMins(row[4]);
+            
+            let actSlice = String(row[2]).trim().substring(0, 10);
+            let eventHash = `${agent}_${rowDateStr}_${startMins}_${endMinsRaw}_${actSlice}`;
+            if (processedEvents.has(eventHash)) return; 
+            processedEvents.add(eventHash);
+
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
             this._getShiftSplits(startMins, endMins).forEach(split => {
@@ -466,6 +483,8 @@ var WorkforceTracker = {
             const db = this._getDB(sheetName);
             if (!db || db.getLastRow() < 2) return;
             
+            let processedEvents = new Set();
+
             db.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
@@ -478,6 +497,11 @@ var WorkforceTracker = {
                     let sMins = this._timeToMins(row[3]); 
                     let eMinsR = this._timeToMins(row[4]);
                     
+                    let actSlice = String(row[2]).trim().substring(0, 10);
+                    let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${actSlice}`;
+                    if (processedEvents.has(eventHash)) return; 
+                    processedEvents.add(eventHash);
+
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
@@ -492,6 +516,7 @@ var WorkforceTracker = {
 
         const dbRoles = this._getDB('WF_ROLES');
         if (dbRoles && dbRoles.getLastRow() > 1) {
+            let processedRoles = new Set();
             dbRoles.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
@@ -504,6 +529,11 @@ var WorkforceTracker = {
                     let sMins = this._timeToMins(row[3]); 
                     let eMinsR = this._timeToMins(row[4]);
                     
+                    let actSlice = String(row[2]).trim().substring(0, 10);
+                    let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${actSlice}`;
+                    if (processedRoles.has(eventHash)) return; 
+                    processedRoles.add(eventHash);
+
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     let roleType = String(row[2]).toUpperCase();
                     
@@ -631,6 +661,17 @@ var WorkforceTracker = {
        return (h * 60) + m;
   },
   
+  _parseCSVLine: function(text) {
+    if (text.includes('\t')) return text.split('\t').map(s => s.trim());
+    let ret = [], inQuote = false, token = "";
+    for(let i=0; i<text.length; i++) {
+      let char = text[i];
+      if(char === '"') { inQuote = !inQuote; continue; }
+      if(char === ',' && !inQuote) { ret.push(token.trim()); token = ""; } else token += char;
+    }
+    ret.push(token.trim()); return ret;
+  },
+  
   _parseDate: function(s) { 
       return this._formatDate(s);
   },
@@ -676,6 +717,7 @@ var WorkforceTracker = {
   
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; }
 };
+
 // --- GLOBAL UI ENDPOINT FOR METADATA ---
 function fetchSyncMetadata() {
   try {
