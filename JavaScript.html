@@ -1,7 +1,16 @@
 <script>
-  const refreshIcons = () => { if(typeof lucide !== 'undefined') lucide.createIcons(); };
+  var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
-  let state = { 
+  // CLOSES NOTIFICATION PANEL ON OUTSIDE CLICK
+  document.addEventListener('click', function(e) {
+      var panel = document.getElementById('notif-panel');
+      var bellBtn = document.getElementById('btn-bell');
+      if (state.notifOpen && panel && !panel.contains(e.target) && (!bellBtn || !bellBtn.contains(e.target))) {
+          toggleNotifPanel();
+      }
+  });
+
+  var state = { 
       view: 'overview', 
       agents: {}, 
       pendingUpdates: {}, 
@@ -23,6 +32,7 @@
       agentTab: 'floor', 
       currentReport: "...", 
       selectedCategory: "All", 
+      selectedScriptId: null, 
       editingId: null, 
       appUrl: "", 
       insightMode: 'day', 
@@ -42,16 +52,20 @@
       syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }
   };
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp); else initApp();
+  if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+  } else {
+      initApp();
+  }
 
   function initApp() {
     try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     
-    const config = document.getElementById('app-config');
+    var config = document.getElementById('app-config');
     if (config) {
         state.appUrl = config.getAttribute('data-url');
-        const popout = config.getAttribute('data-popout');
-        const mode = config.getAttribute('data-mode');
+        var popout = config.getAttribute('data-popout');
+        var mode = config.getAttribute('data-mode');
 
         if (popout === "true") {
             document.body.classList.add('popout-mode');
@@ -68,7 +82,7 @@
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 10000);
     setInterval(fetchCalendar, 300000); 
-    setInterval(() => { if(state.view === 'insights') render(); }, 60000); 
+    setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     
     fetchData(); 
     fetchStats(); 
@@ -81,13 +95,13 @@
 
   function fetchMetadata() {
       if(typeof google==='undefined') return;
-      google.script.run.withSuccessHandler(res => {
+      google.script.run.withSuccessHandler(function(res) {
           try { state.syncMeta = JSON.parse(res); render(); } catch(e){}
       }).fetchSyncMetadata();
   }
 
   function fallbackCopyTextToClipboard(text, successMsg) {
-      const textArea = document.createElement("textarea");
+      var textArea = document.createElement("textarea");
       textArea.value = text;
       textArea.style.top = "0"; textArea.style.left = "0"; textArea.style.position = "fixed"; 
       document.body.appendChild(textArea);
@@ -96,7 +110,7 @@
       document.body.removeChild(textArea);
   }
 
-  window.setView = (v) => { 
+  window.setView = function(v) { 
       state.view = v; 
       if(v==='scripts') fetchScripts(); 
       if(v==='insights') fetchInsightData(); 
@@ -104,91 +118,93 @@
       render(); 
   };
   
-  window.setAgentTab = (tab) => { state.agentTab = tab; render(); };
-  window.setInsightMode = (m) => { state.insightMode = m; fetchInsightData(); render(); };
-  window.handleDateChange = (val) => { state.selectedDate = val; fetchInsightData(); render(); };
-  window.toggleTheme = () => { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
+  window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
+  window.setInsightMode = function(m) { state.insightMode = m; fetchInsightData(); render(); };
+  window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
+  window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
   
-  window.openImportModal = () => document.getElementById('import-modal').classList.add('open');
-  window.closeImportModal = () => document.getElementById('import-modal').classList.remove('open');
-  window.toggleNotifPanel = () => { const p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
+  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); };
+  window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
+  window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   
-  window.openMenu = (e, n) => { 
+  window.openMenu = function(e, n) { 
       state.selectedAgent=n; 
-      const m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); 
+      var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); 
       o.style.display='block'; m.style.display='flex'; 
-      const r=e.currentTarget.getBoundingClientRect(); 
+      var r=e.currentTarget.getBoundingClientRect(); 
       m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; 
   };
-  window.closeMenu = () => { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
+  window.closeMenu = function() { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   
-  window.setAgentStatus = (type, val) => { 
+  window.setAgentStatus = function(type, val) { 
       closeMenu(); 
-      const name=state.selectedAgent; 
-      state.pendingUpdates[name]={type,val,timestamp:Date.now()}; 
+      var name=state.selectedAgent; 
+      state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; 
       moveAgentInMemory(name,type,val); 
       if(state.view==='agents') render(); 
       showToast("Status Updated"); 
       if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); 
   };
   
-  window.openPopout = (mode) => { 
-      const baseUrl = state.appUrl || window.location.href.split('?')[0]; 
-      const sep = baseUrl.includes('?') ? '&' : '?'; 
-      window.open(`${baseUrl}${sep}popout=true&mode=${mode.toLowerCase()}`, '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); 
+  window.openPopout = function(mode) { 
+      var baseUrl = state.appUrl || window.location.href.split('?')[0]; 
+      var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; 
+      window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); 
   };
 
   function showToast(m) { 
-      const t=document.getElementById('toast'); 
+      var t=document.getElementById('toast'); 
       if(!t) return; 
       t.querySelector('#toast-msg').innerText=m; 
       t.style.opacity='1'; t.style.transform='translateY(0)'; 
-      setTimeout(()=>{t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); 
+      setTimeout(function(){t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); 
   }
 
-  function updateClock() { const el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+  function updateClock() { var el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
-  let searchTimeout;
-  window.handleSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
-  window.handleScriptSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.searchTerm = val; render(); }, 200); };
-  window.handleTrackerSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.trackerSearch = val; render(); }, 200); };
-  window.handleInsightSearch = (val) => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { state.insightSearch = val; render(); }, 200); };
+  var searchTimeout;
+  window.handleSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
+  window.handleScriptSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
+  window.handleTrackerSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.trackerSearch = val; render(); }, 200); };
+  window.handleInsightSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.insightSearch = val; render(); }, 200); };
 
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
-  window.handleRangeChange = (val) => {
+  window.handleRangeChange = function(val) {
       state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
-      let [y, m, d] = state.trackerDate.split('-').map(Number);
-      let selDate = new Date(y, m-1, d, 12, 0, 0); 
+      var parts = state.trackerDate.split('-');
+      var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+      var selDate = new Date(y, m-1, d, 12, 0, 0); 
       
       if (val === 'month' || val === 'quarter') { selDate.setDate(1); state.trackerDate = selDate.toISOString().split('T')[0]; } 
       else if (val === 'week') {
-          let day = selDate.getDay(); let offset = (day >= 4) ? (4 - day) : -(day + 3); 
+          var day = selDate.getDay(); var offset = (day >= 4) ? (4 - day) : -(day + 3); 
           selDate.setDate(selDate.getDate() + offset);
-          let ny = selDate.getFullYear(); let nm = selDate.getMonth() + 1; let nd = selDate.getDate();
-          state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
+          var ny = selDate.getFullYear(); var nm = selDate.getMonth() + 1; var nd = selDate.getDate();
+          state.trackerDate = ny + "-" + (nm < 10 ? '0'+nm : nm) + "-" + (nd < 10 ? '0'+nd : nd);
       }
       fetchTrackerData(); render();
   };
 
-  window.toggleCycleFilter = (targetCycle) => {
+  window.toggleCycleFilter = function(targetCycle) {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
-          let [y, m, d] = state.trackerDate.split('-').map(Number);
-          let dObj = new Date(y, m-1, d, 12, 0, 0); 
-          let day = dObj.getDay(); let offset = (day >= 4) ? (4 - day) : -(day + 3);
+          var parts = state.trackerDate.split('-');
+          var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+          var dObj = new Date(y, m-1, d, 12, 0, 0); 
+          var day = dObj.getDay(); var offset = (day >= 4) ? (4 - day) : -(day + 3);
           dObj.setDate(dObj.getDate() + offset);
           
-          const baseDate = new Date(2026, 0, 29, 12, 0, 0); 
-          let diffWeeks = Math.floor(Math.round((dObj - baseDate) / 86400000) / 7);
-          let isWeekB = (Math.abs(diffWeeks) % 2 === 1);
-          let currentCycle = isWeekB ? 'WEEK B' : 'WEEK A';
+          var baseDate = new Date(2026, 0, 29, 12, 0, 0); 
+          var diffWeeks = Math.floor(Math.round((dObj - baseDate) / 86400000) / 7);
+          var isWeekB = (Math.abs(diffWeeks) % 2 === 1);
+          var currentCycle = isWeekB ? 'WEEK B' : 'WEEK A';
 
           if (targetCycle === 'WEEK A' && currentCycle === 'WEEK B') dObj.setDate(dObj.getDate() - 7);
           else if (targetCycle === 'WEEK B' && currentCycle === 'WEEK A') dObj.setDate(dObj.getDate() - 7);
           
-          let ny = dObj.getFullYear(); let nm = dObj.getMonth() + 1; let nd = dObj.getDate();
-          state.trackerDate = `${ny}-${nm < 10 ? '0'+nm : nm}-${nd < 10 ? '0'+nd : nd}`;
+          var ny = dObj.getFullYear(); var nm = dObj.getMonth() + 1; var nd = dObj.getDate();
+          state.trackerDate = ny + "-" + (nm < 10 ? '0'+nm : nm) + "-" + (nd < 10 ? '0'+nd : nd);
           state.trackerCycleFilter = 'ALL';
       } 
       else if (state.trackerRange === 'month' || state.trackerRange === 'quarter') {
@@ -200,35 +216,45 @@
 
   function fetchData() {
     if(typeof google==='undefined') return;
-    google.script.run.withSuccessHandler(j=>{
+    
+    // 1. Fetch Floor Data
+    google.script.run.withSuccessHandler(function(j) {
         try{ 
-            const d=JSON.parse(j); 
+            var d = JSON.parse(j); 
             if(d){ 
-                state.agents={...state.agents,...d}; 
+                for (var k in d) { state.agents[k] = d[k]; }
                 applyPendingUpdates(); 
-                if(!['scripts', 'calc', 'insights', 'tracker'].includes(state.view)) render(); 
+                if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker') render(); 
             } 
         } catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
-      google.script.run.withSuccessHandler(r=>{ try{ const d=(typeof r==='object'&&r!==null)?r:JSON.parse(r); state.weather=d.weather||d; state.alerts=d.alerts||[]; if(state.view.match(/overview|weather/)) render(); }catch(e){} }).getLiveDashboardData();
+        // 2. Fetch Weather and Alerts direct from Google Server Engine
+        google.script.run.withSuccessHandler(function(r) { 
+            try{ 
+                var d = (typeof r==='object'&&r!==null) ? r : JSON.parse(r); 
+                state.weather = d.weather || {};
+                state.alerts = d.alerts || []; 
+                if(state.view === 'overview' || state.view === 'weather') render(); 
+            }catch(e){} 
+        }).getLiveDashboardData();
     }
   }
 
   function fetchNotifications() { 
       if(typeof google==='undefined') return; 
-      google.script.run.withSuccessHandler(j=>{
+      google.script.run.withSuccessHandler(function(j) {
           try{
-              const fetched = JSON.parse(j);
-              const activeNotifs = fetched.filter(n => !state.dismissedNotifs.has(String(n.id)));
+              var fetched = JSON.parse(j);
+              var activeNotifs = fetched.filter(function(n){ return !state.dismissedNotifs.has(String(n.id)); });
               
-              activeNotifs.forEach(n => {
+              activeNotifs.forEach(function(n) {
                   if(!state.knownNotifs.has(n.id)) {
                       state.knownNotifs.add(n.id);
                       showToast("🔔 " + n.text); 
                       
-                      if (n.text.includes("Dashboards refreshed")) {
+                      if (n.text.indexOf("Dashboards refreshed") !== -1) {
                           fetchData();
                           fetchMetadata();
                           if (state.view === 'tracker') fetchTrackerData();
@@ -238,20 +264,20 @@
               });
 
               state.notifications = activeNotifs;
-              const dot = document.getElementById('notif-dot'); 
+              var dot = document.getElementById('notif-dot'); 
               if(dot) dot.style.display = state.notifications.length ? 'block' : 'none'; 
               if(state.notifOpen) renderNotifList(); 
           } catch(e) {}
       }).getSystemNotifications(); 
   }
 
-  window.renderNotifList = () => {
-      const list = document.getElementById('notif-list');
+  window.renderNotifList = function() {
+      var list = document.getElementById('notif-list');
       if(!list) return;
       
-      const visibleNotifs = state.notifications.filter(n => !state.dismissedNotifs.has(String(n.id)));
+      var visibleNotifs = state.notifications.filter(function(n) { return !state.dismissedNotifs.has(String(n.id)); });
 
-      list.innerHTML = visibleNotifs.map(n => `
+      list.innerHTML = visibleNotifs.map(function(n) { return `
           <div style="padding:16px; background:var(--card-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); border-radius:16px; margin-bottom:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); position:relative; overflow:hidden; transition: 0.2s;">
               <div style="position:absolute; top:0; left:0; width:4px; height:100%; background:var(--accent-primary);"></div>
               <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; margin-left:8px; font-weight:700;">${n.time}</div>
@@ -260,62 +286,63 @@
                   <button class="btn btn-glass" style="font-size:0.75rem; padding:4px 16px; height:28px;" onclick="dismissNotif('${n.id}')">Dismiss</button>
               </div>
           </div>
-      `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No new notifications.</div>';
+      `; }).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No new notifications.</div>';
   };
             
-  window.dismissNotif = (id) => {
+  window.dismissNotif = function(id) {
       state.dismissedNotifs.add(String(id));
       renderNotifList(); 
       if(typeof google !== 'undefined') google.script.run.dismissSystemNotification(id);
       
-      const dot = document.getElementById('notif-dot'); 
-      const count = state.notifications.filter(n=>!state.dismissedNotifs.has(String(n.id))).length;
+      var dot = document.getElementById('notif-dot'); 
+      var count = state.notifications.filter(function(n){return !state.dismissedNotifs.has(String(n.id));}).length;
       if(dot) dot.style.display = count ? 'block' : 'none';
   };
 
   function fetchCalendar() { 
       if(typeof google==='undefined') return; 
-      google.script.run.withSuccessHandler(j=>{
+      google.script.run.withSuccessHandler(function(j) {
           try {
               state.calendarEvents = JSON.parse(j); 
               if(state.view === 'overview') render(); 
               
-              const now = new Date();
-              state.calendarEvents.forEach(e => {
+              var now = new Date();
+              for (var i = 0; i < state.calendarEvents.length; i++) {
+                  var e = state.calendarEvents[i];
                   if(e.type === 'maintenance') {
-                      let parts = e.startTime.match(/(\d{1,2}):(\d{2})/);
+                      var parts = (e.startTime || "").match(/(\d{1,2}):(\d{2})/);
                       if(parts) {
-                          let evTime = new Date();
-                          evTime.setHours(parseInt(parts[1]), parseInt(parts[2]), 0, 0);
-                          let diffMins = (evTime - now) / 60000;
+                          var evTime = new Date();
+                          evTime.setHours(parseInt(parts[1], 10), parseInt(parts[2], 10), 0, 0);
+                          var diffMins = (evTime - now) / 60000;
                           if(diffMins > 0 && diffMins <= 15) {
-                              showToast(`⚠️ Maintenance starts in ${Math.ceil(diffMins)} mins!`);
+                              showToast("⚠️ Maintenance starts in " + Math.ceil(diffMins) + " mins!");
                           }
                       }
                   }
-              });
+              }
           } catch(e) {}
       }).getDailyCalendarEvents(); 
   }
 
   function fetchStats() {
       if(typeof google === 'undefined') return;
-      google.script.run.withSuccessHandler(j => {
+      google.script.run.withSuccessHandler(function(j) {
           try {
-              const h = JSON.parse(j);
+              var h = JSON.parse(j);
               if(h && h.length){
                   state.slHistory = h;
-                  const latest = h[h.length-1];
+                  var latest = h[h.length-1];
                   state.currentSL = latest.val + "%";
                   state.currentACK = latest.ack + "s";
                   
-                  const slEl = document.getElementById('hdr-sl');
+                  var slEl = document.getElementById('hdr-sl');
                   if(slEl) slEl.innerText = state.currentSL;
                   
-                  const ackEl = document.getElementById('hdr-ack');
+                  var ackEl = document.getElementById('hdr-ack');
                   if(ackEl) ackEl.innerText = state.currentACK;
 
-                  if(state.view === 'overview') updateOverviewDOM();
+                  if(state.view === 'overview') render();
               }
           } catch(e) {}
       }).getStatsHistory();
@@ -323,30 +350,29 @@
 
   function fetchArchiveList() {
       if(typeof google === 'undefined') return;
-      google.script.run.withSuccessHandler(res => {
+      google.script.run.withSuccessHandler(function(res) {
           try { state.archiveList = JSON.parse(res); if(state.view === 'insights') render(); } catch(e) {}
       }).getArchiveList();
   }
   
-  function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }
+  function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e) {} }).fetchScripts(); }
   
-  // FIX: Fetch Token System for Insight View
-  let insightFetchToken = 0;
+  var insightFetchToken = 0;
   function fetchInsightData() {
       if(typeof google === 'undefined') return;
       state.unifiedReport = null; 
-      let myToken = ++insightFetchToken;
+      var myToken = ++insightFetchToken;
       
       if (state.view === 'insights') render();
 
       if (state.selectedArchive === 'LIVE') {
-          google.script.run.withSuccessHandler(res => {
-              if (myToken !== insightFetchToken) return; // Ignore outdated responses
+          google.script.run.withSuccessHandler(function(res) {
+              if (myToken !== insightFetchToken) return;
               try { state.unifiedReport = JSON.parse(res); } catch(e) {}
               if (state.view === 'insights') render();
           }).getUnifiedWeeklyReport(state.selectedDate);
       } else {
-          google.script.run.withSuccessHandler(res => {
+          google.script.run.withSuccessHandler(function(res) {
               if (myToken !== insightFetchToken) return;
               try { state.unifiedReport = JSON.parse(res); } catch(e) {}
               if (state.view === 'insights') render();
@@ -354,21 +380,20 @@
       }
   }
 
-  // FIX: Fetch Token System for Tracker View (Solves the UI bugging out when changing dates)
-  let trackerFetchToken = 0;
+  var trackerFetchToken = 0;
   function fetchTrackerData() {
       if (typeof google === 'undefined') return;
       state.trackerLoading = true;
-      let myToken = ++trackerFetchToken;
+      var myToken = ++trackerFetchToken;
       
       if (state.view === 'tracker') render(); 
       
-      google.script.run.withSuccessHandler(res => {
-          if (myToken !== trackerFetchToken) return; // Block outdated data from drawing
+      google.script.run.withSuccessHandler(function(res) {
+          if (myToken !== trackerFetchToken) return;
           try { state.trackerData = JSON.parse(res); } catch(e) {}
           state.trackerLoading = false;
           if (state.view === 'tracker') render(); 
-      }).withFailureHandler(err => {
+      }).withFailureHandler(function(err) {
           if (myToken !== trackerFetchToken) return;
           state.trackerLoading = false;
           if (state.view === 'tracker') render();
@@ -376,146 +401,120 @@
       }).getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode, state.trackerRegion, state.trackerCycleFilter);
   }
 
-  function applyPendingUpdates() { const now=Date.now(); for(const n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
+  function applyPendingUpdates() { var now=Date.now(); for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
+  
   function moveAgentInMemory(name, type, val) {
-     let o = null; 
-     for (const k in state.agents) { if(!Array.isArray(state.agents[k])) continue; const i = state.agents[k].findIndex(a => a.name === name); if(i > -1) { o = state.agents[k][i]; break; } }
+     var o = null; 
+     for (var k in state.agents) { 
+         if(!Array.isArray(state.agents[k])) continue; 
+         for(var i=0; i<state.agents[k].length; i++) {
+             if(state.agents[k][i].name === name) { o = state.agents[k][i]; break; }
+         }
+         if(o) break;
+     }
      if(o) { 
          if (type === 'role') { o.role = (val === 'Active') ? '' : val; if(val === 'Active') { o.subStatus = ""; } }
          else if (type === 'absent') { o.subStatus = val; } 
      }
   }
 
-  function updateOverviewDOM() {
-      const unplanCount = (state.agents.unplanned||[]).length;
-      const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
-      const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
-      const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
-      
-      const safeCount = (state.agents.safe||[]).length;
-      const iclCount = (state.agents.icl||[]).length;
-      const ulcCount = (state.agents.ulc||[]).length;
-
-      const updateEl = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val; };
-      updateEl('ov-sl-text', state.currentSL);
-      updateEl('ov-ack-text', state.currentACK);
-      updateEl('ov-unplanned', unplanCount);
-      updateEl('ov-shrink', shrinkPct + '%');
-      updateEl('ov-planned', planCount);
-      updateEl('ov-safe', safeCount);
-      updateEl('ov-icl', iclCount);
-      updateEl('ov-ulc', ulcCount);
-
-      if (charts.overview) {
-          charts.overview.data.labels = state.slHistory.map(d => d.name);
-          charts.overview.data.datasets[0].data = state.slHistory.map(d => d.val);
-          
-          const rawAck = state.slHistory.map(d => d.ack);
-          charts.overview.data.datasets[1].data = rawAck.map(v => v > 120 ? 120 : v);
-          charts.overview.update('none'); 
-      }
-
-      const agendaEl = document.getElementById('ov-agenda');
-      if (agendaEl) {
-          const eventsHtml = state.calendarEvents.map((e, i) => `
-              <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
-                 <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
-                 <div style="flex:1;">
-                     <div style="font-weight:700; font-size:0.9rem;">${e.title}</div>
-                     <div style="font-size:0.75rem; color:var(--text-muted);">
-                         <span style="color:var(--text-main); font-weight:700;">${e.date}</span> • ${e.startTime} - ${e.endTime}
-                     </div>
-                 </div>
-              </div>
-          `).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
-          
-          if (agendaEl.innerHTML !== eventsHtml) agendaEl.innerHTML = eventsHtml;
-      }
-  }
-
   function render() {
-     if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
+      try {
+          if (state.view === 'popout-view') { renderPopout(state.regionFilter); refreshIcons(); return; }
 
-     const activeEl = document.activeElement;
-     const activeId = activeEl ? activeEl.id : null;
-     const cursorStart = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionStart : null;
-     const cursorEnd = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionEnd : null;
+          var activeEl = document.activeElement;
+          var activeId = activeEl ? activeEl.id : null;
+          var cursorStart = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionStart : null;
+          var cursorEnd = activeEl && activeEl.tagName === 'INPUT' ? activeEl.selectionEnd : null;
 
-     const sl = document.getElementById('hdr-sl');
-     if(sl) sl.innerText = state.currentSL;
-     const ackEl = document.getElementById('hdr-ack');
-     if(ackEl) ackEl.innerText = state.currentACK;
-     
-     const c = document.getElementById('content');
-     if(!c) return;
+          var sl = document.getElementById('hdr-sl');
+          if(sl) sl.innerText = state.currentSL;
+          var ackEl = document.getElementById('hdr-ack');
+          if(ackEl) ackEl.innerText = state.currentACK;
+          
+          var c = document.getElementById('content');
+          if(!c) return;
 
-     document.querySelectorAll('.nav-btn, .action-btn').forEach(b => b.classList.remove('active'));
-     const b = document.getElementById('btn-'+state.view); 
-     if(b) b.classList.add('active');
+          var navBtns = document.querySelectorAll('.nav-btn, .action-btn');
+          for(var i=0; i<navBtns.length; i++) { navBtns[i].classList.remove('active'); }
+          var b = document.getElementById('btn-'+state.view); 
+          if(b) b.classList.add('active');
 
-     if (state.view === 'overview' && document.getElementById('chart-overview')) {
-         updateOverviewDOM();
-         refreshIcons();
-         return;
-     }
-
-     let h = '';
-     if (state.view === 'overview') h = renderOverview();
-     else if (state.view === 'agents') h = renderAgents();
-     else if (state.view === 'weather') h = renderWeather();
-     else if (state.view === 'calc') h = renderCalc();
-     else if (state.view === 'scripts') h = renderScripts();
-     else if (state.view === 'insights') h = renderInsights();
-     else if (state.view === 'tracker') h = renderTracker();
-     
-     c.innerHTML = h; refreshIcons();
-     
-     if (activeId) {
-         const reFocus = document.getElementById(activeId);
-         if (reFocus) {
-             reFocus.focus();
-             if (cursorStart !== null) {
-                 try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {}
-             }
-         }
-     }
-     
-     if(state.view === 'insights') initCharts();
-     if(state.view === 'overview') initOverviewChart();
-     if(state.view === 'tracker') initTrackerChart(); 
+          var h = '';
+          try {
+              if (state.view === 'overview') h = renderOverview();
+              else if (state.view === 'agents') h = renderAgents();
+              else if (state.view === 'weather') h = renderWeather();
+              else if (state.view === 'calc') h = renderCalc();
+              else if (state.view === 'scripts') h = renderScripts();
+              else if (state.view === 'insights') h = renderInsights();
+              else if (state.view === 'tracker') h = renderTracker();
+          } catch(renderErr) {
+              console.error("Tab Render Error:", renderErr);
+              h = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);">
+                      <i data-lucide="alert-triangle" width="48" style="margin-bottom:16px;"></i>
+                      <h2 style="margin-top:0;">Tab Error</h2>
+                      <p style="color:var(--text-secondary);">${renderErr.message}</p>
+                   </div>`;
+          }
+          
+          c.innerHTML = h; 
+          refreshIcons();
+          
+          if (activeId) {
+              var reFocus = document.getElementById(activeId);
+              if (reFocus) {
+                  reFocus.focus();
+                  if (cursorStart !== null) {
+                      try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {}
+                  }
+              }
+          }
+          
+          if(state.view === 'overview') initOverviewChart();
+          if(state.view === 'tracker') initTrackerChart(); 
+      } catch(err) {
+          console.error("Critical Render Error:", err);
+          var c = document.getElementById('content');
+          if(c) c.innerHTML = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);"><i data-lucide="alert-triangle" width="48"></i><h2>Critical Error</h2><p>${err.message}</p></div>`;
+      }
   }
 
   function renderPopout(mode) {
-     const c = document.getElementById('content');
+     var c = document.getElementById('content');
      if(!c) return; 
-     const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+     var upMap = {}; 
+     var upBreakList = state.agents.upcomingBreak || [];
+     for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
      
-     let title = "All Units";
+     var title = "All Units";
      if (mode === 'Onshore') title = "Onshore Unit";
      else if (mode === 'Offshore') title = "Offshore Unit";
      else if (mode === 'Breaks') title = "Break Room";
      
-     const filterFn = (list) => (list||[]).filter(a => {
-        if (mode === 'All') return true;
-        if (mode === 'Breaks') return true; 
-        return (a.region||"").includes(mode);
-     });
+     var filterFn = function(list) {
+        return (list||[]).filter(function(a) {
+            if (mode === 'All') return true;
+            if (mode === 'Breaks') return true; 
+            return (a.region||"").indexOf(mode) !== -1;
+        });
+     };
      
-     let h = `<div style="padding:20px;">
+     var h = `<div style="padding:20px;">
          <h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">${title}</h2>`;
      
      if (mode !== 'Breaks') {
          h += `
          <div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div>
-         <div class="agent-list-view">${filterFn(state.agents.startingSoon).map(a => renderAgentRow(a, upMap.get(a.id))).join('')}</div>
+         <div class="agent-list-view">${filterFn(state.agents.startingSoon).map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('')}</div>
          <div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Active Floor</div>
-         <div class="agent-list-view">${filterFn(state.agents.active).map(a => renderAgentRow(a, upMap.get(a.id))).join('')}</div>`;
+         <div class="agent-list-view">${filterFn(state.agents.active).map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('')}</div>`;
      }
 
      if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') {
-         const breakList = filterFn(state.agents.active).filter(a=>a.onBreakNow);
+         var breakList = filterFn(state.agents.active).filter(function(a){return a.onBreakNow;});
          h += `<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div>
-         <div class="agent-list-view">${breakList.length ? breakList.map(a => renderAgentRow(a, upMap.get(a.id))).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
+         <div class="agent-list-view">${breakList.length ? breakList.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>'}</div>`;
      }
      
      h += `</div>`;
@@ -524,12 +523,14 @@
   }
   
   function renderAgents() {
-      const upMap = new Map(); (state.agents.upcomingBreak||[]).forEach(a=>upMap.set(a.id, a));
+      var upMap = {}; 
+      var upBreakList = state.agents.upcomingBreak || [];
+      for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
       
       return `
       <div class="sticky-header">
          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
-             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm}">
+             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm || ''}">
              
              <button class="btn btn-glass" style="height:34px;" onclick="window.open('https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=', '_blank')">
                  <i data-lucide="radio" width="16"></i> Tower Control
@@ -547,7 +548,7 @@
   }
   
   function renderFloorLayout(upMap) {
-     let startingHtml = '';
+     var startingHtml = '';
      if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
          startingHtml = `
          <div class="aether-card" style="padding:20px; margin-bottom:24px; border-left:4px solid var(--accent-primary);">
@@ -556,10 +557,10 @@
          </div>`;
      }
 
-     let offHtml = '';
+     var offHtml = '';
      if (state.searchTerm && state.searchTerm.trim() !== '') {
-         const offAgents = state.agents.off || [];
-         const offRendered = renderGroup(offAgents, upMap);
+         var offAgents = state.agents.off || [];
+         var offRendered = renderGroup(offAgents, upMap);
          if (offRendered) {
              offHtml = `
              <div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div>
@@ -595,7 +596,7 @@
                     Onshore Unit
                     <button class="btn-popout" title="Popout Onshore" onclick="openPopout('Onshore')"><i data-lucide="external-link" width="14"></i></button>
                  </div>
-                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Onshore')), upMap)}</div>
+                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap)}</div>
              </div>
          </div>
          <div style="display:flex; flex-direction:column; gap:20px;">
@@ -604,14 +605,14 @@
                     Offshore Unit
                     <button class="btn-popout" title="Popout Offshore" onclick="openPopout('Offshore')"><i data-lucide="external-link" width="14"></i></button>
                  </div>
-                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(a=>a.region.includes('Offshore')), upMap)}</div>
+                 <div class="agent-list-view">${renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap)}</div>
              </div>
          </div>
      </div>
      
      <div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div>
      <div class="agent-list-view" style="opacity:0.8;">
-         ${renderGroup([...(state.agents.vacation||[]), ...(state.agents.training||[]), ...(state.agents.planned||[])], upMap)}
+         ${renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap)}
      </div>
 
      <div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div>
@@ -624,36 +625,38 @@
   
   function renderGroup(list, upMap) {
       if (!list) return '';
-      const filtered = list.filter(a => {
-         const mName = !state.searchTerm || a.name.toLowerCase().includes(state.searchTerm.toLowerCase());
-         const mReg = state.regionFilter === 'All' || (a.region||"").includes(state.regionFilter);
+      var filtered = list.filter(function(a) {
+         var safeName = a.name || '';
+         var safeReg = a.region || '';
+         var mName = !state.searchTerm || safeName.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1;
+         var mReg = state.regionFilter === 'All' || safeReg.indexOf(state.regionFilter) !== -1;
          return mName && mReg;
       });
       if(!filtered.length) return '';
-      return filtered.map(a => renderAgentRow(a, upMap.get(a.id))).join('');
+      return filtered.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('');
   }
 
   function renderAgentRow(a, upInfo) {
-     let start = "00:00", end = "00:00";
-     if (a.shift && !a.shift.includes("?")) { const parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
+     var start = "00:00", end = "00:00";
+     if (a.shift && a.shift.indexOf("?") === -1) { var parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      
-     let stripClass = a.region.includes('Onshore') ? 'on' : 'off';
+     var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
      if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
 
-     let statusText = a.subStatus || "Active";
-     let statusColor = "var(--text-secondary)";
+     var statusText = a.subStatus || "Active";
+     var statusColor = "var(--text-secondary)";
      
-     if (a.role && a.role.includes('SAFE')) { statusColor = "var(--status-active)"; }
-     if (a.role && a.role.includes('ICL')) { statusColor = "var(--status-role)"; }
-     if (a.role && (a.role.includes('ULC') || a.role.includes('FIRE'))) { statusColor = "var(--status-ulc)"; }
+     if (a.role && a.role.indexOf('SAFE') !== -1) { statusColor = "var(--status-active)"; }
+     if (a.role && a.role.indexOf('ICL') !== -1) { statusColor = "var(--status-role)"; }
+     if (a.role && (a.role.indexOf('ULC') !== -1 || a.role.indexOf('FIRE') !== -1)) { statusColor = "var(--status-ulc)"; }
      
      if (a.onBreakNow) {
          statusColor = "var(--status-break)";
          statusText = a.subStatus; 
      }
 
-     let breakHtml = "";
+     var breakHtml = "";
      if (a.onBreakNow && a.currentBreakStr) {
          breakHtml += `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
      } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) {
@@ -664,18 +667,18 @@
          breakHtml += `<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">${a.shiftEndsIn}</span></div>`;
      }
 
-     let prefix = a.region.includes('Onshore') ? 'T' : 'x';
-     let formattedId = prefix + a.id;
+     var prefix = (a.region || '').indexOf('Onshore') !== -1 ? 'T' : 'x';
+     var formattedId = prefix + (a.id || '');
      
-     let timeDisplay = `${start}-${end}`;
+     var timeDisplay = start + "-" + end;
      if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') {
          timeDisplay = "OFF";
      }
 
      return `
-     <div class="agent-row" onclick="openMenu(event, '${a.name}')">
+     <div class="agent-row" onclick="openMenu(event, '${(a.name || '').replace(/'/g, "\\'")}')">
         <div class="status-strip ${stripClass}"></div>
-        <div class="row-name" data-full-name="${a.name}">${a.name}</div>
+        <div class="row-name" data-full-name="${a.name || ''}">${a.name || ''}</div>
         
         <div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, '${formattedId}')" title="Click to Copy ID">
            <span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color='var(--accent-primary)'" onmouseout="this.style.color='var(--text-muted)'">${formattedId}</span>
@@ -689,39 +692,41 @@
      </div>`;
   }
   
-  function copyAgentInfo(e, idText) {
+  window.copyAgentInfo = function(e, idText) {
       e.stopPropagation(); 
       fallbackCopyTextToClipboard(idText, `Copied: ${idText}`);
   }
 
-  window.openBreakModal = () => {
+  window.openBreakModal = function() {
       closeMenu();
-      const name = state.selectedAgent;
-      let agent = null;
-      for(let k in state.agents) {
+      var name = state.selectedAgent;
+      var agent = null;
+      for(var k in state.agents) {
           if(!Array.isArray(state.agents[k])) continue;
-          const found = state.agents[k].find(a => a.name === name);
-          if(found) { agent = found; break; }
+          for(var i=0; i<state.agents[k].length; i++) {
+              if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; }
+          }
+          if(agent) break;
       }
       
       if(!agent) { showToast("Agent data not found"); return; }
       
-      const container = document.getElementById('break-editor');
+      var container = document.getElementById('break-editor');
       container.innerHTML = "";
-      (agent.rawBreaks || []).forEach((b, i) => {
+      (agent.rawBreaks || []).forEach(function(b, i) {
           container.innerHTML += `
           <div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;">
               <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">${b.type}</div>
               <div style="display:flex; gap:8px;">
-                  <input id="bs-${i}" class="input-aether" value="${b.start}" style="font-size:0.85rem;">
-                  <input id="be-${i}" class="input-aether" value="${b.end}" style="font-size:0.85rem;">
+                  <input id="bs-${i}" class="input-aether" value="${b.start || ''}" style="font-size:0.85rem;">
+                  <input id="be-${i}" class="input-aether" value="${b.end || ''}" style="font-size:0.85rem;">
               </div>
           </div>`;
       });
       document.getElementById('break-modal').classList.add('open');
   };
 
-  window.openOtModal = () => {
+  window.openOtModal = function() {
       closeMenu();
       document.getElementById('ot-start').value = "";
       document.getElementById('ot-end').value = "";
@@ -729,14 +734,29 @@
   };
 
   function renderOverview() {
-      const unplanCount = (state.agents.unplanned||[]).length;
-      const planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
-      const totalActive = Math.max(1, (state.agents.active||[]).length + 10);
-      const shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
+      var unplanCount = (state.agents.unplanned||[]).length;
+      var planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
+      var totalActive = Math.max(1, (state.agents.active||[]).length + 10);
+      var shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
       
-      const safeCount = (state.agents.safe||[]).length;
-      const iclCount = (state.agents.icl||[]).length;
-      const ulcCount = (state.agents.ulc||[]).length;
+      var safeCount = (state.agents.safe||[]).length;
+      var iclCount = (state.agents.icl||[]).length;
+      var ulcCount = (state.agents.ulc||[]).length;
+
+      var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
+      if(state.calendarEvents && state.calendarEvents.length > 0) {
+          eventsHtml = state.calendarEvents.map(function(e, i) { return `
+              <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
+                 <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
+                 <div style="flex:1;">
+                     <div style="font-weight:700; font-size:0.9rem;">${e.title || 'Untitled Event'}</div>
+                     <div style="font-size:0.75rem; color:var(--text-muted);">
+                         <span style="color:var(--text-main); font-weight:700;">${e.date || ''}</span> • ${e.startTime || ''} - ${e.endTime || ''}
+                     </div>
+                 </div>
+              </div>
+          `; }).join('');
+      }
 
       return `
       <style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>
@@ -800,44 +820,56 @@
                 Agenda
                 <i data-lucide="calendar" class="text-muted" width="16"></i>
             </div>
-            <div id="ov-agenda" style="overflow-y:auto; max-height:200px;"></div>
+            <div id="ov-agenda" style="overflow-y:auto; max-height:200px;">
+                ${eventsHtml}
+            </div>
          </div>
       </div>`;
   }
   
   function renderWeather() {
-      if (!state.weather || Object.keys(state.weather).length === 0) {
-         return `<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:60px; text-align:center;"><i data-lucide="cloud-off" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
+      if (!state.weather || typeof state.weather !== 'object') {
+           return `<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
       }
-      let html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      var provs = Object.keys(state.weather);
+      if (provs.length === 0) {
+           return `<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data loading...</div></div>`;
+      }
+
+      var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      
       if (state.alerts && state.alerts.length > 0) {
          html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
-         state.alerts.forEach(a => html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province}: ${a.type} (${a.count})</div>`);
+         state.alerts.forEach(function(a) { html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province || 'Unknown'}: ${a.type || ''} (${a.count || 0})</div>`; });
          html += `</div></div>`;
       } else {
          html += `<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>`;
       }
-      Object.keys(state.weather).forEach(prov => {
-         const cities = state.weather[prov];
-         cities.forEach(c => {
-             const icon = getWeatherIcon(c.condition);
-             const forecastHtml = (c.forecast || []).slice(0,3).map(f => {
-                 const dayName = f.day ? f.day.substring(0,3) : "---";
-                 return `<div class="weather-day"><span class="wd-name">${dayName}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp}</span></div>`;
+      
+      for(var i=0; i<provs.length; i++) {
+         var prov = provs[i];
+         var cities = state.weather[prov];
+         if (!cities || !Array.isArray(cities)) continue;
+         
+         cities.forEach(function(c) {
+             var icon = getWeatherIcon(c.condition);
+             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) {
+                 var dayName = f.day ? String(f.day).substring(0,3) : "---";
+                 return `<div class="weather-day"><span class="wd-name">${dayName}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp || ''}</span></div>`;
              }).join('');
              html += `
              <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
                  <div class="flex-between" style="margin-bottom:16px;">
-                     <span style="font-weight:800; font-size:1.1rem;">${c.name}</span>
+                     <span style="font-weight:800; font-size:1.1rem;">${c.name || ''}</span>
                      <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
                  </div>
                  <div class="flex-between" style="align-items:flex-end;">
                      <div>
-                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp}°</div>
-                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition}</div>
+                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp || ''}°</div>
+                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition || ''}</div>
                      </div>
                      <div style="text-align:right;">
-                         <div style="font-size:1.4rem; font-weight:700;">${c.wind}</div>
+                         <div style="font-size:1.4rem; font-weight:700;">${c.wind || ''}</div>
                          <div class="kpi-label">KM/H</div>
                      </div>
                  </div>
@@ -846,19 +878,20 @@
                  </div>
              </div>`;
          });
-      });
+      }
       html += '</div>';
       return html;
   }
 
   function getWeatherIcon(cond, isSmall) {
-      const c = (cond || "").toLowerCase();
-      let i = "cloud";
-      if(c.includes("sun") || c.includes("clear")) i = "sun";
-      else if(c.includes("rain") || c.includes("shower")) i = "cloud-rain";
-      else if(c.includes("snow") || c.includes("flurr")) i = "snowflake";
-      else if(c.includes("storm") || c.includes("thunder")) i = "cloud-lightning";
-      else if(c.includes("cloud") || c.includes("overcast")) i = "cloud";
+      var c = (cond || "").toLowerCase();
+      var i = "cloud";
+      if(c.indexOf("sun") !== -1 || c.indexOf("clear") !== -1) i = "sun";
+      else if(c.indexOf("rain") !== -1 || c.indexOf("shower") !== -1) i = "cloud-rain";
+      else if(c.indexOf("snow") !== -1 || c.indexOf("flurr") !== -1) i = "snowflake";
+      else if(c.indexOf("storm") !== -1 || c.indexOf("thunder") !== -1) i = "cloud-lightning";
+      else if(c.indexOf("cloud") !== -1 || c.indexOf("overcast") !== -1) i = "cloud";
+      
       if(isSmall) {
           if (i==="sun") return `<i data-lucide="sun" width="16"></i>`;
           if (i==="cloud-rain") return `<i data-lucide="cloud-rain" width="16"></i>`;
@@ -868,65 +901,241 @@
       return `<i data-lucide="${i}" width="20"></i>`;
   }
 
+  // --- SCRIPT UI & CATEGORY SYSTEM ---
   function renderScripts() {
-     const cats = new Set(["All"]);
-     state.scripts.forEach(s => cats.add(s.category || "General"));
-     const categories = Array.from(cats);
+     var cats = new Set();
+     cats.add("All");
+     var scriptArr = state.scripts || [];
+     for(var i=0; i<scriptArr.length; i++) {
+         cats.add(scriptArr[i].category || "General");
+     }
+     var categories = Array.from(cats).sort();
      
-     const catList = categories.map(c => `
-         <button onclick="state.selectedCategory='${c}'; render();" 
-                 class="ctx-item ${state.selectedCategory===c?'active-cat':''}" 
-                 style="width:100%; text-align:left; padding:12px; ${state.selectedCategory===c?'background:var(--accent-primary); color:#fff;':''}">
+     var catList = categories.map(function(c) { return `
+         <button onclick="state.selectedCategory='${c}'; state.selectedScriptId=null; render();" 
+                 class="ctx-item" 
+                 style="width:100%; text-align:left; padding:12px 16px; margin-bottom:6px; border-radius:12px; transition:0.2s; ${state.selectedCategory===c ? 'background:var(--accent-primary); color:#fff; font-weight:800;' : 'color:var(--text-main); font-weight:600;'}">
+             <i data-lucide="${c === 'All' ? 'layers' : 'folder'}" width="16" style="margin-right:10px; vertical-align:middle; opacity:0.8;"></i> 
              ${c}
-         </button>`).join('');
+         </button>`; }).join('');
 
-     const filtered = state.scripts.filter(s => {
-         const matchSearch = !state.searchTerm || s.title.toLowerCase().includes(state.searchTerm.toLowerCase()) || s.body.toLowerCase().includes(state.searchTerm.toLowerCase());
-         const matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
+     var filtered = scriptArr.filter(function(s) {
+         var st = s.title || "";
+         var sb = s.body || "";
+         var matchSearch = !state.searchTerm || st.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1 || sb.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1;
+         var matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory;
          return matchSearch && matchCat;
      });
      
-     const listHTML = filtered.map((s, i) => `
-         <div class="aether-card" style="padding:24px; height:100%; display:flex; flex-direction:column; gap:16px; border-left:4px solid var(--accent-primary);">
-             <div style="display:flex; justify-content:space-between; align-items:start;">
-                <div>
-                    <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; display:block;">${s.category||'General'}</span>
-                    <span style="font-weight:700; font-size:1.2rem; color:var(--text-main);">${s.title}</span>
-                </div>
-                <button onclick="copyScript(${i})" class="btn-icon-sm" style="background:var(--bg-root); color:var(--accent-primary);" title="Copy"><i data-lucide="copy" width="18"></i></button>
-             </div>
-             <div style="font-size:0.95rem; color:var(--text-secondary); white-space:pre-wrap; line-height:1.6; max-height:150px; overflow-y:auto; background:var(--bg-root); padding:12px; border-radius:12px;">${s.body}</div>
-             <div style="display:flex; gap:12px; margin-top:auto; padding-top:12px; border-top:1px solid var(--glass-border);">
-                 <button onclick="editScript(${i})" class="btn-popout" style="width:auto; padding:0 12px; font-size:0.8rem;">Edit</button>
-                 <div style="flex:1;"></div>
-                 <button onclick="delScript(${s.index || i})" class="btn-icon-sm" style="color:var(--status-alert);" title="Delete"><i data-lucide="trash-2" width="16"></i></button>
-             </div>
-         </div>`).join('');
+     var scriptListHTML = filtered.map(function(s) {
+         var isActive = state.selectedScriptId === s.index;
+         var titleSafe = s.title || "Untitled";
+         var catSafe = s.category || "General";
+         var bodySafe = String(s.body || "").replace(/\n/g, ' ');
+         return `
+         <div onclick="state.selectedScriptId=${s.index}; render();" 
+              class="aether-card hover-bg" 
+              style="padding:16px; cursor:pointer; margin-bottom:12px; border:2px solid ${isActive ? 'var(--accent-primary)' : 'transparent'}; border-left:4px solid ${isActive ? 'var(--accent-primary)' : 'var(--glass-border)'}; box-shadow: ${isActive ? '0 8px 25px rgba(99,102,241,0.2)' : 'none'};">
+             <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; font-weight:800;">${catSafe}</div>
+             <div style="font-weight:800; font-size:1.05rem; color:var(--text-main); margin-bottom:6px;">${titleSafe}</div>
+             <div style="font-size:0.85rem; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${bodySafe}</div>
+         </div>`;
+     }).join('') || '<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:600;">No scripts found.</div>';
+
+     var activeScriptHTML = `<div class="aether-card" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); border: 2px dashed var(--glass-border); background: transparent; box-shadow: none;"><i data-lucide="file-code" width="48" style="opacity:0.3; margin-bottom:16px;"></i><h3 style="margin:0;">No Script Selected</h3><p style="font-size:0.9rem;">Select a script from the list to view, copy, or edit.</p></div>`;
+     
+     if (state.selectedScriptId !== null) {
+         var activeScript = null;
+         for(var j=0; j<scriptArr.length; j++) {
+             if(scriptArr[j].index === state.selectedScriptId) { activeScript = scriptArr[j]; break; }
+         }
+         
+         if (activeScript) {
+             var titleSafe = activeScript.title || "Untitled";
+             var catSafe = activeScript.category || "General";
+             var bodySafe = String(activeScript.body || "");
+             activeScriptHTML = `
+             <div class="aether-card" style="height:100%; display:flex; flex-direction:column; padding:0; overflow:hidden;">
+                 <div style="padding:24px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; background:rgba(0,0,0,0.02);">
+                     <div>
+                         <div style="font-size:0.75rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">${catSafe}</div>
+                         <div style="font-weight:800; font-size:1.8rem; color:var(--text-main); line-height:1.2;">${titleSafe}</div>
+                     </div>
+                     <div style="display:flex; gap:10px;">
+                         <button class="btn btn-primary" onclick="copyScript(${activeScript.index})"><i data-lucide="copy" width="16"></i> Copy</button>
+                         <button class="btn btn-glass" onclick="editScript(${activeScript.index})"><i data-lucide="edit-2" width="16"></i> Edit</button>
+                         <button class="btn btn-glass" style="color:var(--status-alert); border-color:var(--status-alert);" onclick="delScript(${activeScript.index})"><i data-lucide="trash-2" width="16"></i></button>
+                     </div>
+                 </div>
+                 <div style="padding:32px; flex:1; overflow-y:auto; background:var(--bg-root);">
+                     <pre style="margin:0; font-family:monospace; font-size:1rem; color:var(--text-secondary); white-space:pre-wrap; line-height:1.7; word-wrap:break-word;">${bodySafe}</pre>
+                 </div>
+             </div>`;
+         }
+     }
 
      return `
-     <div style="display:grid; grid-template-columns: 240px 1fr; gap:32px; height:100%; align-items:start;">
-         <div class="aether-card" style="padding:16px; position:sticky; top:20px;">
-             <div class="section-header">Categories</div>
-             <div style="display:flex; flex-direction:column; gap:4px;">${catList}</div>
-             <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--glass-border);">
-                 <button class="btn btn-primary" style="width:100%;" onclick="openComposeMode()">+ New Script</button>
+     <style>
+         .script-col::-webkit-scrollbar { width: 6px; }
+         .script-col::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 4px; }
+         body.dark .script-col::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+     </style>
+     <div style="display:flex; height:calc(100vh - 140px); gap:24px; align-items:stretch;">
+         <div style="width:260px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;">
+             <div class="aether-card script-col" style="padding:20px 16px; flex:1; overflow-y:auto;">
+                 <div class="section-header" style="margin-bottom:16px;">Library</div>
+                 <div style="display:flex; flex-direction:column;">${catList}</div>
+             </div>
+             <button class="btn btn-primary" style="height:52px; font-size:1rem; border-radius:16px;" onclick="openComposeMode()"><i data-lucide="plus" width="20"></i> New Script</button>
+         </div>
+         <div style="width:380px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;">
+             <input id="script-search" class="input-aether" style="flex-shrink:0; height:48px;" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="${state.searchTerm || ''}">
+             <div class="script-col" style="flex:1; overflow-y:auto; padding-right:8px; padding-bottom:20px;">
+                 ${scriptListHTML}
              </div>
          </div>
-         
-         <div style="display:flex; flex-direction:column; gap:24px;">
-             <input id="script-search" class="input-aether" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="${state.searchTerm || ''}">
-             <div class="grid-masonry" style="grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));">
-                ${listHTML || '<div style="text-align:center; color:var(--text-muted); padding:40px; grid-column:1/-1;">No scripts found in this category.</div>'}
-             </div>
+         <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
+             ${activeScriptHTML}
          </div>
      </div>`;
   }
+
+  window.toggleNewCategoryInput = function() {
+      var sel = document.getElementById('new-script-cat-select');
+      var inp = document.getElementById('new-script-cat-input');
+      if(!sel || !inp) return;
+      if(sel.value === '__NEW__') {
+          inp.style.display = 'block';
+          inp.focus();
+      } else {
+          inp.style.display = 'none';
+          inp.value = "";
+      }
+  };
+
+  window.openComposeMode = function() { 
+      document.getElementById('compose-overlay').classList.add('open');
+      state.editingId = null; 
+      document.getElementById('compose-title').innerText = "Create New Script";
+      document.getElementById('new-script-title').value = ""; 
+      document.getElementById('new-script-body').value = ""; 
+      
+      var cats = new Set();
+      var scriptArr = state.scripts || [];
+      for(var i=0; i<scriptArr.length; i++) { cats.add(scriptArr[i].category || "General"); }
+      
+      var optionsHtml = Array.from(cats).sort().map(function(c){return `<option value="${c}">${c}</option>`;}).join('');
+      optionsHtml += `<option value="__NEW__" style="font-weight:800; color:var(--accent-primary);">➕ Create New Category...</option>`;
+      
+      var sel = document.getElementById('new-script-cat-select');
+      if(sel) {
+          sel.innerHTML = optionsHtml;
+          var targetCat = state.selectedCategory !== "All" ? state.selectedCategory : "General";
+          if(!cats.has(targetCat)) targetCat = "General"; 
+          sel.value = targetCat;
+      }
+      toggleNewCategoryInput();
+  };
+
+  window.closeComposeMode = function() { 
+      document.getElementById('compose-overlay').classList.remove('open');
+      state.editingId = null; 
+  };
+
+  window.editScript = function(idx) { 
+      var s = null;
+      var scriptArr = state.scripts || [];
+      for(var i=0; i<scriptArr.length; i++) { if(scriptArr[i].index === idx) { s = scriptArr[i]; break; } }
+      if(!s) return; 
+      
+      openComposeMode(); 
+      document.getElementById('compose-title').innerText = "Edit Script";
+      state.editingId = s.index; 
+      document.getElementById('new-script-title').value = s.title || ""; 
+      document.getElementById('new-script-body').value = s.body || ""; 
+      
+      var sel = document.getElementById('new-script-cat-select');
+      var cat = s.category || "General";
+      
+      if(sel) {
+          var found = false;
+          for(var j=0; j<sel.options.length; j++) { if(sel.options[j].value === cat) { found = true; break; } }
+          if(found) {
+              sel.value = cat;
+          } else {
+              sel.value = '__NEW__';
+              var inp = document.getElementById('new-script-cat-input');
+              if(inp) inp.value = cat;
+          }
+      }
+      toggleNewCategoryInput();
+  };
+
+  window.copyScript = function(idx) { 
+      var s = null;
+      var scriptArr = state.scripts || [];
+      for(var i=0; i<scriptArr.length; i++) { if(scriptArr[i].index === idx) { s = scriptArr[i]; break; } }
+      if(s) fallbackCopyTextToClipboard(s.body || "", "Script Copied!"); 
+  };
+
+  window.delScript = function(idx) { 
+      if(confirm("Are you sure you want to delete this script? This action cannot be undone.")) { 
+          if(typeof google !== 'undefined') { 
+              google.script.run.withSuccessHandler(function() { 
+                  showToast("Script Deleted"); 
+                  if(state.selectedScriptId === idx) state.selectedScriptId = null;
+                  google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e){} }).fetchScripts(); 
+              }).deleteTeamScript(idx); 
+          } else { 
+              var newArr = [];
+              for(var i=0; i<state.scripts.length; i++) { if(state.scripts[i].index !== idx) newArr.push(state.scripts[i]); }
+              state.scripts = newArr;
+              if(state.selectedScriptId === idx) state.selectedScriptId = null;
+              render(); 
+          } 
+      } 
+  };
+
+  window.addScript = function() { 
+      var t = document.getElementById('new-script-title').value; 
+      var b = document.getElementById('new-script-body').value; 
+      
+      var sel = document.getElementById('new-script-cat-select');
+      var inp = document.getElementById('new-script-cat-input');
+      
+      var finalCat = "General";
+      if(sel) {
+         finalCat = (sel.value === '__NEW__' ? (inp ? inp.value.trim() : "General") : sel.value) || "General";
+      }
+      
+      if(!t || !b) {
+          showToast("Title and script content are required!");
+          return; 
+      }
+      
+      if(typeof google !== 'undefined') { 
+          google.script.run.withSuccessHandler(function() { 
+              closeComposeMode();
+              showToast("Saved to Library"); 
+              google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e){} }).fetchScripts(); 
+          }).saveTeamScript(state.editingId, t, b, finalCat); 
+      } 
+  };
   
   function renderTracker() {
-      const isCoach = state.trackerMode === 'coaching';
-      const d = state.trackerData;
+      var isCoach = state.trackerMode === 'coaching';
+      var d = state.trackerData || {};
 
-      const headerHtml = `
+      var schedText = "Loading...";
+      var idpText = "Awaiting Sync...";
+      var muText = "";
+      if (state.syncMeta) {
+          if (state.syncMeta.sched) schedText = state.syncMeta.sched;
+          if (state.syncMeta.idp) idpText = state.syncMeta.idp;
+          if (state.syncMeta.muSet) muText = state.syncMeta.muSet;
+      }
+
+      var headerHtml = `
       <style>
           @keyframes spin { to { transform: rotate(360deg); } }
           @keyframes slideUp { to { opacity:1; transform:translateY(0); } }
@@ -936,14 +1145,14 @@
              <div>
                  <h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2>
                  <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
-                     <span><i data-lucide="calendar-check" width="10"></i> ${state.syncMeta?.sched || 'Loading...'}</span>
+                     <span><i data-lucide="calendar-check" width="10"></i> ${schedText}</span>
                  </div>
              </div>
              
              <div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">
                  ${state.trackerRange === 'week' ? `
-                 <button onclick="toggleCycleFilter('WEEK A');" style="background:${d && d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
-                 <button onclick="toggleCycleFilter('WEEK B');" style="background:${d && d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d && d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${d && d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
+                 <button onclick="toggleCycleFilter('WEEK A');" style="background:${d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
+                 <button onclick="toggleCycleFilter('WEEK B');" style="background:${d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
                  ` : ((state.trackerRange === 'month' || state.trackerRange === 'quarter') ? `
                  <button onclick="toggleCycleFilter('WEEK A');" style="background:${state.trackerCycleFilter === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerCycleFilter === 'WEEK A' ? 'white' : 'var(--text-muted)'}; border:${state.trackerCycleFilter === 'WEEK A' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button>
                  <button onclick="toggleCycleFilter('WEEK B');" style="background:${state.trackerCycleFilter === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)'}; color:${state.trackerCycleFilter === 'WEEK B' ? 'white' : 'var(--text-muted)'}; border:${state.trackerCycleFilter === 'WEEK B' ? 'none' : '1px solid var(--glass-border)'}; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>
@@ -983,10 +1192,8 @@
           </div>`;
       }
 
-      if (!d || d.error || !d.events) {
-          let errMsg = "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
-          if (d && d.error) errMsg = d.error;
-          
+      if (!d.events || d.error) {
+          var errMsg = d.error || "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; min-height:400px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
               <i data-lucide="database" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i>
@@ -996,49 +1203,49 @@
           </div>`;
       }
       
-      const filteredEvents = d.events.filter(e => 
-          !state.trackerSearch || 
-          e.agent.toLowerCase().includes(state.trackerSearch.toLowerCase()) || 
-          (e.activityName && e.activityName.toLowerCase().includes(state.trackerSearch.toLowerCase()))
-      );
+      var filteredEvents = (d.events || []).filter(function(e) {
+          var sa = e.agent || '';
+          var ac = e.activityName || '';
+          return !state.trackerSearch || sa.toLowerCase().indexOf(state.trackerSearch.toLowerCase()) !== -1 || ac.toLowerCase().indexOf(state.trackerSearch.toLowerCase()) !== -1;
+      });
 
-      const eventLogs = filteredEvents.map(f => `
+      var eventLogs = filteredEvents.map(function(f) { return `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
              <div style="display:flex; align-items:center; gap:12px;">
                  <div style="width:36px; height:36px; border-radius:10px; background:var(--glass-surface); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; color:var(--text-muted);">
                      <i data-lucide="${isCoach ? 'forum' : 'person-standing'}" width="18"></i>
                  </div>
                  <div>
-                    <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${f.agent}</div>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date} • ${f.time} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName}</span>` : ''}</div>
+                    <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${f.agent || ''}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date || ''} • ${f.time || ''} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName || ''}</span>` : ''}</div>
                  </div>
              </div>
              <div style="text-align:right;">
-                 <div style="font-size:1.1rem; font-weight:800; color:var(--text-main);">${f.hours}h</div>
-                 <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${f.shift}</div>
+                 <div style="font-size:1.1rem; font-weight:800; color:var(--text-main);">${f.hours || 0}h</div>
+                 <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${f.shift || ''}</div>
              </div>
           </div>
-      `).join('') || '<div style="padding:30px; text-align:center; color:var(--text-muted);">No logs found matching this filter.</div>';
+      `; }).join('') || '<div style="padding:30px; text-align:center; color:var(--text-muted);">No logs found matching this filter.</div>';
 
-      let gridHtml = '';
+      var gridHtml = '';
       if (!isCoach && state.trackerMode === 'furlough' && d.mode === 'day') {
           gridHtml = `
           <div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;">
               <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;">
                   <div style="display:flex; align-items:center; gap:12px;">
                       <span>Intraday IDP Heatmap</span>
-                      ${state.syncMeta?.muSet ? `<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ${state.syncMeta.muSet}</span>` : ''}
+                      ${muText ? `<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ${muText}</span>` : ''}
                   </div>
                   <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);">
-                      <i data-lucide="database" width="14"></i> ${state.syncMeta?.idp || 'Awaiting Sync...'}
+                      <i data-lucide="database" width="14"></i> ${idpText}
                   </div>
               </div>
               <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(65px, 1fr)); gap:8px;">
-                  ${d.grid.map((b, i) => {
-                      let cls = 'status-neutral'; 
+                  ${(d.grid || []).map(function(b, i) {
+                      var cls = 'status-neutral'; 
                       if(b.net > 3) cls = 'status-surplus'; if(b.net <= 0) cls = 'status-risk';
                       return `<div class="heatmap-cell ${cls}" style="animation: slideUp 0.3s ease forwards; animation-delay: ${i * 0.005}s; opacity:0; transform:translateY(10px);">
-                          <span style="font-size:0.65rem; opacity:0.7; font-weight:700;">${b.label}</span>
+                          <span style="font-size:0.65rem; opacity:0.7; font-weight:700;">${b.label || ''}</span>
                           <span style="font-size:1rem; font-weight:800; font-family:monospace;">${b.net>0?'+'+b.net:b.net}</span>
                       </div>`;
                   }).join('')}
@@ -1056,7 +1263,7 @@
              <div class="aether-card" style="padding:24px;">
                 <div style="text-align:center; margin-bottom:20px;">
                     <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div>
-                    <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals.all.toFixed(2)}</div>
+                    <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals && d.totals.all ? d.totals.all.toFixed(2) : 0}</div>
                 </div>
                 <div class="chart-3d-container" style="height:260px; width:100%; display:flex; justify-content:center; padding: 10px;">
                     <canvas id="tracker-chart"></canvas>
@@ -1064,9 +1271,9 @@
              </div>
              
              <div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;">
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.morning.toFixed(1)}h</div></div>
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.evening.toFixed(1)}h</div></div>
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals.night.toFixed(1)}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.morning ? d.totals.morning.toFixed(1) : 0}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.evening ? d.totals.evening.toFixed(1) : 0}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.night ? d.totals.night.toFixed(1) : 0}h</div></div>
              </div>
          </div>
 
@@ -1074,7 +1281,7 @@
              <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                  <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
                     <span>Detailed Log ${state.trackerCycleFilter !== 'ALL' ? `<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">${state.trackerCycleFilter}</span>` : ''}</span>
-                    <input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="${state.trackerSearch}">
+                    <input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="${state.trackerSearch || ''}">
                  </div>
              </div>
              <div style="flex:1; overflow-y:auto; padding:0 10px;">
@@ -1085,11 +1292,11 @@
       `;
   }
 
-  window.archiveCurrentWeek = () => {
+  window.archiveCurrentWeek = function() {
       if(confirm("Freeze and Archive this specific Wednesday-to-Wednesday cycle?")) {
           showToast("Crunching data & archiving...");
           if(typeof google!=='undefined') {
-              google.script.run.withSuccessHandler(res => {
+              google.script.run.withSuccessHandler(function(res) {
                   showToast(res);
                   fetchArchiveList(); 
               }).archiveUnifiedWeek(state.selectedDate);
@@ -1098,14 +1305,14 @@
   };
 
   function renderInsights() {
-      const u = state.unifiedReport;
+      var u = state.unifiedReport || {};
       
-      let archiveOptionsHtml = state.archiveList.map(a => {
+      var archiveOptionsHtml = (state.archiveList || []).map(function(a) {
          return `<option value="${a.period}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${a.cycle}: ${a.period}</option>`;
       }).join('');
 
-      let rightSideHtml = '';
-      let datePickerHtml = '';
+      var rightSideHtml = '';
+      var datePickerHtml = '';
       if (state.selectedArchive === 'LIVE') {
           datePickerHtml = `<input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">`;
           rightSideHtml = `<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>`;
@@ -1113,7 +1320,10 @@
           rightSideHtml = `<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>`;
       }
 
-      const headerHtml = `
+      var schedText = "Loading...";
+      if (state.syncMeta && state.syncMeta.sched) schedText = state.syncMeta.sched;
+
+      var headerHtml = `
       <style>
           @keyframes spin { to { transform: rotate(360deg); } }
       </style>
@@ -1122,13 +1332,13 @@
              <div>
                  <h2 style="margin:0;">Master Operations Tracker</h2>
                  <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
-                     <span><i data-lucide="calendar-check" width="10"></i> ${state.syncMeta?.sched || 'Loading...'}</span>
+                     <span><i data-lucide="calendar-check" width="10"></i> ${schedText}</span>
                  </div>
              </div>
              
              <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px; margin-left:16px;">
                  <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
-                    ${u ? u.cycle : 'CALCULATING...'}
+                    ${u.cycle || 'CALCULATING...'}
                  </span>
              </div>
 
@@ -1145,7 +1355,7 @@
          </div>
       </div>`;
 
-      if (!u) {
+      if (!u.data) {
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;">
               <div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div>
@@ -1154,23 +1364,23 @@
           </div>`;
       }
       
-      let displayData = u.data || [];
+      var displayData = u.data || [];
       if (state.insightSearch) {
-          const term = state.insightSearch.toLowerCase();
-          displayData = displayData.filter(a => a.name.toLowerCase().includes(term));
+          var term = state.insightSearch.toLowerCase();
+          displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
       }
 
-      const rowsHtml = displayData.map(a => `
+      var rowsHtml = displayData.map(function(a) { return `
           <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
-              <td style="padding:16px; font-weight:700; color:var(--text-main);">${a.name}</td>
+              <td style="padding:16px; font-weight:700; color:var(--text-main);">${a.name || ''}</td>
               <td style="padding:16px; text-align:right; font-family:monospace;">${a.acsu > 0 ? a.acsu + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-family:monospace;">${a.coach > 0 ? a.coach + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-active);">${a.safe > 0 ? a.safe + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-weight:800; font-size:1.1rem; color:var(--text-main);">${a.total}h</td>
+              <td style="padding:16px; text-align:right; font-weight:800; font-size:1.1rem; color:var(--text-main);">${a.total || 0}h</td>
           </tr>
-      `).join('') || `<tr><td colspan="7" style="padding:40px; text-align:center; color:var(--text-muted);">No off-phone activity found for this cycle.</td></tr>`;
+      `; }).join('') || `<tr><td colspan="7" style="padding:40px; text-align:center; color:var(--text-muted);">No off-phone activity found for this cycle.</td></tr>`;
 
       return `
       ${headerHtml}
@@ -1185,7 +1395,7 @@
       <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
           <div style="background:rgba(0,0,0,0.02); padding:16px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
               <div style="font-weight:700; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;">
-                  Cycle Range: <span style="color:var(--text-main);">${u.period}</span>
+                  Cycle Range: <span style="color:var(--text-main);">${u.period || ''}</span>
               </div>
           </div>
           <div style="overflow-y:auto; flex:1;">
@@ -1207,9 +1417,6 @@
       </div>`;
   }
 
-  window.openComposeMode = () => { document.getElementById('compose-area').style.display='block'; document.getElementById('compose-overlay').style.display='block'; state.editingId = null; document.getElementById('new-script-title').value=""; document.getElementById('new-script-body').value=""; document.getElementById('new-script-cat').value=""; };
-  window.closeComposeMode = () => { document.getElementById('compose-area').style.display='none'; document.getElementById('compose-overlay').style.display='none'; state.editingId = null; };
-
   function renderCalc() {
      return `<div class="grid-split">
         <div class="aether-card">
@@ -1229,13 +1436,13 @@
      </div>`;
   }
   
-  window.runCalculation = () => {
-     const i = document.getElementById('in-text').value; 
-     const o = document.getElementById('out-text').value;
+  window.runCalculation = function() {
+     var i = document.getElementById('in-text').value; 
+     var o = document.getElementById('out-text').value;
      if(typeof google!=='undefined') { 
          showToast("Calculating..."); 
-         google.script.run.withSuccessHandler(r=>{ 
-             const d=JSON.parse(r); 
+         google.script.run.withSuccessHandler(function(r){ 
+             var d=JSON.parse(r); 
              state.currentSL=d.svl; 
              state.currentReport = d.report; 
              fetchStats(); 
@@ -1248,55 +1455,40 @@
      }
   };
 
-  window.copyReport = () => {
-      const text = document.getElementById('report-content').innerText; 
+  window.copyReport = function() {
+      var text = document.getElementById('report-content').innerText; 
       fallbackCopyTextToClipboard(text, "Report Copied");
   };
 
-  window.copyWindTemplate = () => {
-     const targetOrder = ["Toronto", "Ottawa", "Calgary", "Edmonton", "Vancouver", "Prince George", "Montreal", "Quebec City"];
-     let flatList = []; if(state.weather) Object.values(state.weather).forEach(list => flatList.push(...list));
-     const rows = targetOrder.map(name => { const city = flatList.find(c => c.name === name); if (!city) return ""; return formatWindString(city.wind); });
+  window.copyWindTemplate = function() {
+     var targetOrder = ["Toronto", "Ottawa", "Calgary", "Edmonton", "Vancouver", "Prince George", "Montreal", "Quebec City"];
+     var flatList = []; 
+     if(state.weather) {
+         var keys = Object.keys(state.weather);
+         for(var i=0; i<keys.length; i++) {
+             var list = state.weather[keys[i]];
+             if (!list || !Array.isArray(list)) continue;
+             for(var j=0; j<list.length; j++) flatList.push(list[j]);
+         }
+     }
+     var rows = targetOrder.map(function(name) { 
+         var city = null;
+         for(var i=0; i<flatList.length; i++) { if(flatList[i].name === name) { city = flatList[i]; break; } }
+         if (!city) return ""; 
+         return formatWindString(city.wind); 
+     });
      
      fallbackCopyTextToClipboard(rows.join("\n"), "Winds Copied");
   };
 
-  function formatWindString(val) { if (!val) return ""; let w = val.toString(); if (w.toLowerCase().includes("light")) w = "~5"; if (w.includes("G")) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
+  function formatWindString(val) { if (!val) return ""; var w = val.toString(); if (w.toLowerCase().indexOf("light") !== -1) w = "~5"; if (w.indexOf("G") !== -1) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
   
-  window.saveBreaks = () => { const name = state.selectedAgent; let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) { const newBreaks = agent.rawBreaks.map((b, i) => ({ type: b.type, start: document.getElementById(`bs-${i}`).value, end: document.getElementById(`be-${i}`).value })); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
-  window.saveOvertime = () => { const name = state.selectedAgent; const s = document.getElementById('ot-start').value; const e = document.getElementById('ot-end').value; if(s && e) { let agent = null; for(let k in state.agents) { const f = state.agents[k].find(a => a.name === name); if(f) { agent = f; break; } } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
+  window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
   
-  window.addScript = () => { 
-      const t = document.getElementById('new-script-title').value; 
-      const b = document.getElementById('new-script-body').value; 
-      const c = document.getElementById('new-script-cat').value;
-      if(!t || !b) return; 
-      if(typeof google !== 'undefined') { 
-          google.script.run.withSuccessHandler(() => { 
-              closeComposeMode();
-              showToast("Saved to Library"); 
-              google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); 
-          }).saveTeamScript(state.editingId, t, b, c); 
-      } 
-  };
+  window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
-  window.editScript = (idx) => { 
-      const s = state.scripts[idx]; if(!s) return; 
-      openComposeMode(); 
-      state.editingId = s.index; 
-      document.getElementById('new-script-title').value = s.title; 
-      document.getElementById('new-script-body').value = s.body; 
-      document.getElementById('new-script-cat').value = s.category || "";
-  };
-
-  window.copyScript = (i) => { 
-      fallbackCopyTextToClipboard(state.scripts[i].body, "Script Copied"); 
-  };
-
-  window.delScript = (idx) => { if(confirm("Delete script?")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(() => { showToast("Deleted"); google.script.run.withSuccessHandler(res => { state.scripts = JSON.parse(res); render(); }).fetchScripts(); }).deleteTeamScript(idx); } else { state.scripts.splice(idx, 1); render(); } } };
-  
-  window.runImportAction = () => { 
-      const t = document.getElementById('import-text').value; 
+  window.runImportAction = function() { 
+      var t = document.getElementById('import-text').value; 
       if(!t) return; 
       closeImportModal(); 
       showToast("Syncing Database..."); 
@@ -1304,8 +1496,8 @@
       if(typeof google !== 'undefined') {
           google.script.run.runImport(t);
           google.script.run
-             .withSuccessHandler((trackerResult) => {
-                 let finalMsg = trackerResult.includes("Error") ? "Schedule Synced" : trackerResult;
+             .withSuccessHandler(function(trackerResult) {
+                 var finalMsg = trackerResult.indexOf("Error") !== -1 ? "Schedule Synced" : trackerResult;
                  showToast(finalMsg); 
                  
                  fetchData();
@@ -1315,7 +1507,7 @@
 
                  google.script.run.addGlobalNotification("Global Update: A manager synced new WFM Data. Dashboards refreshed.");
              })
-             .withFailureHandler((err) => {
+             .withFailureHandler(function(err) {
                  showToast("Schedule Synced");
                  fetchData();
                  fetchMetadata();
@@ -1326,53 +1518,54 @@
       } 
   };
 
-  window.openEventModal = (idx) => {
-      const e = state.calendarEvents[idx];
+  window.openEventModal = function(idx) {
+      var e = state.calendarEvents[idx];
       if(!e) return;
-      document.getElementById('evt-modal-title').innerText = e.title;
-      document.getElementById('evt-modal-time').innerText = `${e.date} • ${e.startTime} - ${e.endTime}`;
+      document.getElementById('evt-modal-title').innerText = e.title || '';
+      document.getElementById('evt-modal-time').innerText = (e.date || '') + " • " + (e.startTime || '') + " - " + (e.endTime || '');
       document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
       document.getElementById('event-modal').classList.add('open');
   };
   
-  let charts = {};
+  var charts = {};
 
   function initTrackerChart() {
       if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.events || state.trackerLoading) return;
-      const canvas = document.getElementById('tracker-chart');
+      var canvas = document.getElementById('tracker-chart');
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      var ctx = canvas.getContext('2d');
 
       if (charts.tracker) { charts.tracker.destroy(); charts.tracker = null; }
 
-      const d = state.trackerData;
-      const isCoach = d.trackerType === 'coaching' || d.trackerType === 'roles';
-      const isDark = document.body.classList.contains('dark');
-      const textColor = isDark ? '#94a3b8' : '#64748b';
+      var d = state.trackerData;
+      var isCoach = d.trackerType === 'coaching' || d.trackerType === 'roles';
+      var isDark = document.body.classList.contains('dark');
+      var textColor = isDark ? '#94a3b8' : '#64748b';
 
-      const shadowPlugin = {
+      var shadowPlugin = {
           id: 'shadowPlugin',
-          beforeDraw: (chart) => {
-              const ctx = chart.ctx;
+          beforeDraw: function(chart) {
+              var ctx = chart.ctx;
               ctx.save();
               ctx.shadowColor = isDark ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.2)';
               ctx.shadowBlur = 15;
               ctx.shadowOffsetX = 0;
               ctx.shadowOffsetY = 10;
           },
-          afterDraw: (chart) => { chart.ctx.restore(); }
+          afterDraw: function(chart) { chart.ctx.restore(); }
       };
 
-      const insideLabelsPlugin = {
+      var insideLabelsPlugin = {
           id: 'insideLabels',
-          afterDatasetsDraw(chart) {
-              const { ctx, data } = chart;
-              chart.getDatasetMeta(0).data.forEach((datapoint, index) => {
-                  const value = data.datasets[0].data[index];
+          afterDatasetsDraw: function(chart) {
+              var ctx = chart.ctx;
+              var data = chart.data;
+              chart.getDatasetMeta(0).data.forEach(function(datapoint, index) {
+                  var value = data.datasets[0].data[index];
                   if (value <= 0) return; 
                   
-                  const label = data.labels[index];
-                  const { x, y } = datapoint.tooltipPosition();
+                  var label = data.labels[index];
+                  var pos = datapoint.tooltipPosition();
                   
                   ctx.save();
                   ctx.font = "bold 12px 'Outfit', sans-serif";
@@ -1384,18 +1577,18 @@
                   ctx.shadowOffsetX = 0;
                   ctx.shadowOffsetY = 1;
                   
-                  ctx.fillText(label, x, y - 8);
+                  ctx.fillText(label, pos.x, pos.y - 8);
                   ctx.font = "800 14px 'Outfit', sans-serif";
-                  ctx.fillText(value.toFixed(1) + 'h', x, y + 8);
+                  ctx.fillText(value.toFixed(1) + 'h', pos.x, pos.y + 8);
                   ctx.restore();
               });
           }
       };
 
       if (!isCoach) {
-          const g1 = ctx.createLinearGradient(0,0,0,300); g1.addColorStop(0, '#fde68a'); g1.addColorStop(1, '#d97706'); 
-          const g2 = ctx.createLinearGradient(0,0,0,300); g2.addColorStop(0, '#fdba74'); g2.addColorStop(1, '#c2410c'); 
-          const g3 = ctx.createLinearGradient(0,0,0,300); g3.addColorStop(0, '#a5b4fc'); g3.addColorStop(1, '#4338ca'); 
+          var g1 = ctx.createLinearGradient(0,0,0,300); g1.addColorStop(0, '#fde68a'); g1.addColorStop(1, '#d97706'); 
+          var g2 = ctx.createLinearGradient(0,0,0,300); g2.addColorStop(0, '#fdba74'); g2.addColorStop(1, '#c2410c'); 
+          var g3 = ctx.createLinearGradient(0,0,0,300); g3.addColorStop(0, '#a5b4fc'); g3.addColorStop(1, '#4338ca'); 
 
           charts.tracker = new Chart(ctx, {
               type: 'pie',
@@ -1403,7 +1596,7 @@
               data: {
                   labels: ['Morning', 'Evening', 'Night'],
                   datasets: [{
-                      data: [d.totals.morning, d.totals.evening, d.totals.night],
+                      data: [d.totals.morning || 0, d.totals.evening || 0, d.totals.night || 0],
                       backgroundColor: [g1, g2, g3],
                       borderColor: isDark ? '#1e293b' : '#ffffff',
                       borderWidth: 2,
@@ -1423,23 +1616,23 @@
               }
           });
       } else {
-          const gBar = ctx.createLinearGradient(0,0,300,0);
+          var gBar = ctx.createLinearGradient(0,0,300,0);
           gBar.addColorStop(0, '#818cf8');
           gBar.addColorStop(1, '#4f46e5');
 
-          const activityCount = {};
-          d.events.forEach(e => {
-              let name = e.activityName || 'Unknown';
-              activityCount[name] = (activityCount[name] || 0) + e.hours;
+          var activityCount = {};
+          (d.events || []).forEach(function(e) {
+              var name = e.activityName || 'Unknown';
+              activityCount[name] = (activityCount[name] || 0) + (e.hours || 0);
           });
-          const sortedNames = Object.keys(activityCount).sort((a,b) => activityCount[b] - activityCount[a]).slice(0, 5);
-          const sortedData = sortedNames.map(n => activityCount[n]);
+          var sortedNames = Object.keys(activityCount).sort(function(a,b){return activityCount[b] - activityCount[a];}).slice(0, 5);
+          var sortedData = sortedNames.map(function(n){return activityCount[n];});
 
           charts.tracker = new Chart(ctx, {
               type: 'bar',
               plugins: [shadowPlugin],
               data: {
-                  labels: sortedNames.map(n => n.length > 15 ? n.substring(0,15)+'...' : n),
+                  labels: sortedNames.map(function(n){return n.length > 15 ? n.substring(0,15)+'...' : n;}),
                   datasets: [{
                       data: sortedData,
                       backgroundColor: gBar,
@@ -1483,42 +1676,42 @@
   function initOverviewChart() {
       if (typeof Chart === 'undefined') return;
       
-      const canvas = document.getElementById('chart-overview');
+      var canvas = document.getElementById('chart-overview');
       if (!canvas) return;
-      const ctx = canvas.getContext('2d');
+      var ctx = canvas.getContext('2d');
 
-      const labels = state.slHistory.map(d => d.name);
-      const slData = state.slHistory.map(d => d.val);
-      const rawAck = state.slHistory.map(d => d.ack);
+      var labels = state.slHistory.map(function(d){return d.name || '';});
+      var slData = state.slHistory.map(function(d){return d.val || 0;});
+      var rawAck = state.slHistory.map(function(d){return d.ack || 0;});
 
       if (charts.overview) {
           charts.overview.destroy();
           charts.overview = null;
       }
 
-      const gradientSL = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      var gradientSL = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
       gradientSL.addColorStop(0, 'rgba(99, 102, 241, 0.4)');
       gradientSL.addColorStop(1, 'rgba(99, 102, 241, 0.0)'); 
       
-      const gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      var gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
       gradientACK.addColorStop(0, 'rgba(244, 63, 94, 0.4)'); 
       gradientACK.addColorStop(1, 'rgba(244, 63, 94, 0.0)');
 
-      const isDark = document.body.classList.contains('dark');
-      const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
-      const textColor = isDark ? '#94a3b8' : '#64748b';
+      var isDark = document.body.classList.contains('dark');
+      var gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+      var textColor = isDark ? '#94a3b8' : '#64748b';
 
-      const shadowPlugin = {
+      var shadowPlugin = {
           id: 'shadowPluginLine',
-          beforeDatasetsDraw: (chart) => {
-              const ctx = chart.ctx;
+          beforeDatasetsDraw: function(chart) {
+              var ctx = chart.ctx;
               ctx.save();
               ctx.shadowColor = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(99, 102, 241, 0.3)';
               ctx.shadowBlur = 12;
               ctx.shadowOffsetX = 0;
               ctx.shadowOffsetY = 6;
           },
-          afterDatasetsDraw: (chart) => {
+          afterDatasetsDraw: function(chart) {
               chart.ctx.restore();
           }
       };
@@ -1546,7 +1739,7 @@
                   },
                   {
                       label: 'Response Time (s)',
-                      data: rawAck.map(v => v > 120 ? 120 : v), 
+                      data: rawAck.map(function(v){return v > 120 ? 120 : v;}), 
                       borderColor: '#f43f5e',
                       backgroundColor: gradientACK,
                       borderWidth: 3,
@@ -1596,7 +1789,7 @@
                       usePointStyle: true,
                       callbacks: {
                           label: function(context) {
-                              let label = context.dataset.label || '';
+                              var label = context.dataset.label || '';
                               if (label) { label = label.replace(' (%)', '').replace(' (s)', '') + ': '; }
                               if (context.datasetIndex === 0) {
                                   label += context.raw + '%';
@@ -1620,16 +1813,16 @@
                       min: 0,
                       max: 100,
                       grid: { color: gridColor, drawBorder: false, borderDash: [5, 5] },
-                      ticks: { callback: value => value + '%', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
+                      ticks: { callback: function(value){return value + '%';}, font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
                   },
                   y1: {
                       type: 'linear',
                       display: true,
                       position: 'right',
                       min: 0,
-                      suggestedMax: Math.max(...rawAck.map(v => v > 120 ? 120 : v), 40) * 1.2, 
+                      suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, 
                       grid: { display: false, drawBorder: false },
-                      ticks: { callback: value => value + 's', font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
+                      ticks: { callback: function(value){return value + 's';}, font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 }
                   }
               },
               animation: { duration: 1500, easing: 'easeOutQuart' }
