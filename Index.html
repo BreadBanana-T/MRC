@@ -48,7 +48,7 @@
                 </div>
                 <div style="height:30px; width:1px; background:var(--glass-border);"></div>
                 <button class="action-btn" onclick="toggleTheme()"><i data-lucide="sun-moon" width="20"></i></button>
-                <button class="action-btn" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
+                <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
                 <button class="action-btn" id="btn-insights" onclick="setView('insights')"><i data-lucide="bar-chart-2" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
@@ -78,7 +78,7 @@
     
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
 
-    <div id="import-modal" class="modal-blur">
+    <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data</h2>
           <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 24px;" placeholder="Paste WFM schedule text here... (Also accepts IDP paste for the Tracker)"></textarea>
@@ -89,20 +89,27 @@
        </div>
     </div>
 
-    <div id="compose-overlay" class="modal-blur">
-        <div id="compose-area" class="modal-window">
-            <h2 style="margin-top:0;">Compose Script</h2>
-            <input id="new-script-title" class="input-aether" placeholder="Title" style="margin-bottom:12px;">
-            <input id="new-script-cat" class="input-aether" placeholder="Category (Optional)" style="margin-bottom:12px;">
-            <textarea id="new-script-body" class="input-aether" style="height:150px; padding-top: 12px; resize: none; margin-bottom:16px;" placeholder="Script content..."></textarea>
+    <div id="compose-overlay" class="modal-blur" onclick="closeComposeMode()">
+        <div id="compose-area" class="modal-window" style="width:800px; max-width:95%;" onclick="event.stopPropagation()">
+            <h2 id="compose-title" style="margin-top:0;">Compose Script</h2>
+            <div class="grid-split" style="gap:16px; margin-bottom:16px; grid-template-columns: 2fr 1fr;">
+                <input id="new-script-title" class="input-aether" placeholder="Script Title">
+                
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <select id="new-script-cat-select" class="input-aether" onchange="toggleNewCategoryInput()"></select>
+                    <input id="new-script-cat-input" class="input-aether" style="display:none; border-color:var(--accent-primary);" placeholder="Type new category name...">
+                </div>
+            </div>
+            <textarea id="new-script-body" class="input-aether" style="height:350px; padding-top: 16px; font-family:monospace; font-size:0.95rem; resize: none; margin-bottom:20px;" placeholder="Paste your script, macro, or template here..."></textarea>
+            
             <div style="display:flex; justify-content:flex-end; gap:12px;">
                 <button class="btn btn-glass" onclick="closeComposeMode()">Cancel</button>
-                <button class="btn btn-primary" onclick="addScript()">Save</button>
+                <button class="btn btn-primary" onclick="addScript()"><i data-lucide="save" width="18"></i> Save Script</button>
             </div>
         </div>
     </div>
 
-    <div id="event-modal" class="modal-blur">
+    <div id="event-modal" class="modal-blur" onclick="document.getElementById('event-modal').classList.remove('open')">
        <div class="modal-window" onclick="event.stopPropagation()" style="width:500px;">
           <h2 id="evt-modal-title" style="margin-top:0;">Event Title</h2>
           <div id="evt-modal-time" style="color:var(--accent-primary); font-weight:700; margin-bottom:16px;"></div>
@@ -113,7 +120,7 @@
        </div>
     </div>
     
-    <div id="break-modal" class="modal-blur">
+    <div id="break-modal" class="modal-blur" onclick="document.getElementById('break-modal').classList.remove('open')">
         <div class="modal-window" onclick="event.stopPropagation()">
             <h2 style="margin-top:0;">Edit Schedule</h2>
             <div id="break-editor" style="max-height:300px; overflow-y:auto; margin-bottom:20px;"></div>
@@ -124,7 +131,7 @@
         </div>
     </div>
 
-    <div id="ot-modal" class="modal-blur">
+    <div id="ot-modal" class="modal-blur" onclick="document.getElementById('ot-modal').classList.remove('open')">
         <div class="modal-window" onclick="event.stopPropagation()">
             <h2 style="margin-top:0;">Log Overtime</h2>
             <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">OT Start</label>
