@@ -1,6 +1,6 @@
 /**
- * MODULE: WORKFORCE TRACKER (V6.2)
- * Features: Absolute String Decrypter, Split Metadata Extraction, Destructive Overwrites
+ * MODULE: WORKFORCE TRACKER (V6.3)
+ * Features: Strict Wed 23:00 Weekly Boundaries, Calendar Month Snapping
  */
 
 var WorkforceTracker = {
@@ -37,7 +37,6 @@ var WorkforceTracker = {
     let idpDates = [];
     let muSet = ""; 
     
-    // --- SCHEDULE PARSER ---
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanCoach = [];
       let cleanFurlough = [];
@@ -170,7 +169,6 @@ var WorkforceTracker = {
       }
     }
 
-    // --- IDP PARSER ---
     if (idpRaw && idpRaw.trim().length > 0) {
       let cleanIDP = [];
       const lines = idpRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -221,7 +219,6 @@ var WorkforceTracker = {
       }
     }
 
-    // --- METADATA SYNC FOR UI ---
     try {
         const props = PropertiesService.getDocumentProperties();
         const curTime = Utilities.formatDate(new Date(), "America/Toronto", "MMM dd, HH:mm");
@@ -273,17 +270,14 @@ var WorkforceTracker = {
 
       let cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 45);
-      let cutoffStr = Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      let cutoffStr = Utilities.formatDate(cutoffDate, "America/Toronto", "yyyy-MM-dd");
 
       const retainedRows = existingData.filter(row => {
           if (!row[0]) return false;
-          
           let rDate = this._formatDate(row[isIDP ? 0 : 1]);
           if (!rDate || rDate < cutoffStr) return false; 
-
           let k = isIDP ? rDate : String(row[0]).trim().toLowerCase() + "_" + rDate;
           if (wipeKeys.has(k)) return false; 
-
           return true;
       });
 
@@ -294,8 +288,9 @@ var WorkforceTracker = {
   },
 
   _getCycleForEpoch: function(epoch) {
-      let targetUTC = Date.UTC(new Date(epoch).getFullYear(), new Date(epoch).getMonth(), new Date(epoch).getDate(), 12, 0, 0);
-      if (new Date(epoch).getHours() >= 23) targetUTC += 86400000; 
+      let d = new Date(epoch);
+      let targetUTC = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+      if (d.getHours() >= 23) targetUTC += 86400000; 
       let diffWeeks = Math.floor(Math.floor((targetUTC - Date.UTC(2026, 0, 29, 12, 0, 0)) / 86400000) / 7);
       return (Math.abs(diffWeeks) % 2 === 1) ? "WEEK B" : "WEEK A";
   },
@@ -314,27 +309,37 @@ var WorkforceTracker = {
           cycle = this._getCycleForEpoch(tStart);
       } 
       else if (mode === 'week') {
-          let diff = (tObj.getDay() >= 4) ? (4 - tObj.getDay()) : -(tObj.getDay() + 3);
-          let wDate = new Date(tObj); wDate.setDate(tObj.getDate() + diff - 1); wDate.setHours(23, 0, 0, 0);
-          tStart = wDate.getTime(); tEnd = tStart + (7 * 86400000);
+          // STRICT WED 23:00 BOUNDARY
+          let wStart = new Date(rY, rM-1, rD, 0, 0, 0, 0);
+          let dayOfWeek = wStart.getDay(); 
+          let offset = (dayOfWeek >= 3) ? (dayOfWeek - 3) : (dayOfWeek + 4);
+          wStart.setDate(wStart.getDate() - offset);
+          wStart.setHours(23, 0, 0, 0);
+          
+          let wEnd = new Date(wStart);
+          wEnd.setDate(wStart.getDate() + 7);
+          wEnd.setHours(22, 59, 59, 999);
+          
+          tStart = wStart.getTime();
+          tEnd = wEnd.getTime();
+          
           cycle = this._getCycleForEpoch(tStart);
-          label = `${Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), "America/Toronto", "yyyy-MM-dd")}`;
+          label = `${Utilities.formatDate(wStart, "America/Toronto", "MMM dd, HH:mm")} to ${Utilities.formatDate(wEnd, "America/Toronto", "MMM dd, HH:mm")}`;
       } 
       else if (mode === 'month' || mode === 'quarter') {
+          // STRICT CALENDAR BOUNDARY (Ignores Rotations)
           let sMonth = (mode === 'month') ? rM - 1 : Math.floor((rM - 1) / 3) * 3;
           let eMonth = (mode === 'month') ? rM : sMonth + 3;
 
-          let sWed = new Date(rY, sMonth, 1, 12, 0, 0);
-          let sOff = (sWed.getDay() >= 3) ? (3 - sWed.getDay()) : -(sWed.getDay() + 4);
-          if (sOff > 0) sOff -= 7; sWed.setDate(sWed.getDate() + sOff); sWed.setHours(23, 0, 0, 0);
-          tStart = sWed.getTime();
+          let sDate = new Date(rY, sMonth, 1, 0, 0, 0, 0);
+          tStart = sDate.getTime();
           
-          let eWed = new Date(rY, eMonth, 1, 12, 0, 0);
-          let eOff = (eWed.getDay() >= 3) ? (3 - eWed.getDay()) : -(eWed.getDay() + 4);
-          if (eOff > 0) eOff -= 7; eWed.setDate(eWed.getDate() + eOff); eWed.setHours(23, 0, 0, 0);
-          tEnd = eWed.getTime();
+          let eDate = new Date(rY, eMonth, 0, 23, 59, 59, 999);
+          tEnd = eDate.getTime();
           
-          label = mode === 'month' ? `Month: ${Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), "America/Toronto", "yyyy-MM-dd")}` : `Q${Math.floor((rM - 1) / 3) + 1}: ${Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd")} to ${Utilities.formatDate(new Date(tEnd), "America/Toronto", "yyyy-MM-dd")}`;
+          label = mode === 'month' 
+              ? `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}` 
+              : `Q${Math.floor((rM - 1) / 3) + 1}: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`;
           cycle = mode === 'month' ? "MONTH" : "QUARTER"; 
       }
       return { start: tStart, end: tEnd, label: label, cycle: cycle, startStr: Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd") };
@@ -416,7 +421,7 @@ var WorkforceTracker = {
             this._getShiftSplits(startMins, endMins).forEach(split => {
                 let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(split.startMins/60), split.startMins%60, 0, 0).getTime();
 
-                if (splitStartEpoch >= bounds.start && splitStartEpoch < bounds.end) {
+                if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
                     if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
                         if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) return;
                     }
@@ -505,7 +510,7 @@ var WorkforceTracker = {
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        if (epoch >= bounds.start && epoch < bounds.end) { getAg(row[0])[metricName] += s.hours; getAg(row[0]).total += s.hours; }
+                        if (epoch >= bounds.start && epoch <= bounds.end) { getAg(row[0])[metricName] += s.hours; getAg(row[0]).total += s.hours; }
                     });
                 }
             });
@@ -539,7 +544,7 @@ var WorkforceTracker = {
                     
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        if (epoch >= bounds.start && epoch < bounds.end) { 
+                        if (epoch >= bounds.start && epoch <= bounds.end) { 
                             if (roleType.includes('SAFE')) { getAg(row[0]).safe += s.hours; getAg(row[0]).total += s.hours; }
                             else if (roleType.includes('ICL')) { getAg(row[0]).icl += s.hours; getAg(row[0]).total += s.hours; }
                             else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(row[0]).ulc += s.hours; getAg(row[0]).total += s.hours; }
@@ -553,7 +558,7 @@ var WorkforceTracker = {
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let sessionEpoch = new Date(row[3]).getTime();
-                if (sessionEpoch >= bounds.start && sessionEpoch < bounds.end) {
+                if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end) {
                     let role = String(row[2]).toUpperCase(); let h = Number(row[6]) || 0; 
                     if (role.includes('SAFE')) { getAg(row[1]).safe += h; getAg(row[1]).total += h; }
                     else if (role.includes('ICL')) { getAg(row[1]).icl += h; getAg(row[1]).total += h; }
@@ -718,7 +723,6 @@ var WorkforceTracker = {
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; }
 };
 
-// --- GLOBAL UI ENDPOINT FOR METADATA ---
 function fetchSyncMetadata() {
   try {
     const props = PropertiesService.getDocumentProperties();
