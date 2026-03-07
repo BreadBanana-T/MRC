@@ -170,35 +170,41 @@
 
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
+  // FIX: Frontend Math to perfectly target Wednesday and 1st of month
   window.handleRangeChange = function(val) {
       state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
       var parts = state.trackerDate.split('-');
       var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
       var selDate = new Date(y, m-1, d, 12, 0, 0); 
       
-      if (val === 'month' || val === 'quarter') { selDate.setDate(1); state.trackerDate = selDate.toISOString().split('T')[0]; } 
+      if (val === 'month' || val === 'quarter') { 
+          selDate.setDate(1); 
+          state.trackerDate = selDate.toISOString().split('T')[0]; 
+      } 
       else if (val === 'week') {
-          var day = selDate.getDay(); var offset = (day >= 4) ? (4 - day) : -(day + 3); 
-          selDate.setDate(selDate.getDate() + offset);
+          var day = selDate.getDay(); 
+          var offset = (day >= 3) ? (day - 3) : (day + 4); 
+          selDate.setDate(selDate.getDate() - offset);
           var ny = selDate.getFullYear(); var nm = selDate.getMonth() + 1; var nd = selDate.getDate();
           state.trackerDate = ny + "-" + (nm < 10 ? '0'+nm : nm) + "-" + (nd < 10 ? '0'+nd : nd);
       }
       fetchTrackerData(); render();
   };
 
+  // FIX: Accurate Toggle Logic for Wednesday Rotations
   window.toggleCycleFilter = function(targetCycle) {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
           var parts = state.trackerDate.split('-');
           var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
           var dObj = new Date(y, m-1, d, 12, 0, 0); 
-          var day = dObj.getDay(); var offset = (day >= 4) ? (4 - day) : -(day + 3);
-          dObj.setDate(dObj.getDate() + offset);
+          var day = dObj.getDay(); 
+          var offset = (day >= 3) ? (day - 3) : (day + 4);
+          dObj.setDate(dObj.getDate() - offset);
           
-          var baseDate = new Date(2026, 0, 29, 12, 0, 0); 
-          var diffWeeks = Math.floor(Math.round((dObj - baseDate) / 86400000) / 7);
-          var isWeekB = (Math.abs(diffWeeks) % 2 === 1);
-          var currentCycle = isWeekB ? 'WEEK B' : 'WEEK A';
+          var targetUTC = Date.UTC(dObj.getFullYear(), dObj.getMonth(), dObj.getDate() + 1, 12, 0, 0);
+          var diffWeeks = Math.floor(Math.floor((targetUTC - Date.UTC(2026, 0, 29, 12, 0, 0)) / 86400000) / 7);
+          var currentCycle = (Math.abs(diffWeeks) % 2 === 1) ? 'WEEK B' : 'WEEK A';
 
           if (targetCycle === 'WEEK A' && currentCycle === 'WEEK B') dObj.setDate(dObj.getDate() - 7);
           else if (targetCycle === 'WEEK B' && currentCycle === 'WEEK A') dObj.setDate(dObj.getDate() - 7);
@@ -1831,3 +1837,4 @@
   }
 
 </script>
+}
