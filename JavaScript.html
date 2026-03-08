@@ -1,7 +1,6 @@
 <script>
   var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
-  // CLOSES NOTIFICATION PANEL ON OUTSIDE CLICK
   document.addEventListener('click', function(e) {
       var panel = document.getElementById('notif-panel');
       var bellBtn = document.getElementById('btn-bell');
@@ -49,6 +48,7 @@
       trackerCycleFilter: 'ALL',
       trackerSearch: '',
       trackerLoading: true,
+      analyzerData: null, 
       syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }
   };
 
@@ -115,6 +115,7 @@
       if(v==='scripts') fetchScripts(); 
       if(v==='insights') fetchInsightData(); 
       if(v==='tracker') fetchTrackerData(); 
+      if(v==='analyzer') getAnalyzerHistory(null);
       render(); 
   };
   
@@ -170,7 +171,6 @@
 
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
-  // FIX: Frontend Math to perfectly target Wednesday and 1st of month
   window.handleRangeChange = function(val) {
       state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
       var parts = state.trackerDate.split('-');
@@ -191,7 +191,6 @@
       fetchTrackerData(); render();
   };
 
-  // FIX: Accurate Toggle Logic for Wednesday Rotations
   window.toggleCycleFilter = function(targetCycle) {
       if (state.trackerRange === 'week') {
           if (targetCycle === 'ALL') return;
@@ -223,20 +222,18 @@
   function fetchData() {
     if(typeof google==='undefined') return;
     
-    // 1. Fetch Floor Data
     google.script.run.withSuccessHandler(function(j) {
         try{ 
             var d = JSON.parse(j); 
             if(d){ 
                 for (var k in d) { state.agents[k] = d[k]; }
                 applyPendingUpdates(); 
-                if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker') render(); 
+                if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker' && state.view !== 'analyzer') render(); 
             } 
         } catch(e){}
     }).getFloorStatus();
 
     if(state.view !== 'popout-view') {
-        // 2. Fetch Weather and Alerts direct from Google Server Engine
         google.script.run.withSuccessHandler(function(r) { 
             try{ 
                 var d = (typeof r==='object'&&r!==null) ? r : JSON.parse(r); 
@@ -280,9 +277,7 @@
   window.renderNotifList = function() {
       var list = document.getElementById('notif-list');
       if(!list) return;
-      
       var visibleNotifs = state.notifications.filter(function(n) { return !state.dismissedNotifs.has(String(n.id)); });
-
       list.innerHTML = visibleNotifs.map(function(n) { return `
           <div style="padding:16px; background:var(--card-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); border-radius:16px; margin-bottom:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); position:relative; overflow:hidden; transition: 0.2s;">
               <div style="position:absolute; top:0; left:0; width:4px; height:100%; background:var(--accent-primary);"></div>
@@ -395,7 +390,7 @@
       if (state.view === 'tracker') render(); 
       
       google.script.run.withSuccessHandler(function(res) {
-          if (myToken !== trackerFetchToken) return;
+          if (myToken !== trackerFetchToken) return; 
           try { state.trackerData = JSON.parse(res); } catch(e) {}
           state.trackerLoading = false;
           if (state.view === 'tracker') render(); 
@@ -455,11 +450,12 @@
               else if (state.view === 'scripts') h = renderScripts();
               else if (state.view === 'insights') h = renderInsights();
               else if (state.view === 'tracker') h = renderTracker();
+              else if (state.view === 'analyzer') h = renderAnalyzer();
           } catch(renderErr) {
-              console.error("Tab Render Error:", renderErr);
+              console.error("View Render Error:", renderErr);
               h = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);">
                       <i data-lucide="alert-triangle" width="48" style="margin-bottom:16px;"></i>
-                      <h2 style="margin-top:0;">Tab Error</h2>
+                      <h2 style="margin-top:0;">UI Render Error</h2>
                       <p style="color:var(--text-secondary);">${renderErr.message}</p>
                    </div>`;
           }
@@ -907,7 +903,6 @@
       return `<i data-lucide="${i}" width="20"></i>`;
   }
 
-  // --- SCRIPT UI & CATEGORY SYSTEM ---
   function renderScripts() {
      var cats = new Set();
      cats.add("All");
@@ -1127,6 +1122,270 @@
           }).saveTeamScript(state.editingId, t, b, finalCat); 
       } 
   };
+
+  // --- NEW: RED FLAGS / ASSIGNMENT ANALYZER (NO TABS, PURE GRID) ---
+  window.openAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.add('open'); };
+  window.closeAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.remove('open'); };
+
+  window.runAnalyzerImport = function() {
+      var txt = document.getElementById('gem-import-text').value;
+      if (!txt) return;
+      var modal = document.getElementById('gem-modal');
+      if (modal) modal.classList.remove('open');
+      
+      showToast("Parsing GEM & Updating DB...");
+      if (typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(function(res) {
+              try {
+                  state.analyzerData = JSON.parse(res);
+                  showToast("Analysis Complete!");
+                  document.getElementById('gem-import-text').value = "";
+                  render();
+              } catch(e) { showToast("Error processing data"); }
+          }).importNewGEMReport(txt);
+      }
+  };
+
+  window.runMasterListImport = function() {
+      var txt = document.getElementById('masterlist-import-text').value;
+      if (!txt) return;
+      var modal = document.getElementById('master-modal');
+      if (modal) modal.classList.remove('open');
+      
+      showToast("Syncing Master Roster...");
+      if (typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(function(res) {
+              showToast(res);
+              document.getElementById('masterlist-import-text').value = "";
+              if (state.analyzerData && state.analyzerData.selectedMonth) {
+                  getAnalyzerHistory(state.analyzerData.selectedMonth);
+              } else {
+                  getAnalyzerHistory(null);
+              }
+          }).processMasterListUpload(txt);
+      }
+  }
+
+  window.getAnalyzerHistory = function(month) {
+      if (typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(function(res) {
+              try {
+                  state.analyzerData = JSON.parse(res);
+                  render();
+              } catch(e) {}
+          }).fetchAnalyzerData(month);
+      }
+  };
+
+  window.dismissFlagAgent = function(agentName) {
+      if (confirm("Are you sure you want to dismiss " + agentName + "? They will be permanently hidden from all future Red Flag reports.")) {
+          showToast("Dismissing Agent...");
+          if (typeof google !== 'undefined') {
+              google.script.run.withSuccessHandler(function() {
+                  getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null);
+              }).ignoreAnalyzerAgent(agentName);
+          }
+      }
+  };
+
+  function renderAnalyzer() {
+      var modalsHtml = `
+      <style>
+          .analyzer-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(5px); z-index:9999; display:none; align-items:center; justify-content:center; opacity:0; transition:0.2s; }
+          .analyzer-modal.open { display:flex; opacity:1; }
+          .analyzer-modal-box { background:var(--bg-root); width:90%; max-width:600px; border-radius:16px; border:1px solid var(--glass-border); box-shadow:0 10px 40px rgba(0,0,0,0.2); display:flex; flex-direction:column; overflow:hidden; transform:translateY(20px); transition:0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+          .analyzer-modal.open .analyzer-modal-box { transform:translateY(0); }
+      </style>
+      
+      <div id="gem-modal" class="analyzer-modal">
+          <div class="analyzer-modal-box">
+              <div style="padding:20px; border-bottom:1px solid var(--glass-border); font-weight:800; font-size:1.1rem; display:flex; justify-content:space-between; background:rgba(0,0,0,0.02);">
+                  <span style="display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart-2" width="18" style="color:var(--accent-primary);"></i> Import GEM Data</span>
+                  <i data-lucide="x" style="cursor:pointer; color:var(--text-muted);" onclick="document.getElementById('gem-modal').classList.remove('open')"></i>
+              </div>
+              <div style="padding:24px;">
+                  <p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5;">Paste the raw text from your "PA Call Performance by Agent" Excel file below. The engine will instantly auto-detect the month and permanently log it to the historical database.</p>
+                  <textarea id="gem-import-text" class="input-aether" style="width:100%; height:200px; resize:none; font-family:monospace; white-space:pre; font-size:0.8rem;"></textarea>
+              </div>
+              <div style="padding:16px 24px; background:var(--glass-surface); border-top:1px solid var(--glass-border); display:flex; justify-content:flex-end; gap:12px;">
+                  <button class="btn btn-glass" onclick="document.getElementById('gem-modal').classList.remove('open')">Cancel</button>
+                  <button class="btn btn-primary" onclick="runAnalyzerImport()">Analyze Data</button>
+              </div>
+          </div>
+      </div>
+
+      <div id="master-modal" class="analyzer-modal">
+          <div class="analyzer-modal-box">
+              <div style="padding:20px; border-bottom:1px solid var(--glass-border); font-weight:800; font-size:1.1rem; display:flex; justify-content:space-between; background:rgba(0,0,0,0.02);">
+                  <span style="display:flex; align-items:center; gap:8px;"><i data-lucide="users" width="18" style="color:var(--status-warn);"></i> Sync Master Roster</span>
+                  <i data-lucide="x" style="cursor:pointer; color:var(--text-muted);" onclick="document.getElementById('master-modal').classList.remove('open')"></i>
+              </div>
+              <div style="padding:24px;">
+                  <p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5;">Paste your RAW DATA (MasterList) here. This permanently teaches the engine who is an active Monitoring Specialist, automatically hiding all managers and team leads from the flags.</p>
+                  <textarea id="masterlist-import-text" class="input-aether" style="width:100%; height:200px; resize:none; font-family:monospace; white-space:pre; font-size:0.8rem;"></textarea>
+              </div>
+              <div style="padding:16px 24px; background:var(--glass-surface); border-top:1px solid var(--glass-border); display:flex; justify-content:flex-end; gap:12px;">
+                  <button class="btn btn-glass" onclick="document.getElementById('master-modal').classList.remove('open')">Cancel</button>
+                  <button class="btn btn-primary" onclick="runMasterListImport()">Sync Roster</button>
+              </div>
+          </div>
+      </div>
+      `;
+
+      if (!state.analyzerData || state.analyzerData.error) {
+          var errMsg = state.analyzerData ? state.analyzerData.error : "Upload your first Avaya GEM report to begin.";
+          return modalsHtml + `
+          <div style="display:flex; justify-content:center; align-items:center; height:70vh;">
+              <div style="text-align:center; max-width:450px;">
+                  <div style="width:80px; height:80px; border-radius:40px; background:rgba(99,102,241,0.1); color:var(--accent-primary); display:flex; align-items:center; justify-content:center; margin:0 auto 24px;">
+                      <i data-lucide="flag" width="40" height="40"></i>
+                  </div>
+                  <h2 style="margin:0 0 16px 0; font-weight:800; font-size:2rem;">Red Flags Dashboard</h2>
+                  <p style="color:var(--text-muted); margin:0 auto 32px; font-size:1rem; line-height:1.6;">${errMsg}</p>
+                  <div style="display:flex; gap:16px; justify-content:center;">
+                      <button class="btn btn-primary" onclick="document.getElementById('gem-modal').classList.add('open');" style="height:44px; padding:0 24px; border-radius:12px; box-shadow:0 8px 20px rgba(99,102,241,0.2);">
+                          <i data-lucide="bar-chart-2" width="18"></i> Import GEM Data
+                      </button>
+                      <button class="btn btn-glass" onclick="document.getElementById('master-modal').classList.add('open');" style="height:44px; padding:0 24px; border-radius:12px;">
+                          <i data-lucide="users" width="18"></i> Sync MasterList
+                      </button>
+                  </div>
+              </div>
+          </div>`;
+      }
+
+      var d = state.analyzerData || {};
+
+      var monthsHtml = (d.availableMonths || []).map(function(m) {
+          var formattedMonth = m;
+          try {
+              var dObj = new Date(m + 'T12:00:00Z');
+              formattedMonth = dObj.toLocaleString('default', { month: 'long', year: 'numeric' });
+              if (formattedMonth === "Invalid Date") formattedMonth = m;
+          } catch(e) {}
+          return `<option value="${m}" ${d.selectedMonth === m ? 'selected' : ''}>📅 ${formattedMonth}</option>`;
+      }).join('');
+
+      function getTrendHtml(val, isBadIfHigh, isPercentage) {
+          if (val === 0 || val == null) return `<span style="color:var(--text-muted); font-size:0.7rem; margin-left:6px; opacity:0.5;">-</span>`;
+          var isPositive = val > 0;
+          var color = (isPositive && !isBadIfHigh) || (!isPositive && isBadIfHigh) ? "var(--status-active)" : "var(--status-alert)";
+          var arrow = isPositive ? "↑" : "↓";
+          var absVal = isPercentage ? Math.abs(val * 100).toFixed(1) + '%' : Math.abs(val).toFixed(1);
+          return `<span style="color:${color}; font-size:0.7rem; font-weight:800; margin-left:6px;">${arrow} ${absVal}</span>`;
+      }
+
+      function renderTable(title, list, type, headerColor, icon) {
+          var safeList = list || [];
+          var rows = safeList.map(function(a) {
+              if (!a) return '';
+              var col1 = "", col2 = "";
+              
+              var statusDot = a.isApproaching 
+                  ? `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-warn); flex-shrink:0;" title="Approaching Threshold"></div>` 
+                  : `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;" title="Critical Flag"></div>`;
+
+              if (type === 'in' || type === 'scope') {
+                  var inPct = a.inPct || 0;
+                  var tasksXCalls = a.tasksXCalls || 0;
+                  col1 = `<td style="padding:12px 16px; font-weight:800;">${(inPct * 100).toFixed(1)}% ${getTrendHtml(a.trendIn, true, true)}</td>`;
+                  col2 = `<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">${Math.round(tasksXCalls * 100)}%</td>`;
+              } else if (type === 'out') {
+                  var outPct = a.outPct || 0;
+                  col1 = `<td style="padding:12px 16px; font-weight:800;">${(outPct * 100).toFixed(1)}% ${getTrendHtml(a.trendOut, true, true)}</td>`;
+                  col2 = `<td style="padding:12px 16px; color:var(--text-muted);">-</td>`;
+              } else if (type === 'cph') {
+                  var cphV = a.cph || 0;
+                  var totalCalls = a.totalCalls || 0;
+                  statusDot = `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;"></div>`;
+                  col1 = `<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">${totalCalls}</td>`;
+                  col2 = `<td style="padding:12px 16px; font-weight:800;">${cphV.toFixed(2)} ${getTrendHtml(a.trendCph, false, false)}</td>`;
+              }
+
+              var safeName = a.name || 'Unknown';
+              var wDays = a.wDays || '-';
+              var jsSafeName = safeName.replace(/'/g, "\\'");
+
+              return `
+              <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
+                  <td style="padding:12px 16px; display:flex; align-items:center; gap:10px;">
+                      ${statusDot}
+                      <span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">${safeName}</span>
+                  </td>
+                  ${col1}
+                  ${col2}
+                  <td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">${wDays}</td>
+                  <td style="padding:12px 16px; text-align:right;">
+                      <button class="btn-icon-sm" style="color:var(--text-muted);" title="Dismiss Agent" onclick="dismissFlagAgent('${jsSafeName}')">
+                          <i data-lucide="x" width="16"></i>
+                      </button>
+                  </td>
+              </tr>`;
+          }).join('');
+
+          if(rows === "") rows = `<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No agents flagged.</td></tr>`;
+
+          var th1 = "", th2 = "";
+          if (type === 'in' || type === 'scope') { th1 = "In %"; th2 = "Tasks x Calls"; }
+          else if (type === 'out') { th1 = "Out %"; th2 = "Tasks x Calls"; }
+          else if (type === 'cph') { th1 = "Total Tasks"; th2 = "CP/H"; }
+
+          return `
+          <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; height:380px;">
+              <div style="background:${headerColor}; padding:16px 20px; font-weight:800; font-size:1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--glass-border);">
+                  <span style="display:flex; align-items:center; gap:8px;">${icon} ${title}</span>
+                  <span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05);">${safeList.length}</span>
+              </div>
+              <div style="overflow-y:auto; flex:1;">
+                  <table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;">
+                      <thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(5px);">
+                          <tr>
+                              <th style="padding:12px 16px;">Agent Name</th>
+                              <th style="padding:12px 16px;">${th1}</th>
+                              <th style="padding:12px 16px;">${th2}</th>
+                              <th style="padding:12px 16px; text-align:center;">W.Days</th>
+                              <th style="padding:12px 16px; width:40px;"></th>
+                          </tr>
+                      </thead>
+                      <tbody>${rows}</tbody>
+                  </table>
+              </div>
+          </div>`;
+      }
+
+      var masterListStatus = d.usingMasterList 
+          ? `<span style="font-size:0.75rem; font-weight:700; color:var(--status-active); background:rgba(16,185,129,0.1); padding:4px 10px; border-radius:12px;"><i data-lucide="shield-check" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Active</span>`
+          : `<span style="font-size:0.75rem; font-weight:700; color:var(--status-warn); background:rgba(245,158,11,0.1); padding:4px 10px; border-radius:12px; cursor:pointer;" onclick="document.getElementById('master-modal').classList.add('open');"><i data-lucide="alert-circle" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Missing</span>`;
+
+      return modalsHtml + `
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;">
+          <div>
+              <h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2>
+              <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                  <select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">
+                      ${monthsHtml}
+                  </select>
+                  ${masterListStatus}
+                  <div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);">
+                      <span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical (70%+)</span>
+                      <span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-warn);"></div> Approaching (65%+)</span>
+                  </div>
+              </div>
+          </div>
+          <div style="display:flex; gap:12px;">
+              <button class="btn btn-glass" onclick="document.getElementById('master-modal').classList.add('open');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button>
+              <button class="btn btn-primary" onclick="document.getElementById('gem-modal').classList.add('open');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button>
+          </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; padding-bottom:40px;">
+          ${renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>')}
+          ${renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>')}
+          ${renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>')}
+          ${renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>')}
+      </div>
+      `;
+  }
   
   function renderTracker() {
       var isCoach = state.trackerMode === 'coaching';
@@ -1299,7 +1558,7 @@
   }
 
   window.archiveCurrentWeek = function() {
-      if(confirm("Freeze and Archive this specific Wednesday-to-Wednesday cycle?")) {
+      if(confirm("Freeze and Archive this specific cycle?")) {
           showToast("Crunching data & archiving...");
           if(typeof google!=='undefined') {
               google.script.run.withSuccessHandler(function(res) {
@@ -1365,7 +1624,7 @@
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;">
               <div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div>
-              <h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Wednesday Cycle...</h3>
+              <h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3>
               <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Furloughs, Coachings, and Special Roles.</p>
           </div>`;
       }
@@ -1385,17 +1644,21 @@
               <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
               <td style="padding:16px; text-align:right; font-weight:800; font-size:1.1rem; color:var(--text-main);">${a.total || 0}h</td>
+              
+              <td style="padding:16px; text-align:right; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 5 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800;">${a.cph || '-'}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace;">${a.aht || '-'}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace; font-weight:600; opacity:0.8;">${a.inOut || '-'}</td>
           </tr>
-      `; }).join('') || `<tr><td colspan="7" style="padding:40px; text-align:center; color:var(--text-muted);">No off-phone activity found for this cycle.</td></tr>`;
+      `; }).join('') || `<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>`;
 
       return `
       ${headerHtml}
       
       <div style="background:rgba(220, 38, 38, 0.05); border-left:4px solid var(--status-alert); padding:16px; margin-bottom:24px; border-radius:8px;">
           <h3 style="margin:0 0 4px 0; color:var(--status-alert); font-size:1rem; display:flex; align-items:center; gap:8px;">
-              <i data-lucide="alert-triangle" width="18"></i> CUMULATIVE WEEKLY TOTALS
+              <i data-lucide="alert-triangle" width="18"></i> CUMULATIVE CYCLE TOTALS
           </h3>
-          <p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">This tracker displays the combined total hours for the entire Wednesday-to-Wednesday cycle. It is not a daily view.</p>
+          <p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">This tracker displays the combined total off-phone hours for the cycle, merged with the latest Avaya GEM stats from the Analyzer.</p>
       </div>
 
       <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
@@ -1409,12 +1672,15 @@
                  <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
                      <tr>
                          <th style="padding:16px; text-align:left;">Agent Name</th>
-                         <th style="padding:16px; text-align:right;">WEEKLY ACSU</th>
-                         <th style="padding:16px; text-align:right;">WEEKLY Coaching</th>
-                         <th style="padding:16px; text-align:right;">WEEKLY SAFE</th>
-                         <th style="padding:16px; text-align:right;">WEEKLY ICL</th>
-                         <th style="padding:16px; text-align:right;">WEEKLY ULC</th>
-                         <th style="padding:16px; text-align:right; color:var(--text-main);">TOTAL WEEKLY</th>
+                         <th style="padding:16px; text-align:right;">ACSU</th>
+                         <th style="padding:16px; text-align:right;">Coach</th>
+                         <th style="padding:16px; text-align:right;">SAFE</th>
+                         <th style="padding:16px; text-align:right;">ICL</th>
+                         <th style="padding:16px; text-align:right;">ULC</th>
+                         <th style="padding:16px; text-align:right; color:var(--text-main);">TOTAL OFF-PHONE</th>
+                         <th style="padding:16px; text-align:right; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th>
+                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th>
+                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th>
                      </tr>
                  </thead>
                  <tbody>${rowsHtml}</tbody>
@@ -1837,4 +2103,3 @@
   }
 
 </script>
-}
