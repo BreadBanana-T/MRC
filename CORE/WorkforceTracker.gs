@@ -1,6 +1,6 @@
 /**
- * MODULE: WORKFORCE TRACKER (V6.3)
- * Features: Strict Wed 23:00 Weekly Boundaries, Calendar Month Snapping
+ * MODULE: WORKFORCE TRACKER (V7.1)
+ * Features: Strict Boundaries, Master Tracker with GEM V2 Integration
  */
 
 var WorkforceTracker = {
@@ -567,8 +567,28 @@ var WorkforceTracker = {
             });
         }
 
+        // LOAD SAVED GEM STATS TO INJECT INTO MASTER TRACKER (V2 DATABASE LINK)
+        const dbGEM = this._getDB('WF_GEM_DATA_V2');
+        let gemData = {};
+        if (dbGEM && dbGEM.getLastRow() > 1) {
+            dbGEM.getDataRange().getDisplayValues().slice(1).forEach(row => {
+                let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
+                gemData[agName] = { cph: row[2], inPct: row[3], outPct: row[4], aht: row[5] };
+            });
+        }
+
         let finalArr = Object.values(report.agents).filter(a => a.total > 0);
-        finalArr.forEach(a => { ['acsu','coach','safe','icl','ulc','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); });
+        finalArr.forEach(a => { 
+            ['acsu','coach','safe','icl','ulc','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
+            if (gemData[a.name]) {
+                a.cph = parseFloat(gemData[a.name].cph).toFixed(2);
+                a.aht = gemData[a.name].aht;
+                a.inOut = Math.round(parseFloat(gemData[a.name].inPct) * 100) + "% / " + Math.round(parseFloat(gemData[a.name].outPct) * 100) + "%";
+            } else {
+                a.cph = '-'; a.aht = '-'; a.inOut = '-';
+            }
+        });
+
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
   },
@@ -621,7 +641,7 @@ var WorkforceTracker = {
       for (let i = 1; i < data.length; i++) {
           if (data[i][2] === targetPeriod) {
               report.cycle = data[i][1];
-              report.data.push({ name: data[i][3], acsu: data[i][4], coach: data[i][5], safe: data[i][6], icl: data[i][7], ulc: data[i][8], total: data[i][9] });
+              report.data.push({ name: data[i][3], acsu: data[i][4], coach: data[i][5], safe: data[i][6], icl: data[i][7], ulc: data[i][8], total: data[i][9], cph: '-', aht: '-', inOut: '-' });
           }
       }
       report.data.sort((a,b) => b.total - a.total);
