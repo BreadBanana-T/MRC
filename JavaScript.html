@@ -37,6 +37,7 @@
       insightMode: 'day', 
       selectedDate: new Date().toISOString().split('T')[0],
       insightSearch: '',
+      insightRegionFilter: 'All', 
       unifiedReport: null,
       archiveList: [],
       selectedArchive: 'LIVE',
@@ -49,6 +50,7 @@
       trackerSearch: '',
       trackerLoading: true,
       analyzerData: null, 
+      expandedInsights: new Set(), // NEW: Memory cache for the accordion!
       syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }
   };
 
@@ -841,8 +843,8 @@
       var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       
       if (state.alerts && state.alerts.length > 0) {
-         html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-wrap:wrap; gap:12px;">`;
-         state.alerts.forEach(function(a) { html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:6px 12px; border-radius:8px; font-size:0.8rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1);">${a.province || 'Unknown'}: ${a.type || ''} (${a.count || 0})</div>`; });
+         html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-direction:column; gap:12px;">`;
+         state.alerts.forEach(function(a) { html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 16px; border-radius:8px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:inline-block; width:fit-content;">${a.province || 'Unknown'}: ${a.type || ''}</div>`; });
          html += `</div></div>`;
       } else {
          html += `<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>`;
@@ -863,7 +865,7 @@
              <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
                  <div class="flex-between" style="margin-bottom:16px;">
                      <span style="font-weight:800; font-size:1.1rem;">${c.name || ''}</span>
-                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted);">${prov}</span>
+                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">${prov}</span>
                  </div>
                  <div class="flex-between" style="align-items:flex-end;">
                      <div>
@@ -872,7 +874,7 @@
                      </div>
                      <div style="text-align:right;">
                          <div style="font-size:1.4rem; font-weight:700;">${c.wind || ''}</div>
-                         <div class="kpi-label">KM/H</div>
+                         <div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div>
                      </div>
                  </div>
                  <div class="weather-mini-row">
@@ -889,15 +891,16 @@
       var c = (cond || "").toLowerCase();
       var i = "cloud";
       if(c.indexOf("sun") !== -1 || c.indexOf("clear") !== -1) i = "sun";
-      else if(c.indexOf("rain") !== -1 || c.indexOf("shower") !== -1) i = "cloud-rain";
+      else if(c.indexOf("rain") !== -1 || c.indexOf("shower") !== -1 || c.indexOf("drizzle") !== -1) i = "cloud-rain";
       else if(c.indexOf("snow") !== -1 || c.indexOf("flurr") !== -1) i = "snowflake";
       else if(c.indexOf("storm") !== -1 || c.indexOf("thunder") !== -1) i = "cloud-lightning";
-      else if(c.indexOf("cloud") !== -1 || c.indexOf("overcast") !== -1) i = "cloud";
+      else if(c.indexOf("cloud") !== -1 || c.indexOf("overcast") !== -1 || c.indexOf("fog") !== -1) i = "cloud";
       
       if(isSmall) {
           if (i==="sun") return `<i data-lucide="sun" width="16"></i>`;
           if (i==="cloud-rain") return `<i data-lucide="cloud-rain" width="16"></i>`;
           if (i==="snowflake") return `<i data-lucide="snowflake" width="16"></i>`;
+          if (i==="cloud-lightning") return `<i data-lucide="cloud-lightning" width="16"></i>`;
           return `<i data-lucide="cloud" width="16"></i>`;
       }
       return `<i data-lucide="${i}" width="20"></i>`;
@@ -905,12 +908,16 @@
 
   function renderScripts() {
      var cats = new Set();
-     cats.add("All");
      var scriptArr = state.scripts || [];
      for(var i=0; i<scriptArr.length; i++) {
-         cats.add(scriptArr[i].category || "General");
+         if ((scriptArr[i].category || "General") !== "All") {
+             cats.add(scriptArr[i].category || "General");
+         }
      }
+     
+     // FORCE "All" CATEGORY TO ALWAYS BE AT THE VERY TOP
      var categories = Array.from(cats).sort();
+     categories.unshift("All");
      
      var catList = categories.map(function(c) { return `
          <button onclick="state.selectedCategory='${c}'; state.selectedScriptId=null; render();" 
@@ -1123,7 +1130,6 @@
       } 
   };
 
-  // --- NEW: RED FLAGS / ASSIGNMENT ANALYZER (NO TABS, PURE GRID) ---
   window.openAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.add('open'); };
   window.closeAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.remove('open'); };
 
@@ -1281,9 +1287,7 @@
               if (!a) return '';
               var col1 = "", col2 = "";
               
-              var statusDot = a.isApproaching 
-                  ? `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-warn); flex-shrink:0;" title="Approaching Threshold"></div>` 
-                  : `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;" title="Critical Flag"></div>`;
+              var statusDot = `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;"></div>`;
 
               if (type === 'in' || type === 'scope') {
                   var inPct = a.inPct || 0;
@@ -1297,7 +1301,6 @@
               } else if (type === 'cph') {
                   var cphV = a.cph || 0;
                   var totalCalls = a.totalCalls || 0;
-                  statusDot = `<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;"></div>`;
                   col1 = `<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">${totalCalls}</td>`;
                   col2 = `<td style="padding:12px 16px; font-weight:800;">${cphV.toFixed(2)} ${getTrendHtml(a.trendCph, false, false)}</td>`;
               }
@@ -1327,7 +1330,7 @@
 
           var th1 = "", th2 = "";
           if (type === 'in' || type === 'scope') { th1 = "In %"; th2 = "Tasks x Calls"; }
-          else if (type === 'out') { th1 = "Out %"; th2 = "Tasks x Calls"; }
+          else if (type === 'out') { th1 = "Out %"; th2 = " "; } 
           else if (type === 'cph') { th1 = "Total Tasks"; th2 = "CP/H"; }
 
           return `
@@ -1367,8 +1370,7 @@
                   </select>
                   ${masterListStatus}
                   <div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);">
-                      <span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical (70%+)</span>
-                      <span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-warn);"></div> Approaching (65%+)</span>
+                      <span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span>
                   </div>
               </div>
           </div>
@@ -1386,7 +1388,214 @@
       </div>
       `;
   }
-  
+
+  // --- NEW: ACCORDION TOGGLE LOGIC WITH MEMORY ---
+  window.toggleInsightRow = function(id) {
+      if (state.expandedInsights.has(id)) {
+          state.expandedInsights.delete(id);
+      } else {
+          state.expandedInsights.add(id);
+      }
+      
+      // Directly manipulate the DOM for instant visual feedback without waiting for a full re-render
+      var row = document.getElementById('details-' + id);
+      var icon = document.getElementById('icon-' + id);
+      if(!row) return;
+      if (state.expandedInsights.has(id)) {
+          row.style.display = 'table-row';
+          if(icon) icon.style.transform = 'rotate(180deg)';
+      } else {
+          row.style.display = 'none';
+          if(icon) icon.style.transform = 'rotate(0deg)';
+      }
+  };
+
+  function renderInsights() {
+      var u = state.unifiedReport || {};
+      
+      var archiveOptionsHtml = (state.archiveList || []).map(function(a) {
+         return `<option value="${a.period}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${a.cycle}: ${a.period}</option>`;
+      }).join('');
+
+      var rightSideHtml = '';
+      var datePickerHtml = '';
+      if (state.selectedArchive === 'LIVE') {
+          datePickerHtml = `<input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">`;
+          rightSideHtml = `<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>`;
+      } else {
+          rightSideHtml = `<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>`;
+      }
+
+      var schedText = "Loading...";
+      if (state.syncMeta && state.syncMeta.sched) schedText = state.syncMeta.sched;
+
+      var headerHtml = `
+      <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+          .insight-pill { background:rgba(0,0,0,0.04); padding:4px 8px; border-radius:6px; font-family:monospace; font-size:0.8rem; color:var(--text-main); font-weight:700; border:1px solid var(--glass-border); }
+          .insight-pill span { color:var(--text-muted); font-family:var(--font-ui); font-size:0.7rem; text-transform:uppercase; margin-right:6px; }
+      </style>
+      <div class="sticky-header" style="justify-content:space-between; align-items:center;">
+         <div style="display:flex; align-items:center; gap:16px;">
+             <div>
+                 <h2 style="margin:0;">Master Operations Tracker</h2>
+                 <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
+                     <span><i data-lucide="calendar-check" width="10"></i> ${schedText}</span>
+                 </div>
+             </div>
+             
+             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px; margin-left:16px;">
+                 <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
+                    ${u.cycle || 'CALCULATING...'}
+                 </span>
+             </div>
+
+             <select class="input-aether" style="width:auto; height:34px; font-weight:700;" onchange="state.selectedArchive=this.value; fetchInsightData();">
+                 <option value="LIVE" ${state.selectedArchive === 'LIVE' ? 'selected' : ''}>🔴 Live Calculation Engine</option>
+                 ${archiveOptionsHtml}
+             </select>
+
+             ${datePickerHtml}
+
+             <div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border); margin-left:12px;">
+                <button class="nav-btn ${state.insightRegionFilter==='All'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.insightRegionFilter='All'; render();">All</button>
+                <button class="nav-btn ${state.insightRegionFilter==='Onshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.insightRegionFilter='Onshore'; render();">Onshore</button>
+                <button class="nav-btn ${state.insightRegionFilter==='Offshore'?'active':''}" style="height:32px; font-size:0.8rem;" onclick="state.insightRegionFilter='Offshore'; render();">Offshore</button>
+             </div>
+         </div>
+         <div style="display:flex; gap:12px;">
+             <input id="insight-search" type="text" class="input-aether" style="width:200px; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${state.insightSearch || ''}">
+             ${rightSideHtml}
+         </div>
+      </div>`;
+
+      if (!u.data) {
+          return headerHtml + `
+          <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;">
+              <div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div>
+              <h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3>
+              <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Schedule and deep GEM metrics.</p>
+          </div>`;
+      }
+      
+      var displayData = u.data || [];
+      
+      // APPLY REGION FILTER
+      if (state.insightRegionFilter !== 'All') {
+          displayData = displayData.filter(function(a) { return (a.region || 'Onshore').includes(state.insightRegionFilter); });
+      }
+
+      if (state.insightSearch) {
+          var term = state.insightSearch.toLowerCase();
+          displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
+      }
+
+      // NEW: ACCORDION ROW RENDERER WITH MEMORY (CLEAN HEADERS)
+      var rowsHtml = displayData.map(function(a, idx) { 
+          var g = a.gem || {};
+          var safeId = "agt-" + idx;
+          var regionTag = (a.region || '').includes('Offshore') ? `<span style="font-size:0.6rem; background:var(--region-off); color:white; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle; font-weight:800;">OFF</span>` : '';
+          
+          // Check if this row was already expanded before the render happened
+          var isExpanded = state.expandedInsights.has(safeId);
+          var displayStyle = isExpanded ? 'table-row' : 'none';
+          var iconTransform = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
+
+          return `
+          <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s; cursor:pointer;" class="hover-bg" onclick="toggleInsightRow('${safeId}')">
+              <td style="padding:16px; font-weight:700; color:var(--text-main);">
+                 ${a.name || ''} ${regionTag}
+              </td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role); font-weight:800;">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-active); font-weight:800;">${a.safe > 0 ? a.safe + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc); font-weight:800;">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800; font-size:1.1rem;">${a.cph || '-'}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">${a.aht || '-'}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">${a.inOut || '-'}</td>
+              <td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-${safeId}" data-lucide="chevron-down" width="18" style="transform:${iconTransform}; transition:0.3s;"></i></td>
+          </tr>
+
+          <tr id="details-${safeId}" style="display:${displayStyle}; background:rgba(0,0,0,0.015);">
+              <td colspan="8" style="padding:0;">
+                  <div style="padding:24px; border-bottom:2px solid var(--glass-border); display:grid; grid-template-columns: 1fr 1fr; gap:32px;">
+                      
+                      <div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);">
+                          <div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="calendar-clock" width="14"></i> Off-Phone / Roles Tracker</div>
+                          <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                              <div class="insight-pill" style="border-color:var(--text-main); background:rgba(0,0,0,0.05); font-size: 0.95rem;"><span>Total Off-Phone</span> <b style="color:var(--text-main);">${a.total || 0}h</b></div>
+                              <div class="insight-pill"><span>ACSU</span> ${a.acsu > 0 ? a.acsu + 'h' : '-'}</div>
+                              <div class="insight-pill"><span>Coach</span> ${a.coach > 0 ? a.coach + 'h' : '-'}</div>
+                              <div class="insight-pill" style="border-color:rgba(79,70,229,0.3); background:rgba(79,70,229,0.05);"><span>Tower</span> <b style="color:var(--accent-primary);">${a.tower > 0 ? a.tower + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(124,58,237,0.3); background:rgba(124,58,237,0.05);"><span>ICL</span> <b style="color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(5,150,105,0.3); background:rgba(5,150,105,0.05);"><span>SAFE</span> <b style="color:var(--status-active);">${a.safe > 0 ? a.safe + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(249,115,22,0.3); background:rgba(249,115,22,0.05);"><span>ULC</span> <b style="color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</b></div>
+                          </div>
+                      </div>
+
+                      <div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);">
+                          <div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart" width="14"></i> GEM Deep Dive</div>
+                          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                              
+                              <div style="display:flex; flex-direction:column; gap:8px;">
+                                  <div class="insight-pill"><span>Avg Talk Time</span> ${g.avgTalk || '-'}</div>
+                                  <div class="insight-pill"><span>Avg Hold Time</span> ${g.avgHold || '-'}</div>
+                                  <div class="insight-pill"><span>Avg ACW</span> ${g.avgAcw || '-'}</div>
+                              </div>
+                              <div style="display:flex; flex-direction:column; gap:8px;">
+                                  <div class="insight-pill"><span>Transfers</span> ${g.transfers || 0} (${g.transfPct ? (g.transfPct * 100).toFixed(1) + '%' : '0%'})</div>
+                                  <div class="insight-pill"><span>Outbound Calls</span> ${g.outCalls || 0}</div>
+                                  <div class="insight-pill"><span>Ext. In Calls</span> ${g.extCalls || 0}</div>
+                              </div>
+
+                          </div>
+                      </div>
+
+                  </div>
+              </td>
+          </tr>
+      `; }).join('') || `<tr><td colspan="8" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>`;
+
+      return `
+      ${headerHtml}
+      
+      <div style="background:rgba(99, 102, 241, 0.05); border-left:4px solid var(--accent-primary); padding:16px; margin-bottom:24px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+              <h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;">
+                  <i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD
+              </h3>
+              <p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown and deep-dive Avaya GEM metrics.</p>
+          </div>
+          <div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">
+              Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">${displayData.length}</span>
+          </div>
+      </div>
+
+      <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
+          <div style="background:rgba(0,0,0,0.02); padding:16px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+              <div style="font-weight:700; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;">
+                  Cycle Range: <span style="color:var(--text-main);">${u.period || ''}</span>
+              </div>
+          </div>
+          <div style="overflow-y:auto; flex:1;">
+              <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                 <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
+                     <tr>
+                         <th style="padding:16px; text-align:left;">Agent Name</th>
+                         <th style="padding:16px; text-align:right; color:var(--status-role);">ICL</th>
+                         <th style="padding:16px; text-align:right; color:var(--status-active);">SAFE</th>
+                         <th style="padding:16px; text-align:right; color:var(--status-ulc);">ULC</th>
+                         <th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th>
+                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th>
+                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th>
+                         <th style="padding:16px; width:40px;"></th>
+                     </tr>
+                 </thead>
+                 <tbody>${rowsHtml}</tbody>
+              </table>
+          </div>
+      </div>`;
+  }
+
   function renderTracker() {
       var isCoach = state.trackerMode === 'coaching';
       var d = state.trackerData || {};
@@ -1555,138 +1764,6 @@
          </div>
       </div>
       `;
-  }
-
-  window.archiveCurrentWeek = function() {
-      if(confirm("Freeze and Archive this specific cycle?")) {
-          showToast("Crunching data & archiving...");
-          if(typeof google!=='undefined') {
-              google.script.run.withSuccessHandler(function(res) {
-                  showToast(res);
-                  fetchArchiveList(); 
-              }).archiveUnifiedWeek(state.selectedDate);
-          }
-      }
-  };
-
-  function renderInsights() {
-      var u = state.unifiedReport || {};
-      
-      var archiveOptionsHtml = (state.archiveList || []).map(function(a) {
-         return `<option value="${a.period}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${a.cycle}: ${a.period}</option>`;
-      }).join('');
-
-      var rightSideHtml = '';
-      var datePickerHtml = '';
-      if (state.selectedArchive === 'LIVE') {
-          datePickerHtml = `<input type="date" class="input-aether" style="width:auto; height:34px;" value="${state.selectedDate}" onchange="handleDateChange(this.value)">`;
-          rightSideHtml = `<button class="btn btn-primary" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="16"></i> Freeze & Archive</button>`;
-      } else {
-          rightSideHtml = `<button class="btn btn-glass" disabled style="opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="16"></i> Archived</button>`;
-      }
-
-      var schedText = "Loading...";
-      if (state.syncMeta && state.syncMeta.sched) schedText = state.syncMeta.sched;
-
-      var headerHtml = `
-      <style>
-          @keyframes spin { to { transform: rotate(360deg); } }
-      </style>
-      <div class="sticky-header" style="justify-content:space-between; align-items:center;">
-         <div style="display:flex; align-items:center; gap:16px;">
-             <div>
-                 <h2 style="margin:0;">Master Operations Tracker</h2>
-                 <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">
-                     <span><i data-lucide="calendar-check" width="10"></i> ${schedText}</span>
-                 </div>
-             </div>
-             
-             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px; margin-left:16px;">
-                 <span style="font-weight:800; font-size:0.8rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">
-                    ${u.cycle || 'CALCULATING...'}
-                 </span>
-             </div>
-
-             <select class="input-aether" style="width:auto; height:34px; font-weight:700;" onchange="state.selectedArchive=this.value; fetchInsightData();">
-                 <option value="LIVE" ${state.selectedArchive === 'LIVE' ? 'selected' : ''}>🔴 Live Calculation Engine</option>
-                 ${archiveOptionsHtml}
-             </select>
-
-             ${datePickerHtml}
-         </div>
-         <div style="display:flex; gap:12px;">
-             <input id="insight-search" type="text" class="input-aether" style="width:200px; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${state.insightSearch || ''}">
-             ${rightSideHtml}
-         </div>
-      </div>`;
-
-      if (!u.data) {
-          return headerHtml + `
-          <div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;">
-              <div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div>
-              <h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3>
-              <p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Furloughs, Coachings, and Special Roles.</p>
-          </div>`;
-      }
-      
-      var displayData = u.data || [];
-      if (state.insightSearch) {
-          var term = state.insightSearch.toLowerCase();
-          displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
-      }
-
-      var rowsHtml = displayData.map(function(a) { return `
-          <tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">
-              <td style="padding:16px; font-weight:700; color:var(--text-main);">${a.name || ''}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace;">${a.acsu > 0 ? a.acsu + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace;">${a.coach > 0 ? a.coach + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-active);">${a.safe > 0 ? a.safe + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-weight:800; font-size:1.1rem; color:var(--text-main);">${a.total || 0}h</td>
-              
-              <td style="padding:16px; text-align:right; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 5 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800;">${a.cph || '-'}</td>
-              <td style="padding:16px; text-align:center; font-family:monospace;">${a.aht || '-'}</td>
-              <td style="padding:16px; text-align:center; font-family:monospace; font-weight:600; opacity:0.8;">${a.inOut || '-'}</td>
-          </tr>
-      `; }).join('') || `<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>`;
-
-      return `
-      ${headerHtml}
-      
-      <div style="background:rgba(220, 38, 38, 0.05); border-left:4px solid var(--status-alert); padding:16px; margin-bottom:24px; border-radius:8px;">
-          <h3 style="margin:0 0 4px 0; color:var(--status-alert); font-size:1rem; display:flex; align-items:center; gap:8px;">
-              <i data-lucide="alert-triangle" width="18"></i> CUMULATIVE CYCLE TOTALS
-          </h3>
-          <p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">This tracker displays the combined total off-phone hours for the cycle, merged with the latest Avaya GEM stats from the Analyzer.</p>
-      </div>
-
-      <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;">
-          <div style="background:rgba(0,0,0,0.02); padding:16px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
-              <div style="font-weight:700; color:var(--text-muted); font-size:0.85rem; text-transform:uppercase; letter-spacing:1px;">
-                  Cycle Range: <span style="color:var(--text-main);">${u.period || ''}</span>
-              </div>
-          </div>
-          <div style="overflow-y:auto; flex:1;">
-              <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
-                 <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
-                     <tr>
-                         <th style="padding:16px; text-align:left;">Agent Name</th>
-                         <th style="padding:16px; text-align:right;">ACSU</th>
-                         <th style="padding:16px; text-align:right;">Coach</th>
-                         <th style="padding:16px; text-align:right;">SAFE</th>
-                         <th style="padding:16px; text-align:right;">ICL</th>
-                         <th style="padding:16px; text-align:right;">ULC</th>
-                         <th style="padding:16px; text-align:right; color:var(--text-main);">TOTAL OFF-PHONE</th>
-                         <th style="padding:16px; text-align:right; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th>
-                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th>
-                         <th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th>
-                     </tr>
-                 </thead>
-                 <tbody>${rowsHtml}</tbody>
-              </table>
-          </div>
-      </div>`;
   }
 
   function renderCalc() {
