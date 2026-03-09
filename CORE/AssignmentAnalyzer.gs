@@ -135,6 +135,17 @@ var AssignmentAnalyzer = {
               prevMonth = months[tIdx + 1];
           }
 
+          // FIX HELPER: Repairs any nasty dates found in the Red Flags tab as well
+          const fixTime = (v) => {
+              if (!v || v === '-') return '-';
+              let s = String(v).trim();
+              if (s.startsWith("'")) s = s.substring(1);
+              let m = s.match(/T(\d{2}:\d{2})/);
+              if (m) return m[1];
+              if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "HH:mm");
+              return s;
+          };
+
           let currentMap = {};
           let prevMap = {};
           
@@ -172,7 +183,7 @@ var AssignmentAnalyzer = {
               if (r[0] === targetMonth) {
                   currentMap[agent] = {
                       level: agentLevel,
-                      cph: cphV, inPct: inP, outPct: outP, aht: r[5], 
+                      cph: cphV, inPct: inP, outPct: outP, aht: fixTime(r[5]), 
                       tasksXCalls: parseFloat(r[6]) || 0, totalCalls: parseInt(r[7]) || 0, 
                       callsAnsw: parseInt(r[8]) || 0, wDays: parseInt(r[9]) || 0
                   };
@@ -355,12 +366,15 @@ var AssignmentAnalyzer = {
               return dStr !== repMonth;
           });
           
+          // FIX: Add an apostrophe to force Google Sheets to save as raw text!
+          let safeT = function(t) { return (t && t !== '-' && t !== '00:00') ? "'" + t : "-"; };
+          
           let newRows = [];
           Object.keys(gemMap).forEach(agent => {
               let m = gemMap[agent];
               newRows.push([
-                  repMonth, agent, m.cph, m.inPct, m.outPct, m.aht, m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays,
-                  m.transfers, m.transfPct, m.avgTalk, m.avgHold, m.avgAcw, m.outCalls, m.outTalk, m.extCalls, m.extTalk
+                  repMonth, agent, m.cph, m.inPct, m.outPct, safeT(m.aht), m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays,
+                  m.transfers, m.transfPct, safeT(m.avgTalk), safeT(m.avgHold), safeT(m.avgAcw), m.outCalls, safeT(m.outTalk), m.extCalls, safeT(m.extTalk)
               ]);
           });
           
