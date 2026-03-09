@@ -1,6 +1,6 @@
 /**
- * MODULE: ASSIGNMENT ANALYZER (RED FLAGS) V5.0
- * Features: V2 DB (Fixes Corruption), MasterList Filter, Yellow/Red Flag Tiers
+ * MODULE: ASSIGNMENT ANALYZER (RED FLAGS) V5.4
+ * Features: Exact Excel Math (70%, 75%, < 7.3), Fuzzy Name Matching, Level Failsafes
  */
 
 var AssignmentAnalyzer = {
@@ -30,6 +30,7 @@ var AssignmentAnalyzer = {
           let colName = headers.findIndex(h => h.toLowerCase().includes('employee_name') || h.toLowerCase() === 'name');
           let colJob = headers.findIndex(h => h.toLowerCase().includes('title') || h.toLowerCase().includes('job'));
           let colStatus = headers.findIndex(h => h.toLowerCase().includes('status'));
+          let colLevel = headers.findIndex(h => h.toLowerCase().includes('erc_level') || h.toLowerCase().includes('level'));
 
           let validAgents = [];
           for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -38,8 +39,11 @@ var AssignmentAnalyzer = {
               let job = cols[colJob] || "";
               let status = cols[colStatus] || "";
               
+              // Safely default to Level 2 if the column is empty/missing so they aren't hidden from Outbound
+              let level = colLevel > -1 ? parseInt(cols[colLevel]) || 2 : 2;
+
               if (name && job.toLowerCase().includes('monitoring') && status.toLowerCase().includes('active')) {
-                  validAgents.push([name.replace(/(^"|"$)/g, '').trim()]);
+                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level]);
               }
           }
           
@@ -48,19 +52,19 @@ var AssignmentAnalyzer = {
               let sheet = ss.getSheetByName('WF_MASTERLIST');
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
-              sheet.appendRow(["Agent Name"]);
-              sheet.getRange(2, 1, validAgents.length, 1).setValues(validAgents);
+              sheet.appendRow(["Agent Name", "ERC Level"]); 
+              sheet.getRange(2, 1, validAgents.length, 2).setValues(validAgents);
               
               if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
                   try {
                       let mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('WF_MASTERLIST');
                       if (!mSheet) mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).insertSheet('WF_MASTERLIST');
                       mSheet.clearContents();
-                      mSheet.appendRow(["Agent Name"]);
-                      mSheet.getRange(2, 1, validAgents.length, 1).setValues(validAgents);
+                      mSheet.appendRow(["Agent Name", "ERC Level"]); 
+                      mSheet.getRange(2, 1, validAgents.length, 2).setValues(validAgents);
                   } catch(e) {}
               }
-              return `Success: Locked ${validAgents.length} Monitoring Agents into the engine. Managers will now be ignored.`;
+              return `Success: Locked ${validAgents.length} Monitoring Agents into the engine.\nManagers will now be ignored.`;
           }
           return "Error: No active monitoring agents found in the pasted list.";
       } catch (e) {
@@ -76,7 +80,7 @@ var AssignmentAnalyzer = {
           let repMonth = "";
           for (let k in map) { if (map[k].month) { repMonth = map[k].month; break; } }
           if (!repMonth) repMonth = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-01");
-
+          
           this._saveGEMToDB(map, repMonth);
           return this.getAnalyzerData(repMonth);
       } catch (e) {
@@ -89,6 +93,7 @@ var AssignmentAnalyzer = {
           const ss = SpreadsheetApp.getActiveSpreadsheet();
           let sheet = ss.getSheetByName('WF_EXCLUSIONS');
           if (!sheet) { sheet = ss.insertSheet('WF_EXCLUSIONS'); sheet.appendRow(["Excluded Agents"]); }
+          
           let existing = sheet.getDataRange().getValues().flat();
           if (!existing.includes(agentName)) sheet.appendRow([agentName]);
           
@@ -105,15 +110,21 @@ var AssignmentAnalyzer = {
 
   getAnalyzerData: function(targetMonth) {
       try {
-          let db = this._getDB('WF_GEM_DATA_V2'); // NEW DATABASE TO BYPASS CORRUPTED DATA
+          let db = this._getDB('WF_GEM_DATA_V2');
           if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
-
-          let validAgents = new Set();
+          
+          let validAgents = new Map();
           let mlSheet = this._getDB('WF_MASTERLIST');
           let useMasterList = false;
+          
           if (mlSheet && mlSheet.getLastRow() > 1) {
               useMasterList = true;
-              mlSheet.getDataRange().getDisplayValues().slice(1).forEach(r => validAgents.add(String(r[0]).trim().toLowerCase()));
+              mlSheet.getDataRange().getDisplayValues().slice(1).forEach(r => {
+                  let lvl = parseInt(r[1]);
+                  if (isNaN(lvl)) lvl = 2; // Ultimate Failsafe
+                  let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+                  validAgents.set(cleanName, lvl);
+              });
           }
 
           let exclusions = new Set();
@@ -122,15 +133,22 @@ var AssignmentAnalyzer = {
               exclSheet.getDataRange().getValues().slice(1).forEach(r => exclusions.add(String(r[0]).trim()));
           }
 
-          let data = db.getDataRange().getDisplayValues().slice(1);
-          let validData = data.filter(r => String(r[0]).match(/^20\d{2}-\d{2}-\d{2}/));
+          let data = db.getDataRange().getValues().slice(1);
+          let validData = [];
           
-          if (validData.length === 0) return JSON.stringify({ error: "Database was corrupted. Please re-import your GEM report.", months: [] });
+          data.forEach(r => {
+              let dateStr = r[0] instanceof Date ? Utilities.formatDate(r[0], "America/Toronto", "yyyy-MM-dd") : String(r[0]);
+              if (dateStr.match(/^20\d{2}-\d{2}-\d{2}/)) {
+                  r[0] = dateStr;
+                  validData.push(r);
+              }
+          });
 
+          if (validData.length === 0) return JSON.stringify({ error: "Database was corrupted. Please re-import your GEM report.", months: [] });
+          
           let monthSet = new Set();
           validData.forEach(r => monthSet.add(r[0]));
-          let months = Array.from(monthSet).sort().reverse(); 
-
+          let months = Array.from(monthSet).sort().reverse();
           if (!targetMonth || !monthSet.has(targetMonth)) {
               targetMonth = months.length > 0 ? months[0] : null;
           }
@@ -143,10 +161,43 @@ var AssignmentAnalyzer = {
 
           let currentMap = {};
           let prevMap = {};
-
+          
           validData.forEach(r => {
               let agent = String(r[1]).trim();
-              if (useMasterList && !validAgents.has(agent.toLowerCase())) return; 
+              let cleanAgent = agent.toLowerCase().replace(/\s+/g, ' ');
+              let agentLevel = 2; // Default if ML missing
+              
+              if (useMasterList) {
+                  let matchedLvl = null;
+                  
+                  // 1. Try Exact Match
+                  if (validAgents.has(cleanAgent)) {
+                      matchedLvl = validAgents.get(cleanAgent);
+                  } else {
+                      // 2. Try Fuzzy Match (e.g. "Dansou, Senami Patrick" vs "Dansou, Senami")
+                      let gnParts = cleanAgent.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
+                      
+                      for (let [mlName, lvl] of validAgents.entries()) {
+                          let mlParts = mlName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
+                          
+                          // If Last Name and First Name match perfectly, it's the same person
+                          if (gnParts.length > 1 && mlParts.length > 1 && gnParts[0] === mlParts[0] && gnParts[1] === mlParts[1]) {
+                              matchedLvl = lvl;
+                              break;
+                          }
+                          // Fallback substring check
+                          if (cleanAgent.includes(mlName) || mlName.includes(cleanAgent)) {
+                              matchedLvl = lvl;
+                              break;
+                          }
+                      }
+                  }
+                  
+                  // If we still can't find them, they are a Manager/TMA -> Skip entirely
+                  if (matchedLvl === null) return; 
+                  agentLevel = matchedLvl;
+              }
+              
               if (exclusions.has(agent)) return; 
 
               let inP = parseFloat(r[3]) || 0; if (inP > 1) inP = inP / 100;
@@ -155,6 +206,7 @@ var AssignmentAnalyzer = {
               
               if (r[0] === targetMonth) {
                   currentMap[agent] = {
+                      level: agentLevel, // Store the verified level!
                       cph: cphV, inPct: inP, outPct: outP, aht: r[5], 
                       tasksXCalls: parseFloat(r[6]) || 0, totalCalls: parseInt(r[7]) || 0, 
                       callsAnsw: parseInt(r[8]) || 0, wDays: parseInt(r[9]) || 0
@@ -163,16 +215,18 @@ var AssignmentAnalyzer = {
                   prevMap[agent] = { cph: cphV, inPct: inP, outPct: outP };
               }
           });
-
+          
           let inboundList = [];
           let outOfScopeList = [];
           let outboundList = [];
           let cphList = [];
-
+          
           Object.keys(currentMap).forEach(agent => {
               let c = currentMap[agent];
               let p = prevMap[agent] || null;
               
+              if (c.wDays < 5) return; 
+
               let trendIn = p ? (c.inPct - p.inPct) : 0;
               let trendOut = p ? (c.outPct - p.outPct) : 0;
               let trendCPH = p ? (c.cph - p.cph) : 0;
@@ -182,43 +236,35 @@ var AssignmentAnalyzer = {
                   inPct: c.inPct, prevIn: p ? p.inPct : null, trendIn: trendIn,
                   outPct: c.outPct, prevOut: p ? p.outPct : null, trendOut: trendOut,
                   cph: c.cph, prevCph: p ? p.cph : null, trendCph: trendCPH,
-                  aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls,
-                  isApproaching: false 
+                  aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls
               };
 
-              // INBOUND LOGIC (>= 65% Yellow, >= 70% Red)
-              if (c.inPct >= 0.65) {
-                  let tierPayload = JSON.parse(JSON.stringify(payload));
-                  tierPayload.isApproaching = (c.inPct < 0.70);
-                  if (c.tasksXCalls >= 0.50) inboundList.push(tierPayload);
-                  else outOfScopeList.push(tierPayload);
+              // INBOUND LOGIC (>= 75% Red)
+              if (c.inPct >= 0.75) {
+                  if (c.tasksXCalls >= 0.50 || c.totalCalls === 0) inboundList.push(payload);
+                  else outOfScopeList.push(payload);
               }
               
-              // OUTBOUND LOGIC (>= 65% Yellow, >= 70% Red)
-              if (c.outPct >= 0.65) {
-                  let tierPayload = JSON.parse(JSON.stringify(payload));
-                  tierPayload.isApproaching = (c.outPct < 0.70);
-                  outboundList.push(tierPayload);
+              // OUTBOUND LOGIC (>= 75% Red, Level 2+)
+              if (c.outPct >= 0.75 && c.level >= 2) {
+                  outboundList.push(payload);
               }
 
-              // CPH LOGIC (< 6.0 Yellow, < 5.0 Red)
-              if (c.cph > 0 && c.cph < 6.0) {
-                  let tierPayload = JSON.parse(JSON.stringify(payload));
-                  tierPayload.isApproaching = (c.cph >= 5.0);
-                  cphList.push(tierPayload);
+              // CP/H LOGIC (< 7.3 Red)
+              if (c.cph > 0 && c.cph <= 7.3) {
+                  cphList.push(payload);
               }
           });
-
+          
           inboundList.sort((a,b) => b.inPct - a.inPct);
           outOfScopeList.sort((a,b) => b.inPct - a.inPct);
           outboundList.sort((a,b) => b.outPct - a.outPct);
-          cphList.sort((a,b) => a.cph - b.cph); 
-
+          cphList.sort((a,b) => a.cph - b.cph);
+          
           return JSON.stringify({
               selectedMonth: targetMonth, availableMonths: months, usingMasterList: useMasterList,
               inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList
           });
-
       } catch (e) {
           return JSON.stringify({ error: "Data generation failed: " + e.message });
       }
@@ -284,7 +330,7 @@ var AssignmentAnalyzer = {
       if (isNaN(f)) return 0;
       if (s.includes('%')) return f / 100;
       if (f > 1) return f / 100; 
-      return f; 
+      return f;
   },
 
   _parseSafeFloat: function(val) {
@@ -312,24 +358,27 @@ var AssignmentAnalyzer = {
   },
 
   _saveGEMToDB: function(gemMap, repMonth) {
-      let sheetName = 'WF_GEM_DATA_V2'; // BYPASS CORRUPTED DATABASE
+      let sheetName = 'WF_GEM_DATA_V2';
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
       
       const writeToSheet = (targetSS) => {
           let sheet = targetSS.getSheetByName(sheetName);
           let expectedHeaders = ["Month", "Agent Name", "CPH", "Inbound %", "Outbound %", "AHT", "Tasks x Calls", "Total Tasks", "Calls Answered", "WDays"];
-
+          
           if (!sheet) {
               sheet = targetSS.insertSheet(sheetName);
               sheet.appendRow(expectedHeaders);
           }
           
-          let existing = sheet.getDataRange().getDisplayValues();
+          let existing = sheet.getDataRange().getValues();
           if (existing.length === 1 && existing[0].join('') === "") existing = [];
           
           let headers = existing.length > 0 ? existing.shift() : expectedHeaders;
           
-          let retained = existing.filter(row => row[0] !== repMonth);
+          let retained = existing.filter(row => {
+              let dStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
+              return dStr !== repMonth;
+          });
           
           let newRows = [];
           Object.keys(gemMap).forEach(agent => {
