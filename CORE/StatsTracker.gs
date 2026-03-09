@@ -1,18 +1,13 @@
 /**
- * MODULE: STATS TRACKER
- * Handles historical data for the Dashboard Graph
+ * MODULE: STATS TRACKER (LOCAL HOST ONLY)
  */
 
 const StatsTracker = {
   
-  // Configuration
   SHEET_NAME: "Stats History",
   IDP_SHEET: "IDP_History",
-  MAX_HISTORY_POINTS: 24, // Keep last 24 entries
+  MAX_HISTORY_POINTS: 24,
 
-  /**
-   * Appends a new SVL and ACK record with timestamp.
-   */
   logHourlyStats: function(svl, ack) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(this.SHEET_NAME);
@@ -29,9 +24,6 @@ const StatsTracker = {
     return "Stats Logged";
   },
 
-  /**
-   * Logs IDP Value specifically.
-   */
   logIdp: function(val) {
      const ss = SpreadsheetApp.getActiveSpreadsheet();
      let sheet = ss.getSheetByName(this.IDP_SHEET);
@@ -51,7 +43,6 @@ const StatsTracker = {
      
      const data = sheet.getDataRange().getValues().slice(1);
      const tz = ss.getSpreadsheetTimeZone();
-     
      data.sort((a,b) => new Date(a[0]) - new Date(b[0]));
      const history = data.slice(-20).map(r => ({
          name: Utilities.formatDate(new Date(r[0]), tz, "HH:mm"),
@@ -60,25 +51,9 @@ const StatsTracker = {
      return JSON.stringify(history);
   },
 
-  /**
-   * Retrieves historical stats, SORTED by time, directly from MASTER DB.
-   */
   getHistory: function() {
-    let sheet;
-    
-    // 1. Tries to Read from the Master DB's Stats_Log FIRST
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try {
-            const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
-            sheet = ssMaster.getSheetByName("Stats_Log");
-        } catch(e) {}
-    }
-    
-    // 2. Fallback to Local Sheet if Master DB fails
-    if (!sheet) {
-        const ss = SpreadsheetApp.getActiveSpreadsheet();
-        sheet = ss.getSheetByName(this.SHEET_NAME);
-    }
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(this.SHEET_NAME);
 
     if (!sheet || sheet.getLastRow() < 2) {
       return JSON.stringify([]);
@@ -88,16 +63,13 @@ const StatsTracker = {
     const startRow = Math.max(2, lastRow - 48);
     const numRows = lastRow - startRow + 1;
     
-    // Columns might be different in Master DB (Timestamp, SVL, ACK, LAW, IDP)
-    // We only need the first 3 columns.
     const data = sheet.getRange(startRow, 1, numRows, 3).getValues();
 
     let history = data.map(row => {
       let svlRaw = parseFloat(row[1]) || 0;
-      let ackRaw = String(row[2]).replace(/[^\d.]/g, ''); // Strips out "s" safely
+      let ackRaw = String(row[2]).replace(/[^\d.]/g, ''); 
       ackRaw = parseFloat(ackRaw) || 0;
 
-      // Clean decimals (e.g., 0.87 -> 87)
       if (svlRaw > 0 && svlRaw <= 1) {
           svlRaw = Math.round(svlRaw * 100);
       }
@@ -110,20 +82,14 @@ const StatsTracker = {
       };
     });
 
-    // Clean out any corrupt dates
     history = history.filter(h => !isNaN(h.time.getTime()));
-    
-    // Sort Chronologically
     history.sort((a, b) => a.time - b.time);
-    
-    // Slice to the last 24 points
     history = history.slice(-this.MAX_HISTORY_POINTS);
     
     const tz = Session.getScriptTimeZone();
     history.forEach(h => {
         h.label = Utilities.formatDate(h.time, tz, "HH:mm");
     });
-
     return JSON.stringify(history.map(h => ({ name: h.label, val: h.val, ack: h.ack })));
   }
 };
