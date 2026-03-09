@@ -46,11 +46,18 @@
                     <div class="kpi-box"><h4>ACK</h4><div id="hdr-ack" style="color:var(--text-secondary);">--</div></div>
                     <div class="kpi-box"><h4>Time</h4><div id="clock">00:00</div></div>
                 </div>
-                <div style="height:30px; width:1px; background:var(--glass-border);"></div>
-                <button class="action-btn" onclick="toggleTheme()"><i data-lucide="sun-moon" width="20"></i></button>
+                <div style="height:30px; width:1px; background:var(--glass-border); margin: 0 8px;"></div>
+                
+                <div class="theme-switch" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
+                    <div class="theme-switch-thumb">
+                        <i data-lucide="sun" class="theme-switch-icon icon-sun" width="14"></i>
+                        <i data-lucide="moon" class="theme-switch-icon icon-moon" width="14"></i>
+                    </div>
+                </div>
+
                 <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
                 <button class="action-btn" id="btn-insights" onclick="setView('insights')"><i data-lucide="bar-chart-2" width="20"></i></button>
-                <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags"><i data-lucide="flag" width="20"></i></button>
+                <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags" style="color: var(--status-alert); border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.05);"><i data-lucide="flag" width="20" fill="rgba(220, 38, 38, 0.2)"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
