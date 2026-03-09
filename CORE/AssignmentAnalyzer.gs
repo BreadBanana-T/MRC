@@ -1,21 +1,11 @@
 /**
- * MODULE: ASSIGNMENT ANALYZER (RED FLAGS) V5.4
- * Features: Exact Excel Math (70%, 75%, < 7.3), Fuzzy Name Matching, Level Failsafes
+ * MODULE: ASSIGNMENT ANALYZER (RED FLAGS - LOCAL HOST ONLY)
  */
 
 var AssignmentAnalyzer = {
 
   _getDB: function(sheetName) {
-      const local = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-      if (local && local.getLastRow() > 1) return local;
-
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { 
-              const mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName(sheetName);
-              if (mSheet && mSheet.getLastRow() > 1) return mSheet;
-          } catch(e) {}
-      }
-      return local;
+      return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
   importMasterList: function(rawText) {
@@ -39,7 +29,6 @@ var AssignmentAnalyzer = {
               let job = cols[colJob] || "";
               let status = cols[colStatus] || "";
               
-              // Safely default to Level 2 if the column is empty/missing so they aren't hidden from Outbound
               let level = colLevel > -1 ? parseInt(cols[colLevel]) || 2 : 2;
 
               if (name && job.toLowerCase().includes('monitoring') && status.toLowerCase().includes('active')) {
@@ -55,15 +44,6 @@ var AssignmentAnalyzer = {
               sheet.appendRow(["Agent Name", "ERC Level"]); 
               sheet.getRange(2, 1, validAgents.length, 2).setValues(validAgents);
               
-              if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-                  try {
-                      let mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('WF_MASTERLIST');
-                      if (!mSheet) mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).insertSheet('WF_MASTERLIST');
-                      mSheet.clearContents();
-                      mSheet.appendRow(["Agent Name", "ERC Level"]); 
-                      mSheet.getRange(2, 1, validAgents.length, 2).setValues(validAgents);
-                  } catch(e) {}
-              }
               return `Success: Locked ${validAgents.length} Monitoring Agents into the engine.\nManagers will now be ignored.`;
           }
           return "Error: No active monitoring agents found in the pasted list.";
@@ -97,21 +77,17 @@ var AssignmentAnalyzer = {
           let existing = sheet.getDataRange().getValues().flat();
           if (!existing.includes(agentName)) sheet.appendRow([agentName]);
           
-          if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-              try {
-                  let mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName('WF_EXCLUSIONS');
-                  if (!mSheet) { mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).insertSheet('WF_EXCLUSIONS'); mSheet.appendRow(["Excluded Agents"]); }
-                  mSheet.appendRow([agentName]);
-              } catch(e) {}
-          }
           return "Agent Dismissed";
       } catch (e) { return "Error dismissing agent."; }
   },
 
   getAnalyzerData: function(targetMonth) {
       try {
-          let db = this._getDB('WF_GEM_DATA_V2');
-          if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+          let db = this._getDB('WF_GEM_DATA_V3');
+          if (!db || db.getLastRow() < 2) {
+              db = this._getDB('WF_GEM_DATA_V2');
+              if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+          }
           
           let validAgents = new Map();
           let mlSheet = this._getDB('WF_MASTERLIST');
@@ -121,7 +97,7 @@ var AssignmentAnalyzer = {
               useMasterList = true;
               mlSheet.getDataRange().getDisplayValues().slice(1).forEach(r => {
                   let lvl = parseInt(r[1]);
-                  if (isNaN(lvl)) lvl = 2; // Ultimate Failsafe
+                  if (isNaN(lvl)) lvl = 2; 
                   let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
                   validAgents.set(cleanName, lvl);
               });
@@ -165,35 +141,24 @@ var AssignmentAnalyzer = {
           validData.forEach(r => {
               let agent = String(r[1]).trim();
               let cleanAgent = agent.toLowerCase().replace(/\s+/g, ' ');
-              let agentLevel = 2; // Default if ML missing
+              let agentLevel = 2; 
               
               if (useMasterList) {
                   let matchedLvl = null;
-                  
-                  // 1. Try Exact Match
                   if (validAgents.has(cleanAgent)) {
                       matchedLvl = validAgents.get(cleanAgent);
                   } else {
-                      // 2. Try Fuzzy Match (e.g. "Dansou, Senami Patrick" vs "Dansou, Senami")
                       let gnParts = cleanAgent.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
-                      
                       for (let [mlName, lvl] of validAgents.entries()) {
                           let mlParts = mlName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
-                          
-                          // If Last Name and First Name match perfectly, it's the same person
                           if (gnParts.length > 1 && mlParts.length > 1 && gnParts[0] === mlParts[0] && gnParts[1] === mlParts[1]) {
-                              matchedLvl = lvl;
-                              break;
+                              matchedLvl = lvl; break;
                           }
-                          // Fallback substring check
                           if (cleanAgent.includes(mlName) || mlName.includes(cleanAgent)) {
-                              matchedLvl = lvl;
-                              break;
+                              matchedLvl = lvl; break;
                           }
                       }
                   }
-                  
-                  // If we still can't find them, they are a Manager/TMA -> Skip entirely
                   if (matchedLvl === null) return; 
                   agentLevel = matchedLvl;
               }
@@ -206,7 +171,7 @@ var AssignmentAnalyzer = {
               
               if (r[0] === targetMonth) {
                   currentMap[agent] = {
-                      level: agentLevel, // Store the verified level!
+                      level: agentLevel,
                       cph: cphV, inPct: inP, outPct: outP, aht: r[5], 
                       tasksXCalls: parseFloat(r[6]) || 0, totalCalls: parseInt(r[7]) || 0, 
                       callsAnsw: parseInt(r[8]) || 0, wDays: parseInt(r[9]) || 0
@@ -239,21 +204,12 @@ var AssignmentAnalyzer = {
                   aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls
               };
 
-              // INBOUND LOGIC (>= 75% Red)
               if (c.inPct >= 0.75) {
                   if (c.tasksXCalls >= 0.50 || c.totalCalls === 0) inboundList.push(payload);
                   else outOfScopeList.push(payload);
               }
-              
-              // OUTBOUND LOGIC (>= 75% Red, Level 2+)
-              if (c.outPct >= 0.75 && c.level >= 2) {
-                  outboundList.push(payload);
-              }
-
-              // CP/H LOGIC (< 7.3 Red)
-              if (c.cph > 0 && c.cph <= 7.3) {
-                  cphList.push(payload);
-              }
+              if (c.outPct >= 0.75 && c.level >= 2) outboundList.push(payload);
+              if (c.cph > 0 && c.cph <= 7.3) cphList.push(payload);
           });
           
           inboundList.sort((a,b) => b.inPct - a.inPct);
@@ -278,6 +234,7 @@ var AssignmentAnalyzer = {
       
       let headers = this._parseCSVLine(lines[headerIdx]);
       let colMap = {};
+      
       headers.forEach((h, i) => {
           let low = h.toLowerCase();
           if (low.includes('agent')) colMap.agent = i;
@@ -289,6 +246,15 @@ var AssignmentAnalyzer = {
           else if (low.includes('nb calls answ') || low.includes('calls answered')) colMap.callsAnsw = i;
           else if (low.includes('worked days') || low.includes('wdays')) colMap.wDays = i;
           else if (low.includes('aht')) colMap.aht = i;
+          else if (low.includes('nb transfers')) colMap.transfers = i;
+          else if (low.includes('% transf')) colMap.transfPct = i;
+          else if (low.includes('avg talk time out')) colMap.outTalk = i;
+          else if (low.includes('avg talk time ext')) colMap.extTalk = i;
+          else if (low.includes('avg talk time')) colMap.avgTalk = i;
+          else if (low.includes('avg hold')) colMap.avgHold = i;
+          else if (low.includes('avg acw total') || low.includes('avg acw')) colMap.avgAcw = i;
+          else if (low.includes('outbound calls')) colMap.outCalls = i;
+          else if (low.includes('extension in calls') || low.includes('ext in calls')) colMap.extCalls = i;
       });
 
       let map = {};
@@ -317,7 +283,16 @@ var AssignmentAnalyzer = {
               callsAnsw: cAnsw,
               tasksXCalls: txc,
               wDays: wD,
-              aht: this._parseSafeAHT(cols[colMap.aht])
+              aht: this._parseSafeAHT(cols[colMap.aht]),
+              transfers: parseInt(String(cols[colMap.transfers] || 0).replace(/,/g, '')),
+              transfPct: this._parseSafePercent(cols[colMap.transfPct]),
+              avgTalk: this._parseSafeAHT(cols[colMap.avgTalk]),
+              avgHold: this._parseSafeAHT(cols[colMap.avgHold]),
+              avgAcw: this._parseSafeAHT(cols[colMap.avgAcw]),
+              outCalls: parseInt(String(cols[colMap.outCalls] || 0).replace(/,/g, '')),
+              outTalk: this._parseSafeAHT(cols[colMap.outTalk]),
+              extCalls: parseInt(String(cols[colMap.extCalls] || 0).replace(/,/g, '')),
+              extTalk: this._parseSafeAHT(cols[colMap.extTalk])
           };
       }
       return map;
@@ -358,12 +333,12 @@ var AssignmentAnalyzer = {
   },
 
   _saveGEMToDB: function(gemMap, repMonth) {
-      let sheetName = 'WF_GEM_DATA_V2';
+      let sheetName = 'WF_GEM_DATA_V3';
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
       
       const writeToSheet = (targetSS) => {
           let sheet = targetSS.getSheetByName(sheetName);
-          let expectedHeaders = ["Month", "Agent Name", "CPH", "Inbound %", "Outbound %", "AHT", "Tasks x Calls", "Total Tasks", "Calls Answered", "WDays"];
+          let expectedHeaders = ["Month", "Agent Name", "CPH", "Inbound %", "Outbound %", "AHT", "Tasks x Calls", "Total Tasks", "Calls Answered", "WDays", "Transfers", "Transf %", "Avg Talk", "Avg Hold", "Avg ACW", "Out Calls", "Out Talk", "Ext Calls", "Ext Talk"];
           
           if (!sheet) {
               sheet = targetSS.insertSheet(sheetName);
@@ -383,19 +358,19 @@ var AssignmentAnalyzer = {
           let newRows = [];
           Object.keys(gemMap).forEach(agent => {
               let m = gemMap[agent];
-              newRows.push([repMonth, agent, m.cph, m.inPct, m.outPct, m.aht, m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays]);
+              newRows.push([
+                  repMonth, agent, m.cph, m.inPct, m.outPct, m.aht, m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays,
+                  m.transfers, m.transfPct, m.avgTalk, m.avgHold, m.avgAcw, m.outCalls, m.outTalk, m.extCalls, m.extTalk
+              ]);
           });
           
           let combined = retained.concat(newRows);
           sheet.clearContents();
           sheet.appendRow(headers);
-          if (combined.length > 0) sheet.getRange(2, 1, combined.length, 10).setValues(combined);
+          if (combined.length > 0) sheet.getRange(2, 1, combined.length, 19).setValues(combined);
       };
 
       writeToSheet(ssLocal);
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { writeToSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
-      }
   },
 
   _parseCSVLine: function(text) {
