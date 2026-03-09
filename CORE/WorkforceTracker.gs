@@ -1,21 +1,11 @@
 /**
- * MODULE: WORKFORCE TRACKER (V7.3)
- * Features: WOFQT (Tower) Integration, Hybrid Role Enforcement (WFM + Manual ICL)
+ * MODULE: WORKFORCE TRACKER (V7.4 - LOCAL HOST ONLY)
  */
 
 var WorkforceTracker = {
 
   _getDB: function(sheetName) {
-      const local = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-      if (local && local.getLastRow() > 1) return local;
-
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { 
-              const mSheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName(sheetName);
-              if (mSheet && mSheet.getLastRow() > 1) return mSheet;
-          } catch(e) {}
-      }
-      return local;
+      return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
   importData: function(schedRaw, idpRaw) {
@@ -23,15 +13,6 @@ var WorkforceTracker = {
     ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
-    
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try {
-            const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
-            ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
-               if(!masterSS.getSheetByName(n)) masterSS.insertSheet(n);
-            });
-        } catch(e) {}
-    }
     
     let msg = [];
     let schedDates = [];
@@ -241,13 +222,6 @@ var WorkforceTracker = {
   _executeDestructiveUpsert: function(sheetName, newRows, headersArray) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
     this._runDestructiveLogic(ssLocal, sheetName, newRows, headersArray);
-    
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try { 
-            const ssMaster = SpreadsheetApp.openById(MasterConnector.DB_ID);
-            this._runDestructiveLogic(ssMaster, sheetName, newRows, headersArray); 
-        } catch(e) {}
-    }
   },
 
   _runDestructiveLogic: function(targetSpreadsheet, sheetName, newRows, headersArray) {
@@ -634,9 +608,6 @@ var WorkforceTracker = {
       };
 
       writeToArchiveSheet(ssLocal);
-      if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-          try { writeToArchiveSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
-      }
       return `Successfully archived ${report.data.length} agents for ${report.cycle} (${report.period}).`;
   },
 
