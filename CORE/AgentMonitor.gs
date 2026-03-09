@@ -1,8 +1,5 @@
 /**
- * MODULE: AGENT MONITOR (V5.2)
- * - Block Vacation/Sick from Shift Ending Badge
- * - Strict Shield Role Filtering (Blocks Sick/Off from Special Roles)
- * - Shadow Roster Shrinkage Fix 
+ * MODULE: AGENT MONITOR (LOCAL HOST ONLY)
  */
 
 var AgentMonitor = {
@@ -23,17 +20,8 @@ function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBr
 function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.logOvertime(name, start, end, bStart, bEnd); }
 
 function compileFloorData() {
-  let sheet;
   const localSS = SpreadsheetApp.getActiveSpreadsheet();
-  const localSheet = localSS.getSheetByName("Raw Schedule");
-  
-  if (localSheet && localSheet.getLastRow() > 1) {
-      sheet = localSheet;
-  } else if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-      try {
-          sheet = SpreadsheetApp.openById(MasterConnector.DB_ID).getSheetByName("Raw Schedule");
-      } catch (e) { }
-  }
+  let sheet = localSS.getSheetByName("Raw Schedule");
 
   const emptyFloor = {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
@@ -95,7 +83,6 @@ function compileFloorData() {
     }
 
     const LOOKAHEAD = 60 * 60 * 1000;
-    
     if(startEpoch && endEpoch) {
        const sFmt = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "HH:mm");
        const eFmt = Utilities.formatDate(new Date(endEpoch), "America/Toronto", "HH:mm");
@@ -106,17 +93,17 @@ function compileFloorData() {
     let inactiveReason = "";
 
     if ((shiftType === "Off" || region === "Off") && !isOT) { 
-        isInactiveTime = true; 
+        isInactiveTime = true;
         inactiveReason = "Scheduled Off"; 
     } else if ((!startEpoch || !endEpoch) && !isOT) { 
-        isInactiveTime = true; 
+        isInactiveTime = true;
         inactiveReason = "Not Scheduled"; 
     } else if (startEpoch && endEpoch) {
        if (endEpoch <= now && !isOT) { 
-           isInactiveTime = true; 
+           isInactiveTime = true;
            inactiveReason = "Shift Ended"; 
        } else if (startEpoch > (now + LOOKAHEAD) && !isOT) { 
-           isInactiveTime = true; 
+           isInactiveTime = true;
            inactiveReason = `Starts at ${shiftStr.split('-')[0].trim()}`; 
        }
     }
@@ -173,6 +160,7 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
+
              if (now >= bs && now <= be) {
                  if (b.type === "Training") {
                      inTrainingNow = true;
@@ -226,7 +214,7 @@ function compileFloorData() {
 
         if (category === "active") {
             if (onAcsuNow) { 
-                category = "off"; 
+                category = "off";
                 subStatus = activeIntradayLabel; 
             }
             else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
@@ -235,7 +223,6 @@ function compileFloorData() {
         }
     }
 
-    // FIX: Only trigger Shift Ending badge if the agent is actively working! (Blocks Vacation/Sick)
     let shiftEndsIn = null;
     if (['active', 'training'].includes(category) && endEpoch && endEpoch > now && (endEpoch - now) <= 1800000) {
         shiftEndsIn = Math.ceil((endEpoch - now) / 60000) + "m";
@@ -257,7 +244,6 @@ function compileFloorData() {
     }
 
     const newScore = SCORES[category] || 0;
-
     if (agentMap.has(rawName)) {
        const existing = agentMap.get(rawName);
        if (newScore > SCORES[existing.category]) agentMap.set(rawName, { agent, category });
