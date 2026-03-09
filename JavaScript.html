@@ -50,7 +50,7 @@
       trackerSearch: '',
       trackerLoading: true,
       analyzerData: null, 
-      expandedInsights: new Set(), // NEW: Memory cache for the accordion!
+      expandedInsights: new Set(), 
       syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }
   };
 
@@ -1201,6 +1201,17 @@
           .analyzer-modal.open { display:flex; opacity:1; }
           .analyzer-modal-box { background:var(--bg-root); width:90%; max-width:600px; border-radius:16px; border:1px solid var(--glass-border); box-shadow:0 10px 40px rgba(0,0,0,0.2); display:flex; flex-direction:column; overflow:hidden; transform:translateY(20px); transition:0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
           .analyzer-modal.open .analyzer-modal-box { transform:translateY(0); }
+          
+          /* TOOLTIP CSS */
+          .rf-tooltip-container { position:relative; display:inline-flex; align-items:center; cursor:help; margin-left:6px; }
+          .rf-tooltip-box { 
+              position:absolute; top:calc(100% + 8px); left:-10px; width:280px; background:var(--text-main); color:var(--bg-root); 
+              padding:12px 16px; border-radius:10px; font-size:0.75rem; font-weight:500; line-height:1.5; text-transform:none; letter-spacing:normal;
+              opacity:0; visibility:hidden; transition:0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index:999; box-shadow:0 10px 30px rgba(0,0,0,0.3); pointer-events:none;
+              transform: translateY(4px);
+          }
+          .rf-tooltip-container:hover .rf-tooltip-box { opacity:1; visibility:visible; transform:translateY(0); }
+          .rf-tooltip-box::before { content:''; position:absolute; bottom:100%; left:12px; border:6px solid transparent; border-bottom-color:var(--text-main); }
       </style>
       
       <div id="gem-modal" class="analyzer-modal">
@@ -1281,7 +1292,7 @@
           return `<span style="color:${color}; font-size:0.7rem; font-weight:800; margin-left:6px;">${arrow} ${absVal}</span>`;
       }
 
-      function renderTable(title, list, type, headerColor, icon) {
+      function renderTable(title, list, type, headerColor, icon, tooltip) {
           var safeList = list || [];
           var rows = safeList.map(function(a) {
               if (!a) return '';
@@ -1336,7 +1347,15 @@
           return `
           <div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; height:380px;">
               <div style="background:${headerColor}; padding:16px 20px; font-weight:800; font-size:1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--glass-border);">
-                  <span style="display:flex; align-items:center; gap:8px;">${icon} ${title}</span>
+                  
+                  <span style="display:flex; align-items:center; gap:8px;">
+                      ${icon} ${title}
+                      <div class="rf-tooltip-container">
+                          <i data-lucide="help-circle" width="14" style="color:var(--text-muted); opacity:0.7; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7"></i>
+                          <div class="rf-tooltip-box">${tooltip}</div>
+                      </div>
+                  </span>
+                  
                   <span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05);">${safeList.length}</span>
               </div>
               <div style="overflow-y:auto; flex:1;">
@@ -1381,15 +1400,15 @@
       </div>
 
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; padding-bottom:40px;">
-          ${renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>')}
-          ${renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>')}
-          ${renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>')}
-          ${renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>')}
+          ${renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.")}
+          ${renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.")}
+          ${renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.")}
+          ${renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.")}
       </div>
       `;
   }
 
-  // --- NEW: ACCORDION TOGGLE LOGIC WITH MEMORY ---
+  // --- ACCORDION TOGGLE LOGIC WITH MEMORY ---
   window.toggleInsightRow = function(id) {
       if (state.expandedInsights.has(id)) {
           state.expandedInsights.delete(id);
@@ -1397,7 +1416,6 @@
           state.expandedInsights.add(id);
       }
       
-      // Directly manipulate the DOM for instant visual feedback without waiting for a full re-render
       var row = document.getElementById('details-' + id);
       var icon = document.getElementById('icon-' + id);
       if(!row) return;
@@ -1480,7 +1498,6 @@
       
       var displayData = u.data || [];
       
-      // APPLY REGION FILTER
       if (state.insightRegionFilter !== 'All') {
           displayData = displayData.filter(function(a) { return (a.region || 'Onshore').includes(state.insightRegionFilter); });
       }
@@ -1490,13 +1507,11 @@
           displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
       }
 
-      // NEW: ACCORDION ROW RENDERER WITH MEMORY (CLEAN HEADERS)
       var rowsHtml = displayData.map(function(a, idx) { 
           var g = a.gem || {};
           var safeId = "agt-" + idx;
           var regionTag = (a.region || '').includes('Offshore') ? `<span style="font-size:0.6rem; background:var(--region-off); color:white; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle; font-weight:800;">OFF</span>` : '';
           
-          // Check if this row was already expanded before the render happened
           var isExpanded = state.expandedInsights.has(safeId);
           var displayStyle = isExpanded ? 'table-row' : 'none';
           var iconTransform = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
