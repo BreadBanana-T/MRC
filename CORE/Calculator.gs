@@ -1,5 +1,5 @@
 /**
- * MODULE: CALCULATOR
+ * MODULE: CALCULATOR (LOCAL HOST ONLY)
  */
 
 function runCalculator(inText, outText) {
@@ -15,8 +15,6 @@ function calculateMetrics(inText, outText) {
     report: ""
   };
 
-  // 1. SLA LIST (Strictly Priorities 1-4 ONLY)
-  // EXCLUDES 4-COMM and 6-O/C to ensure ACK and SVL are pinpoint accurate
   const LIST_SVL_ACK = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
       "2-CCM", "2-FARM", 
@@ -24,7 +22,6 @@ function calculateMetrics(inText, outText) {
       "4-BURG", "4-TAMP"
   ];
 
-  // 2. TREND LIST (Includes COMM and O/C for overall volume forecasting)
   const LIST_TREND = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
       "2-CCM", "2-FARM", 
@@ -33,9 +30,6 @@ function calculateMetrics(inText, outText) {
       "6-O/C"
   ];
 
-  // ----------------------------------------------------
-  // A. INBOUND PARSING
-  // ----------------------------------------------------
   if (inText) {
     const lines = inText.split(/\r?\n/);
     for (const line of lines) {
@@ -54,11 +48,7 @@ function calculateMetrics(inText, outText) {
     }
   }
 
-  // ----------------------------------------------------
-  // B. OUTBOUND PARSING
-  // ----------------------------------------------------
   if (outText) {
-    // 1. INTRADAY STATS (ACK & SVL) -> Uses LIST_SVL_ACK
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
     let svlVol = 0, svlW = 0; 
     let ackVol = 0, ackW = 0;
@@ -73,7 +63,7 @@ function calculateMetrics(inText, outText) {
             const timeIdx = parts.findIndex(p => p.match(/^\d{1,2}:\d{2}:\d{2}$/));
             
             if (timeIdx > -1 && timeIdx >= 3) {
-                const vol = parseInt(parts[timeIdx - 3]) || 0; // Actual Handled
+                const vol = parseInt(parts[timeIdx - 3]) || 0; 
                 const timeSec = dur(parts[timeIdx]);
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
@@ -89,7 +79,6 @@ function calculateMetrics(inText, outText) {
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
     stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
 
-    // 2. TREND OUTBOUND (Last 60 Min) -> Uses LIST_TREND
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
 
@@ -128,10 +117,7 @@ function calculateMetrics(inText, outText) {
     }
   }
 
-  // LOGGING
-  if (typeof MasterConnector !== 'undefined' && stats.svl !== "0%") {
-      MasterConnector.logStats(stats.svl, stats.ack, "", "");
-  }
+  // LOGGING (Only Local Now)
   if (typeof StatsTracker !== 'undefined' && stats.svl !== "0%") {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
@@ -140,7 +126,6 @@ function calculateMetrics(inText, outText) {
   return JSON.stringify(stats);
 }
 
-// HELPERS
 function extractSection(text, header) {
   const idx = text.indexOf(header);
   if (idx === -1) return "";
@@ -150,32 +135,22 @@ function extractSection(text, header) {
 }
 
 function checkList(id, list) { 
-  return list.some(key => id.startsWith(key)); 
+  return list.some(key => id.startsWith(key));
 }
 
-// CUSTOM ROUNDING: 
-// If first decimal is >= 5, keeps only the first decimal (truncating the rest). 
-// If first decimal is < 5, drops decimals completely.
 function formatTrend(val) {
   if (val === 0) return "0%";
   const isNeg = val < 0;
-  
-  // Get absolute value to handle math safely
   const absVal = Math.abs(val);
   const intPart = Math.floor(absVal);
-  
-  // Extract just the first decimal digit (e.g., for 11.79, this extracts 7)
   const tenths = Math.floor((absVal * 10) % 10);
   
   let finalString;
   if (tenths >= 5) {
-     // Keep the integer and exactly the first decimal
      finalString = intPart + "." + tenths; 
   } else {
-     // Drop decimals entirely
-     finalString = intPart; 
+     finalString = intPart;
   }
-  
   return (isNeg ? "-" : "+") + finalString + "%";
 }
 
