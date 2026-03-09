@@ -1,5 +1,5 @@
 /**
- * MODULE: WORKFORCE TRACKER (V7.4 - LOCAL HOST ONLY)
+ * MODULE: WORKFORCE TRACKER (V7.6 - LOCAL HOST + TIMESTAMP FIX)
  */
 
 var WorkforceTracker = {
@@ -521,7 +521,6 @@ var WorkforceTracker = {
                         if (epoch >= bounds.start && epoch <= bounds.end) { 
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('TOWER') || roleType.includes('WOFQT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
-                            // Note: Also captures WFM ICL/ULC if someone schedules them, just in case
                             else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours; }
                         }
@@ -530,7 +529,7 @@ var WorkforceTracker = {
             });
         }
 
-        // RESTORED MANUAL TRACKER (DB_SESSIONS) FOR ICL & ULC (IGNORES SAFE)
+        // RESTORED MANUAL TRACKER (DB_SESSIONS) FOR ICL & ULC
         const dbSess = this._getDB('DB_Sessions');
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
@@ -540,7 +539,6 @@ var WorkforceTracker = {
                     let role = String(row[2]).toUpperCase(); 
                     let h = Number(row[6]) || 0; 
                     
-                    // We DO NOT add SAFE here, because SAFE is now fully automated via WFM
                     if (role.includes('ICL')) { 
                         getAg(agentName).icl += h; 
                         getAg(agentName).total += h; 
@@ -557,32 +555,65 @@ var WorkforceTracker = {
         const dbGEM = this._getDB('WF_GEM_DATA_V3');
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
+            
+            // NEW HELPER: Slices nasty 1899-12-30 ISO strings back into beautiful mm:ss format instantly
+            const fixTime = (v) => {
+                if (!v || v === '-' || v === '00:00') return '-';
+                let s = String(v).trim();
+                if (s.startsWith("'")) s = s.substring(1); 
+                let m = s.match(/T(\d{2}:\d{2})/); 
+                if (m) return m[1];
+                if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "HH:mm");
+                return s;
+            };
+
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
                 let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
                 gemData[agName] = { 
-                    cph: row[2], inPct: row[3], outPct: row[4], aht: row[5],
+                    cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
                     transfers: row[10] || 0, transfPct: row[11] || 0,
-                    avgTalk: row[12] || '-', avgHold: row[13] || '-', avgAcw: row[14] || '-',
-                    outCalls: row[15] || 0, outTalk: row[16] || '-',
-                    extCalls: row[17] || 0, extTalk: row[18] || '-'
+                    avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
+                    outCalls: row[15] || 0, outTalk: fixTime(row[16]),
+                    extCalls: row[17] || 0, extTalk: fixTime(row[18])
                 };
             });
         }
 
-        let finalArr = Object.values(report.agents).filter(a => a.total > 0 || gemData[a.name]);
+        let gemKeys = Object.keys(gemData);
+        let finalArr = Object.values(report.agents);
         
         finalArr.forEach(a => { 
             ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
             
-            if (gemData[a.name]) {
-                a.gem = gemData[a.name]; // Attach entire nested GEM object for the UI Card
-                a.cph = parseFloat(gemData[a.name].cph).toFixed(2);
-                a.aht = gemData[a.name].aht;
-                a.inOut = Math.round(parseFloat(gemData[a.name].inPct) * 100) + "% / " + Math.round(parseFloat(gemData[a.name].outPct) * 100) + "%";
+            let matchedGem = gemData[a.name]; 
+            
+            if (!matchedGem) {
+                let wfmParts = a.name.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
+                
+                for(let i=0; i<gemKeys.length; i++) {
+                    let gName = gemKeys[i];
+                    let gParts = gName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
+                    
+                    if (wfmParts.length > 1 && gParts.length > 1 && wfmParts[0] === gParts[0] && wfmParts[1] === gParts[1]) {
+                        matchedGem = gemData[gName]; break;
+                    }
+                    if (a.name.includes(gName) || gName.includes(a.name)) {
+                        matchedGem = gemData[gName]; break;
+                    }
+                }
+            }
+
+            if (matchedGem) {
+                a.gem = matchedGem; 
+                a.cph = parseFloat(matchedGem.cph).toFixed(2);
+                a.aht = matchedGem.aht;
+                a.inOut = Math.round(parseFloat(matchedGem.inPct) * 100) + "% / " + Math.round(parseFloat(matchedGem.outPct) * 100) + "%";
             } else {
                 a.gem = null; a.cph = '-'; a.aht = '-'; a.inOut = '-';
             }
         });
+        
+        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null);
         
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
