@@ -1,5 +1,5 @@
 /**
- * MODULE: IMPORT HANDLER (SMART WFM + MASTER DB BACKUP)
+ * MODULE: IMPORT HANDLER (SMART WFM - LOCAL HOST ONLY)
  */
 
 const ImportHandler = {
@@ -82,7 +82,6 @@ function processWFMImport(rawText, forcedDate) {
            else if (upper.includes("ACSU") || upper.includes("SOLICITED") || upper.includes("VOLUNTARY") || upper.includes("LIBÉRATION")) {
                buffer.breaks.push({ type: "ACSU", start: actStart, end: actEnd });
            }
-           // --- NEW: EXACT INTRADAY TIMELINES FOR SPECIAL ROLES ---
            else if (upper.includes("SAFE ONQUEUE") || upper.includes("SAFE EN LIGNE")) {
                buffer.breaks.push({ type: "SAFE", start: actStart, end: actEnd });
            }
@@ -105,27 +104,9 @@ function processWFMImport(rawText, forcedDate) {
 
   if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
   if (rosterData.length > 0) {
-    
-    // 1. FAST LOCAL RAM SAVE
     sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
-    
-    // 2. MASTER DB SILENT BACKUP (Dual-Mirroring)
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try {
-            const masterSS = SpreadsheetApp.openById(MasterConnector.DB_ID);
-            let mSheet = masterSS.getSheetByName("Raw Schedule");
-            if (!mSheet) { mSheet = masterSS.insertSheet("Raw Schedule"); }
-            mSheet.clear();
-            mSheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
-            mSheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
-            mSheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
-        } catch(e) {
-            console.error("Master DB Sync failed: ", e);
-        }
-    }
-
     if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
-    return `Synced ${rosterData.length} entries successfully to RAM and Master DB.`;
+    return `Synced ${rosterData.length} entries successfully to Local Database.`;
   }
   return "No valid data found.";
 }
