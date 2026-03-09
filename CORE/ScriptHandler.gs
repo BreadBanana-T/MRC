@@ -1,6 +1,5 @@
 /**
- * MODULE: SCRIPT HANDLER
- * Dual-Write enabled: Reads locally for speed, saves/deletes to BOTH Local and Master DB.
+ * MODULE: SCRIPT HANDLER (LOCAL HOST ONLY)
  */
 
 const ScriptHandler = {
@@ -24,7 +23,6 @@ const ScriptHandler = {
   },
 
   getAll: function() {
-    // Reading uses the FAST Local RAM Sheet
     const sheet = this._getSheet(SpreadsheetApp.getActiveSpreadsheet());
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
@@ -44,7 +42,6 @@ const ScriptHandler = {
     if(!title || !body) return "Missing Info";
     const catVal = category || "General";
     
-    // Dual Write Logic
     const writeToSheet = (spreadsheet) => {
         const sheet = this._getSheet(spreadsheet);
         if (index !== null && index !== undefined && index !== "") {
@@ -57,38 +54,22 @@ const ScriptHandler = {
         sheet.appendRow([title, body, catVal]);
     };
 
-    // 1. Write Local
     writeToSheet(SpreadsheetApp.getActiveSpreadsheet());
-    
-    // 2. Write Master DB
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try { writeToSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
-    }
-
     return "Saved";
   },
 
   delete: function(index) {
     const rowToDelete = parseInt(index) + 2;
-
     const deleteFromSheet = (spreadsheet) => {
         const sheet = this._getSheet(spreadsheet);
         if (rowToDelete <= sheet.getLastRow()) sheet.deleteRow(rowToDelete);
     };
 
-    // 1. Local Delete
     deleteFromSheet(SpreadsheetApp.getActiveSpreadsheet());
-    
-    // 2. Master DB Delete
-    if (typeof MasterConnector !== 'undefined' && MasterConnector.DB_ID) {
-        try { deleteFromSheet(SpreadsheetApp.openById(MasterConnector.DB_ID)); } catch(e) {}
-    }
-
     return "Deleted";
   }
 };
 
-// --- GLOBAL EXPORTS ---
 function getTeamScripts() { return JSON.stringify(ScriptHandler.getAll()); }
 function saveTeamScript(i, t, b, c) { return ScriptHandler.save(i, t, b, c); }
 function deleteTeamScript(i) { return ScriptHandler.delete(i); }
