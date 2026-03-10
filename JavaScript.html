@@ -1592,13 +1592,15 @@
       } else if (state.insightSort === 'coach') {
           c1 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' };
           c2 = { key: 'acsu', name: 'ACSU', color: 'var(--text-muted)' };
-          c3 = { key: 'total', name: 'TOTAL OFF', color: 'var(--accent-primary)' };
+          c3 = { key: 'total', name: 'Overview', color: 'var(--accent-primary)' };
       } else if (state.insightSort === 'acsu') {
           c1 = { key: 'acsu', name: 'ACSU', color: 'var(--text-main)' };
           c2 = { key: 'coach', name: 'COACH', color: 'var(--text-muted)' };
-          c3 = { key: 'total', name: 'TOTAL OFF', color: 'var(--accent-primary)' };
+          c3 = { key: 'total', name: 'Overview', color: 'var(--accent-primary)' };
       } else if (state.insightSort === 'safe') {
           c1 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
+          c2 = { key: 'icl', name: 'ICL', color: 'var(--status-role)' };
+          c3 = { key: 'ulc', name: 'ULC', color: 'var(--status-ulc)' };
       } else if (state.insightSort === 'ulc') {
           c1 = { key: 'ulc', name: 'ULC', color: 'var(--status-ulc)' };
           c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
