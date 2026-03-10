@@ -1536,12 +1536,6 @@
 
              ${datePickerHtml}
 
-             <select class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.8rem;" onchange="state.insightCycleFilter=this.value; fetchInsightData();">
-                 <option value="ALL" ${state.insightCycleFilter === 'ALL' ? 'selected' : ''}>📅 Rotation: All</option>
-                 <option value="WEEK A" ${state.insightCycleFilter === 'WEEK A' ? 'selected' : ''}>📅 Week A</option>
-                 <option value="WEEK B" ${state.insightCycleFilter === 'WEEK B' ? 'selected' : ''}>📅 Week B</option>
-             </select>
-
              <div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);">
                 <button class="nav-btn ${state.insightRegionFilter==='All'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter='All'; render();">All</button>
                 <button class="nav-btn ${state.insightRegionFilter==='Onshore'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter='Onshore'; render();">Onshore</button>
@@ -1578,7 +1572,6 @@
           displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
       }
       
-      // NEW TOWER LOGIC: If sorting by Tower, hide non-Backup MRC agents entirely!
       if (state.insightSort === 'tower') {
           displayData = displayData.filter(function(a) { return a.isBackupMRC === true; });
       }
@@ -1586,6 +1579,31 @@
       displayData.sort(function(a, b) {
           return (b[state.insightSort] || 0) - (a[state.insightSort] || 0);
       });
+
+      // NEW: DYNAMIC COLUMNS BASED ON SELECTED FILTER
+      var c1 = { key: 'icl', name: 'ICL', color: 'var(--status-role)' };
+      var c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
+      var c3 = { key: 'ulc', name: 'ULC', color: 'var(--status-ulc)' };
+
+      if (state.insightSort === 'tower') {
+          c1 = { key: 'tower', name: 'TOWER', color: 'var(--accent-primary)' };
+          c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
+          c3 = { key: 'icl', name: 'ICL', color: 'var(--status-role)' };
+      } else if (state.insightSort === 'coach') {
+          c1 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' };
+          c2 = { key: 'acsu', name: 'ACSU', color: 'var(--text-muted)' };
+          c3 = { key: 'total', name: 'TOTAL OFF', color: 'var(--accent-primary)' };
+      } else if (state.insightSort === 'acsu') {
+          c1 = { key: 'acsu', name: 'ACSU', color: 'var(--text-main)' };
+          c2 = { key: 'coach', name: 'COACH', color: 'var(--text-muted)' };
+          c3 = { key: 'total', name: 'TOTAL OFF', color: 'var(--accent-primary)' };
+      } else if (state.insightSort === 'safe') {
+          c1 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
+      } else if (state.insightSort === 'ulc') {
+          c1 = { key: 'ulc', name: 'ULC', color: 'var(--status-ulc)' };
+          c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
+          c3 = { key: 'icl', name: 'ICL', color: 'var(--status-role)' };
+      }
 
       var rowsHtml = displayData.map(function(a, idx) { 
           var g = a.gem || {};
@@ -1601,9 +1619,9 @@
               <td style="padding:16px; font-weight:700; color:var(--text-main);">
                  ${a.name || ''} ${regionTag}
               </td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-role); font-weight:800;">${a.icl > 0 ? a.icl + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-active); font-weight:800;">${a.safe > 0 ? a.safe + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:var(--status-ulc); font-weight:800;">${a.ulc > 0 ? a.ulc + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c1.color}; font-weight:800;">${a[c1.key] > 0 ? a[c1.key] + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c2.color}; font-weight:800;">${a[c2.key] > 0 ? a[c2.key] + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c3.color}; font-weight:800;">${a[c3.key] > 0 ? a[c3.key] + 'h' : '-'}</td>
               <td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800; font-size:1.1rem;">${a.cph || '-'}</td>
               <td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">${a.aht || '-'}</td>
               <td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">${a.inOut || '-'}</td>
@@ -1683,9 +1701,9 @@
                  <thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);">
                      <tr>
                          <th style="padding:16px; text-align:left;">Agent Name</th>
-                         <th style="padding:16px; text-align:right; color:var(--status-role);">ICL</th>
-                         <th style="padding:16px; text-align:right; color:var(--status-active);">SAFE</th>
-                         <th style="padding:16px; text-align:right; color:var(--status-ulc);">ULC</th>
+                         <th style="padding:16px; text-align:right; color:${c1.color};">${c1.name}</th>
+                         <th style="padding:16px; text-align:right; color:${c2.color};">${c2.name}</th>
+                         <th style="padding:16px; text-align:right; color:${c3.color};">${c3.name}</th>
                          <th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th>
                          <th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th>
                          <th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th>
@@ -1956,7 +1974,6 @@
                  if (state.view === 'tracker') fetchTrackerData(); 
                  if (state.view === 'insights') fetchInsightData();
 
-                 // FIX: Look for "Occupied Seats" to strictly identify the IDP Heatmap
                  let notifMsg = "Global Update: WFM Schedule Refreshed.";
                  if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) {
                      notifMsg = "Global Update: IDP Heatmap Refreshed.";
