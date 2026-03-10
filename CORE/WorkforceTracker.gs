@@ -13,12 +13,10 @@ var WorkforceTracker = {
     ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
-    
     let msg = [];
     let schedDates = [];
     let idpDates = [];
     let muSet = "";
-
     if (schedRaw && schedRaw.trim().length > 0) {
       let cleanCoach = [];
       let cleanFurlough = [];
@@ -30,20 +28,19 @@ var WorkforceTracker = {
       let lastTimeMins = -1, daysAdded = 0;
       let agentBuffer = []; 
       
-      const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&]+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
+      const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&']+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
-      
       const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
       const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
-      const ROLE_CODES = ['safe onqueue', 'safe en ligne', 'icl', 'incident', 'ulc', 'fire', 'feu', 'wofqt', 'tower'];
-
+      const ROLE_CODES = ['safe onqueue', 'safe en ligne', 'icl', 'incident', 'ulc', 'fire', 'feu', 'wofqt', 'woqft', 'tower'];
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
           let isOffshore = false;
           if (currentID && String(currentID).startsWith("3")) isOffshore = true;
           for (let obj of agentBuffer) {
               if (obj.raw.toUpperCase().includes("TI ") || obj.raw.toUpperCase().includes("OFFSHORE")) {
-                  isOffshore = true; break;
+                  isOffshore = true;
+                  break;
               }
           }
           let reg = isOffshore ? "Offshore" : "Onshore";
@@ -61,10 +58,10 @@ var WorkforceTracker = {
                   if (actLower.includes('safe')) roleType = "SAFE";
                   else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
                   else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
-                  else if (actLower.includes('wofqt') || actLower.includes('tower')) roleType = "TOWER";
+                  else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
               }
               
-              if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]); 
+              if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg]);
               schedDates.push(obj.dateStr);
@@ -104,7 +101,7 @@ var WorkforceTracker = {
                   if (actLower.includes('safe')) roleType = "SAFE";
                   else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
                   else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
-                  else if (actLower.includes('wofqt') || actLower.includes('tower')) roleType = "TOWER";
+                  else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
               }
 
               let isOff = csvParts[5] && csvParts[5].includes("Offshore");
@@ -139,7 +136,6 @@ var WorkforceTracker = {
         }
       });
       flushAgentBuffer();
-
       if (cleanCoach.length > 0) {
         this._executeDestructiveUpsert('WF_COACHING', cleanCoach, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
         msg.push(`Coaching`);
@@ -149,6 +145,7 @@ var WorkforceTracker = {
         msg.push(`Furloughs`);
       }
       if (cleanRoles.length > 0) {
+        cleanRoles.sort((a, b) => b[1].localeCompare(a[1]));
         this._executeDestructiveUpsert('WF_ROLES', cleanRoles, ['Agent Name', 'Date', 'Role', 'Start Time', 'End Time', 'Region']);
         msg.push(`Roles`);
       }
@@ -217,7 +214,6 @@ var WorkforceTracker = {
                 let m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
                 return m ? v : null;
             }).filter(v => v);
-            
             if (vals.length === 0) return null;
             vals.sort(); // String sorting works perfectly for ISO dates
             return { min: vals[0], max: vals[vals.length - 1] };
@@ -234,7 +230,6 @@ var WorkforceTracker = {
         }
         
         if (minS && maxS) props.setProperty('SYNC_SCHED', `WFM: ${minS} to ${maxS} (Sync: ${curTime})`);
-
         const idpRange = getMinMax('WF_IDP', 1);
         if (idpRange) props.setProperty('SYNC_IDP', `IDP: ${idpRange.min} to ${idpRange.max} (Sync: ${curTime})`);
         
@@ -266,11 +261,9 @@ var WorkforceTracker = {
           if (isIDP) wipeKeys.add(dateStr);
           else wipeKeys.add(String(r[0]).trim().toLowerCase() + "_" + dateStr);
       });
-      
       let cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 45);
       let cutoffStr = Utilities.formatDate(cutoffDate, "America/Toronto", "yyyy-MM-dd");
-      
       const retainedRows = existingData.filter(row => {
           if (!row[0]) return false;
           let rDate = this._formatDate(row[isIDP ? 0 : 1]);
@@ -299,9 +292,7 @@ var WorkforceTracker = {
       let rM = parseInt(refDateStr.substring(5,7));
       let rD = parseInt(refDateStr.substring(8,10));
       let tObj = new Date(rY, rM-1, rD, 12, 0, 0, 0);
-      
       let tStart = 0, tEnd = 0, label = "", cycle = "";
-      
       if (mode === 'day') {
           tStart = new Date(rY, rM-1, rD, 0, 0, 0, 0).getTime();
           tEnd = new Date(rY, rM-1, rD, 23, 59, 59, 999).getTime();
@@ -318,7 +309,6 @@ var WorkforceTracker = {
           let wEnd = new Date(wStart);
           wEnd.setDate(wStart.getDate() + 7);
           wEnd.setHours(22, 59, 59, 999);
-          
           tStart = wStart.getTime();
           tEnd = wEnd.getTime();
           
@@ -331,14 +321,11 @@ var WorkforceTracker = {
 
           let sDate = new Date(rY, sMonth, 1, 0, 0, 0, 0);
           tStart = sDate.getTime();
-          
           let eDate = new Date(rY, eMonth, 0, 23, 59, 59, 999);
           tEnd = eDate.getTime();
-          
           label = mode === 'month' 
               ? `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}` 
               : `Q${Math.floor((rM - 1) / 3) + 1}: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`;
-          
           cycle = mode === 'month' ? "MONTH" : "QUARTER"; 
       }
       return { start: tStart, end: tEnd, label: label, cycle: cycle, startStr: Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd") };
@@ -352,7 +339,6 @@ var WorkforceTracker = {
     else if (trackerType === 'roles') dbSched = this._getDB('WF_ROLES');
     
     if (!dbIDP || !dbSched) return JSON.stringify({ error: "Databases missing. Please run WFM Import first." });
-    
     const bounds = this._calculateEpochBoundaries(mode, refDate);
     let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
     const searchStartStr = Utilities.formatDate(searchStart, "America/Toronto", "yyyy-MM-dd");
@@ -367,7 +353,6 @@ var WorkforceTracker = {
 
     if (mode === 'day' && trackerType === 'furlough') {
       buckets = Array.from({length: 96}, (_, i) => ({ index: i, label: this._indexToTime(i), supply: 0, demand: 0, net: 0 }));
-      
       idpData.forEach(row => {
         let rowDateStr = this._formatDate(row[0]);
         if (!rowDateStr) return;
@@ -462,12 +447,9 @@ var WorkforceTracker = {
     });
 
     if (mode === 'day' && trackerType === 'furlough') buckets.forEach(b => { b.net = parseFloat((b.supply - b.demand).toFixed(2)); });
-    
     combinedEvents = Object.values(groupedLogs).map(g => ({ date: g.date, agent: g.agent, activityName: g.activityName, shift: g.shift, hours: parseFloat(g.hours.toFixed(2)), time: `${g.timeStart} - ${g.timeEnd}` }));
-    
     let totals = { all: 0, morning: 0, evening: 0, night: 0, count: combinedEvents.length };
     combinedEvents.forEach(f => { totals.all += f.hours; if (f.shift === 'Morning') totals.morning += f.hours; else if (f.shift === 'Evening') totals.evening += f.hours; else totals.night += f.hours; });
-    
     return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals });
   },
 
@@ -486,7 +468,6 @@ var WorkforceTracker = {
         let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
         const sStr = Utilities.formatDate(searchStart, "America/Toronto", "yyyy-MM-dd");
         const eStr = Utilities.formatDate(new Date(bounds.end), "America/Toronto", "yyyy-MM-dd");
-
         const parseDB = (sheetName, metricName) => {
             const db = this._getDB(sheetName);
             if (!db || db.getLastRow() < 2) return;
@@ -521,7 +502,6 @@ var WorkforceTracker = {
 
         parseDB('WF_COACHING', 'coach');
         parseDB('WF_FURLOUGH', 'acsu');
-        
         const dbRoles = this._getDB('WF_ROLES');
         if (dbRoles && dbRoles.getLastRow() > 1) {
             let processedRoles = new Set();
@@ -541,18 +521,17 @@ var WorkforceTracker = {
 
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     let roleType = String(row[2]).toUpperCase();
-                    
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
                         if (epoch >= bounds.start && epoch <= bounds.end) { 
                             if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
 
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
-                            else if (roleType.includes('TOWER') || roleType.includes('WOFQT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
+                            else if (roleType.includes('TOWER') || roleType.includes('WOFQT') || roleType.includes('WOQFT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours; }
                         }
-                    });
+                     });
                 }
             });
         }
@@ -587,7 +566,6 @@ var WorkforceTracker = {
                 if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "HH:mm");
                 return s;
             };
-
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
                 let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
                 gemData[agName] = { 
@@ -602,7 +580,6 @@ var WorkforceTracker = {
 
         let gemKeys = Object.keys(gemData);
         let finalArr = Object.values(report.agents);
-        
         finalArr.forEach(a => { 
             ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
             let matchedGem = gemData[a.name]; 
@@ -617,19 +594,19 @@ var WorkforceTracker = {
                     if (a.name.includes(gName) || gName.includes(a.name)) {
                         matchedGem = gemData[gName]; break;
                     }
-                }
+                 }
             }
 
             if (matchedGem) {
-                a.gem = matchedGem; 
+                a.gem = matchedGem;
                 a.cph = parseFloat(matchedGem.cph).toFixed(2);
                 a.aht = matchedGem.aht;
                 a.inOut = Math.round(parseFloat(matchedGem.inPct) * 100) + "% / " + Math.round(parseFloat(matchedGem.outPct) * 100) + "%";
             } else {
-                a.gem = null; a.cph = '-'; a.aht = '-'; a.inOut = '-';
+                a.gem = null;
+                a.cph = '-'; a.aht = '-'; a.inOut = '-';
             }
         });
-        
         finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
@@ -648,7 +625,8 @@ var WorkforceTracker = {
               archiveSheet.getRange(1,1,1,7).setFontWeight("bold");
           }
           const data = archiveSheet.getDataRange().getValues();
-          for (let i = data.length - 1; i >= 1; i--) { if (data[i][2] === report.period && data[i][1] === report.cycle) archiveSheet.deleteRow(i + 1); }
+          for (let i = data.length - 1; i >= 1; i--) { if (data[i][2] === report.period && data[i][1] === report.cycle) archiveSheet.deleteRow(i + 1);
+          }
           
           const rows = report.data.map(a => [ new Date(), report.cycle, report.period, a.name, a.region, a.total, JSON.stringify(a) ]);
           if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
@@ -669,7 +647,8 @@ var WorkforceTracker = {
           const cycle = data[i][0];
           const period = data[i][1];
           let key = cycle + "|" + period;
-          if (!seen.has(key)) { seen.add(key); unique.push({ cycle: cycle, period: period }); }
+          if (!seen.has(key)) { seen.add(key);
+          unique.push({ cycle: cycle, period: period }); }
       }
       return JSON.stringify(unique);
   },
@@ -680,7 +659,6 @@ var WorkforceTracker = {
       
       const data = sheet.getDataRange().getDisplayValues();
       let report = { cycle: "ARCHIVED", period: targetPeriod, data: [] };
-      
       for (let i = 1; i < data.length; i++) {
           if (data[i][2] === targetPeriod) {
               report.cycle = data[i][1];
@@ -692,14 +670,16 @@ var WorkforceTracker = {
   },
 
   _getShiftSplits: function(startMins, endMins) {
-      let splits = []; let current = startMins;
+      let splits = [];
+      let current = startMins;
       while (current < endMins) {
           let timeOfDay = current % 1440;
           let shiftType = "Night"; let nextBound = current - timeOfDay + 420;
-          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBound = current - timeOfDay + 900; } 
-          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening"; nextBound = current - timeOfDay + 1380; } 
+          if (timeOfDay >= 420 && timeOfDay < 900) { shiftType = "Morning"; nextBound = current - timeOfDay + 900;
+          } 
+          else if (timeOfDay >= 900 && timeOfDay < 1380) { shiftType = "Evening";
+          nextBound = current - timeOfDay + 1380; } 
           else if (timeOfDay >= 1380) nextBound = current - timeOfDay + 1860;
-          
           let chunkEnd = Math.min(endMins, nextBound);
           splits.push({ shift: shiftType, hours: (chunkEnd - current) / 60, startMins: current, endMins: chunkEnd });
           current = chunkEnd;
@@ -707,13 +687,18 @@ var WorkforceTracker = {
       return splits;
   },
   
-  _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60); let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`; },
+  _minsToTime: function(mins) { let m = mins % 1440; let h = Math.floor(m / 60);
+      let mm = m % 60; return `${h < 10 ? '0'+h : h}:${mm < 10 ? '0'+mm : mm}`;
+  },
   _timeToMins: function(tStr) {
        if (tStr == null || tStr === "") return 0;
        let s = String(tStr).trim();
        let num = Number(s);
-       if (!isNaN(num) && s !== "" && !s.includes(":")) { let m = Math.round(num * 1440); return m >= 1440 ? m % 1440 : m; }
-       if (tStr instanceof Date) { s = Utilities.formatDate(tStr, "America/Toronto", 'HH:mm'); }
+       if (!isNaN(num) && s !== "" && !s.includes(":")) { let m = Math.round(num * 1440);
+           return m >= 1440 ? m % 1440 : m;
+       }
+       if (tStr instanceof Date) { s = Utilities.formatDate(tStr, "America/Toronto", 'HH:mm');
+       }
        let match = s.match(/(\d{1,2})[:\.](\d{2})\s*([AP]M)?/i);
        if (!match) return 0;
        let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
@@ -747,16 +732,21 @@ var WorkforceTracker = {
       let isoMatch = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
       if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2,'0')}-${isoMatch[3].padStart(2,'0')}`;
       let regMatch = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
-      if (regMatch) { let p1 = parseInt(regMatch[1]), p2 = parseInt(regMatch[2]); let m = p1 > 12 ? p2 : p1; let day = p1 > 12 ? p1 : p2; return `${regMatch[3]}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`; }
+      if (regMatch) { let p1 = parseInt(regMatch[1]), p2 = parseInt(regMatch[2]); let m = p1 > 12 ? p2 : p1;
+          let day = p1 > 12 ? p1 : p2; return `${regMatch[3]}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      }
       let pDate = new Date(s);
       if (!isNaN(pDate)) return Utilities.formatDate(pDate, "America/Toronto", "yyyy-MM-dd");
-      return s.substring(0, 10); 
+      return s.substring(0, 10);
   },
   
-  _formatTimeStr: function(t) { let d=new Date(`2000/01/01 ${t}`); return isNaN(d)?t:Utilities.formatDate(d, "America/Toronto", 'HH:mm'); },
+  _formatTimeStr: function(t) { let d=new Date(`2000/01/01 ${t}`); return isNaN(d)?t:Utilities.formatDate(d, "America/Toronto", 'HH:mm');
+  },
   _cleanActivity: function(s) { return s.replace(/\d{2}\s?[AP]M/gi, '').trim(); },
-  _timeToBucket: function(val) { let mins = this._timeToMins(val); return mins < 0 ? -1 : Math.floor(mins / 15); },
-  _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`; }
+  _timeToBucket: function(val) { let mins = this._timeToMins(val);
+      return mins < 0 ? -1 : Math.floor(mins / 15); },
+  _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`;
+  }
 };
 
 function fetchSyncMetadata() {
