@@ -160,7 +160,7 @@ var WorkforceTracker = {
           if (muMatch) { muSet = muMatch[1]; break; }
       }
 
-      let headerIdx = lines.findIndex(l => { const low = l.toLowerCase(); return (low.includes('req') || low.includes('besoin')) && (low.includes('open') || low.includes('ouvert') || low.includes('dispo')); });
+      let headerIdx = lines.findIndex(l => { const low = l.toLowerCase(); return (low.includes('requirements') || low.includes('besoins')) && (low.includes('occupied seats') || low.includes('sièges occupés')); });
       if (headerIdx > -1) {
         let headers = this._parseCSVLine(lines[headerIdx]);
         let colMap = {};
@@ -198,7 +198,6 @@ var WorkforceTracker = {
       }
     }
 
-    // --- REBUILT: DYNAMIC METADATA SCANNER ---
     try {
         const props = PropertiesService.getDocumentProperties();
         const curTime = Utilities.formatDate(new Date(), "America/Toronto", "MMM dd, HH:mm");
@@ -209,13 +208,12 @@ var WorkforceTracker = {
             let vals = s.getRange(2, colIdx, s.getLastRow() - 1, 1).getDisplayValues().flat().filter(v => String(v).trim() !== "");
             if (vals.length === 0) return null;
             
-            // Format check ensures we only measure actual dates
             vals = vals.map(v => {
                 let m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
                 return m ? v : null;
             }).filter(v => v);
             if (vals.length === 0) return null;
-            vals.sort(); // String sorting works perfectly for ISO dates
+            vals.sort();
             return { min: vals[0], max: vals[vals.length - 1] };
         };
 
@@ -458,6 +456,24 @@ var WorkforceTracker = {
         const bounds = this._calculateEpochBoundaries("month", refDateStr);
         let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
         
+        // 1. Pre-load MasterList metadata
+        let mlData = {};
+        const dbML = this._getDB('WF_MASTERLIST');
+        if (dbML && dbML.getLastRow() > 1) {
+            dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
+                let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+                let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+                mlData[cleanName] = {
+                    name: String(r[0]).trim(),
+                    level: r[1],
+                    manager: r[2],
+                    skills: r[3],
+                    isOffshore: isOffshore,
+                    isBackup: String(r[3]).includes("Backup MRC")
+                };
+            });
+        }
+
         const getAg = (name, reg) => {
             let n = String(name).replace(/\b\w/g, c => c.toUpperCase()).trim();
             if(!report.agents[n]) report.agents[n] = { name: n, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
@@ -465,9 +481,16 @@ var WorkforceTracker = {
             return report.agents[n];
         };
 
+        // NEW: Ensure all Backup MRC agents are forced onto the list (starting with 0 hours)
+        Object.keys(mlData).forEach(k => {
+            let ml = mlData[k];
+            if (ml.isBackup) getAg(ml.name, ml.isOffshore ? "Offshore" : "Onshore");
+        });
+
         let searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
         const sStr = Utilities.formatDate(searchStart, "America/Toronto", "yyyy-MM-dd");
         const eStr = Utilities.formatDate(new Date(bounds.end), "America/Toronto", "yyyy-MM-dd");
+        
         const parseDB = (sheetName, metricName) => {
             const db = this._getDB(sheetName);
             if (!db || db.getLastRow() < 2) return;
@@ -580,7 +603,18 @@ var WorkforceTracker = {
 
         let gemKeys = Object.keys(gemData);
         let finalArr = Object.values(report.agents);
+        
         finalArr.forEach(a => { 
+            // Lock in MasterList data
+            let ml = mlData[String(a.name).trim().toLowerCase().replace(/\s+/g, ' ')];
+            if (ml) {
+                a.level = ml.level;
+                a.manager = ml.manager;
+                a.skills = ml.skills;
+                a.isBackupMRC = ml.isBackup;
+                if (ml.isOffshore) a.region = "Offshore";
+            }
+
             ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
             let matchedGem = gemData[a.name]; 
             if (!matchedGem) {
@@ -607,7 +641,9 @@ var WorkforceTracker = {
                 a.cph = '-'; a.aht = '-'; a.inOut = '-';
             }
         });
-        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null);
+        
+        // Remove completely empty rows UNLESS they are a Backup MRC agent
+        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.isBackupMRC === true);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
   },
