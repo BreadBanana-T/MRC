@@ -1,5 +1,5 @@
 /**
- * MODULE: WORKFORCE TRACKER (V7.6 - LOCAL HOST + TIMESTAMP FIX)
+ * MODULE: WORKFORCE TRACKER (V7.8 - LOCAL HOST + DYNAMIC METADATA)
  */
 
 var WorkforceTracker = {
@@ -201,18 +201,44 @@ var WorkforceTracker = {
       }
     }
 
+    // --- REBUILT: DYNAMIC METADATA SCANNER ---
     try {
         const props = PropertiesService.getDocumentProperties();
         const curTime = Utilities.formatDate(new Date(), "America/Toronto", "MMM dd, HH:mm");
-        if (schedDates.length > 0) {
-            schedDates.sort();
-            props.setProperty('SYNC_SCHED', `WFM: ${schedDates[0]} to ${schedDates[schedDates.length-1]} (Sync: ${curTime})`);
+        
+        const getMinMax = (sheetName, colIdx) => {
+            const s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+            if (!s || s.getLastRow() < 2) return null;
+            let vals = s.getRange(2, colIdx, s.getLastRow() - 1, 1).getDisplayValues().flat().filter(v => String(v).trim() !== "");
+            if (vals.length === 0) return null;
+            
+            // Format check ensures we only measure actual dates
+            vals = vals.map(v => {
+                let m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                return m ? v : null;
+            }).filter(v => v);
+            
+            if (vals.length === 0) return null;
+            vals.sort(); // String sorting works perfectly for ISO dates
+            return { min: vals[0], max: vals[vals.length - 1] };
+        };
+
+        const roleRange = getMinMax('WF_ROLES', 2);
+        const furlRange = getMinMax('WF_FURLOUGH', 2);
+        
+        let minS = null, maxS = null;
+        if (roleRange) { minS = roleRange.min; maxS = roleRange.max; }
+        if (furlRange) { 
+            if (!minS || furlRange.min < minS) minS = furlRange.min;
+            if (!maxS || furlRange.max > maxS) maxS = furlRange.max;
         }
-        if (idpDates.length > 0) {
-            idpDates.sort();
-            props.setProperty('SYNC_IDP', `IDP: ${idpDates[0]} to ${idpDates[idpDates.length-1]} (Sync: ${curTime})`);
-            if (muSet) props.setProperty('MU_SET', muSet);
-        }
+        
+        if (minS && maxS) props.setProperty('SYNC_SCHED', `WFM: ${minS} to ${maxS} (Sync: ${curTime})`);
+
+        const idpRange = getMinMax('WF_IDP', 1);
+        if (idpRange) props.setProperty('SYNC_IDP', `IDP: ${idpRange.min} to ${idpRange.max} (Sync: ${curTime})`);
+        
+        if (muSet) props.setProperty('MU_SET', muSet);
     } catch(e) {}
     
     if (msg.length === 0) return "Basic Schedule Synced.";
@@ -445,11 +471,11 @@ var WorkforceTracker = {
     return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals });
   },
 
-  getUnifiedWeeklyReport: function(refDateStr) {
-        const bounds = this._calculateEpochBoundaries("week", refDateStr);
-        let report = { cycle: bounds.cycle, period: bounds.label, agents: {} };
+  getUnifiedReport: function(refDateStr, cycleFilter) {
+        const targetCycle = cycleFilter || 'ALL';
+        const bounds = this._calculateEpochBoundaries("month", refDateStr);
+        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
         
-        // Setup agent memory with regional tags and tower
         const getAg = (name, reg) => {
             let n = String(name).replace(/\b\w/g, c => c.toUpperCase()).trim();
             if(!report.agents[n]) report.agents[n] = { name: n, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
@@ -484,6 +510,7 @@ var WorkforceTracker = {
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
                         if (epoch >= bounds.start && epoch <= bounds.end) { 
+                            if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
                             getAg(agent, region)[metricName] += s.hours; 
                             getAg(agent, region).total += s.hours;
                         }
@@ -495,7 +522,6 @@ var WorkforceTracker = {
         parseDB('WF_COACHING', 'coach');
         parseDB('WF_FURLOUGH', 'acsu');
         
-        // PURE WFM ROLES (SAFE / TOWER)
         const dbRoles = this._getDB('WF_ROLES');
         if (dbRoles && dbRoles.getLastRow() > 1) {
             let processedRoles = new Set();
@@ -519,6 +545,8 @@ var WorkforceTracker = {
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
                         if (epoch >= bounds.start && epoch <= bounds.end) { 
+                            if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
+
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('TOWER') || roleType.includes('WOFQT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
@@ -529,34 +557,27 @@ var WorkforceTracker = {
             });
         }
 
-        // RESTORED MANUAL TRACKER (DB_SESSIONS) FOR ICL & ULC
         const dbSess = this._getDB('DB_Sessions');
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let sessionEpoch = new Date(row[3]).getTime();
                 if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end) {
+                    if (targetCycle !== 'ALL' && this._getCycleForEpoch(sessionEpoch) !== targetCycle) return;
+
                     let agentName = String(row[1]).trim();
                     let role = String(row[2]).toUpperCase(); 
                     let h = Number(row[6]) || 0; 
                     
-                    if (role.includes('ICL')) { 
-                        getAg(agentName).icl += h; 
-                        getAg(agentName).total += h; 
-                    }
-                    else if (role.includes('ULC') || role.includes('FIRE')) { 
-                        getAg(agentName).ulc += h; 
-                        getAg(agentName).total += h; 
-                    }
+                    if (role.includes('ICL')) { getAg(agentName).icl += h; getAg(agentName).total += h; }
+                    else if (role.includes('ULC') || role.includes('FIRE')) { getAg(agentName).ulc += h; getAg(agentName).total += h; }
                 }
             });
         }
 
-        // DEEP GEM INTEGRATION (V3 DB)
         const dbGEM = this._getDB('WF_GEM_DATA_V3');
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
             
-            // NEW HELPER: Slices nasty 1899-12-30 ISO strings back into beautiful mm:ss format instantly
             const fixTime = (v) => {
                 if (!v || v === '-' || v === '00:00') return '-';
                 let s = String(v).trim();
@@ -584,16 +605,12 @@ var WorkforceTracker = {
         
         finalArr.forEach(a => { 
             ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
-            
             let matchedGem = gemData[a.name]; 
-            
             if (!matchedGem) {
                 let wfmParts = a.name.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
-                
                 for(let i=0; i<gemKeys.length; i++) {
                     let gName = gemKeys[i];
                     let gParts = gName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
-                    
                     if (wfmParts.length > 1 && gParts.length > 1 && wfmParts[0] === gParts[0] && wfmParts[1] === gParts[1]) {
                         matchedGem = gemData[gName]; break;
                     }
@@ -614,13 +631,12 @@ var WorkforceTracker = {
         });
         
         finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null);
-        
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
   },
 
-  archiveUnifiedWeek: function(refDateStr) {
-      const reportStr = this.getUnifiedWeeklyReport(refDateStr);
+  archiveUnifiedReport: function(refDateStr, cycleFilter) {
+      const reportStr = this.getUnifiedReport(refDateStr, cycleFilter);
       const report = JSON.parse(reportStr);
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
       
@@ -632,7 +648,7 @@ var WorkforceTracker = {
               archiveSheet.getRange(1,1,1,7).setFontWeight("bold");
           }
           const data = archiveSheet.getDataRange().getValues();
-          for (let i = data.length - 1; i >= 1; i--) { if (data[i][2] === report.period) archiveSheet.deleteRow(i + 1); }
+          for (let i = data.length - 1; i >= 1; i--) { if (data[i][2] === report.period && data[i][1] === report.cycle) archiveSheet.deleteRow(i + 1); }
           
           const rows = report.data.map(a => [ new Date(), report.cycle, report.period, a.name, a.region, a.total, JSON.stringify(a) ]);
           if (rows.length > 0) archiveSheet.getRange(archiveSheet.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
@@ -652,7 +668,8 @@ var WorkforceTracker = {
       for (let i = data.length - 1; i >= 0; i--) {
           const cycle = data[i][0];
           const period = data[i][1];
-          if (!seen.has(period)) { seen.add(period); unique.push({ cycle: cycle, period: period }); }
+          let key = cycle + "|" + period;
+          if (!seen.has(key)) { seen.add(key); unique.push({ cycle: cycle, period: period }); }
       }
       return JSON.stringify(unique);
   },
