@@ -97,14 +97,14 @@ function importWorkforceData(sched, idp) {
 }
 
 // --- GRAND UNIFIED TRACKER & ARCHIVES ---
-function getUnifiedWeeklyReport(dateStr) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getUnifiedWeeklyReport(dateStr) : "{}"; 
+function getUnifiedReport(dateStr, cycleFilter) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getUnifiedReport(dateStr, cycleFilter) : "{}"; 
 }
-function archiveUnifiedWeek(dateStr) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.archiveUnifiedWeek(dateStr) : "Error"; 
+function archiveUnifiedReport(dateStr, cycleFilter) { 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.archiveUnifiedReport(dateStr, cycleFilter) : "Error";
 }
 function getArchiveList() { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchiveList() : "[]"; 
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchiveList() : "[]";
 }
 function getArchivedReport(period) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period) : "{}"; 
