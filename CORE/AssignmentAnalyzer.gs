@@ -21,6 +21,12 @@ var AssignmentAnalyzer = {
           let colJob = headers.findIndex(h => h.toLowerCase().includes('title') || h.toLowerCase().includes('job'));
           let colStatus = headers.findIndex(h => h.toLowerCase().includes('status'));
           let colLevel = headers.findIndex(h => h.toLowerCase().includes('erc_level') || h.toLowerCase().includes('level'));
+          
+          // NEW: Grab extra metadata
+          let colSup = headers.findIndex(h => h.toLowerCase().includes('supervisor'));
+          let colSkills = headers.findIndex(h => h.toLowerCase() === 'skills');
+          let colLoc = headers.findIndex(h => h.toLowerCase().includes('location'));
+          let colEmailTI = headers.findIndex(h => h.toLowerCase().includes('international'));
 
           let validAgents = [];
           for (let i = headerIdx + 1; i < lines.length; i++) {
@@ -30,9 +36,15 @@ var AssignmentAnalyzer = {
               let status = cols[colStatus] || "";
               
               let level = colLevel > -1 ? parseInt(cols[colLevel]) || 2 : 2;
+              let sup = colSup > -1 ? cols[colSup] : "";
+              let skills = colSkills > -1 ? cols[colSkills] : "";
+              let loc = colLoc > -1 ? cols[colLoc] : "";
+              let emailTI = colEmailTI > -1 ? cols[colEmailTI] : "";
 
-              if (name && job.toLowerCase().includes('monitoring') && status.toLowerCase().includes('active')) {
-                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level]);
+              let isManager = job.toLowerCase().includes('manager') || job.toLowerCase().includes('supervisor') || job.toLowerCase().includes('director');
+
+              if (name && status.toLowerCase().includes('active') && !isManager) {
+                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI]);
               }
           }
           
@@ -41,12 +53,12 @@ var AssignmentAnalyzer = {
               let sheet = ss.getSheetByName('WF_MASTERLIST');
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
-              sheet.appendRow(["Agent Name", "ERC Level"]); 
-              sheet.getRange(2, 1, validAgents.length, 2).setValues(validAgents);
-              
-              return `Success: Locked ${validAgents.length} Monitoring Agents into the engine.\nManagers will now be ignored.`;
+              // Save the 6 columns
+              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]); 
+              sheet.getRange(2, 1, validAgents.length, 6).setValues(validAgents);
+              return `Success: Locked ${validAgents.length} Active Agents into the engine.\nManagers are permanently ignored.`;
           }
-          return "Error: No active monitoring agents found in the pasted list.";
+          return "Error: No active agents found in the pasted list.";
       } catch (e) {
           return "Error parsing MasterList: " + e.message;
       }
@@ -111,7 +123,6 @@ var AssignmentAnalyzer = {
 
           let data = db.getDataRange().getValues().slice(1);
           let validData = [];
-          
           data.forEach(r => {
               let dateStr = r[0] instanceof Date ? Utilities.formatDate(r[0], "America/Toronto", "yyyy-MM-dd") : String(r[0]);
               if (dateStr.match(/^20\d{2}-\d{2}-\d{2}/)) {
@@ -121,7 +132,6 @@ var AssignmentAnalyzer = {
           });
 
           if (validData.length === 0) return JSON.stringify({ error: "Database was corrupted. Please re-import your GEM report.", months: [] });
-          
           let monthSet = new Set();
           validData.forEach(r => monthSet.add(r[0]));
           let months = Array.from(monthSet).sort().reverse();
@@ -135,7 +145,6 @@ var AssignmentAnalyzer = {
               prevMonth = months[tIdx + 1];
           }
 
-          // FIX HELPER: Repairs any nasty dates found in the Red Flags tab as well
           const fixTime = (v) => {
               if (!v || v === '-') return '-';
               let s = String(v).trim();
@@ -148,7 +157,6 @@ var AssignmentAnalyzer = {
 
           let currentMap = {};
           let prevMap = {};
-          
           validData.forEach(r => {
               let agent = String(r[1]).trim();
               let cleanAgent = agent.toLowerCase().replace(/\s+/g, ' ');
@@ -170,12 +178,11 @@ var AssignmentAnalyzer = {
                           }
                       }
                   }
-                  if (matchedLvl === null) return; 
+                  if (matchedLvl === null) return;
                   agentLevel = matchedLvl;
               }
               
-              if (exclusions.has(agent)) return; 
-
+              if (exclusions.has(agent)) return;
               let inP = parseFloat(r[3]) || 0; if (inP > 1) inP = inP / 100;
               let outP = parseFloat(r[4]) || 0; if (outP > 1) outP = outP / 100;
               let cphV = parseFloat(r[2]) || 0;
@@ -245,7 +252,6 @@ var AssignmentAnalyzer = {
       
       let headers = this._parseCSVLine(lines[headerIdx]);
       let colMap = {};
-      
       headers.forEach((h, i) => {
           let low = h.toLowerCase();
           if (low.includes('agent')) colMap.agent = i;
@@ -267,7 +273,7 @@ var AssignmentAnalyzer = {
           else if (low.includes('outbound calls')) colMap.outCalls = i;
           else if (low.includes('extension in calls') || low.includes('ext in calls')) colMap.extCalls = i;
       });
-
+      
       let map = {};
       for (let i = headerIdx + 1; i < lines.length; i++) {
           let cols = this._parseCSVLine(lines[i]);
@@ -350,7 +356,6 @@ var AssignmentAnalyzer = {
       const writeToSheet = (targetSS) => {
           let sheet = targetSS.getSheetByName(sheetName);
           let expectedHeaders = ["Month", "Agent Name", "CPH", "Inbound %", "Outbound %", "AHT", "Tasks x Calls", "Total Tasks", "Calls Answered", "WDays", "Transfers", "Transf %", "Avg Talk", "Avg Hold", "Avg ACW", "Out Calls", "Out Talk", "Ext Calls", "Ext Talk"];
-          
           if (!sheet) {
               sheet = targetSS.insertSheet(sheetName);
               sheet.appendRow(expectedHeaders);
@@ -365,8 +370,7 @@ var AssignmentAnalyzer = {
               let dStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
               return dStr !== repMonth;
           });
-          
-          // FIX: Add an apostrophe to force Google Sheets to save as raw text!
+
           let safeT = function(t) { return (t && t !== '-' && t !== '00:00') ? "'" + t : "-"; };
           
           let newRows = [];
