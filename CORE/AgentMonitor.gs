@@ -22,7 +22,7 @@ function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.lo
 function compileFloorData() {
   const localSS = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = localSS.getSheetByName("Raw Schedule");
-
+  
   const emptyFloor = {
     active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
@@ -31,26 +31,47 @@ function compileFloorData() {
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
+  // Fetch MasterList for Metadata
+  const dbML = localSS.getSheetByName('WF_MASTERLIST');
+  let mlData = {};
+  if (dbML && dbML.getLastRow() > 1) {
+      dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
+          let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+          let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+          mlData[cleanName] = {
+              level: r[1],
+              manager: r[2],
+              skills: r[3],
+              isOffshore: isOffshore
+          };
+      });
+  }
+
   const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
   const now = new Date().getTime();
   const agentMap = new Map();
-
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
-    const cleanName = String(rawName).trim().toLowerCase();
-    const persistentData = sheetOverrides.get(cleanName) || {};
-    const fastData = fastOverrides[cleanName] || {};
+    const cleanNameKey = String(rawName).trim().toLowerCase().replace(/\s+/g, ' ');
+    const ml = mlData[cleanNameKey] || null;
+
+    const persistentData = sheetOverrides.get(cleanNameKey) || {};
+    const fastData = fastOverrides[cleanNameKey] || {};
     
     let manualRole = (fastData.role !== undefined) ? fastData.role : (persistentData.role || "");
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
+    
+    // MasterList Offshore Override
     let region = row ? row[6] : "Offshore";
+    if (ml) region = ml.isOffshore ? "Offshore" : "Onshore";
+
     let startEpoch = row ? Number(row[10]) : 0;
     let endEpoch = row ? Number(row[11]) : 0;
     let originalBreaksJson = row ? row[7] : "[]";
     let agentID = row ? row[1] : "";
-
+    
     if (manualRole && manualRole !== "") absentType = "";
 
     const otList = persistentData.ot || [];
@@ -59,7 +80,6 @@ function compileFloorData() {
 
     let dateStr = row ? row[2] : "";
     let shiftStr = "";
-
     if (isOT && (!startEpoch || !endEpoch)) {
        let today = new Date();
        let otStart = otList[0].start;
@@ -111,7 +131,6 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
-
     if (isOT) {
        otList.forEach(o => {
            if(o.bStart && o.bStart !== "-" && o.bEnd && o.bEnd !== "-") rawBreaks.push({ type: "OT Break", start: o.bStart, end: o.bEnd });
@@ -160,7 +179,6 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
-
              if (now >= bs && now <= be) {
                  if (b.type === "Training") {
                      inTrainingNow = true;
@@ -191,7 +209,7 @@ function compileFloorData() {
     let effectiveRole = manualRole || dynamicRoleNow;
     let category = "active";
     let subStatus = effectiveRole || "";
-
+    
     if (isInactiveTime) {
         category = "off";
         subStatus = absentType ? `${absentType} (Off Shift)` : inactiveReason;
@@ -233,7 +251,10 @@ function compileFloorData() {
       dateStr: dateStr, subStatus: subStatus, role: effectiveRole, rawBreaks: enrichedBreaks, 
       isModified: isModified, breakTimeStr: nextBreakStr, currentBreakStr: currentBreakStr, 
       timer: breakTimer, auxLabel: "Remaining", startsIn: breakStartsIn, nextBreakType: nextBreakType,
-      onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn
+      onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn,
+      level: ml ? ml.level : null,
+      manager: ml ? ml.manager : null,
+      skills: ml ? ml.skills : null
     };
 
     if (category === 'active' && nextBreakStr) {
@@ -256,7 +277,7 @@ function compileFloorData() {
   sheetOverrides.forEach((val, key) => {
       if (!agentMap.has(key) && !agentMap.has(toTitleCase(key)) && val.ot.length > 0) processEntry(toTitleCase(key), null); 
   });
-
+  
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
