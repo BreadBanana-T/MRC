@@ -1,3 +1,34 @@
+<style>
+  /* --- CUSTOM CSS FOR HOVER CARD INJECTED DIRECTLY --- */
+  .row-name { position: relative; cursor: help; }
+  .agent-tooltip {
+      position: absolute;
+      left: 0;
+      bottom: 100%;
+      margin-bottom: 8px;
+      background: var(--bg-root);
+      border: 1px solid var(--glass-border);
+      padding: 12px 16px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      opacity: 0;
+      visibility: hidden;
+      transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 1000;
+      width: max-content;
+      max-width: 250px;
+      pointer-events: none;
+      white-space: normal;
+  }
+  body.dark .agent-tooltip { background: #1e293b; border-color: rgba(255,255,255,0.1); }
+  .row-name:hover .agent-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(-4px);
+  }
+  .row-name:hover::after { display: none !important; } /* Hide old tooltips */
+</style>
+
 <script>
   var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
@@ -587,7 +618,6 @@
          }
      }
 
-     // FIX: REMOVED THE TOWER CARD ENTIRELY FROM THE UI
      return `
      ${startingHtml}
 
@@ -693,10 +723,24 @@
          timeDisplay = "OFF";
      }
 
+     // NEW: Build the beautiful HTML Hover Tooltip pulling from MasterList
+     var hoverCardHtml = `
+         <div class="agent-tooltip">
+             <div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">${a.name || ''}</div>
+             ${a.level ? `<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ${a.level}</div>` : ''}
+             ${a.manager ? `<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">${a.manager}</span></div>` : ''}
+             ${a.skills ? `<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">${String(a.skills).replace(/;#[0-9]+/g, '').replace(/;/g, ', ')}</div>` : ''}
+         </div>
+     `;
+
      return `
      <div class="agent-row" onclick="openMenu(event, '${(a.name || '').replace(/'/g, "\\'")}')">
         <div class="status-strip ${stripClass}"></div>
-        <div class="row-name" data-full-name="${a.name || ''}">${a.name || ''}</div>
+        
+        <div class="row-name">
+            ${a.name || ''}
+            ${hoverCardHtml}
+        </div>
         
         <div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, '${formattedId}')" title="Click to Copy ID">
            <span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color='var(--accent-primary)'" onmouseout="this.style.color='var(--text-muted)'">${formattedId}</span>
@@ -1186,7 +1230,7 @@
               } else {
                   getAnalyzerHistory(null);
               }
-              google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Red Flags Updated.");
+              google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Profiles Updated.");
           }).withFailureHandler(function(){
               state.analyzerLoading = false; render();
           }).processMasterListUpload(txt);
@@ -1257,8 +1301,8 @@
           return modalsHtml + `
           <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:60vh; text-align:center;">
               <div style="width: 50px; height: 50px; border: 4px solid var(--glass-border); border-top-color: var(--status-alert); border-radius: 50%; animation: spin 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite; margin-bottom: 24px; box-shadow: 0 0 20px rgba(220, 38, 38, 0.4);"></div>
-              <h2 style="margin:0 0 8px 0; font-weight:800; font-size:1.8rem; color:var(--text-main);">Analyzing GEM Data...</h2>
-              <p style="color:var(--text-muted); font-size:1rem;">Cross-referencing 10+ metrics against the Master Roster.</p>
+              <h2 style="margin:0 0 8px 0; font-weight:800; font-size:1.8rem; color:var(--text-main);">Analyzing Data...</h2>
+              <p style="color:var(--text-muted); font-size:1rem;">Cross-referencing metrics against the Master Roster.</p>
           </div>`;
       }
 
@@ -1492,11 +1536,11 @@
 
              ${datePickerHtml}
 
-             <div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);">
-                <button class="nav-btn ${state.insightCycleFilter==='ALL'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightCycleFilter='ALL'; fetchInsightData();">Full Month</button>
-                <button class="nav-btn ${state.insightCycleFilter==='WEEK A'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightCycleFilter='WEEK A'; fetchInsightData();">Week A</button>
-                <button class="nav-btn ${state.insightCycleFilter==='WEEK B'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightCycleFilter='WEEK B'; fetchInsightData();">Week B</button>
-             </div>
+             <select class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.8rem;" onchange="state.insightCycleFilter=this.value; fetchInsightData();">
+                 <option value="ALL" ${state.insightCycleFilter === 'ALL' ? 'selected' : ''}>📅 Rotation: All</option>
+                 <option value="WEEK A" ${state.insightCycleFilter === 'WEEK A' ? 'selected' : ''}>📅 Week A</option>
+                 <option value="WEEK B" ${state.insightCycleFilter === 'WEEK B' ? 'selected' : ''}>📅 Week B</option>
+             </select>
 
              <div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);">
                 <button class="nav-btn ${state.insightRegionFilter==='All'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter='All'; render();">All</button>
@@ -1532,6 +1576,11 @@
       if (state.insightSearch) {
           var term = state.insightSearch.toLowerCase();
           displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; });
+      }
+      
+      // NEW TOWER LOGIC: If sorting by Tower, hide non-Backup MRC agents entirely!
+      if (state.insightSort === 'tower') {
+          displayData = displayData.filter(function(a) { return a.isBackupMRC === true; });
       }
 
       displayData.sort(function(a, b) {
@@ -1907,10 +1956,12 @@
                  if (state.view === 'tracker') fetchTrackerData(); 
                  if (state.view === 'insights') fetchInsightData();
 
+                 // FIX: Look for "Occupied Seats" to strictly identify the IDP Heatmap
                  let notifMsg = "Global Update: WFM Schedule Refreshed.";
-                 if (t.toLowerCase().includes("mu set:") || (t.toLowerCase().includes("req") && t.toLowerCase().includes("open"))) {
+                 if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) {
                      notifMsg = "Global Update: IDP Heatmap Refreshed.";
                  }
+                 
                  google.script.run.addGlobalNotification(notifMsg);
              })
              .withFailureHandler(function(err) {
