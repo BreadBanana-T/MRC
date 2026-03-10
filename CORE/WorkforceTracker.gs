@@ -481,7 +481,6 @@ var WorkforceTracker = {
             return report.agents[n];
         };
 
-        // NEW: Ensure all Backup MRC agents are forced onto the list (starting with 0 hours)
         Object.keys(mlData).forEach(k => {
             let ml = mlData[k];
             if (ml.isBackup) getAg(ml.name, ml.isOffshore ? "Offshore" : "Onshore");
@@ -580,6 +579,9 @@ var WorkforceTracker = {
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
             
+            // FIX: Get the year and month we are currently looking at (e.g., "2026-03")
+            const targetMonth = refDateStr.substring(0, 7);
+
             const fixTime = (v) => {
                 if (!v || v === '-' || v === '00:00') return '-';
                 let s = String(v).trim();
@@ -590,14 +592,20 @@ var WorkforceTracker = {
                 return s;
             };
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
-                let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
-                gemData[agName] = { 
-                    cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
-                    transfers: row[10] || 0, transfPct: row[11] || 0,
-                    avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
-                    outCalls: row[15] || 0, outTalk: fixTime(row[16]),
-                    extCalls: row[17] || 0, extTalk: fixTime(row[18])
-                };
+                // Check if the GEM data matches the current month we are looking at in the tracker
+                let rowDateStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM") : String(row[0]).substring(0, 7);
+                
+                // ONLY load the GEM data if it actually belongs to the month we are viewing
+                if (rowDateStr === targetMonth) {
+                    let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
+                    gemData[agName] = { 
+                        cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
+                        transfers: row[10] || 0, transfPct: row[11] || 0,
+                        avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
+                        outCalls: row[15] || 0, outTalk: fixTime(row[16]),
+                        extCalls: row[17] || 0, extTalk: fixTime(row[18])
+                    };
+                }
             });
         }
 
@@ -605,7 +613,6 @@ var WorkforceTracker = {
         let finalArr = Object.values(report.agents);
         
         finalArr.forEach(a => { 
-            // Lock in MasterList data
             let ml = mlData[String(a.name).trim().toLowerCase().replace(/\s+/g, ' ')];
             if (ml) {
                 a.level = ml.level;
@@ -642,7 +649,6 @@ var WorkforceTracker = {
             }
         });
         
-        // Remove completely empty rows UNLESS they are a Backup MRC agent
         finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.isBackupMRC === true);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
