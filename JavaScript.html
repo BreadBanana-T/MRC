@@ -1497,7 +1497,8 @@
       var rightSideHtml = '';
       var datePickerHtml = '';
       if (state.selectedArchive === 'LIVE') {
-          datePickerHtml = `<input type="month" class="input-aether" style="width:auto; height:32px; font-size:0.8rem;" value="${state.selectedDate.substring(0,7)}" onchange="state.selectedDate = this.value + '-01'; fetchInsightData();">`;
+          // Added cursor:pointer and onclick="try{this.showPicker();}catch(e){}"
+          datePickerHtml = `<input type="month" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; cursor:pointer;" value="${state.selectedDate.substring(0,7)}" onchange="state.selectedDate = this.value + '-01'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}">`;
           rightSideHtml = `<button class="btn btn-primary" style="height:32px; font-size:0.75rem;" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="14"></i> Freeze & Archive</button>`;
       } else {
           rightSideHtml = `<button class="btn btn-glass" disabled style="height:32px; font-size:0.75rem; opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="14"></i> Archived</button>`;
