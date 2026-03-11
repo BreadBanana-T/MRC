@@ -889,7 +889,7 @@
       </div>`;
   }
   
-  function renderWeather() {
+   function renderWeather() {
       if (!state.weather || typeof state.weather !== 'object') {
            return `<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>`;
       }
@@ -906,6 +906,49 @@
          html += `</div></div>`;
       } else {
          html += `<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>`;
+      }
+      
+      for(var i=0; i<provs.length; i++) {
+         var prov = provs[i];
+         var cities = state.weather[prov];
+         if (!cities || !Array.isArray(cities)) continue;
+         
+         cities.forEach(function(c) {
+             var icon = getWeatherIcon(c.condition);
+             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) {
+                 var dayName = f.day ? String(f.day).substring(0,3) : "---";
+                 // FIX: Bulletproof inline flexbox styling for the 3-day forecast
+                 return `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">${dayName}</span><div style="color:var(--text-main);">${getWeatherIcon(f.cond, true)}</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">${f.temp || ''}</span></div>`;
+             }).join('');
+             
+             html += `
+             <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
+                 
+                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                     <span style="font-weight:800; font-size:1.1rem;">${c.name || ''}</span>
+                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">${prov}</span>
+                 </div>
+                 
+                 <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                     <div style="display:flex; flex-direction:column; gap:4px;">
+                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">${c.temp || ''}°</div>
+                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition || ''}</div>
+                     </div>
+                     <div style="text-align:right; display:flex; flex-direction:column; gap:4px;">
+                         <div style="font-size:1.4rem; font-weight:700;">${c.wind || ''}</div>
+                         <div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div>
+                     </div>
+                 </div>
+
+                 <div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">
+                     ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
+                 </div>
+
+             </div>`;
+         });
+      }
+      html += '</div>';
+      return html;
       }
       
       for(var i=0; i<provs.length; i++) {
