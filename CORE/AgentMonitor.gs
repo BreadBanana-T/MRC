@@ -48,6 +48,7 @@ function compileFloorData() {
   }
 
   const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
+  
   const now = new Date().getTime();
   const agentMap = new Map();
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
@@ -58,7 +59,7 @@ function compileFloorData() {
 
     const persistentData = sheetOverrides.get(cleanNameKey) || {};
     const fastData = fastOverrides[cleanNameKey] || {};
-    
+
     let manualRole = (fastData.role !== undefined) ? fastData.role : (persistentData.role || "");
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
@@ -77,9 +78,10 @@ function compileFloorData() {
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
     const isOT = otList.length > 0;
-
+    
     let dateStr = row ? row[2] : "";
     let shiftStr = "";
+
     if (isOT && (!startEpoch || !endEpoch)) {
        let today = new Date();
        let otStart = otList[0].start;
@@ -131,6 +133,7 @@ function compileFloorData() {
     let activeBreaksJson = customBreaks ? customBreaks : originalBreaksJson;
     const isModified = !!customBreaks;
     const rawBreaks = parseBreaksSafe(activeBreaksJson);
+    
     if (isOT) {
        otList.forEach(o => {
            if(o.bStart && o.bStart !== "-" && o.bEnd && o.bEnd !== "-") rawBreaks.push({ type: "OT Break", start: o.bStart, end: o.bEnd });
@@ -179,6 +182,7 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
+             
              if (now >= bs && now <= be) {
                  if (b.type === "Training") {
                      inTrainingNow = true;
@@ -209,7 +213,7 @@ function compileFloorData() {
     let effectiveRole = manualRole || dynamicRoleNow;
     let category = "active";
     let subStatus = effectiveRole || "";
-    
+
     if (isInactiveTime) {
         category = "off";
         subStatus = absentType ? `${absentType} (Off Shift)` : inactiveReason;
@@ -218,7 +222,8 @@ function compileFloorData() {
         if (absentType) {
             const upper = absentType.toUpperCase();
             if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
-            else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP/)) { category = "unplanned"; subStatus = absentType; }
+            // NEW: Push PW/ALT and Personal into the Unplanned / Needs Attention bucket
+            else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP|PW\/ALT|PERSONAL|WELLNESS/)) { category = "unplanned"; subStatus = absentType; }
             else { category = "vacation"; subStatus = absentType; }
         } 
 
@@ -235,7 +240,8 @@ function compileFloorData() {
                 category = "off";
                 subStatus = activeIntradayLabel; 
             }
-            else if (inTrainingNow) { category = "training"; subStatus = activeIntradayLabel || "Training"; }
+            else if (inTrainingNow) { category = "training";
+                subStatus = activeIntradayLabel || "Training"; }
             else if (onBreakNow) subStatus = activeIntradayLabel;
             else if (dynamicRoleNow) subStatus = activeIntradayLabel;
         }
@@ -277,7 +283,7 @@ function compileFloorData() {
   sheetOverrides.forEach((val, key) => {
       if (!agentMap.has(key) && !agentMap.has(toTitleCase(key)) && val.ot.length > 0) processEntry(toTitleCase(key), null); 
   });
-  
+
   agentMap.forEach(item => {
       const targetCat = item.category;
       if (emptyFloor[targetCat]) emptyFloor[targetCat].push(item.agent);
