@@ -30,6 +30,16 @@
 </style>
 
 <script>
+  function escapeHTML(str) {
+      if (!str) return "";
+      return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+  }
+
   var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
   
   document.addEventListener('click', function(e) {
@@ -39,6 +49,21 @@
           toggleNotifPanel();
       }
   });
+
+  // HEADER TOGGLE LOGIC
+  window.toggleHeaderActions = function() {
+      var header = document.querySelector('.top-deck');
+      var icon = document.getElementById('header-toggle-icon');
+      if (!header || !icon) return;
+      
+      header.classList.toggle('show-actions');
+      if (header.classList.contains('show-actions')) {
+          icon.setAttribute('data-lucide', 'chevron-right');
+      } else {
+          icon.setAttribute('data-lucide', 'chevron-left');
+      }
+      refreshIcons();
+  };
 
   var state = { 
       view: 'overview', 
@@ -290,7 +315,7 @@
               activeNotifs.forEach(function(n) {
                   if(!state.knownNotifs.has(n.id)) {
                       state.knownNotifs.add(n.id);
-                      showToast("🔔 " + n.text); 
+                      showToast("🔔 " + escapeHTML(n.text)); 
                       
                       if (n.text.indexOf("Dashboards refreshed") !== -1) {
                           fetchData();
@@ -316,10 +341,10 @@
       list.innerHTML = visibleNotifs.map(function(n) { return `
           <div style="padding:16px; background:var(--card-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); border-radius:16px; margin-bottom:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); position:relative; overflow:hidden; transition: 0.2s;">
               <div style="position:absolute; top:0; left:0; width:4px; height:100%; background:var(--accent-primary);"></div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; margin-left:8px; font-weight:700;">${n.time}</div>
-              <div style="font-weight:700; font-size:0.9rem; margin-bottom:12px; margin-left:8px;">${n.text}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; margin-left:8px; font-weight:700;">${escapeHTML(n.time)}</div>
+              <div style="font-weight:700; font-size:0.9rem; margin-bottom:12px; margin-left:8px;">${escapeHTML(n.text)}</div>
               <div style="display:flex; justify-content:flex-end;">
-                  <button class="btn btn-glass" style="font-size:0.75rem; padding:4px 16px; height:28px;" onclick="dismissNotif('${n.id}')">Dismiss</button>
+                  <button class="btn btn-glass" style="font-size:0.75rem; padding:4px 16px; height:28px;" onclick="dismissNotif('${escapeHTML(n.id)}')">Dismiss</button>
               </div>
           </div>
       `; }).join('') || '<div style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No new notifications.</div>';
@@ -369,8 +394,8 @@
               if(h && h.length){
                   state.slHistory = h;
                   var latest = h[h.length-1];
-                  state.currentSL = latest.val + "%";
-                  state.currentACK = latest.ack + "s";
+                  state.currentSL = escapeHTML(latest.val) + "%";
+                  state.currentACK = escapeHTML(latest.ack) + "s";
                   
                   var slEl = document.getElementById('hdr-sl');
                   if(slEl) slEl.innerText = state.currentSL;
@@ -502,7 +527,7 @@
               h = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);">
                       <i data-lucide="alert-triangle" width="48" style="margin-bottom:16px;"></i>
                       <h2 style="margin-top:0;">UI Render Error</h2>
-                      <p style="color:var(--text-secondary);">${renderErr.message}</p>
+                      <p style="color:var(--text-secondary);">${escapeHTML(renderErr.message)}</p>
                    </div>`;
           }
           
@@ -524,7 +549,7 @@
       } catch(err) {
           console.error("Critical Render Error:", err);
           var c = document.getElementById('content');
-          if(c) c.innerHTML = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);"><i data-lucide="alert-triangle" width="48"></i><h2>Critical Error</h2><p>${err.message}</p></div>`;
+          if(c) c.innerHTML = `<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);"><i data-lucide="alert-triangle" width="48"></i><h2>Critical Error</h2><p>${escapeHTML(err.message)}</p></div>`;
       }
   }
 
@@ -578,7 +603,7 @@
       return `
       <div class="sticky-header">
          <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">
-             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${state.searchTerm || ''}">
+             <input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="${escapeHTML(state.searchTerm) || ''}">
              
              <button class="btn btn-glass" style="height:34px;" onclick="window.open('https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=', '_blank')">
                  <i data-lucide="radio" width="16"></i> Tower Control
@@ -689,10 +714,10 @@
      if (a.shift && a.shift.indexOf("?") === -1) { var parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      
      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
-     if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL/)) stripClass = 'alert';
+     if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL|PW\/ALT|PERSONAL/i)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
 
-     var statusText = a.subStatus || "Active";
+     var statusText = escapeHTML(a.subStatus) || "Active";
      var statusColor = "var(--text-secondary)";
      
      if (a.role && a.role.indexOf('SAFE') !== -1) { statusColor = "var(--status-active)"; }
@@ -701,44 +726,43 @@
      
      if (a.onBreakNow) {
          statusColor = "var(--status-break)";
-         statusText = a.subStatus; 
+         statusText = escapeHTML(a.subStatus); 
      }
 
      var breakHtml = "";
      if (a.onBreakNow && a.currentBreakStr) {
-         breakHtml += `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${a.currentBreakStr} • Remaining: <span style="font-weight:800; color:var(--status-break);">${a.timer}</span></div>`;
+         breakHtml += `<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ${escapeHTML(a.currentBreakStr)} • Remaining: <span style="font-weight:800; color:var(--status-break);">${escapeHTML(a.timer)}</span></div>`;
      } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) {
-         breakHtml += `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${upInfo.nextBreakType} in <span style="font-weight:800; color:var(--text-main);">${upInfo.startsIn}</span></div>`;
+         breakHtml += `<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>${escapeHTML(upInfo.nextBreakType)} in <span style="font-weight:800; color:var(--text-main);">${escapeHTML(upInfo.startsIn)}</span></div>`;
      }
 
      if (a.shiftEndsIn) {
-         breakHtml += `<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">${a.shiftEndsIn}</span></div>`;
+         breakHtml += `<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">${escapeHTML(a.shiftEndsIn)}</span></div>`;
      }
 
      var prefix = (a.region || '').indexOf('Onshore') !== -1 ? 'T' : 'x';
-     var formattedId = prefix + (a.id || '');
+     var formattedId = prefix + escapeHTML(a.id || '');
      
-     var timeDisplay = start + "-" + end;
+     var timeDisplay = escapeHTML(start) + "-" + escapeHTML(end);
      if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') {
          timeDisplay = "OFF";
      }
 
-     // NEW: Build the beautiful HTML Hover Tooltip pulling from MasterList
      var hoverCardHtml = `
          <div class="agent-tooltip">
-             <div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">${a.name || ''}</div>
-             ${a.level ? `<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ${a.level}</div>` : ''}
-             ${a.manager ? `<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">${a.manager}</span></div>` : ''}
-             ${a.skills ? `<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">${String(a.skills).replace(/;#[0-9]+/g, '').replace(/;/g, ', ')}</div>` : ''}
+             <div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">${escapeHTML(a.name || '')}</div>
+             ${a.level ? `<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ${escapeHTML(a.level)}</div>` : ''}
+             ${a.manager ? `<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">${escapeHTML(a.manager)}</span></div>` : ''}
+             ${a.skills ? `<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">${escapeHTML(String(a.skills).replace(/;#[0-9]+/g, '').replace(/;/g, ', '))}</div>` : ''}
          </div>
      `;
 
      return `
-     <div class="agent-row" onclick="openMenu(event, '${(a.name || '').replace(/'/g, "\\'")}')">
+     <div class="agent-row" onclick="openMenu(event, '${escapeHTML(a.name || '').replace(/'/g, "\\'")}')">
         <div class="status-strip ${stripClass}"></div>
         
         <div class="row-name">
-            ${a.name || ''}
+            ${escapeHTML(a.name || '')}
             ${hoverCardHtml}
         </div>
         
@@ -778,10 +802,10 @@
       (agent.rawBreaks || []).forEach(function(b, i) {
           container.innerHTML += `
           <div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;">
-              <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">${b.type}</div>
+              <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">${escapeHTML(b.type)}</div>
               <div style="display:flex; gap:8px;">
-                  <input id="bs-${i}" class="input-aether" value="${b.start || ''}" style="font-size:0.85rem;">
-                  <input id="be-${i}" class="input-aether" value="${b.end || ''}" style="font-size:0.85rem;">
+                  <input id="bs-${i}" class="input-aether" value="${escapeHTML(b.start || '')}" style="font-size:0.85rem;">
+                  <input id="be-${i}" class="input-aether" value="${escapeHTML(b.end || '')}" style="font-size:0.85rem;">
               </div>
           </div>`;
       });
@@ -811,9 +835,9 @@
               <div onclick="openEventModal(${i})" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg">
                  <div style="width:4px; height:30px; background:${e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)'}; border-radius:2px;"></div>
                  <div style="flex:1;">
-                     <div style="font-weight:700; font-size:0.9rem;">${e.title || 'Untitled Event'}</div>
+                     <div style="font-weight:700; font-size:0.9rem;">${escapeHTML(e.title || 'Untitled Event')}</div>
                      <div style="font-size:0.75rem; color:var(--text-muted);">
-                         <span style="color:var(--text-main); font-weight:700;">${e.date || ''}</span> • ${e.startTime || ''} - ${e.endTime || ''}
+                         <span style="color:var(--text-main); font-weight:700;">${escapeHTML(e.date || '')}</span> • ${escapeHTML(e.startTime || '')} - ${escapeHTML(e.endTime || '')}
                      </div>
                  </div>
               </div>
@@ -825,8 +849,8 @@
       <div class="grid-bento">
          <div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentSL}</div></div>
-                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${state.currentACK}</div></div>
+                <div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${escapeHTML(state.currentSL)}</div></div>
+                <div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">${escapeHTML(state.currentACK)}</div></div>
             </div>
             <div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;">
                 <canvas id="chart-overview" style="width:100%; height:120px;"></canvas>
@@ -902,7 +926,7 @@
       
       if (state.alerts && state.alerts.length > 0) {
          html += `<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-direction:column; gap:12px;">`;
-         state.alerts.forEach(function(a) { html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 16px; border-radius:8px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:inline-block; width:fit-content;">${a.province || 'Unknown'}: ${a.type || ''}</div>`; });
+         state.alerts.forEach(function(a) { html += `<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 16px; border-radius:8px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:inline-block; width:fit-content;">${escapeHTML(a.province || 'Unknown')}: ${escapeHTML(a.type || '')}</div>`; });
          html += `</div></div>`;
       } else {
          html += `<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>`;
@@ -916,26 +940,25 @@
          cities.forEach(function(c) {
              var icon = getWeatherIcon(c.condition);
              var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) {
-                 var dayName = f.day ? String(f.day).substring(0,3) : "---";
-                 // FIX: Bulletproof inline flexbox styling for the 3-day forecast
-                 return `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">${dayName}</span><div style="color:var(--text-main);">${getWeatherIcon(f.cond, true)}</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">${f.temp || ''}</span></div>`;
+                 var dayName = f.day ? escapeHTML(String(f.day).substring(0,3)) : "---";
+                 return `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">${dayName}</span><div style="color:var(--text-main);">${getWeatherIcon(f.cond, true)}</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">${escapeHTML(f.temp || '')}</span></div>`;
              }).join('');
              
              html += `
-             <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
+             <div class="aether-card" onclick="openWeatherModal('${escapeHTML(c.id)}')" style="cursor:pointer; transition:0.2s;">
                  
                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                     <span style="font-weight:800; font-size:1.1rem;">${c.name || ''}</span>
-                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">${prov}</span>
+                     <span style="font-weight:800; font-size:1.1rem;">${escapeHTML(c.name || '')}</span>
+                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">${escapeHTML(prov)}</span>
                  </div>
                  
                  <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                      <div style="display:flex; flex-direction:column; gap:4px;">
-                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">${c.temp || ''}°</div>
-                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition || ''}</div>
+                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">${escapeHTML(c.temp || '')}°</div>
+                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${escapeHTML(c.condition || '')}</div>
                      </div>
                      <div style="text-align:right; display:flex; flex-direction:column; gap:4px;">
-                         <div style="font-size:1.4rem; font-weight:700;">${c.wind || ''}</div>
+                         <div style="font-size:1.4rem; font-weight:700;">${escapeHTML(c.wind || '')}</div>
                          <div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div>
                      </div>
                  </div>
@@ -944,43 +967,6 @@
                      ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
                  </div>
 
-             </div>`;
-         });
-      }
-      html += '</div>';
-      return html;
-      }
-      
-      for(var i=0; i<provs.length; i++) {
-         var prov = provs[i];
-         var cities = state.weather[prov];
-         if (!cities || !Array.isArray(cities)) continue;
-         
-         cities.forEach(function(c) {
-             var icon = getWeatherIcon(c.condition);
-             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) {
-                 var dayName = f.day ? String(f.day).substring(0,3) : "---";
-                 return `<div class="weather-day"><span class="wd-name">${dayName}</span><div class="wd-icon">${getWeatherIcon(f.wind, true)}</div><span class="wd-temp">${f.temp || ''}</span></div>`;
-             }).join('');
-             html += `
-             <div class="aether-card" onclick="openWeatherModal('${c.id}')" style="cursor:pointer; transition:0.2s;">
-                 <div class="flex-between" style="margin-bottom:16px;">
-                     <span style="font-weight:800; font-size:1.1rem;">${c.name || ''}</span>
-                     <span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">${prov}</span>
-                 </div>
-                 <div class="flex-between" style="align-items:flex-end;">
-                     <div>
-                         <div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px; margin-bottom:4px;">${c.temp || ''}°</div>
-                         <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">${icon} ${c.condition || ''}</div>
-                     </div>
-                     <div style="text-align:right;">
-                         <div style="font-size:1.4rem; font-weight:700;">${c.wind || ''}</div>
-                         <div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div>
-                     </div>
-                 </div>
-                 <div class="weather-mini-row">
-                     ${forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>'}
-                 </div>
              </div>`;
          });
       }
@@ -1020,11 +1006,11 @@
      categories.unshift("All");
      
      var catList = categories.map(function(c) { return `
-         <button onclick="state.selectedCategory='${c}'; state.selectedScriptId=null; render();" 
+         <button onclick="state.selectedCategory='${escapeHTML(c)}'; state.selectedScriptId=null; render();" 
                  class="ctx-item" 
                  style="width:100%; text-align:left; padding:12px 16px; margin-bottom:6px; border-radius:12px; transition:0.2s; ${state.selectedCategory===c ? 'background:var(--accent-primary); color:#fff; font-weight:800;' : 'color:var(--text-main); font-weight:600;'}">
              <i data-lucide="${c === 'All' ? 'layers' : 'folder'}" width="16" style="margin-right:10px; vertical-align:middle; opacity:0.8;"></i> 
-             ${c}
+             ${escapeHTML(c)}
          </button>`; }).join('');
 
      var filtered = scriptArr.filter(function(s) {
@@ -1037,9 +1023,9 @@
      
      var scriptListHTML = filtered.map(function(s) {
          var isActive = state.selectedScriptId === s.index;
-         var titleSafe = s.title || "Untitled";
-         var catSafe = s.category || "General";
-         var bodySafe = String(s.body || "").replace(/\n/g, ' ');
+         var titleSafe = escapeHTML(s.title || "Untitled");
+         var catSafe = escapeHTML(s.category || "General");
+         var bodySafe = escapeHTML(String(s.body || "").replace(/\n/g, ' '));
          return `
          <div onclick="state.selectedScriptId=${s.index}; render();" 
               class="aether-card hover-bg" 
@@ -1059,9 +1045,9 @@
          }
          
          if (activeScript) {
-             var titleSafe = activeScript.title || "Untitled";
-             var catSafe = activeScript.category || "General";
-             var bodySafe = String(activeScript.body || "");
+             var titleSafe = escapeHTML(activeScript.title || "Untitled");
+             var catSafe = escapeHTML(activeScript.category || "General");
+             var bodySafe = escapeHTML(String(activeScript.body || ""));
              activeScriptHTML = `
              <div class="aether-card" style="height:100%; display:flex; flex-direction:column; padding:0; overflow:hidden;">
                  <div style="padding:24px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; background:rgba(0,0,0,0.02);">
@@ -1092,7 +1078,7 @@
              <button class="btn btn-primary" style="height:52px; font-size:1rem; border-radius:16px;" onclick="openComposeMode()"><i data-lucide="plus" width="20"></i> New Script</button>
          </div>
          <div style="width:380px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;">
-             <input id="script-search" class="input-aether" style="flex-shrink:0; height:48px;" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="${state.searchTerm || ''}">
+             <input id="script-search" class="input-aether" style="flex-shrink:0; height:48px;" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="${escapeHTML(state.searchTerm) || ''}">
              <div class="script-col" style="flex:1; overflow-y:auto; overflow-x:hidden; padding-right:12px; padding-bottom:20px;">
                  ${scriptListHTML}
              </div>
@@ -1127,7 +1113,7 @@
       var scriptArr = state.scripts || [];
       for(var i=0; i<scriptArr.length; i++) { cats.add(scriptArr[i].category || "General"); }
       
-      var optionsHtml = Array.from(cats).sort().map(function(c){return `<option value="${c}">${c}</option>`;}).join('');
+      var optionsHtml = Array.from(cats).sort().map(function(c){return `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`;}).join('');
       optionsHtml += `<option value="__NEW__" style="font-weight:800; color:var(--accent-primary);">➕ Create New Category...</option>`;
       
       var sel = document.getElementById('new-script-cat-select');
@@ -1231,6 +1217,11 @@
   window.runAnalyzerImport = function() {
       var txt = document.getElementById('gem-import-text').value;
       if (!txt) return;
+      
+      var btn = event.target;
+      btn.innerHTML = `<i data-lucide="loader" class="spin"></i> Syncing...`;
+      btn.disabled = true;
+
       var modal = document.getElementById('gem-modal');
       if (modal) modal.classList.remove('open');
       
@@ -1350,7 +1341,7 @@
       }
 
       if (!state.analyzerData || state.analyzerData.error) {
-          var errMsg = state.analyzerData ? state.analyzerData.error : "Upload your first Avaya GEM report to begin.";
+          var errMsg = state.analyzerData ? escapeHTML(state.analyzerData.error) : "Upload your first Avaya GEM report to begin.";
           return modalsHtml + `
           <div style="display:flex; justify-content:center; align-items:center; height:70vh;">
               <div style="text-align:center; max-width:450px;">
@@ -1380,7 +1371,7 @@
               formattedMonth = dObj.toLocaleString('default', { month: 'long', year: 'numeric' });
               if (formattedMonth === "Invalid Date") formattedMonth = m;
           } catch(e) {}
-          return `<option value="${m}" ${d.selectedMonth === m ? 'selected' : ''}>📅 ${formattedMonth}</option>`;
+          return `<option value="${escapeHTML(m)}" ${d.selectedMonth === m ? 'selected' : ''}>📅 ${escapeHTML(formattedMonth)}</option>`;
       }).join('');
 
       function getTrendHtml(val, isBadIfHigh, isPercentage) {
@@ -1416,8 +1407,8 @@
                   col2 = `<td style="padding:12px 16px; font-weight:800;">${cphV.toFixed(2)} ${getTrendHtml(a.trendCph, false, false)}</td>`;
               }
 
-              var safeName = a.name || 'Unknown';
-              var wDays = a.wDays || '-';
+              var safeName = escapeHTML(a.name || 'Unknown');
+              var wDays = escapeHTML(a.wDays || '-');
               var jsSafeName = safeName.replace(/'/g, "\\'");
 
               return `
@@ -1534,13 +1525,12 @@
       var u = state.unifiedReport || {};
       
       var archiveOptionsHtml = (state.archiveList || []).map(function(a) {
-         return `<option value="${a.period}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${a.cycle}: ${a.period}</option>`;
+         return `<option value="${escapeHTML(a.period)}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${escapeHTML(a.cycle)}: ${escapeHTML(a.period)}</option>`;
       }).join('');
 
       var rightSideHtml = '';
       var datePickerHtml = '';
       if (state.selectedArchive === 'LIVE') {
-          // Added cursor:pointer and onclick="try{this.showPicker();}catch(e){}"
           datePickerHtml = `<input type="month" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; cursor:pointer;" value="${state.selectedDate.substring(0,7)}" onchange="state.selectedDate = this.value + '-01'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}">`;
           rightSideHtml = `<button class="btn btn-primary" style="height:32px; font-size:0.75rem;" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="14"></i> Freeze & Archive</button>`;
       } else {
@@ -1548,7 +1538,7 @@
       }
 
       var schedText = "Loading...";
-      if (state.syncMeta && state.syncMeta.sched) schedText = state.syncMeta.sched;
+      if (state.syncMeta && state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
 
       var headerHtml = `
       <style>
@@ -1570,7 +1560,7 @@
 
          <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
              <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px;">
-                 <span style="font-weight:800; font-size:0.75rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">${u.cycle || 'CALCULATING...'}</span>
+                 <span style="font-weight:800; font-size:0.75rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">${escapeHTML(u.cycle || 'CALCULATING...')}</span>
              </div>
 
              <select class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.8rem;" onchange="state.selectedArchive=this.value; fetchInsightData();">
@@ -1590,7 +1580,7 @@
          <div style="flex: 1; min-width: 16px;"></div>
 
          <div style="display:flex; gap:12px; flex-shrink: 0;">
-             <input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${state.insightSearch || ''}">
+             <input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${escapeHTML(state.insightSearch) || ''}">
              ${rightSideHtml}
          </div>
 
@@ -1624,7 +1614,6 @@
           return (b[state.insightSort] || 0) - (a[state.insightSort] || 0);
       });
 
-      // NEW: DYNAMIC COLUMNS BASED ON SELECTED FILTER
       var c1 = { key: 'icl', name: 'ICL', color: 'var(--status-role)' };
       var c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' };
       var c3 = { key: 'ulc', name: 'ULC', color: 'var(--status-ulc)' };
@@ -1663,14 +1652,14 @@
           return `
           <tr class="hover-bg insight-row" style="border-bottom:1px solid var(--glass-border); cursor:pointer; animation-delay:${idx * 0.02}s;" onclick="toggleInsightRow('${safeId}')">
               <td style="padding:16px; font-weight:700; color:var(--text-main);">
-                 ${a.name || ''} ${regionTag}
+                 ${escapeHTML(a.name || '')} ${regionTag}
               </td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:${c1.color}; font-weight:800;">${a[c1.key] > 0 ? a[c1.key] + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:${c2.color}; font-weight:800;">${a[c2.key] > 0 ? a[c2.key] + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:right; font-family:monospace; color:${c3.color}; font-weight:800;">${a[c3.key] > 0 ? a[c3.key] + 'h' : '-'}</td>
-              <td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800; font-size:1.1rem;">${a.cph || '-'}</td>
-              <td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">${a.aht || '-'}</td>
-              <td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">${a.inOut || '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c1.color}; font-weight:800;">${a[c1.key] > 0 ? escapeHTML(a[c1.key]) + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c2.color}; font-weight:800;">${a[c2.key] > 0 ? escapeHTML(a[c2.key]) + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:right; font-family:monospace; color:${c3.color}; font-weight:800;">${a[c3.key] > 0 ? escapeHTML(a[c3.key]) + 'h' : '-'}</td>
+              <td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:${a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)'}; font-weight:800; font-size:1.1rem;">${escapeHTML(a.cph || '-')}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">${escapeHTML(a.aht || '-')}</td>
+              <td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">${escapeHTML(a.inOut || '-')}</td>
               <td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-${safeId}" data-lucide="chevron-down" width="18" style="transform:${iconTransform}; transition:0.3s;"></i></td>
           </tr>
 
@@ -1681,13 +1670,13 @@
                       <div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);">
                           <div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="calendar-clock" width="14"></i> Off-Phone / Roles Tracker</div>
                           <div style="display:flex; flex-wrap:wrap; gap:10px;">
-                              <div class="insight-pill" style="border-color:var(--text-main); background:rgba(0,0,0,0.05); font-size: 0.95rem;"><span>Total Off-Phone</span> <b style="color:var(--text-main);">${a.total || 0}h</b></div>
-                              <div class="insight-pill"><span>ACSU</span> ${a.acsu > 0 ? a.acsu + 'h' : '-'}</div>
-                              <div class="insight-pill"><span>Coach</span> ${a.coach > 0 ? a.coach + 'h' : '-'}</div>
-                              <div class="insight-pill" style="border-color:rgba(79,70,229,0.3); background:rgba(79,70,229,0.05);"><span>Tower</span> <b style="color:var(--accent-primary);">${a.tower > 0 ? a.tower + 'h' : '-'}</b></div>
-                              <div class="insight-pill" style="border-color:rgba(124,58,237,0.3); background:rgba(124,58,237,0.05);"><span>ICL</span> <b style="color:var(--status-role);">${a.icl > 0 ? a.icl + 'h' : '-'}</b></div>
-                              <div class="insight-pill" style="border-color:rgba(5,150,105,0.3); background:rgba(5,150,105,0.05);"><span>SAFE</span> <b style="color:var(--status-active);">${a.safe > 0 ? a.safe + 'h' : '-'}</b></div>
-                              <div class="insight-pill" style="border-color:rgba(249,115,22,0.3); background:rgba(249,115,22,0.05);"><span>ULC</span> <b style="color:var(--status-ulc);">${a.ulc > 0 ? a.ulc + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:var(--text-main); background:rgba(0,0,0,0.05); font-size: 0.95rem;"><span>Total Off-Phone</span> <b style="color:var(--text-main);">${escapeHTML(a.total || 0)}h</b></div>
+                              <div class="insight-pill"><span>ACSU</span> ${a.acsu > 0 ? escapeHTML(a.acsu) + 'h' : '-'}</div>
+                              <div class="insight-pill"><span>Coach</span> ${a.coach > 0 ? escapeHTML(a.coach) + 'h' : '-'}</div>
+                              <div class="insight-pill" style="border-color:rgba(79,70,229,0.3); background:rgba(79,70,229,0.05);"><span>Tower</span> <b style="color:var(--accent-primary);">${a.tower > 0 ? escapeHTML(a.tower) + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(124,58,237,0.3); background:rgba(124,58,237,0.05);"><span>ICL</span> <b style="color:var(--status-role);">${a.icl > 0 ? escapeHTML(a.icl) + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(5,150,105,0.3); background:rgba(5,150,105,0.05);"><span>SAFE</span> <b style="color:var(--status-active);">${a.safe > 0 ? escapeHTML(a.safe) + 'h' : '-'}</b></div>
+                              <div class="insight-pill" style="border-color:rgba(249,115,22,0.3); background:rgba(249,115,22,0.05);"><span>ULC</span> <b style="color:var(--status-ulc);">${a.ulc > 0 ? escapeHTML(a.ulc) + 'h' : '-'}</b></div>
                           </div>
                       </div>
 
@@ -1696,14 +1685,14 @@
                           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
                               
                               <div style="display:flex; flex-direction:column; gap:8px;">
-                                  <div class="insight-pill"><span>Avg Talk Time</span> ${g.avgTalk || '-'}</div>
-                                  <div class="insight-pill"><span>Avg Hold Time</span> ${g.avgHold || '-'}</div>
-                                  <div class="insight-pill"><span>Avg ACW</span> ${g.avgAcw || '-'}</div>
+                                  <div class="insight-pill"><span>Avg Talk Time</span> ${escapeHTML(g.avgTalk || '-')}</div>
+                                  <div class="insight-pill"><span>Avg Hold Time</span> ${escapeHTML(g.avgHold || '-')}</div>
+                                  <div class="insight-pill"><span>Avg ACW</span> ${escapeHTML(g.avgAcw || '-')}</div>
                               </div>
                               <div style="display:flex; flex-direction:column; gap:8px;">
-                                  <div class="insight-pill"><span>Transfers</span> ${g.transfers || 0} (${g.transfPct ? (g.transfPct * 100).toFixed(1) + '%' : '0%'})</div>
-                                  <div class="insight-pill"><span>Outbound Calls</span> ${g.outCalls || 0}</div>
-                                  <div class="insight-pill"><span>Ext. In Calls</span> ${g.extCalls || 0}</div>
+                                  <div class="insight-pill"><span>Transfers</span> ${escapeHTML(g.transfers || 0)} (${g.transfPct ? escapeHTML((g.transfPct * 100).toFixed(1)) + '%' : '0%'})</div>
+                                  <div class="insight-pill"><span>Outbound Calls</span> ${escapeHTML(g.outCalls || 0)}</div>
+                                  <div class="insight-pill"><span>Ext. In Calls</span> ${escapeHTML(g.extCalls || 0)}</div>
                               </div>
 
                           </div>
@@ -1770,9 +1759,9 @@
       var idpText = "Awaiting Sync...";
       var muText = "";
       if (state.syncMeta) {
-          if (state.syncMeta.sched) schedText = state.syncMeta.sched;
-          if (state.syncMeta.idp) idpText = state.syncMeta.idp;
-          if (state.syncMeta.muSet) muText = state.syncMeta.muSet;
+          if (state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
+          if (state.syncMeta.idp) idpText = escapeHTML(state.syncMeta.idp);
+          if (state.syncMeta.muSet) muText = escapeHTML(state.syncMeta.muSet);
       }
 
       var headerHtml = `
@@ -1833,7 +1822,7 @@
       }
 
       if (!d.events || d.error) {
-          var errMsg = d.error || "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
+          var errMsg = d.error ? escapeHTML(d.error) : "Backend module not fully loaded. Paste your Schedule/IDP to initialize the database.";
           return headerHtml + `
           <div class="aether-card" style="padding:60px; text-align:center; min-height:400px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
               <i data-lucide="database" width="48" style="color:var(--text-muted); margin-bottom:16px;"></i>
@@ -1856,13 +1845,13 @@
                      <i data-lucide="${isCoach ? 'forum' : 'person-standing'}" width="18"></i>
                  </div>
                  <div>
-                    <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${f.agent || ''}</div>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">${f.date || ''} • ${f.time || ''} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${f.activityName || ''}</span>` : ''}</div>
+                    <div style="font-weight:700; color:var(--text-main); font-size:0.95rem;">${escapeHTML(f.agent || '')}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHTML(f.date || '')} • ${escapeHTML(f.time || '')} ${isCoach ? `• <span style="color:var(--accent-primary); font-weight:700;">${escapeHTML(f.activityName || '')}</span>` : ''}</div>
                  </div>
              </div>
              <div style="text-align:right;">
-                 <div style="font-size:1.1rem; font-weight:800; color:var(--text-main);">${f.hours || 0}h</div>
-                 <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${f.shift || ''}</div>
+                 <div style="font-size:1.1rem; font-weight:800; color:var(--text-main);">${escapeHTML(f.hours || 0)}h</div>
+                 <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:var(--text-muted); padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${escapeHTML(f.shift || '')}</div>
              </div>
           </div>
       `; }).join('') || '<div style="padding:30px; text-align:center; color:var(--text-muted);">No logs found matching this filter.</div>';
@@ -1885,7 +1874,7 @@
                       var cls = 'status-neutral'; 
                       if(b.net > 3) cls = 'status-surplus'; if(b.net <= 0) cls = 'status-risk';
                       return `<div class="heatmap-cell ${cls}" style="animation: slideUp 0.3s ease forwards; animation-delay: ${i * 0.005}s; opacity:0; transform:translateY(10px);">
-                          <span style="font-size:0.65rem; opacity:0.7; font-weight:700;">${b.label || ''}</span>
+                          <span style="font-size:0.65rem; opacity:0.7; font-weight:700;">${escapeHTML(b.label || '')}</span>
                           <span style="font-size:1rem; font-weight:800; font-family:monospace;">${b.net>0?'+'+b.net:b.net}</span>
                       </div>`;
                   }).join('')}
@@ -1903,7 +1892,7 @@
              <div class="aether-card" style="padding:24px;">
                  <div style="text-align:center; margin-bottom:20px;">
                     <div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div>
-                    <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals && d.totals.all ? d.totals.all.toFixed(2) : 0}</div>
+                    <div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">${d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0}</div>
                  </div>
                  <div class="chart-3d-container" style="height:260px; width:100%; display:flex; justify-content:center; padding: 10px;">
                     <canvas id="tracker-chart"></canvas>
@@ -1911,17 +1900,17 @@
              </div>
              
              <div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;">
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.morning ? d.totals.morning.toFixed(1) : 0}h</div></div>
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.evening ? d.totals.evening.toFixed(1) : 0}h</div></div>
-                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.night ? d.totals.night.toFixed(1) : 0}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0}h</div></div>
+                 <div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">${d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0}h</div></div>
              </div>
          </div>
 
          <div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;">
              <div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;">
                  <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
-                    <span>Detailed Log ${state.trackerCycleFilter !== 'ALL' ? `<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">${state.trackerCycleFilter}</span>` : ''}</span>
-                    <input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="${state.trackerSearch || ''}">
+                    <span>Detailed Log ${state.trackerCycleFilter !== 'ALL' ? `<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">${escapeHTML(state.trackerCycleFilter)}</span>` : ''}</span>
+                    <input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="${escapeHTML(state.trackerSearch) || ''}">
                  </div>
              </div>
              <div style="flex:1; overflow-y:auto; padding:0 10px;">
@@ -1942,9 +1931,9 @@
         </div>
         <div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
             <div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>
-            <div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${state.currentSL}</div>
+            <div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">${escapeHTML(state.currentSL)}</div>
             <div id="report-box" style="width:100%;">
-                <div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${state.currentReport || "..."}</div>
+                <div style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">${escapeHTML(state.currentReport || "...")}</div>
                 <button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button>
             </div>
         </div>
@@ -2005,6 +1994,13 @@
   window.runImportAction = function() { 
       var t = document.getElementById('import-text').value; 
       if(!t) return; 
+      
+      // Prevent double submissions visually
+      var btn = event.target;
+      var originalText = btn.innerText;
+      btn.innerHTML = `<i data-lucide="loader" class="spin"></i> Syncing...`;
+      btn.disabled = true;
+
       closeImportModal(); 
       showToast("Syncing Database..."); 
       
@@ -2015,6 +2011,9 @@
                  var finalMsg = trackerResult.indexOf("Error") !== -1 ? "Schedule Synced" : trackerResult;
                  showToast(finalMsg); 
                  
+                 btn.innerHTML = originalText;
+                 btn.disabled = false;
+
                  fetchData();
                  fetchMetadata();
                  if (state.view === 'tracker') fetchTrackerData(); 
@@ -2028,6 +2027,8 @@
                  google.script.run.addGlobalNotification(notifMsg);
              })
              .withFailureHandler(function(err) {
+                 btn.innerHTML = originalText;
+                 btn.disabled = false;
                  showToast("Schedule Synced");
                  fetchData();
                  fetchMetadata();
@@ -2041,9 +2042,10 @@
   window.openEventModal = function(idx) {
       var e = state.calendarEvents[idx];
       if(!e) return;
-      document.getElementById('evt-modal-title').innerText = e.title || '';
-      document.getElementById('evt-modal-time').innerText = (e.date || '') + " • " + (e.startTime || '') + " - " + (e.endTime || '');
-      document.getElementById('evt-modal-desc').innerHTML = e.description || "No description provided.";
+      document.getElementById('evt-modal-title').innerText = escapeHTML(e.title || '');
+      document.getElementById('evt-modal-time').innerText = escapeHTML(e.date || '') + " • " + escapeHTML(e.startTime || '') + " - " + escapeHTML(e.endTime || '');
+      // Description might have formatting, so we only escape the basic parts or leave as innerHTML if trusted, but let's be safe
+      document.getElementById('evt-modal-desc').innerHTML = escapeHTML(e.description || "No description provided.");
       document.getElementById('event-modal').classList.add('open');
   };
   
