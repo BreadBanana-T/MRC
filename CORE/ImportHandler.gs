@@ -25,6 +25,7 @@ function processWFMImport(rawText, forcedDate) {
   
   if (!forcedDate) forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
+  
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
   const rgxAnyDateLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
   const rgxShiftLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
@@ -68,10 +69,13 @@ function processWFMImport(rawText, forcedDate) {
        }
        else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
        else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
+       // NEW: Explicitly catch Personal Wellness / ALT
+       else if (upper.match(/\bPW\b/) || upper.match(/\bALT\b/) || upper.includes("PERSONAL") || upper.includes("WELLNESS")) buffer.absentType = "PW/ALT";
 
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
            const actStart = actMatch[1], actEnd = actMatch[2];
+           
            if ((upper.includes("BREAK") || upper.includes("LUNCH") || upper.includes("REPAS") || upper.includes("PAUSE")) && !upper.includes("PAID LUNCH")) {
                let type = (upper.includes("LUNCH") || upper.includes("REPAS")) ? "Lunch" : "Break";
                buffer.breaks.push({ type: type, start: actStart, end: actEnd });
@@ -91,11 +95,12 @@ function processWFMImport(rawText, forcedDate) {
            else if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
                buffer.breaks.push({ type: "ULC FIRE", start: actStart, end: actEnd });
            }
-           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF")) {
+           // NEW: Prevent PW/ALT from making the engine think the agent is actively working
+           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF") && !upper.match(/\bPW\b/) && !upper.match(/\bALT\b/) && !upper.includes("PERSONAL") && !upper.includes("WELLNESS")) {
                buffer.hasWork = true;
            }
 
-           if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL"))) {
+           if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL") || upper.match(/\bPW\b/) || upper.match(/\bALT\b/))) {
                if (compareTimeStrings(actEnd, buffer.end)) buffer.end = actStart;
            }
        }
@@ -103,6 +108,7 @@ function processWFMImport(rawText, forcedDate) {
   }
 
   if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
+  
   if (rosterData.length > 0) {
     sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
     if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
@@ -121,10 +127,12 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (buf.hasWork) {
       if (buf.absentType === "VACATION") buf.absentType = "";
       if (buf.absentType === "SICK") buf.absentType = "Leaving Early (Sick)";
+      if (buf.absentType === "PW/ALT") buf.absentType = "Leaving Early (PW/ALT)";
   }
 
   let finalDateObj = safeParseDateStr(buf.dateStr, defY, defM, defD);
   let finalDateStr = finalDateObj.str;
+  
   let startEpoch = "", endEpoch = "";
   if (buf.start && buf.end) {
      const sObj = parseTime(buf.start);
