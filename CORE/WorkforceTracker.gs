@@ -62,7 +62,6 @@ var WorkforceTracker = {
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
               }
               
-     
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg]);
@@ -80,7 +79,6 @@ var WorkforceTracker = {
           let parts = text.split(':');
           if (parts.length > 1) {
               let agentData = parts[1].trim();
-      
               let idMatch = agentData.match(/^(\d+)/);
               currentID = idMatch ? idMatch[1] : "";
               currentAgent = agentData.replace(/^\d+\s+/, '').trim();
@@ -89,14 +87,12 @@ var WorkforceTracker = {
         } 
         
         if (text.includes('"') && text.includes(',')) {
-   
           flushAgentBuffer(); 
           let csvParts = this._parseCSVLine(text);
           if (csvParts.length >= 6) { 
               let actLower = this._cleanActivity(csvParts[2]).toLowerCase();
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
               
-           
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_CODES.some(c => actLower.includes(c));
@@ -175,7 +171,6 @@ var WorkforceTracker = {
             let dStr = this._parseDate(match[1]);
             if (h.toLowerCase().includes('req') || h.toLowerCase().includes('besoin')) colMap[i] = { date: dStr, type: 'req' };
             else if ((h.toLowerCase().includes('open') || h.toLowerCase().includes('ouvert')) && !h.toLowerCase().includes('+/-')) colMap[i] = { date: dStr, type: 'open' };
-        
           }
         });
         let dataByDay = {};
@@ -188,7 +183,6 @@ var WorkforceTracker = {
                  if (!dataByDay[colMap[idx].date]) dataByDay[colMap[idx].date] = {};
                  if (!dataByDay[colMap[idx].date][tNorm]) dataByDay[colMap[idx].date][tNorm] = { req:0, open:0 };
                  let val = parseFloat(String(cols[idx]).replace(/,/g, '')) || 0;
-           
                  dataByDay[colMap[idx].date][tNorm][colMap[idx].type] = val;
                }
             });
@@ -240,8 +234,33 @@ var WorkforceTracker = {
         if (muSet) props.setProperty('MU_SET', muSet);
     } catch(e) {}
     
-    if (msg.length === 0) return "Basic Schedule Synced.";
-    return `Synced: ${msg.join(' | ')}`;
+    // --- NEW SMART AUTO-ARCHIVE LOGIC ---
+    let affectedMonths = new Set();
+    
+    // 1. Gather all dates touched by the import and find their months
+    schedDates.concat(idpDates).forEach(d => {
+        if (d && d.length >= 7) {
+            // Convert "YYYY-MM-DD" into the 1st of that month "YYYY-MM-01"
+            affectedMonths.add(d.substring(0, 7) + "-01"); 
+        }
+    });
+
+    let archiveMsg = [];
+    
+    // 2. Silently run the archiver for every month affected
+    affectedMonths.forEach(monthStr => {
+        try {
+            // Re-compiles the month using the newest data and overwrites the DB
+            this.archiveUnifiedReport(monthStr, 'ALL');
+            archiveMsg.push(monthStr.substring(0, 7));
+        } catch(e) {
+            console.error("Auto-archive failed for " + monthStr, e);
+        }
+    });
+    // ------------------------------------
+
+    if (msg.length === 0) return `Basic Schedule Synced. (Auto-Archived: ${archiveMsg.join(', ')})`;
+    return `Synced: ${msg.join(' | ')}. Auto-Archived: ${archiveMsg.join(', ')}`;
   },
 
   _executeDestructiveUpsert: function(sheetName, newRows, headersArray) {
@@ -265,7 +284,6 @@ var WorkforceTracker = {
           if (isIDP) wipeKeys.add(dateStr);
           else wipeKeys.add(String(r[0]).trim().toLowerCase() + "_" + dateStr);
       });
-
       const retainedRows = existingData.filter(row => {
           if (!row[0]) return false;
           let rDate = this._formatDate(row[isIDP ? 0 : 1]);
@@ -273,11 +291,11 @@ var WorkforceTracker = {
           if (!rDate) return false; 
           
           let k = isIDP ? rDate : String(row[0]).trim().toLowerCase() + "_" + rDate;
+          
           if (wipeKeys.has(k)) return false; 
           
           return true;
       });
-
       const combined = retainedRows.concat(newRows);
       sheet.clearContents(); 
       sheet.appendRow(headers);
@@ -321,18 +339,15 @@ var WorkforceTracker = {
           label = `${Utilities.formatDate(wStart, "America/Toronto", "MMM dd, HH:mm")} to ${Utilities.formatDate(wEnd, "America/Toronto", "MMM dd, HH:mm")}`;
       } 
       else if (mode === 'month' || mode === 'quarter') {
-          let sMonth = (mode === 'month') ?
-          rM - 1 : Math.floor((rM - 1) / 3) * 3;
-          let eMonth = (mode === 'month') ?
-          rM : sMonth + 3;
+          let sMonth = (mode === 'month') ? rM - 1 : Math.floor((rM - 1) / 3) * 3;
+          let eMonth = (mode === 'month') ? rM : sMonth + 3;
 
           let sDate = new Date(rY, sMonth, 1, 0, 0, 0, 0);
           tStart = sDate.getTime();
           let eDate = new Date(rY, eMonth, 0, 23, 59, 59, 999);
           tEnd = eDate.getTime();
           label = mode === 'month' 
-              ?
-              `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}` 
+              ? `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}` 
               : `Q${Math.floor((rM - 1) / 3) + 1}: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`;
           cycle = mode === 'month' ? "MONTH" : "QUARTER"; 
       }
@@ -371,14 +386,12 @@ var WorkforceTracker = {
         if (isNaN(rY) || isNaN(rM) || isNaN(rD)) return; 
         
         let mins = this._timeToMins(row[1]);
-  
         let blockTime = new Date(rY, rM-1, rD, Math.floor(mins/60), mins%60, 0, 0).getTime();
         
         if (blockTime >= bounds.start && blockTime <= bounds.end) { 
           let idx = this._timeToBucket(row[1]);
           if (idx > -1) { 
               let dem = parseFloat(String(row[2]).replace(',', '.')) || 0;
-           
               let sup = parseFloat(String(row[3]).replace(',', '.')) || 0;
               buckets[idx].demand += dem; 
               buckets[idx].supply += sup; 
@@ -397,7 +410,6 @@ var WorkforceTracker = {
 
         if (rowDateStr >= searchStartStr && rowDateStr <= endStr) {
             let agent = String(row[0]).trim();
-      
             let rY = parseInt(rowDateStr.substring(0,4));
             let rM = parseInt(rowDateStr.substring(5,7));
             let rD = parseInt(rowDateStr.substring(8,10));
@@ -405,32 +417,26 @@ var WorkforceTracker = {
 
             let startMins = this._timeToMins(row[3]);
             let endMinsRaw = this._timeToMins(row[4]);
-            
- 
             let actSlice = String(row[2]).trim().substring(0, 10);
             let eventHash = `${agent}_${rowDateStr}_${startMins}_${endMinsRaw}_${actSlice}`;
             if (processedEvents.has(eventHash)) return; 
             processedEvents.add(eventHash);
 
-            let endMins = endMinsRaw < startMins ?
-            endMinsRaw + 1440 : endMinsRaw; 
+            let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
             this._getShiftSplits(startMins, endMins).forEach(split => {
                 let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(split.startMins/60), split.startMins%60, 0, 0).getTime();
 
                 if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
                     if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
-          
                         if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) return;
                     }
                     
                     let effDateStr = Utilities.formatDate(new Date(splitStartEpoch), "America/Toronto", "yyyy-MM-dd");
 
-                
                     if (trackerType === 'furlough' && mode === 'day') {
                         for (let min = split.startMins; min < split.endMins; min += 15) {
                             let blockTime = new Date(rY, rM-1, rD, Math.floor(min/60), min%60, 0, 0).getTime();
-               
                             if (blockTime >= bounds.start && blockTime <= bounds.end) {
                                 let idx = Math.floor((min % 1440) / 15);
                                 if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
@@ -449,11 +455,9 @@ var WorkforceTracker = {
                         groupedLogs[groupKey] = { 
                             date: effDateStr, agent: agent, 
                             activityName: actName, 
-      
                             shift: split.shift, hours: split.hours, 
                             timeStart: this._minsToTime(split.startMins), 
                             timeEnd: this._minsToTime(split.endMins) 
-              
                         };
                     } else {
                         groupedLogs[groupKey].hours += split.hours;
@@ -474,9 +478,10 @@ var WorkforceTracker = {
   getUnifiedReport: function(refDateStr, cycleFilter) {
         const targetCycle = cycleFilter || 'ALL';
         const bounds = this._calculateEpochBoundaries("month", refDateStr);
-        let report = { cycle: targetCycle === 'ALL' ?
-        "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
+        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
         
+        const nowEpoch = new Date().getTime(); // NEW: Prevents counting future scheduled shifts
+
         // 1. Pre-load MasterList metadata
         let mlData = {};
         const dbML = this._getDB('WF_MASTERLIST');
@@ -485,13 +490,11 @@ var WorkforceTracker = {
                 let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
                 let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
                 mlData[cleanName] = {
-           
                     name: String(r[0]).trim(),
                     level: r[1],
                     manager: r[2],
                     skills: r[3],
                     isOffshore: isOffshore,
-      
                     isBackup: String(r[3]).includes("Backup MRC")
                 };
             });
@@ -520,23 +523,21 @@ var WorkforceTracker = {
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let rY = parseInt(dStr.substring(0,4)); let rM = parseInt(dStr.substring(5,7)); let rD = parseInt(dStr.substring(8,10));
-                    if(isNaN(rY) || isNaN(rM) || 
-isNaN(rD)) return;
+                    if(isNaN(rY) || isNaN(rM) || isNaN(rD)) return;
                     
                     let agent = String(row[0]).trim();
                     let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
                     let region = row[5] ? String(row[5]).trim() : 'Onshore';
   
-                    
                     let actSlice = String(row[2]).trim().substring(0, 10);
                     let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${actSlice}`;
                     if (processedEvents.has(eventHash)) return; processedEvents.add(eventHash);
 
-            
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        if (epoch >= bounds.start && epoch <= bounds.end) { 
+                        // ADDED: && epoch <= nowEpoch
+                        if (epoch >= bounds.start && epoch <= bounds.end && epoch <= nowEpoch) { 
                             if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
                             getAg(agent, region)[metricName] += s.hours; 
                             getAg(agent, region).total += s.hours;
@@ -555,30 +556,26 @@ isNaN(rD)) return;
                 let dStr = this._formatDate(row[1]);
                 if (dStr >= sStr && dStr <= eStr) {
                     let rY = parseInt(dStr.substring(0,4)); let rM = parseInt(dStr.substring(5,7)); let rD = parseInt(dStr.substring(8,10));
-                    if(isNaN(rY) || isNaN(rM) || 
-isNaN(rD)) return;
+                    if(isNaN(rY) || isNaN(rM) || isNaN(rD)) return;
                     
                     let agent = String(row[0]).trim();
                     let sMins = this._timeToMins(row[3]); let eMinsR = this._timeToMins(row[4]);
                     let region = row[5] ? String(row[5]).trim() : 'Onshore';
   
-                    
                     let actSlice = String(row[2]).trim().substring(0, 10);
                     let eventHash = `${agent}_${dStr}_${sMins}_${eMinsR}_${actSlice}`;
                     if (processedRoles.has(eventHash)) return; processedRoles.add(eventHash);
 
-            
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     let roleType = String(row[2]).toUpperCase();
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        if (epoch >= bounds.start && epoch <= bounds.end) { 
-                            if (targetCycle 
-!== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
+                        // ADDED: && epoch <= nowEpoch
+                        if (epoch >= bounds.start && epoch <= bounds.end && epoch <= nowEpoch) { 
+                            if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
 
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('TOWER') || roleType.includes('WOFQT') || roleType.includes('WOQFT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
-           
                             else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours;
                             }
@@ -592,15 +589,14 @@ isNaN(rD)) return;
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let sessionEpoch = new Date(row[3]).getTime();
-                if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end) {
+                // ADDED: && sessionEpoch <= nowEpoch
+                if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end && sessionEpoch <= nowEpoch) {
                     if (targetCycle !== 'ALL' && this._getCycleForEpoch(sessionEpoch) !== targetCycle) return;
-
         
                     let agentName = String(row[1]).trim();
                     let role = String(row[2]).toUpperCase(); 
                     let h = Number(row[6]) || 0; 
                     
-               
                     if (role.includes('ICL')) { getAg(agentName).icl += h; getAg(agentName).total += h; }
                     else if (role.includes('ULC') || role.includes('FIRE')) { getAg(agentName).ulc += h; getAg(agentName).total += h; }
                 }
@@ -610,7 +606,6 @@ isNaN(rD)) return;
         const dbGEM = this._getDB('WF_GEM_DATA_V3');
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
-            
             // FIX: Get the year and month we are currently looking at (e.g., "2026-03")
             const targetMonth = refDateStr.substring(0, 7);
             const fixTime = (v) => {
@@ -630,12 +625,10 @@ isNaN(rD)) return;
                 if (rowDateStr === targetMonth) {
                     let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
                     gemData[agName] = { 
-                      
                         cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
                         transfers: row[10] || 0, transfPct: row[11] || 0,
                         avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
                         outCalls: row[15] || 0, outTalk: fixTime(row[16]),
-  
                         extCalls: row[17] || 0, extTalk: fixTime(row[18])
                     };
                 }
@@ -650,7 +643,6 @@ isNaN(rD)) return;
                 a.level = ml.level;
                 a.manager = ml.manager;
                 a.skills = ml.skills;
-            
                 a.isBackupMRC = ml.isBackup;
                 if (ml.isOffshore) a.region = "Offshore";
             }
@@ -658,7 +650,6 @@ isNaN(rD)) return;
             ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
             let matchedGem = gemData[a.name]; 
             if (!matchedGem) {
-               
                 let wfmParts = a.name.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
                 for(let i=0; i<gemKeys.length; i++) {
                     let gName = gemKeys[i];
@@ -801,8 +792,7 @@ isNaN(rD)) return;
       if (d == null || d === "") return "";
       if (d instanceof Date) return Utilities.formatDate(d, "America/Toronto", "yyyy-MM-dd");
       let s = String(d).trim();
-      let num = 
-      Number(s);
+      let num = Number(s);
       if (!isNaN(num) && num > 30000) {
           let date = new Date((num - 25569) * 86400 * 1000);
           date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
@@ -811,9 +801,12 @@ isNaN(rD)) return;
       let isoMatch = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
       if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2,'0')}-${isoMatch[3].padStart(2,'0')}`;
       let regMatch = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+    
       if (regMatch) { let 
-      p1 = parseInt(regMatch[1]), p2 = parseInt(regMatch[2]); let m = p1 > 12 ? p2 : p1;
-      let day = p1 > 12 ? p1 : p2; return `${regMatch[3]}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      p1 = parseInt(regMatch[1]), p2 = parseInt(regMatch[2]);
+      let m = p1 > 12 ? p2 : p1;
+      let day = p1 > 12 ? p1 : p2;
+      return `${regMatch[3]}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
       }
       let pDate = new Date(s);
       if (!isNaN(pDate)) return Utilities.formatDate(pDate, "America/Toronto", "yyyy-MM-dd");
