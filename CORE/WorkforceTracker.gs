@@ -1,5 +1,5 @@
 /**
- * MODULE: WORKFORCE TRACKER (V7.8 - LOCAL HOST + DYNAMIC METADATA + ABSENCES)
+ * MODULE: WORKFORCE TRACKER 
  */
 
 var WorkforceTracker = {
@@ -10,7 +10,6 @@ var WorkforceTracker = {
 
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    // Added WF_ABSENCES to the creation array
     ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP', 'WF_ABSENCES'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
@@ -22,7 +21,7 @@ var WorkforceTracker = {
       let cleanCoach = [];
       let cleanFurlough = [];
       let cleanRoles = [];
-      let cleanAbsences = []; // NEW: Array for our absence tracker
+      let cleanAbsences = [];
       
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let currentAgent = "", currentID = "", currentDateStr = "";
@@ -56,7 +55,6 @@ var WorkforceTracker = {
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_CODES.some(c => actLower.includes(c));
               
-              // NEW: Advanced Absence Coding Scanner
               let isAbsence = false;
               let absType = "";
               if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
@@ -291,19 +289,22 @@ var WorkforceTracker = {
       
       let agents = {};
       
-      // 1. Cross-reference with MasterList to get clean Supervisor names
+      // 1. Cross-reference with MasterList to get clean Supervisor names and Region
       if (dbML && dbML.getLastRow() > 1) {
           dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
               let cleanName = String(r[0]).trim();
               let key = cleanName.toLowerCase().replace(/\s+/g, ' ');
+              let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
               agents[key] = {
                   name: cleanName,
                   supervisor: r[2] || "Unassigned",
+                  region: isOffshore ? "Offshore" : "Onshore",
                   records: [],
                   totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
                   monthlyCounts: {},
                   totalAbsences: 0,
-                  flags: 0
+                  flags: 0,
+                  flaggedMonths: [] // NEW: Collect the specific months
               };
           });
       }
@@ -320,10 +321,12 @@ var WorkforceTracker = {
               let month = dStr.substring(0, 7);
               
               if (!agents[key]) {
+                  let reg = String(row[5]).trim();
+                  if (!reg) reg = "Onshore";
                   agents[key] = {
-                      name: aName, supervisor: "Unknown",
+                      name: aName, supervisor: "Unknown", region: reg,
                       records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
-                      monthlyCounts: {}, totalAbsences: 0, flags: 0
+                      monthlyCounts: {}, totalAbsences: 0, flags: 0, flaggedMonths: []
                   };
               }
               
@@ -345,9 +348,13 @@ var WorkforceTracker = {
       Object.values(agents).forEach(ag => {
           if (ag.totalAbsences > 0) {
               // FLAG Logic: Any month where count >= 4
-              Object.values(ag.monthlyCounts).forEach(count => {
-                  if (count >= 4) ag.flags++;
+              Object.keys(ag.monthlyCounts).forEach(month => {
+                  if (ag.monthlyCounts[month] >= 4) {
+                      ag.flags++;
+                      ag.flaggedMonths.push(month);
+                  }
               });
+              ag.flaggedMonths.sort().reverse();
               // Sort timeline chronologically (newest first)
               ag.records.sort((a,b) => b.date.localeCompare(a.date));
               profiles.push(ag);
@@ -917,10 +924,6 @@ function fetchSyncMetadata() {
   }
 }
 
-/**
- * Smart router for the front-end: Determines whether to pull live data or archived data
- * based on whether the requested date is the current month or a past month.
- */
 function getSmartUnifiedReport(dateStr) {
     const reqParts = dateStr.split('-');
     const reqY = parseInt(reqParts[0]);
@@ -946,10 +949,6 @@ function getSmartUnifiedReport(dateStr) {
     }
 }
 
-/**
- * Retroactively generates and freezes archives for all past months found in the database.
- * Run this ONCE to populate your history!
- */
 function runRetroactiveArchive() {
    const db = WorkforceTracker._getDB('WF_GEM_DATA_V3');
    if (!db || db.getLastRow() < 2) return "No GEM data found to archive.";
