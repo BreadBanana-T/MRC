@@ -1,5 +1,5 @@
 /**
- * MODULE: WORKFORCE TRACKER (V7.8 - LOCAL HOST + DYNAMIC METADATA)
+ * MODULE: WORKFORCE TRACKER (V7.8 - LOCAL HOST + DYNAMIC METADATA + ABSENCES)
  */
 
 var WorkforceTracker = {
@@ -10,7 +10,8 @@ var WorkforceTracker = {
 
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP'].forEach(n => {
+    // Added WF_ABSENCES to the creation array
+    ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP', 'WF_ABSENCES'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
     let msg = [];
@@ -21,6 +22,7 @@ var WorkforceTracker = {
       let cleanCoach = [];
       let cleanFurlough = [];
       let cleanRoles = [];
+      let cleanAbsences = []; // NEW: Array for our absence tracker
       
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let currentAgent = "", currentID = "", currentDateStr = "";
@@ -33,6 +35,7 @@ var WorkforceTracker = {
       const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
       const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
       const ROLE_CODES = ['safe onqueue', 'safe en ligne', 'icl', 'incident', 'ulc', 'fire', 'feu', 'wofqt', 'woqft', 'tower'];
+      
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
           let isOffshore = false;
@@ -51,9 +54,18 @@ var WorkforceTracker = {
               
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
- 
               let isRole = ROLE_CODES.some(c => actLower.includes(c));
               
+              // NEW: Advanced Absence Coding Scanner
+              let isAbsence = false;
+              let absType = "";
+              if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
+              else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
+              else if (actLower.includes('compu')) { isAbsence = true; absType = 'COMPU'; }
+              else if (actLower.includes('comp') && !actLower.includes('compu')) { isAbsence = true; absType = 'COMP'; }
+              else if (actLower.includes('alu')) { isAbsence = true; absType = 'ALU'; }
+              else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
+
               let roleType = "";
               if (isRole) {
                   if (actLower.includes('safe')) roleType = "SAFE";
@@ -65,6 +77,8 @@ var WorkforceTracker = {
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
               if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg]);
+              if (isAbsence) cleanAbsences.push([currentAgent, obj.dateStr, absType, obj.start, obj.end, reg]);
+              
               schedDates.push(obj.dateStr);
           });
           agentBuffer = [];
@@ -96,6 +110,15 @@ var WorkforceTracker = {
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_CODES.some(c => actLower.includes(c));
+
+              let isAbsence = false;
+              let absType = "";
+              if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
+              else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
+              else if (actLower.includes('compu')) { isAbsence = true; absType = 'COMPU'; }
+              else if (actLower.includes('comp') && !actLower.includes('compu')) { isAbsence = true; absType = 'COMP'; }
+              else if (actLower.includes('alu')) { isAbsence = true; absType = 'ALU'; }
+              else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
               
               let roleType = "";
               if (isRole) {
@@ -111,6 +134,8 @@ var WorkforceTracker = {
               if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
               if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
               if (isRole) cleanRoles.push([csvParts[0], pDate, roleType, csvParts[3], csvParts[4], csvParts[5]]);
+              if (isAbsence) cleanAbsences.push([csvParts[0], pDate, absType, csvParts[3], csvParts[4], csvParts[5]]);
+              
               schedDates.push(pDate);
           }
           return;
@@ -137,6 +162,7 @@ var WorkforceTracker = {
         }
       });
       flushAgentBuffer();
+      
       if (cleanCoach.length > 0) {
         this._executeDestructiveUpsert('WF_COACHING', cleanCoach, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
         msg.push(`Coaching`);
@@ -149,6 +175,10 @@ var WorkforceTracker = {
         cleanRoles.sort((a, b) => b[1].localeCompare(a[1]));
         this._executeDestructiveUpsert('WF_ROLES', cleanRoles, ['Agent Name', 'Date', 'Role', 'Start Time', 'End Time', 'Region']);
         msg.push(`Roles`);
+      }
+      if (cleanAbsences.length > 0) {
+        this._executeDestructiveUpsert('WF_ABSENCES', cleanAbsences, ['Agent Name', 'Date', 'Type', 'Start Time', 'End Time', 'Region']);
+        msg.push(`Absences`);
       }
     }
 
@@ -234,33 +264,98 @@ var WorkforceTracker = {
         if (muSet) props.setProperty('MU_SET', muSet);
     } catch(e) {}
     
-    // --- NEW SMART AUTO-ARCHIVE LOGIC ---
+    // --- SMART AUTO-ARCHIVE LOGIC ---
     let affectedMonths = new Set();
-    
-    // 1. Gather all dates touched by the import and find their months
     schedDates.concat(idpDates).forEach(d => {
-        if (d && d.length >= 7) {
-            // Convert "YYYY-MM-DD" into the 1st of that month "YYYY-MM-01"
-            affectedMonths.add(d.substring(0, 7) + "-01"); 
-        }
+        if (d && d.length >= 7) affectedMonths.add(d.substring(0, 7) + "-01"); 
     });
 
     let archiveMsg = [];
-    
-    // 2. Silently run the archiver for every month affected
     affectedMonths.forEach(monthStr => {
         try {
-            // Re-compiles the month using the newest data and overwrites the DB
             this.archiveUnifiedReport(monthStr, 'ALL');
             archiveMsg.push(monthStr.substring(0, 7));
-        } catch(e) {
-            console.error("Auto-archive failed for " + monthStr, e);
-        }
+        } catch(e) {}
     });
-    // ------------------------------------
 
     if (msg.length === 0) return `Basic Schedule Synced. (Auto-Archived: ${archiveMsg.join(', ')})`;
     return `Synced: ${msg.join(' | ')}. Auto-Archived: ${archiveMsg.join(', ')}`;
+  },
+
+  // NEW: Engine to fetch Yearly Agent Profiles
+  getAbsenceProfiles: function(year) {
+      if (!year) year = new Date().getFullYear().toString();
+      
+      const dbAbs = this._getDB('WF_ABSENCES');
+      const dbML = this._getDB('WF_MASTERLIST');
+      
+      let agents = {};
+      
+      // 1. Cross-reference with MasterList to get clean Supervisor names
+      if (dbML && dbML.getLastRow() > 1) {
+          dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
+              let cleanName = String(r[0]).trim();
+              let key = cleanName.toLowerCase().replace(/\s+/g, ' ');
+              agents[key] = {
+                  name: cleanName,
+                  supervisor: r[2] || "Unassigned",
+                  records: [],
+                  totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
+                  monthlyCounts: {},
+                  totalAbsences: 0,
+                  flags: 0
+              };
+          });
+      }
+      
+      if (!dbAbs || dbAbs.getLastRow() < 2) return JSON.stringify({ year: year, profiles: [] });
+      
+      // 2. Iterate through Absences Database
+      dbAbs.getDataRange().getDisplayValues().slice(1).forEach(row => {
+          let dStr = this._formatDate(row[1]);
+          if (dStr.startsWith(year)) {
+              let aName = String(row[0]).trim();
+              let key = aName.toLowerCase().replace(/\s+/g, ' ');
+              let type = String(row[2]).trim();
+              let month = dStr.substring(0, 7);
+              
+              if (!agents[key]) {
+                  agents[key] = {
+                      name: aName, supervisor: "Unknown",
+                      records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
+                      monthlyCounts: {}, totalAbsences: 0, flags: 0
+                  };
+              }
+              
+              agents[key].records.push({ date: dStr, type: type, start: row[3], end: row[4] });
+              
+              // Increment global totals
+              if (agents[key].totals[type] !== undefined) agents[key].totals[type]++;
+              else agents[key].totals[type] = 1;
+              
+              agents[key].totalAbsences++;
+              
+              // Monthly aggregator (for Flagging system)
+              if (!agents[key].monthlyCounts[month]) agents[key].monthlyCounts[month] = 0;
+              agents[key].monthlyCounts[month]++;
+          }
+      });
+      
+      let profiles = [];
+      Object.values(agents).forEach(ag => {
+          if (ag.totalAbsences > 0) {
+              // FLAG Logic: Any month where count >= 4
+              Object.values(ag.monthlyCounts).forEach(count => {
+                  if (count >= 4) ag.flags++;
+              });
+              // Sort timeline chronologically (newest first)
+              ag.records.sort((a,b) => b.date.localeCompare(a.date));
+              profiles.push(ag);
+          }
+      });
+      
+      profiles.sort((a, b) => b.totalAbsences - a.totalAbsences);
+      return JSON.stringify({ year: year, profiles: profiles });
   },
 
   _executeDestructiveUpsert: function(sheetName, newRows, headersArray) {
@@ -287,13 +382,9 @@ var WorkforceTracker = {
       const retainedRows = existingData.filter(row => {
           if (!row[0]) return false;
           let rDate = this._formatDate(row[isIDP ? 0 : 1]);
-          
           if (!rDate) return false; 
-          
           let k = isIDP ? rDate : String(row[0]).trim().toLowerCase() + "_" + rDate;
-          
           if (wipeKeys.has(k)) return false; 
-          
           return true;
       });
       const combined = retainedRows.concat(newRows);
@@ -480,9 +571,8 @@ var WorkforceTracker = {
         const bounds = this._calculateEpochBoundaries("month", refDateStr);
         let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
         
-        const nowEpoch = new Date().getTime(); // NEW: Prevents counting future scheduled shifts
+        const nowEpoch = new Date().getTime();
 
-        // 1. Pre-load MasterList metadata
         let mlData = {};
         const dbML = this._getDB('WF_MASTERLIST');
         if (dbML && dbML.getLastRow() > 1) {
@@ -536,7 +626,6 @@ var WorkforceTracker = {
                     let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR; 
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        // ADDED: && epoch <= nowEpoch
                         if (epoch >= bounds.start && epoch <= bounds.end && epoch <= nowEpoch) { 
                             if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
                             getAg(agent, region)[metricName] += s.hours; 
@@ -570,15 +659,13 @@ var WorkforceTracker = {
                     let roleType = String(row[2]).toUpperCase();
                     this._getShiftSplits(sMins, eMins).forEach(s => {
                         let epoch = new Date(rY, rM-1, rD, Math.floor(s.startMins/60), s.startMins%60, 0, 0).getTime();
-                        // ADDED: && epoch <= nowEpoch
                         if (epoch >= bounds.start && epoch <= bounds.end && epoch <= nowEpoch) { 
                             if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
 
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('TOWER') || roleType.includes('WOFQT') || roleType.includes('WOQFT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
-                            else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours;
-                            }
+                            else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours; }
                         }
                      });
                 }
@@ -589,7 +676,6 @@ var WorkforceTracker = {
         if (dbSess && dbSess.getLastRow() > 1) {
             dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
                 let sessionEpoch = new Date(row[3]).getTime();
-                // ADDED: && sessionEpoch <= nowEpoch
                 if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end && sessionEpoch <= nowEpoch) {
                     if (targetCycle !== 'ALL' && this._getCycleForEpoch(sessionEpoch) !== targetCycle) return;
         
@@ -606,7 +692,6 @@ var WorkforceTracker = {
         const dbGEM = this._getDB('WF_GEM_DATA_V3');
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
-            // FIX: Get the year and month we are currently looking at (e.g., "2026-03")
             const targetMonth = refDateStr.substring(0, 7);
             const fixTime = (v) => {
                 if (!v || v === '-' || v === '00:00') return '-';
@@ -618,10 +703,7 @@ var WorkforceTracker = {
                 return s;
             };
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
-                // Check if the GEM data matches the current month we are looking at in the tracker
                 let rowDateStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM") : String(row[0]).substring(0, 7);
-                
-                // ONLY load the GEM data 
                 if (rowDateStr === targetMonth) {
                     let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
                     gemData[agName] = { 
@@ -833,7 +915,9 @@ function fetchSyncMetadata() {
   } catch(e) {
     return JSON.stringify({ sched: "Metadata unavailable", idp: "Metadata unavailable", muSet: "" });
   }
-  /**
+}
+
+/**
  * Smart router for the front-end: Determines whether to pull live data or archived data
  * based on whether the requested date is the current month or a past month.
  */
@@ -846,10 +930,8 @@ function getSmartUnifiedReport(dateStr) {
     const isCurrentMonth = (reqY === today.getFullYear() && reqM === today.getMonth());
     
     if (isCurrentMonth) {
-        // Fetch live calculated data for the current month
         return WorkforceTracker.getUnifiedReport(dateStr, 'ALL');
     } else {
-        // Fetch frozen snapshot for past months
         const bounds = WorkforceTracker._calculateEpochBoundaries('month', dateStr);
         const archivedData = WorkforceTracker.getArchivedReport(bounds.label);
         
@@ -857,7 +939,6 @@ function getSmartUnifiedReport(dateStr) {
         if (parsed.data && parsed.data.length > 0) {
             return archivedData;
         } else {
-            // Fallback to calculating on the fly if the archive doesn't exist for some reason
             let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, 'ALL'));
             liveCalc.cycle = "HISTORICAL RECORD";
             return JSON.stringify(liveCalc);
@@ -867,6 +948,7 @@ function getSmartUnifiedReport(dateStr) {
 
 /**
  * Retroactively generates and freezes archives for all past months found in the database.
+ * Run this ONCE to populate your history!
  */
 function runRetroactiveArchive() {
    const db = WorkforceTracker._getDB('WF_GEM_DATA_V3');
@@ -882,7 +964,7 @@ function runRetroactiveArchive() {
    let archivedList = [];
    
    months.forEach(mStr => {
-       if (!mStr.startsWith(todayStr)) { // Skip the current live month
+       if (!mStr.startsWith(todayStr)) { 
            WorkforceTracker.archiveUnifiedReport(mStr, 'ALL');
            archivedList.push(mStr.substring(0,7));
        }
@@ -890,4 +972,7 @@ function runRetroactiveArchive() {
    
    return `Successfully retro-archived: ${archivedList.join(', ')}`;
 }
+
+function fetchAbsenceProfiles(year) {
+   return WorkforceTracker.getAbsenceProfiles(year);
 }
