@@ -147,7 +147,6 @@
     
     fetchData(); 
     fetchStats(); 
-    fetchArchiveList();
     fetchNotifications();
     fetchCalendar();
     fetchTrackerData(); 
@@ -409,13 +408,6 @@
       }).getStatsHistory();
   }
 
-  function fetchArchiveList() {
-      if(typeof google === 'undefined') return;
-      google.script.run.withSuccessHandler(function(res) {
-          try { state.archiveList = JSON.parse(res); if(state.view === 'insights') render(); } catch(e) {}
-      }).getArchiveList();
-  }
-  
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e) {} }).fetchScripts(); }
   
   var insightFetchToken = 0;
@@ -426,31 +418,12 @@
       
       if (state.view === 'insights') render();
 
-      if (state.selectedArchive === 'LIVE') {
-          google.script.run.withSuccessHandler(function(res) {
-              if (myToken !== insightFetchToken) return;
-              try { state.unifiedReport = JSON.parse(res); } catch(e) {}
-              if (state.view === 'insights') render();
-          }).getUnifiedReport(state.selectedDate, state.insightCycleFilter);
-      } else {
-          google.script.run.withSuccessHandler(function(res) {
-              if (myToken !== insightFetchToken) return;
-              try { state.unifiedReport = JSON.parse(res); } catch(e) {}
-              if (state.view === 'insights') render();
-          }).getArchivedReport(state.selectedArchive);
-      }
+      google.script.run.withSuccessHandler(function(res) {
+          if (myToken !== insightFetchToken) return;
+          try { state.unifiedReport = JSON.parse(res); } catch(e) {}
+          if (state.view === 'insights') render();
+      }).getSmartUnifiedReport(state.selectedDate);
   }
-
-  window.archiveCurrentWeek = function() {
-      if (!confirm("Are you sure you want to freeze this exact view into the database?")) return;
-      showToast("Saving Snapshot...");
-      if(typeof google !== 'undefined') {
-          google.script.run.withSuccessHandler(function(res) {
-              showToast(res);
-              fetchArchiveList();
-          }).archiveUnifiedReport(state.selectedDate, state.insightCycleFilter);
-      }
-  };
 
   var trackerFetchToken = 0;
   function fetchTrackerData() {
@@ -1523,19 +1496,7 @@
 
   function renderInsights() {
       var u = state.unifiedReport || {};
-      
-      var archiveOptionsHtml = (state.archiveList || []).map(function(a) {
-         return `<option value="${escapeHTML(a.period)}" ${state.selectedArchive === a.period ? 'selected' : ''}>💾 ${escapeHTML(a.cycle)}: ${escapeHTML(a.period)}</option>`;
-      }).join('');
-
-      var rightSideHtml = '';
-      var datePickerHtml = '';
-      if (state.selectedArchive === 'LIVE') {
-          datePickerHtml = `<input type="month" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; cursor:pointer;" value="${state.selectedDate.substring(0,7)}" onchange="state.selectedDate = this.value + '-01'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}">`;
-          rightSideHtml = `<button class="btn btn-primary" style="height:32px; font-size:0.75rem;" onclick="archiveCurrentWeek()"><i data-lucide="archive" width="14"></i> Freeze & Archive</button>`;
-      } else {
-          rightSideHtml = `<button class="btn btn-glass" disabled style="height:32px; font-size:0.75rem; opacity:0.6; cursor:not-allowed;"><i data-lucide="lock" width="14"></i> Archived</button>`;
-      }
+      var displayCycle = u.cycle || 'CALCULATING...';
 
       var schedText = "Loading...";
       if (state.syncMeta && state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
@@ -1559,16 +1520,7 @@
          <div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div>
 
          <div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;">
-             <div class="nav-island" style="background:${state.selectedArchive === 'LIVE' ? 'var(--accent-primary)' : 'var(--status-break)'}; border:none; padding:4px 16px; border-radius:12px;">
-                 <span style="font-weight:800; font-size:0.75rem; color:${state.selectedArchive === 'LIVE' ? 'white' : '#000'}; letter-spacing:1px;">${escapeHTML(u.cycle || 'CALCULATING...')}</span>
-             </div>
-
-             <select class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.8rem;" onchange="state.selectedArchive=this.value; fetchInsightData();">
-                 <option value="LIVE" ${state.selectedArchive === 'LIVE' ? 'selected' : ''}>🔴 Live Engine</option>
-                 ${archiveOptionsHtml}
-             </select>
-
-             ${datePickerHtml}
+             <input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="${state.selectedDate.substring(0,7)}" onchange="state.selectedDate = this.value + '-01'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}">
 
              <div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);">
                 <button class="nav-btn ${state.insightRegionFilter==='All'?'active':''}" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter='All'; render();">All</button>
@@ -1581,9 +1533,7 @@
 
          <div style="display:flex; gap:12px; flex-shrink: 0;">
              <input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="${escapeHTML(state.insightSearch) || ''}">
-             ${rightSideHtml}
          </div>
-
       </div>`;
 
       if (!u.data) {
