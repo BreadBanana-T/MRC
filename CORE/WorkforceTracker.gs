@@ -833,4 +833,61 @@ function fetchSyncMetadata() {
   } catch(e) {
     return JSON.stringify({ sched: "Metadata unavailable", idp: "Metadata unavailable", muSet: "" });
   }
+  /**
+ * Smart router for the front-end: Determines whether to pull live data or archived data
+ * based on whether the requested date is the current month or a past month.
+ */
+function getSmartUnifiedReport(dateStr) {
+    const reqParts = dateStr.split('-');
+    const reqY = parseInt(reqParts[0]);
+    const reqM = parseInt(reqParts[1]) - 1;
+    
+    const today = new Date();
+    const isCurrentMonth = (reqY === today.getFullYear() && reqM === today.getMonth());
+    
+    if (isCurrentMonth) {
+        // Fetch live calculated data for the current month
+        return WorkforceTracker.getUnifiedReport(dateStr, 'ALL');
+    } else {
+        // Fetch frozen snapshot for past months
+        const bounds = WorkforceTracker._calculateEpochBoundaries('month', dateStr);
+        const archivedData = WorkforceTracker.getArchivedReport(bounds.label);
+        
+        let parsed = JSON.parse(archivedData);
+        if (parsed.data && parsed.data.length > 0) {
+            return archivedData;
+        } else {
+            // Fallback to calculating on the fly if the archive doesn't exist for some reason
+            let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, 'ALL'));
+            liveCalc.cycle = "HISTORICAL RECORD";
+            return JSON.stringify(liveCalc);
+        }
+    }
+}
+
+/**
+ * Retroactively generates and freezes archives for all past months found in the database.
+ */
+function runRetroactiveArchive() {
+   const db = WorkforceTracker._getDB('WF_GEM_DATA_V3');
+   if (!db || db.getLastRow() < 2) return "No GEM data found to archive.";
+   
+   let data = db.getRange(2, 1, db.getLastRow()-1, 1).getDisplayValues().flat();
+   let months = new Set();
+   data.forEach(d => {
+       if (d && d.length >= 7) months.add(d.substring(0,7) + "-01");
+   });
+   
+   let todayStr = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM");
+   let archivedList = [];
+   
+   months.forEach(mStr => {
+       if (!mStr.startsWith(todayStr)) { // Skip the current live month
+           WorkforceTracker.archiveUnifiedReport(mStr, 'ALL');
+           archivedList.push(mStr.substring(0,7));
+       }
+   });
+   
+   return `Successfully retro-archived: ${archivedList.join(', ')}`;
+}
 }
