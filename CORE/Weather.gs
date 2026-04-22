@@ -85,82 +85,102 @@ var WeatherService = {
         }
     }
 
-    // --- 2. FETCH OFFICIAL ALERTS FROM ECCC GEOMET API (NATIONAL RADAR) ---
+    // --- 2. FETCH OFFICIAL ALERTS FROM ECCC GEOMET API ---
+    // Only RED-level alerts (WARNING + severity Severe/Extreme). WATCHES, ADVISORIES,
+    // STATEMENTS are dropped. Alerts are aggregated per-province by hazard type and
+    // weighted by the population of the cities they touch, so Toronto + Mississauga +
+    // Brampton under one freezing-rain warning produces a single heavy row instead of
+    // three duplicate banner entries.
+    //
+    // City weights: Major metros (>=1M) = 10, Mid (>=250k) = 5, others = 1.
+    var cityWeights = {
+        // Major
+        "TORONTO": 10, "MONTREAL": 10, "VANCOUVER": 10, "CALGARY": 10, "OTTAWA": 10, "EDMONTON": 10,
+        // Mid
+        "WINNIPEG": 6, "QUEBEC": 6, "HAMILTON": 6, "KITCHENER": 6, "LONDON": 5,
+        "MARKHAM": 5, "MISSISSAUGA": 5, "BRAMPTON": 5, "VAUGHAN": 5,
+        "HALIFAX": 6, "VICTORIA": 6, "SURREY": 5, "BURNABY": 5, "REGINA": 5,
+        "SASKATOON": 5, "GATINEAU": 5, "LAVAL": 5, "LONGUEUIL": 5, "SHERBROOKE": 4
+    };
+    var alertRadar = {
+        "ON": ["TORONTO", "OTTAWA", "MISSISSAUGA", "BRAMPTON", "HAMILTON", "LONDON", "MARKHAM", "VAUGHAN", "KITCHENER", "WINDSOR", "BURLINGTON", "SUDBURY", "OSHAWA", "BARRIE", "KINGSTON", "NIAGARA", "THUNDER BAY", "PETERBOROUGH", "GUELPH", "WATERLOO", "BELLEVILLE"],
+        "BC": ["VANCOUVER", "PRINCE GEORGE", "VICTORIA", "SURREY", "BURNABY", "RICHMOND", "ABBOTSFORD", "KELOWNA", "KAMLOOPS", "NANAIMO", "CHILLIWACK", "COQUITLAM", "LANGLEY", "DELTA", "WHISTLER", "SQUAMISH"],
+        "AB": ["CALGARY", "EDMONTON", "RED DEER", "LETHBRIDGE", "FORT MCMURRAY", "MEDICINE HAT", "GRANDE PRAIRIE", "AIRDRIE", "BANFF", "JASPER", "LLOYDMINSTER"],
+        "QC": ["MONTREAL", "QUEBEC", "LAVAL", "GATINEAU", "LONGUEUIL", "SHERBROOKE", "TROIS-RIVIERES", "CHICOUTIMI", "SAINT-JEAN", "BROSSARD", "LEVIS", "DRUMMONDVILLE", "SAGUENAY", "GRANBY"],
+        "MB": ["WINNIPEG", "BRANDON", "THOMPSON", "PORTAGE LA PRAIRIE", "STEINBACH"],
+        "SK": ["SASKATOON", "REGINA", "PRINCE ALBERT", "MOOSE JAW", "SWIFT CURRENT", "YORKTON"],
+        "NS": ["HALIFAX", "DARTMOUTH", "SYDNEY", "TRURO", "NEW GLASGOW", "CAPE BRETON"],
+        "NB": ["MONCTON", "SAINT JOHN", "FREDERICTON", "DIEPPE", "MIRAMICHI", "EDMUNDSTON"],
+        "NL": ["ST. JOHN'S", "CORNER BROOK", "GANDER", "MOUNT PEARL", "CONCEPTION BAY"],
+        "PE": ["CHARLOTTETOWN", "SUMMERSIDE", "STRATFORD"]
+    };
+    var toTitleCase = function(str) {
+        return str.replace(/\w\S*/g, function(t){ return t.charAt(0).toUpperCase() + t.substr(1).toLowerCase(); });
+    };
+
     try {
-        var alertUrl = "https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en";
-        var alertRes = UrlFetchApp.fetch(alertUrl, { muteHttpExceptions: true });
-        
-        if (alertRes.getResponseCode() === 200) {
-            var alertData = JSON.parse(alertRes.getContentText());
-            if (alertData && alertData.features) {
-                var seenAlerts = new Set();
-                
-                // MASSIVE DICTIONARY: Scans all 10 provinces for major and minor regional centers
-                var alertRadar = {
-                    "ON": ["TORONTO", "OTTAWA", "MISSISSAUGA", "BRAMPTON", "HAMILTON", "LONDON", "MARKHAM", "VAUGHAN", "KITCHENER", "WINDSOR", "BURLINGTON", "SUDBURY", "OSHAWA", "BARRIE", "KINGSTON", "NIAGARA", "THUNDER BAY", "PETERBOROUGH", "GUELPH", "WATERLOO", "BELLEVILLE"],
-                    "BC": ["VANCOUVER", "PRINCE GEORGE", "VICTORIA", "SURREY", "BURNABY", "RICHMOND", "ABBOTSFORD", "KELOWNA", "KAMLOOPS", "NANAIMO", "CHILLIWACK", "COQUITLAM", "LANGLEY", "DELTA", "WHISTLER", "SQUAMISH"],
-                    "AB": ["CALGARY", "EDMONTON", "RED DEER", "LETHBRIDGE", "FORT MCMURRAY", "MEDICINE HAT", "GRANDE PRAIRIE", "AIRDRIE", "BANFF", "JASPER", "LLOYDMINSTER"],
-                    "QC": ["MONTREAL", "QUEBEC", "LAVAL", "GATINEAU", "LONGUEUIL", "SHERBROOKE", "TROIS-RIVIERES", "CHICOUTIMI", "SAINT-JEAN", "BROSSARD", "LEVIS", "DRUMMONDVILLE", "SAGUENAY", "GRANBY"],
-                    "MB": ["WINNIPEG", "BRANDON", "THOMPSON", "PORTAGE LA PRAIRIE", "STEINBACH"],
-                    "SK": ["SASKATOON", "REGINA", "PRINCE ALBERT", "MOOSE JAW", "SWIFT CURRENT", "YORKTON"],
-                    "NS": ["HALIFAX", "DARTMOUTH", "SYDNEY", "TRURO", "NEW GLASGOW", "CAPE BRETON"],
-                    "NB": ["MONCTON", "SAINT JOHN", "FREDERICTON", "DIEPPE", "MIRAMICHI", "EDMUNDSTON"],
-                    "NL": ["ST. JOHN'S", "CORNER BROOK", "GANDER", "MOUNT PEARL", "CONCEPTION BAY"],
-                    "PE": ["CHARLOTTETOWN", "SUMMERSIDE", "STRATFORD"]
-                };
+        // limit=1000 pulls all currently active records; default limit is 10.
+        var alertUrl = "https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=1000";
+        var alertRes = UrlFetchApp.fetch(alertUrl, { muteHttpExceptions: true, headers: { "User-Agent": "MRC-Ops-Dashboard/1.0" } });
+        var alertData = (alertRes.getResponseCode() === 200) ? JSON.parse(alertRes.getContentText()) : null;
+        var features = (alertData && alertData.features) ? alertData.features : [];
 
-                // Helper to pretty-print uppercase cities (e.g. "MISSISSAUGA" -> "Mississauga")
-                var toTitleCase = function(str) {
-                    return str.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
-                };
-                
-                var provKeys = Object.keys(alertRadar);
-                
-                // Scan all active alerts in Canada
-                for (var j = 0; j < alertData.features.length; j++) {
-                    var props = alertData.features[j].properties || {};
-                    var headline = props.headline || props.event || "";
-                    if (!headline) continue;
-                    
-                    var areas = (props.areas || "").toUpperCase();
-                    var headUp = headline.toUpperCase();
+        // Bucket = province + hazard type -> { weight, cities:Set }
+        var buckets = {};
 
-                    // Check our dictionary
-                    for (var p = 0; p < provKeys.length; p++) {
-                        var provCode = provKeys[p];
-                        var cityList = alertRadar[provCode];
-                        var matchedCities = [];
+        for (var j = 0; j < features.length; j++) {
+            var props = features[j].properties || {};
+            var headline = props.headline || props.event || "";
+            if (!headline) continue;
 
-                        // Find all minor/major cities caught in this specific alert
-                        for (var c = 0; c < cityList.length; c++) {
-                            var checkCity = cityList[c];
-                            if (areas.indexOf(checkCity) !== -1 || headUp.indexOf(checkCity) !== -1) {
-                                matchedCities.push(toTitleCase(checkCity));
-                            }
-                        }
+            // RED-only filter: must be a WARNING (not watch/advisory/statement) AND
+            // severity must be Severe or Extreme when present.
+            var headUp = headline.toUpperCase();
+            if (headUp.indexOf("WARNING") === -1) continue;
+            var severity = String(props.severity || "").toLowerCase();
+            if (severity && severity !== "severe" && severity !== "extreme") continue;
 
-                        if (matchedCities.length > 0) {
-                            var alertText = headline;
-                            if (alertText.toLowerCase().indexOf(" in effect") !== -1) {
-                                alertText = alertText.substring(0, alertText.toLowerCase().indexOf(" in effect")).trim();
-                            }
-                            
-                            // Combine cities neatly (e.g. "Toronto, Mississauga, Brampton")
-                            // Limits to 3 to prevent the dashboard banner from taking up half the screen
-                            var displayCities = matchedCities.slice(0, 3).join(", ");
-                            if (matchedCities.length > 3) displayCities += " + " + (matchedCities.length - 3) + " more";
+            var areas = String(props.areas || "").toUpperCase();
 
-                            var alertKey = provCode + "-" + alertText + "-" + displayCities;
-                            
-                            if (!seenAlerts.has(alertKey)) {
-                                seenAlerts.add(alertKey);
-                                activeAlerts.push({ province: provCode, type: alertText + " (" + displayCities + ")", count: 1 });
-                            }
-                        }
+            // Extract the hazard name (strip trailing " in effect", " issued", etc.)
+            var hazard = headline;
+            var cut = hazard.toLowerCase().search(/\s+(in effect|issued|ended)/);
+            if (cut !== -1) hazard = hazard.substring(0, cut).trim();
+
+            for (var provCode in alertRadar) {
+                var cityList = alertRadar[provCode];
+                for (var c = 0; c < cityList.length; c++) {
+                    var city = cityList[c];
+                    if (areas.indexOf(city) === -1 && headUp.indexOf(city) === -1) continue;
+
+                    var bucketKey = provCode + "|" + hazard;
+                    if (!buckets[bucketKey]) buckets[bucketKey] = { province: provCode, hazard: hazard, cities: {}, weight: 0 };
+                    if (!buckets[bucketKey].cities[city]) {
+                        buckets[bucketKey].cities[city] = true;
+                        buckets[bucketKey].weight += (cityWeights[city] || 1);
                     }
                 }
             }
         }
+
+        // Materialize and sort by weight (most-impactful first)
+        Object.keys(buckets).forEach(function(k) {
+            var b = buckets[k];
+            var cityNames = Object.keys(b.cities).map(toTitleCase);
+            var shown = cityNames.slice(0, 3).join(", ");
+            if (cityNames.length > 3) shown += " + " + (cityNames.length - 3) + " more";
+            activeAlerts.push({
+                province: b.province,
+                type: b.hazard,
+                cities: cityNames,
+                cityCount: cityNames.length,
+                weight: b.weight,
+                displayCities: shown
+            });
+        });
+        activeAlerts.sort(function(a, b) { return b.weight - a.weight; });
+        // Cap so a flood of alerts can't take over the banner.
+        if (activeAlerts.length > 8) activeAlerts = activeAlerts.slice(0, 8);
     } catch (e) {
         console.error("ECCC Alerts Error: " + e.toString());
     }
