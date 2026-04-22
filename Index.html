@@ -66,6 +66,7 @@
                     <i data-lucide="flag" width="20" color="var(--status-alert)" fill="rgba(220, 38, 38, 0.2)"></i>
                 </button>
                 
+                <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region Manager"><i data-lucide="map-pin" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
@@ -159,6 +160,40 @@
                 <button class="btn btn-primary" onclick="saveOvertime()">Submit OT</button>
             </div>
         </div>
+    </div>
+
+    <div id="region-modal" class="modal-blur" onclick="closeRegionManager()">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:720px; max-width:95%; padding:0; overflow:hidden;">
+          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+             <div>
+                <h2 style="margin:0 0 4px 0; font-size:1.25rem;">Region Manager</h2>
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Single source of truth for Onshore / Offshore. Manual flips always beat auto-detection.</div>
+             </div>
+             <button class="btn-icon-sm" onclick="closeRegionManager()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+          </div>
+          <div style="padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; gap:12px; align-items:center;">
+             <input id="region-search" class="input-aether" style="flex:1; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="renderRegionManager()">
+             <div style="display:flex; gap:6px;">
+                <button class="btn btn-glass" id="region-filter-all" onclick="state.regionManagerFilter='ALL'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">All</button>
+                <button class="btn btn-glass" id="region-filter-on" onclick="state.regionManagerFilter='Onshore'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">Onshore</button>
+                <button class="btn btn-glass" id="region-filter-off" onclick="state.regionManagerFilter='Offshore'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">Offshore</button>
+             </div>
+          </div>
+          <div id="region-list" style="max-height:520px; overflow-y:auto;" class="custom-scrollbar"></div>
+       </div>
+    </div>
+
+    <div id="outage-modal" class="modal-blur" onclick="closeOutageDrawer()">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:560px; max-width:95%; padding:0; overflow:hidden;">
+          <div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start;">
+             <div>
+                <h2 id="outage-modal-title" style="margin:0 0 6px 0;">Outages</h2>
+                <div id="outage-modal-sub" style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"></div>
+             </div>
+             <button class="btn-icon-sm" onclick="closeOutageDrawer()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+          </div>
+          <div id="outage-modal-list" style="max-height:480px; overflow-y:auto;" class="custom-scrollbar"></div>
+       </div>
     </div>
 
     <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">

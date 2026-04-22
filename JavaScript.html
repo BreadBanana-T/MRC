@@ -38,7 +38,7 @@
   };
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL'
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -66,7 +66,132 @@
     setInterval(fetchNotifications, 10000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
+    setInterval(fetchOutages, 300000); // 5 min
+    setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
+  }
+
+  function fetchStaffingBalance() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.staffingBalance = JSON.parse(res); if (state.view === 'overview') render(); } catch (e) {}
+      }).getStaffingBalance();
+  }
+
+  function fetchOutages() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.outagesData = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getPowerOutages();
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.outageCorrelation = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getOutageAgentCorrelation(5000, 2);
+  }
+
+  window.openRegionManager = function() {
+      document.getElementById('region-modal').classList.add('open');
+      state.regionManagerFilter = 'ALL';
+      fetchRegionRegistry();
+  };
+  window.closeRegionManager = function() {
+      document.getElementById('region-modal').classList.remove('open');
+  };
+  function fetchRegionRegistry() {
+      if (typeof google === 'undefined') return;
+      document.getElementById('region-list').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-size:0.85rem;">Loading registry…</div>';
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.regionRegistry = JSON.parse(res); renderRegionManager(); }
+          catch(e) { document.getElementById('region-list').innerHTML = '<div style="padding:40px; text-align:center; color:var(--status-alert); font-weight:600;">Failed to load registry.</div>'; }
+      }).getRegionRegistry();
+  }
+  window.renderRegionManager = function() {
+      var list = state.regionRegistry || [];
+      var q = (document.getElementById('region-search') || {}).value || '';
+      q = q.toLowerCase().trim();
+      var filter = state.regionManagerFilter || 'ALL';
+      var filtered = list.filter(function(r) {
+          if (filter !== 'ALL' && r.region !== filter) return false;
+          if (q && r.display.toLowerCase().indexOf(q) === -1) return false;
+          return true;
+      });
+      var sourceBadge = function(src) {
+          var color = src === 'manual' ? 'var(--status-alert)' : (src === 'masterlist' ? 'var(--accent-primary)' : 'var(--text-muted)');
+          var bg = src === 'manual' ? 'rgba(220,38,38,0.1)' : (src === 'masterlist' ? 'rgba(99,102,241,0.1)' : 'rgba(0,0,0,0.05)');
+          return '<span style="background:' + bg + '; color:' + color + '; padding:2px 8px; border-radius:6px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">' + src + '</span>';
+      };
+      var rows = filtered.map(function(r) {
+          var regionColor = r.region === 'Offshore' ? 'var(--region-off, #b45309)' : 'var(--status-active)';
+          var flipTo = r.region === 'Offshore' ? 'Onshore' : 'Offshore';
+          var nameEsc = escapeHTML(r.display).replace(/'/g, "\\'");
+          return '<div style="padding:12px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;">' +
+                   '<div style="flex:1; min-width:0;">' +
+                     '<div style="font-weight:700; color:var(--text-main); font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(r.display) + '</div>' +
+                     '<div style="display:flex; gap:6px; margin-top:4px; align-items:center;">' +
+                       '<span style="font-size:0.7rem; font-weight:800; color:' + regionColor + ';">' + escapeHTML(r.region) + '</span>' +
+                       sourceBadge(r.source) +
+                     '</div>' +
+                   '</div>' +
+                   '<div style="display:flex; gap:6px; flex-shrink:0;">' +
+                     '<button class="btn btn-glass" onclick="flipAgentRegion(\'' + nameEsc + '\', \'' + flipTo + '\')" style="height:30px; padding:0 12px; font-size:0.75rem;">Flip to ' + flipTo + '</button>' +
+                     (r.source === 'manual' ? '<button class="btn btn-glass" onclick="resetAgentRegion(\'' + nameEsc + '\')" style="height:30px; padding:0 10px; font-size:0.75rem; color:var(--text-muted);" title="Remove manual override, revert to auto-detection">Reset</button>' : '') +
+                   '</div>' +
+                 '</div>';
+      }).join('') || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No agents match the filter.</div>';
+      document.getElementById('region-list').innerHTML = rows;
+      ['all','on','off'].forEach(function(k) {
+          var el = document.getElementById('region-filter-' + k);
+          if (!el) return;
+          var wantActive = (filter === 'ALL' && k === 'all') || (filter === 'Onshore' && k === 'on') || (filter === 'Offshore' && k === 'off');
+          el.classList.toggle('btn-primary', wantActive);
+      });
+      refreshIcons();
+  };
+  window.flipAgentRegion = function(name, newRegion) {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function() { fetchRegionRegistry(); showToast('Flipped ' + name + ' → ' + newRegion); }).setAgentRegionManual(name, newRegion);
+  };
+  window.resetAgentRegion = function(name) {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function() { fetchRegionRegistry(); showToast('Reset ' + name + ' to auto-detection'); }).clearAgentRegion(name);
+  };
+
+  window.openOutageDrawer = function(prov) {
+      state.outageDrawerProv = prov;
+      var modal = document.getElementById('outage-modal');
+      if (modal) modal.classList.add('open');
+      renderOutageDrawer();
+  };
+  window.closeOutageDrawer = function() {
+      var modal = document.getElementById('outage-modal');
+      if (modal) modal.classList.remove('open');
+      state.outageDrawerProv = null;
+  };
+  function renderOutageDrawer() {
+      var p = state.outageDrawerProv;
+      if (!p || !state.outagesData || !state.outagesData.byProvince[p]) return;
+      var d = state.outagesData.byProvince[p];
+      var titleEl = document.getElementById('outage-modal-title');
+      var subEl = document.getElementById('outage-modal-sub');
+      var listEl = document.getElementById('outage-modal-list');
+      if (!titleEl || !listEl) return;
+      titleEl.innerText = p + ' — ' + (d.customers || 0).toLocaleString() + ' customers affected';
+      subEl.innerText = d.source + ' • ' + (d.outages || 0) + ' active outages';
+      var rows = (d.top || []).map(function(r) {
+          var eta = r.eta ? ('<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">ETA: ' + escapeHTML(String(r.eta)) + '</div>') : '';
+          return '<div style="padding:14px 16px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
+                 '<div style="flex:1; min-width:0;"><div style="font-weight:800; color:var(--text-main); font-size:0.95rem;">' + escapeHTML(r.region || 'Unknown') + '</div>' +
+                 '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(r.cause || '—') + '</div>' + eta + '</div>' +
+                 '<div style="text-align:right; flex-shrink:0;"><div style="font-size:1.25rem; font-weight:800; color:var(--status-alert);">' + (r.customers || 0).toLocaleString() + '</div><div style="font-size:0.65rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">customers</div></div>' +
+                 '</div>';
+      }).join('');
+      listEl.innerHTML = rows || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No active outages.</div>';
+      refreshIcons();
   }
 
   function fetchMetadata() {
@@ -185,12 +310,20 @@
             
   window.dismissNotif = function(id) { state.dismissedNotifs.add(String(id)); renderNotifList(); if(typeof google !== 'undefined') google.script.run.dismissSystemNotification(id); var dot = document.getElementById('notif-dot'); var count = state.notifications.filter(function(n){return !state.dismissedNotifs.has(String(n.id));}).length; if(dot) dot.style.display = count ? 'block' : 'none'; };
 
-  function fetchCalendar() { 
-      if(typeof google==='undefined') return; 
+  function fetchCalendar() {
+      if(typeof google==='undefined') return;
       google.script.run.withSuccessHandler(function(j) {
           try {
-              state.calendarEvents = JSON.parse(j); 
-              if(state.view === 'overview') render(); 
+              var parsed = JSON.parse(j);
+              if (parsed && parsed.__error) {
+                  state.calendarEvents = [];
+                  state.calendarError = parsed.__error;
+                  if(state.view === 'overview') render();
+                  return;
+              }
+              state.calendarError = null;
+              state.calendarEvents = Array.isArray(parsed) ? parsed : [];
+              if(state.view === 'overview') render();
               var now = new Date();
               for (var i = 0; i < state.calendarEvents.length; i++) {
                   var e = state.calendarEvents[i];
@@ -200,7 +333,7 @@
                   }
               }
           } catch(e) {}
-      }).getDailyCalendarEvents(); 
+      }).getDailyCalendarEvents();
   }
 
   function fetchStats() {
@@ -230,8 +363,14 @@
           if (myToken !== insightFetchToken) return;
           try { state.unifiedReport = JSON.parse(res); } catch(e) {}
           if (state.view === 'insights') render();
-      }).getSmartUnifiedReport(state.selectedDate);
+      }).getSmartUnifiedReport(state.selectedDate, state.insightCycleFilter || 'ALL');
   }
+
+  window.toggleInsightCycle = function(target) {
+      if (state.insightCycleFilter === target) state.insightCycleFilter = 'ALL';
+      else state.insightCycleFilter = target;
+      fetchInsightData();
+  };
 
   var trackerFetchToken = 0;
   function fetchTrackerData() {
@@ -408,7 +547,8 @@
          breakHtml += '<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">' + escapeHTML(a.shiftEndsIn) + '</span></div>'; 
      }
 
-     var prefix = (a.region || '').indexOf('Onshore') !== -1 ? 'T' : 'x';
+     // Default to Onshore prefix (T) when region is unset; only mark x for explicit Offshore.
+     var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
      var formattedId = prefix + escapeHTML(a.id || '');
      var timeDisplay = escapeHTML(start) + "-" + escapeHTML(end);
      if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') { timeDisplay = "OFF"; }
@@ -432,22 +572,88 @@
   window.openBreakModal = function() { closeMenu(); var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(!agent) { showToast("Agent data not found"); return; } var container = document.getElementById('break-editor'); container.innerHTML = ""; (agent.rawBreaks || []).forEach(function(b, i) { container.innerHTML += '<div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;"><div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">' + escapeHTML(b.type) + '</div><div style="display:flex; gap:8px;"><input id="bs-' + i + '" class="input-aether" value="' + escapeHTML(b.start || '') + '" style="font-size:0.85rem;"><input id="be-' + i + '" class="input-aether" value="' + escapeHTML(b.end || '') + '" style="font-size:0.85rem;"></div></div>'; }); document.getElementById('break-modal').classList.add('open'); };
   window.openOtModal = function() { closeMenu(); document.getElementById('ot-start').value = ""; document.getElementById('ot-end').value = ""; document.getElementById('ot-modal').classList.add('open'); };
 
+  function renderOutageCorrelationBanner() {
+      var c = state.outageCorrelation;
+      if (!c || !c.banners || !c.banners.length) return '';
+      var rows = c.banners.map(function(b) {
+          var sourceTag = b.source ? ' • ' + escapeHTML(b.source) : '';
+          var topTag = b.topRegion ? ' — epicenter ' + escapeHTML(b.topRegion) : '';
+          var starting = b.agentsStarting > 0
+              ? '<span style="background:rgba(245,158,11,0.12); color:var(--status-warn); padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; margin-left:6px;">' + b.agentsStarting + ' starting in next ' + b.lookaheadHours + 'h</span>'
+              : '';
+          return '<div style="display:flex; align-items:center; gap:12px; padding:10px 14px; border-top:1px solid var(--glass-border);">' +
+                 '<span style="font-size:0.7rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.12); padding:2px 8px; border-radius:6px; letter-spacing:1px;">' + escapeHTML(b.province) + '</span>' +
+                 '<div style="flex:1; min-width:0;">' +
+                   '<div style="font-weight:800; color:var(--text-main); font-size:0.85rem;">' + b.customers.toLocaleString() + ' customers affected' + topTag + '</div>' +
+                   '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-top:2px;">' + b.agentsInProvince + ' agents office-based here' + sourceTag + '</div>' +
+                 '</div>' +
+                 starting +
+                 '</div>';
+      }).join('');
+      return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden; border-left:4px solid var(--status-alert);"><div style="padding:10px 14px; background:rgba(220,38,38,0.05); display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--status-alert);"><i data-lucide="alert-triangle" width="14"></i> Outage Situational Awareness<span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-left:6px;">Office-region correlation. Not a per-agent alert.</span></div>' + rows + '</div>';
+  }
+
+  function renderStaffingTile() {
+      var s = state.staffingBalance;
+      if (!s || !s.available) {
+          var reason = s && s.reason ? s.reason : 'Loading…';
+          return '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; opacity:0.6;"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Net Staffing</h4><div style="font-size:1.8rem; font-weight:800; color:var(--text-muted);">—</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;" title="' + escapeHTML(reason) + '">' + escapeHTML(reason.length > 22 ? reason.substring(0, 20) + '…' : reason) + '</div></div>';
+      }
+      var color = s.status === 'critical' ? 'var(--status-alert)' : (s.status === 'warn' ? 'var(--status-warn)' : (s.status === 'surplus' ? 'var(--status-active)' : 'var(--text-main)'));
+      var sign = s.net > 0 ? '+' : '';
+      return '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Net = Open seats − Required for current 15-min IDP bucket"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Net Staffing</h4><div style="font-size:2.5rem; font-weight:800; color:' + color + ';">' + sign + s.net + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + s.supply + ' open / ' + s.demand + ' req @ ' + escapeHTML(s.bucket) + '</div></div>';
+  }
+
+  function renderOutageTile() {
+      var d = state.outagesData;
+      if (!d || !d.byProvince) {
+          return '<div class="aether-card" style="padding:14px 20px; margin-bottom:20px; display:flex; align-items:center; gap:12px; color:var(--text-muted); font-size:0.8rem; font-weight:600;"><i data-lucide="zap" width="14"></i> Loading power-outage feeds…</div>';
+      }
+      var provs = ['BC','ON','QC'];
+      var provLabels = { BC: 'British Columbia', ON: 'Ontario (Hydro One)', QC: 'Québec' };
+      var cols = provs.map(function(p) {
+          var stats = d.byProvince[p];
+          var err = (d.errors || []).find(function(e) { return e.indexOf(p + ':') === 0; });
+          if (!stats) {
+              return '<div onclick="showToast(\'Source offline: ' + escapeHTML(err || 'Unknown') + '\');" style="flex:1; padding:12px 16px; border-left:3px solid var(--text-muted); cursor:help; opacity:0.6;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + p + '</div><div style="font-size:1.4rem; font-weight:800; color:var(--text-muted); margin-top:4px;">—</div><div style="font-size:0.7rem; color:var(--status-alert); font-weight:700; margin-top:2px;">offline</div></div>';
+          }
+          var color = stats.customers > 10000 ? 'var(--status-alert)' : (stats.customers > 1000 ? 'var(--status-warn)' : 'var(--text-main)');
+          var tops = (stats.top || []).slice(0, 2).map(function(t) { return escapeHTML(t.region) + ' (' + (t.customers || 0).toLocaleString() + ')'; }).join(' · ');
+          return '<div onclick="openOutageDrawer(\'' + p + '\');" style="flex:1; padding:12px 16px; border-left:3px solid ' + color + '; cursor:pointer; transition:0.2s;" class="hover-bg" title="' + escapeHTML(stats.source) + '">' +
+                 '<div style="display:flex; justify-content:space-between; align-items:baseline;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + escapeHTML(provLabels[p]) + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">' + (stats.outages || 0) + ' outages</div></div>' +
+                 '<div style="font-size:1.6rem; font-weight:800; color:' + color + '; margin-top:4px; line-height:1;">' + (stats.customers || 0).toLocaleString() + '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:6px;">customers</span></div>' +
+                 (tops ? '<div style="font-size:0.7rem; color:var(--text-secondary); font-weight:600; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + tops + '</div>' : '<div style="font-size:0.7rem; color:var(--status-active); font-weight:700; margin-top:6px;">All clear</div>') +
+                 '</div>';
+      }).join('');
+      var updated = d.updated ? ' • updated ' + escapeHTML(d.updated) : '';
+      var errBadge = (d.errors && d.errors.length) ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:6px; font-weight:700;" title="' + escapeHTML(d.errors.join(' | ')) + '">' + d.errors.length + ' source' + (d.errors.length > 1 ? 's' : '') + ' offline</span>' : '';
+      return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 20px; background:rgba(0,0,0,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages (Real-time)' + errBadge + '</div><div style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</div></div><div style="display:flex;">' + cols + '</div></div>';
+  }
+
   function renderOverview() {
       var unplanCount = (state.agents.unplanned||[]).length;
       var planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
-      var totalActive = Math.max(1, (state.agents.active||[]).length + 10);
-      var shrinkPct = Math.round(((unplanCount + planCount) / totalActive) * 100);
+      var activeCount = (state.agents.active||[]).length;
+      // Real off-floor %: off-floor agents / total-scheduled. No artificial padding.
+      var totalScheduled = activeCount + unplanCount + planCount;
+      var offFloorPct = totalScheduled > 0 ? Math.round(((unplanCount + planCount) / totalScheduled) * 100) : 0;
       var safeCount = (state.agents.safe||[]).length; var iclCount = (state.agents.icl||[]).length; var ulcCount = (state.agents.ulc||[]).length;
 
       var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
+      if (state.calendarError) {
+          eventsHtml = '<div style="padding:16px; color:var(--status-alert); font-size:0.8rem; font-weight:700; line-height:1.5;"><i data-lucide="alert-triangle" width="14" style="vertical-align:middle; margin-right:4px;"></i> Calendar unavailable<div style="font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-top:6px;">' + escapeHTML(state.calendarError) + '</div><div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px;">Re-authorize the script (Apps Script editor → Run doGet once) or redeploy as "Execute as: Me".</div></div>';
+      }
       if(state.calendarEvents && state.calendarEvents.length > 0) {
           eventsHtml = state.calendarEvents.map(function(e, i) { return '<div onclick="openEventModal(' + i + ')" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg"><div style="width:4px; height:30px; background:' + (e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)') + '; border-radius:2px;"></div><div style="flex:1;"><div style="font-weight:700; font-size:0.9rem;">' + escapeHTML(e.title || 'Untitled Event') + '</div><div style="font-size:0.75rem; color:var(--text-muted);"><span style="color:var(--text-main); font-weight:700;">' + escapeHTML(e.date || '') + '</span> • ' + escapeHTML(e.startTime || '') + ' - ' + escapeHTML(e.endTime || '') + '</div></div></div>'; }).join('');
       }
 
-      var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style><div class="grid-bento">' +
+      var outageTileHtml = renderOutageTile();
+      var correlationHtml = renderOutageCorrelationBanner();
+      var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>' + correlationHtml + outageTileHtml + '<div class="grid-bento">' +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;"><div style="display:flex; justify-content:space-between; align-items:center;"><div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;"><canvas id="chart-overview" style="width:100%; height:120px;"></canvas></div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
-                 '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Shrinkage</h4><div id="ov-shrink" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + shrinkPct + '%</div></div>' +
+                 '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
+                 renderStaffingTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div><div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">' + iclCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div><div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">' + ulcCount + '</div></div></div></div>' +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div></div>';
@@ -462,8 +668,27 @@
       var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       
       if (state.alerts && state.alerts.length > 0) {
-         html += '<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Alerts</div><div style="display:flex; flex-direction:column; gap:12px;">';
-         state.alerts.forEach(function(a) { html += '<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 16px; border-radius:8px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:inline-block; width:fit-content;">' + escapeHTML(a.province || 'Unknown') + ': ' + escapeHTML(a.type || '') + '</div>'; });
+         html += '<div class="aether-card" style="grid-column: 1 / -1; border-left: 4px solid var(--status-alert); background: linear-gradient(90deg, rgba(220, 38, 38, 0.05), transparent);"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level only)</div><div style="display:flex; flex-direction:column; gap:10px;">';
+         state.alerts.forEach(function(a) {
+             var hazard = escapeHTML(a.type || '');
+             var prov = escapeHTML(a.province || '—');
+             var cities = escapeHTML(a.displayCities || '');
+             var count = a.cityCount || 0;
+             var weight = a.weight || 0;
+             // Weight-band heat: >=20 deep red, >=10 medium, else light.
+             var intensity = weight >= 20 ? 'rgba(220,38,38,0.2)' : (weight >= 10 ? 'rgba(220,38,38,0.12)' : 'rgba(220,38,38,0.06)');
+             html += '<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 14px; border-radius:10px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:flex; justify-content:space-between; align-items:center; gap:16px;">' +
+                     '<div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">' +
+                       '<span style="background:' + intensity + '; padding:3px 8px; border-radius:6px; font-size:0.7rem; letter-spacing:1px;">' + prov + '</span>' +
+                       '<span style="color:var(--text-main); font-weight:800;">' + hazard + '</span>' +
+                       (cities ? '<span style="color:var(--text-muted); font-weight:600; font-size:0.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">— ' + cities + '</span>' : '') +
+                     '</div>' +
+                     '<div style="display:flex; gap:8px; align-items:center; flex-shrink:0;">' +
+                       '<span title="Cities affected" style="background:rgba(0,0,0,0.04); color:var(--text-main); padding:2px 8px; border-radius:6px; font-size:0.7rem;">' + count + ' city' + (count !== 1 ? 'ies' : '') + '</span>' +
+                       '<span title="Impact weight" style="background:rgba(220,38,38,0.12); padding:2px 8px; border-radius:6px; font-size:0.7rem;">w ' + weight + '</span>' +
+                     '</div>' +
+                   '</div>';
+         });
          html += '</div></div>';
       } else {
          html += '<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>';
@@ -519,7 +744,7 @@
   window.closeAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.remove('open'); };
   window.runAnalyzerImport = function() { var txt = document.getElementById('gem-import-text').value; if (!txt) return; var btn = event.target; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true; var modal = document.getElementById('gem-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Parsing GEM & Updating DB..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; showToast("Analysis Complete!"); document.getElementById('gem-import-text').value = ""; render(); google.script.run.addGlobalNotification("Global Update: GEM Report Synced. Deep Dives Refreshed."); } catch(e) { state.analyzerLoading = false; showToast("Error processing data"); render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).importNewGEMReport(txt); } };
   window.runMasterListImport = function() { var txt = document.getElementById('masterlist-import-text').value; if (!txt) return; var modal = document.getElementById('master-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Syncing Master Roster..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { showToast(res); document.getElementById('masterlist-import-text').value = ""; if (state.analyzerData && state.analyzerData.selectedMonth) { getAnalyzerHistory(state.analyzerData.selectedMonth); } else { getAnalyzerHistory(null); } google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Profiles Updated."); }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).processMasterListUpload(txt); } }
-  window.getAnalyzerHistory = function(month) { state.analyzerLoading = true; render(); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; render(); } catch(e) { state.analyzerLoading = false; render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).fetchAnalyzerData(month); } };
+  window.getAnalyzerHistory = function(month) { state.analyzerLoading = true; render(); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; render(); } catch(e) { state.analyzerLoading = false; render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).fetchAnalyzerData(month); google.script.run.withSuccessHandler(function(res) { try { state.coachingCadence = JSON.parse(res); if (state.view === 'analyzer') render(); } catch(e) {} }).fetchCoachingCadence(30); } };
   window.dismissFlagAgent = function(agentName) { if (confirm("Are you sure you want to dismiss " + agentName + "? They will be permanently hidden from all future Red Flag reports.")) { showToast("Dismissing Agent..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function() { getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null); }).ignoreAnalyzerAgent(agentName); } } };
 
   function renderAnalyzer() {
@@ -537,7 +762,28 @@
       
       var masterListStatus = d.usingMasterList ? '<span style="font-size:0.75rem; font-weight:700; color:var(--status-active); background:rgba(16,185,129,0.1); padding:4px 10px; border-radius:12px;"><i data-lucide="shield-check" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Active</span>' : '<span style="font-size:0.75rem; font-weight:700; color:var(--status-warn); background:rgba(245,158,11,0.1); padding:4px 10px; border-radius:12px; cursor:pointer;" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');"><i data-lucide="alert-circle" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Missing</span>';
 
-      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; padding-bottom:40px;">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + '</div>';
+      function renderCoachingCadenceCard() {
+          var c = state.coachingCadence || { flags: [] };
+          var rows = (c.flags || []).map(function(f) {
+              var sev = f.daysSince === null ? 'var(--status-alert)' : (f.daysSince >= 60 ? 'var(--status-alert)' : 'var(--status-warn)');
+              var regionTag = f.region === 'Offshore' ? '<span style="font-size:0.6rem; background:rgba(180,83,9,0.12); color:#b45309; padding:1px 6px; border-radius:4px; font-weight:800; margin-left:6px;">OFF</span>' : '';
+              return '<tr style="border-bottom:1px solid var(--glass-border);" class="hover-bg">' +
+                     '<td style="padding:12px 16px; display:flex; align-items:center; gap:10px;"><div style="width:8px; height:8px; border-radius:4px; background:' + sev + '; flex-shrink:0;"></div><span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + escapeHTML(f.name) + '</span>' + regionTag + '</td>' +
+                     '<td style="padding:12px 16px; font-weight:800; color:' + sev + ';">' + (f.daysSince === null ? 'Never' : f.daysSince + ' days') + '</td>' +
+                     '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600; font-size:0.8rem;">' + (f.lastCoachingDate ? escapeHTML(f.lastCoachingDate) : '—') + '</td>' +
+                     '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + f.coachingCount90d + '</td>' +
+                     '</tr>';
+          }).join('') || '<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No coaching cadence flags.</td></tr>';
+          var threshold = c.threshold || 30;
+          return '<div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; height:380px; grid-column: 1 / -1;">' +
+                 '<div style="background:rgba(245,158,11,0.06); padding:16px 20px; font-weight:800; font-size:1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--glass-border);">' +
+                 '<span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clock" width="18" style="color:var(--status-warn);"></i> Coaching Cadence<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:6px;">no session in ' + threshold + '+ days</span></span>' +
+                 '<span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05);">' + (c.flags || []).length + '</span>' +
+                 '</div>' +
+                 '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+      }
+
+      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; padding-bottom:40px;">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + '</div>' + renderCoachingCadenceCard();
   }
 
   window.toggleInsightRow = function(id) {
@@ -553,7 +799,14 @@
       var schedText = "Loading...";
       if (state.syncMeta && state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
 
-      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;"><i data-lucide="calendar-check" width="10" style="vertical-align:middle;"></i> ' + schedText + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div></div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;"><input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="' + escapeHTML(state.insightSearch) + '"></div></div>';
+      var curCycle = state.insightCycleFilter || 'ALL';
+      var cycleBtn = function(label, val) {
+          var active = curCycle === val;
+          return '<button onclick="toggleInsightCycle(\'' + val + '\');" style="background:' + (active ? 'var(--accent-primary)' : 'var(--card-bg)') + '; color:' + (active ? 'white' : 'var(--text-muted)') + '; border:' + (active ? 'none' : '1px solid var(--glass-border)') + '; padding:4px 14px; border-radius:12px; font-weight:800; font-size:0.75rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">' + label + '</button>';
+      };
+      var cycleToggleHtml = '<div style="display:flex; gap:8px; flex-shrink:0;">' + cycleBtn('WEEK A', 'WEEK A') + cycleBtn('WEEK B', 'WEEK B') + (curCycle !== 'ALL' ? '<button onclick="toggleInsightCycle(\'' + curCycle + '\');" style="background:transparent; color:var(--text-muted); border:none; padding:4px 8px; font-size:0.7rem; cursor:pointer; text-decoration:underline;">Clear</button>' : '') + '</div>';
+
+      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;"><i data-lucide="calendar-check" width="10" style="vertical-align:middle;"></i> ' + schedText + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;"><input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="' + escapeHTML(state.insightSearch) + '"></div></div>';
 
       if (!u.data) {
           return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;"><div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Schedule and deep GEM metrics.</p></div>';

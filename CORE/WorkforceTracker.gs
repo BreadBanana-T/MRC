@@ -1,6 +1,32 @@
 /**
- * MODULE: WORKFORCE TRACKER 
+ * MODULE: WORKFORCE TRACKER
  */
+
+/**
+ * Canonical key for agent-name matching across MasterList, WFM, GEM, and DB_Sessions.
+ * Strips diacritics (é→e), replaces hyphens with spaces, collapses whitespace, lowercases.
+ * Exposed at global scope so AgentMonitor and AssignmentAnalyzer can use the same key.
+ */
+function _normalizeAgentKey(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/-+/g, ' ')
+    .replace(/\s+,/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Unicode-safe title-case. JS \b\w treats accented chars as non-word,
+ * so 'Jaén' would turn into 'JaéN'. This preserves Unicode letters.
+ */
+function _titleCaseName(s) {
+  return String(s == null ? '' : s)
+    .replace(/(^|[\s,\-'])(\S)/g, function(m, p, c) { return p + c.toUpperCase(); })
+    .trim();
+}
 
 var WorkforceTracker = {
 
@@ -38,11 +64,26 @@ var WorkforceTracker = {
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
           let isOffshore = false;
-          if (currentID && String(currentID).startsWith("3")) isOffshore = true;
+          let detectedBy = null;
+          if (currentID && String(currentID).startsWith("3")) { isOffshore = true; detectedBy = 'auto-wfm-id'; }
           for (let obj of agentBuffer) {
               if (obj.raw.toUpperCase().includes("TI ") || obj.raw.toUpperCase().includes("OFFSHORE")) {
                   isOffshore = true;
+                  if (!detectedBy) detectedBy = 'auto-wfm-keyword';
                   break;
+              }
+          }
+
+          // Region Registry is the source of truth. A manual / masterlist entry
+          // always wins over anything we detect here. Otherwise we upsert with
+          // the confidence we detected (id-prefix > keyword > default).
+          if (typeof RegionRegistry !== 'undefined') {
+              const registered = RegionRegistry.getRegion(currentAgent);
+              const src = RegionRegistry.getSource(currentAgent);
+              if (registered && (src === 'manual' || src === 'masterlist')) {
+                  isOffshore = registered === 'Offshore';
+              } else {
+                  RegionRegistry.upsert(currentAgent, isOffshore ? 'Offshore' : 'Onshore', detectedBy || 'auto-wfm-default');
               }
           }
           let reg = isOffshore ? "Offshore" : "Onshore";
@@ -127,6 +168,16 @@ var WorkforceTracker = {
               }
 
               let isOff = csvParts[5] && csvParts[5].includes("Offshore");
+              // Registry consultation + upsert, same hierarchy rule as flushAgentBuffer.
+              if (typeof RegionRegistry !== 'undefined' && csvParts[0]) {
+                  const registered = RegionRegistry.getRegion(csvParts[0]);
+                  const src = RegionRegistry.getSource(csvParts[0]);
+                  if (registered && (src === 'manual' || src === 'masterlist')) {
+                      isOff = registered === 'Offshore';
+                  } else {
+                      RegionRegistry.upsert(csvParts[0], isOff ? 'Offshore' : 'Onshore', 'auto-wfm-keyword');
+                  }
+              }
               let pDate = this._parseDate(csvParts[1]);
               
               if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
@@ -202,9 +253,10 @@ var WorkforceTracker = {
           }
         });
         let dataByDay = {};
+        const TIME_ROW_RE = /^\s*\d{1,2}[:\.]\d{2}(?:[:\.]\d{2})?(?:\s*[AP]M)?\s*$/i;
         for (let i = headerIdx + 1; i < lines.length; i++) {
           let cols = this._parseCSVLine(lines[i]);
-          if (cols[0] && cols[0].includes(':')) {
+          if (cols[0] && TIME_ROW_RE.test(cols[0])) {
             let tNorm = this._formatTimeStr(cols[0]);
             Object.keys(colMap).forEach(idx => {
                if (cols[idx] !== undefined) {
@@ -271,7 +323,10 @@ var WorkforceTracker = {
     let archiveMsg = [];
     affectedMonths.forEach(monthStr => {
         try {
+            // Archive all three slices so past-month cycle filters work offline.
             this.archiveUnifiedReport(monthStr, 'ALL');
+            this.archiveUnifiedReport(monthStr, 'WEEK A');
+            this.archiveUnifiedReport(monthStr, 'WEEK B');
             archiveMsg.push(monthStr.substring(0, 7));
         } catch(e) {}
     });
@@ -293,8 +348,13 @@ var WorkforceTracker = {
       if (dbML && dbML.getLastRow() > 1) {
           dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
               let cleanName = String(r[0]).trim();
-              let key = cleanName.toLowerCase().replace(/\s+/g, ' ');
+              let key = _normalizeAgentKey(cleanName);
               let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+              // Registry is authoritative if set.
+              if (typeof RegionRegistry !== 'undefined') {
+                  const rg = RegionRegistry.getRegion(cleanName);
+                  if (rg) isOffshore = rg === 'Offshore';
+              }
               agents[key] = {
                   name: cleanName,
                   supervisor: r[2] || "Unassigned",
@@ -308,21 +368,26 @@ var WorkforceTracker = {
               };
           });
       }
-      
+
       if (!dbAbs || dbAbs.getLastRow() < 2) return JSON.stringify({ year: year, profiles: [] });
-      
+
       // 2. Iterate through Absences Database
       dbAbs.getDataRange().getDisplayValues().slice(1).forEach(row => {
           let dStr = this._formatDate(row[1]);
           if (dStr.startsWith(year)) {
               let aName = String(row[0]).trim();
-              let key = aName.toLowerCase().replace(/\s+/g, ' ');
+              let key = _normalizeAgentKey(aName);
               let type = String(row[2]).trim();
               let month = dStr.substring(0, 7);
-              
+
               if (!agents[key]) {
                   let reg = String(row[5]).trim();
                   if (!reg) reg = "Onshore";
+                  // Registry wins over the absence-row region tag.
+                  if (typeof RegionRegistry !== 'undefined') {
+                      const rg = RegionRegistry.getRegion(aName);
+                      if (rg) reg = rg;
+                  }
                   agents[key] = {
                       name: aName, supervisor: "Unknown", region: reg,
                       records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
@@ -576,7 +641,7 @@ var WorkforceTracker = {
   getUnifiedReport: function(refDateStr, cycleFilter) {
         const targetCycle = cycleFilter || 'ALL';
         const bounds = this._calculateEpochBoundaries("month", refDateStr);
-        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
+        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label };
         
         const nowEpoch = new Date().getTime();
 
@@ -584,10 +649,17 @@ var WorkforceTracker = {
         const dbML = this._getDB('WF_MASTERLIST');
         if (dbML && dbML.getLastRow() > 1) {
             dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
-                let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+                let displayName = String(r[0]).trim();
+                let key = _normalizeAgentKey(displayName);
                 let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
-                mlData[cleanName] = {
-                    name: String(r[0]).trim(),
+                // Registry override wins if user manually flipped this agent.
+                if (typeof RegionRegistry !== 'undefined') {
+                    const rg = RegionRegistry.getRegion(displayName);
+                    const src = RegionRegistry.getSource(displayName);
+                    if (rg && src === 'manual') isOffshore = rg === 'Offshore';
+                }
+                mlData[key] = {
+                    name: displayName,
                     level: r[1],
                     manager: r[2],
                     skills: r[3],
@@ -597,11 +669,24 @@ var WorkforceTracker = {
             });
         }
 
+        // Internal registry keyed by normalized key so accented / hyphenated names
+        // (e.g. "Jaén-Benitez" in MasterList vs "Jaen Benitez" in WFM/GEM) collapse
+        // to a single agent.
+        let agentsByKey = {};
         const getAg = (name, reg) => {
-            let n = String(name).replace(/\b\w/g, c => c.toUpperCase()).trim();
-            if(!report.agents[n]) report.agents[n] = { name: n, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
-            if (reg && String(reg).includes('Offshore')) report.agents[n].region = 'Offshore';
-            return report.agents[n];
+            let key = _normalizeAgentKey(name);
+            if (!agentsByKey[key]) {
+                // Prefer MasterList's display name when we have one.
+                let displayName = (mlData[key] && mlData[key].name) ? mlData[key].name : String(name).trim();
+                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
+            }
+            if (reg && String(reg).includes('Offshore')) agentsByKey[key].region = 'Offshore';
+            // Registry is authoritative. Overrides both the row-level region and any MasterList inference.
+            if (typeof RegionRegistry !== 'undefined') {
+                const registryRegion = RegionRegistry.getRegion(name);
+                if (registryRegion) agentsByKey[key].region = registryRegion;
+            }
+            return agentsByKey[key];
         };
         Object.keys(mlData).forEach(k => {
             let ml = mlData[k];
@@ -712,8 +797,8 @@ var WorkforceTracker = {
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
                 let rowDateStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM") : String(row[0]).substring(0, 7);
                 if (rowDateStr === targetMonth) {
-                    let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
-                    gemData[agName] = { 
+                    let agName = _titleCaseName(String(row[1]).trim());
+                    gemData[agName] = {
                         cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
                         transfers: row[10] || 0, transfPct: row[11] || 0,
                         avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
@@ -725,9 +810,14 @@ var WorkforceTracker = {
         }
 
         let gemKeys = Object.keys(gemData);
-        let finalArr = Object.values(report.agents);
-        finalArr.forEach(a => { 
-            let ml = mlData[String(a.name).trim().toLowerCase().replace(/\s+/g, ' ')];
+        // Index GEM data by normalized key so "Jaen Benitez" matches "Jaén-Benitez".
+        let gemByKey = {};
+        gemKeys.forEach(g => { gemByKey[_normalizeAgentKey(g)] = gemData[g]; });
+
+        let finalArr = Object.values(agentsByKey);
+        finalArr.forEach(a => {
+            let aKey = _normalizeAgentKey(a.name);
+            let ml = mlData[aKey];
             if (ml) {
                 a.level = ml.level;
                 a.manager = ml.manager;
@@ -736,19 +826,23 @@ var WorkforceTracker = {
                 if (ml.isOffshore) a.region = "Offshore";
             }
 
-            ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
-            let matchedGem = gemData[a.name]; 
+            ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
+            let matchedGem = gemData[a.name] || gemByKey[aKey];
             if (!matchedGem) {
-                let wfmParts = a.name.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
+                let aWords = aKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
                 for(let i=0; i<gemKeys.length; i++) {
                     let gName = gemKeys[i];
-                    let gParts = gName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
-                    
-                    if (wfmParts.length > 1 && gParts.length > 1 && wfmParts[0] === gParts[0] && wfmParts[1] === gParts[1]) {
+                    let gKey = _normalizeAgentKey(gName);
+                    let gWords = gKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
+
+                    if (aWords.length > 1 && gWords.length > 1 && aWords[0] === gWords[0] && aWords[1] === gWords[1]) {
                         matchedGem = gemData[gName];
                         break;
                     }
-                    if (a.name.includes(gName) || gName.includes(a.name)) {
+                    // Substring fallback: only if both names are long enough to make a spurious
+                    // short-substring match (e.g. "Ali" inside "Alison") unlikely.
+                    let minLen = Math.min(aKey.length, gKey.length);
+                    if (minLen >= 8 && (aKey.includes(gKey) || gKey.includes(aKey))) {
                         matchedGem = gemData[gName];
                         break;
                     }
@@ -794,6 +888,59 @@ var WorkforceTracker = {
       return `Successfully archived ${report.data.length} agents for ${report.cycle} (${report.period}).`;
   },
 
+  /**
+   * Real-time staffing balance for the current 15-min IDP bucket.
+   * Positive net = surplus; negative = understaffed. Based on:
+   *   supply  = IDP "open" seats for this 15-min slot (today)
+   *   demand  = IDP "required" seats for same slot
+   * If IDP data isn't available for today, returns null so the UI can hide.
+   */
+  getStaffingBalance: function() {
+    try {
+      const dbIDP = this._getDB('WF_IDP');
+      if (!dbIDP || dbIDP.getLastRow() < 2) return JSON.stringify({ available: false, reason: 'No IDP data' });
+
+      const now = new Date();
+      const tz = 'America/Toronto';
+      const todayStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+      const mins = parseInt(Utilities.formatDate(now, tz, 'H'), 10) * 60 + parseInt(Utilities.formatDate(now, tz, 'm'), 10);
+      const bucketMin = Math.floor(mins / 15) * 15;
+      const bucketLabel = (bucketMin < 600 ? '0' : '') + Math.floor(bucketMin / 60) + ':' + (bucketMin % 60 < 10 ? '0' : '') + (bucketMin % 60);
+
+      const data = dbIDP.getRange(2, 1, dbIDP.getLastRow() - 1, 4).getDisplayValues();
+      let demand = 0, supply = 0, found = false;
+      for (let i = 0; i < data.length; i++) {
+        const rowDate = this._formatDate(data[i][0]);
+        if (rowDate !== todayStr) continue;
+        const rowTime = this._formatTimeStr(String(data[i][1]));
+        if (rowTime !== bucketLabel) continue;
+        demand = parseFloat(String(data[i][2]).replace(',', '.')) || 0;
+        supply = parseFloat(String(data[i][3]).replace(',', '.')) || 0;
+        found = true;
+        break;
+      }
+      if (!found) return JSON.stringify({ available: false, reason: 'No IDP row for ' + todayStr + ' ' + bucketLabel });
+
+      const net = parseFloat((supply - demand).toFixed(2));
+      let status = 'ok';
+      if (net < -2) status = 'critical';
+      else if (net < 0) status = 'warn';
+      else if (net > 3) status = 'surplus';
+
+      return JSON.stringify({
+        available: true,
+        bucket: bucketLabel,
+        date: todayStr,
+        demand: demand,
+        supply: supply,
+        net: net,
+        status: status
+      });
+    } catch (e) {
+      return JSON.stringify({ available: false, reason: 'Error: ' + e.message });
+    }
+  },
+
   getArchiveList: function() {
       let sheet = this._getDB('Weekly_Archives_V3');
       if (!sheet || sheet.getLastRow() < 2) return "[]";
@@ -811,15 +958,20 @@ var WorkforceTracker = {
       return JSON.stringify(unique);
   },
 
-  getArchivedReport: function(targetPeriod) {
+  getArchivedReport: function(targetPeriod, targetCycle) {
       let sheet = this._getDB('Weekly_Archives_V3');
       if (!sheet || sheet.getLastRow() < 2) return "{}";
-      
+
+      // Map the UI cycle filter to the label stored in the archive.
+      let cycleLabel = null;
+      if (targetCycle === 'WEEK A' || targetCycle === 'WEEK B') cycleLabel = targetCycle;
+      else if (!targetCycle || targetCycle === 'ALL') cycleLabel = 'FULL MONTH';
+      else cycleLabel = targetCycle;
+
       const data = sheet.getDataRange().getDisplayValues();
-      let report = { cycle: "ARCHIVED", period: targetPeriod, data: [] };
+      let report = { cycle: cycleLabel, period: targetPeriod, data: [] };
       for (let i = 1; i < data.length; i++) {
-          if (data[i][2] === targetPeriod) {
-              report.cycle = data[i][1];
+          if (data[i][2] === targetPeriod && data[i][1] === cycleLabel) {
               try { report.data.push(JSON.parse(data[i][6])); } catch(e) {}
           }
       }
@@ -924,25 +1076,26 @@ function fetchSyncMetadata() {
   }
 }
 
-function getSmartUnifiedReport(dateStr) {
+function getSmartUnifiedReport(dateStr, cycleFilter) {
     const reqParts = dateStr.split('-');
     const reqY = parseInt(reqParts[0]);
     const reqM = parseInt(reqParts[1]) - 1;
-    
+    const cycle = cycleFilter || 'ALL';
+
     const today = new Date();
     const isCurrentMonth = (reqY === today.getFullYear() && reqM === today.getMonth());
-    
+
     if (isCurrentMonth) {
-        return WorkforceTracker.getUnifiedReport(dateStr, 'ALL');
+        return WorkforceTracker.getUnifiedReport(dateStr, cycle);
     } else {
         const bounds = WorkforceTracker._calculateEpochBoundaries('month', dateStr);
-        const archivedData = WorkforceTracker.getArchivedReport(bounds.label);
-        
+        const archivedData = WorkforceTracker.getArchivedReport(bounds.label, cycle);
+
         let parsed = JSON.parse(archivedData);
         if (parsed.data && parsed.data.length > 0) {
             return archivedData;
         } else {
-            let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, 'ALL'));
+            let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, cycle));
             liveCalc.cycle = "HISTORICAL RECORD";
             return JSON.stringify(liveCalc);
         }
@@ -952,23 +1105,25 @@ function getSmartUnifiedReport(dateStr) {
 function runRetroactiveArchive() {
    const db = WorkforceTracker._getDB('WF_GEM_DATA_V3');
    if (!db || db.getLastRow() < 2) return "No GEM data found to archive.";
-   
+
    let data = db.getRange(2, 1, db.getLastRow()-1, 1).getDisplayValues().flat();
    let months = new Set();
    data.forEach(d => {
        if (d && d.length >= 7) months.add(d.substring(0,7) + "-01");
    });
-   
+
    let todayStr = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM");
    let archivedList = [];
-   
+
    months.forEach(mStr => {
-       if (!mStr.startsWith(todayStr)) { 
+       if (!mStr.startsWith(todayStr)) {
            WorkforceTracker.archiveUnifiedReport(mStr, 'ALL');
+           WorkforceTracker.archiveUnifiedReport(mStr, 'WEEK A');
+           WorkforceTracker.archiveUnifiedReport(mStr, 'WEEK B');
            archivedList.push(mStr.substring(0,7));
        }
    });
-   
+
    return `Successfully retro-archived: ${archivedList.join(', ')}`;
 }
 

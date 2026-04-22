@@ -15,18 +15,35 @@ function calculateMetrics(inText, outText) {
     report: ""
   };
 
-  const LIST_SVL_ACK = [
-      "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
-      "2-CCM", "2-FARM", 
-      "3-LWK", "3-VID", 
+  // SVL = tableau's "Service Level" — narrow list, matches tableau output.
+  const LIST_SVL = [
+      "1-FIRE", "1-GAS", "1-H/U", "1-MED",
+      "2-CCM", "2-FARM",
+      "3-LWK", "3-VID",
       "4-BURG", "4-TAMP"
   ];
 
+  // ACK = tableau's "Response Time" — broader list. Excludes 5-SUPF
+  // (auto-resolved supervision fire, which dilutes ACK artificially).
+  // Single-alarm outlier queues (vol <= 1) are also filtered during calc.
+  const LIST_ACK = [
+      "1-FIRE", "1-GAS", "1-H/U", "1-MED",
+      "2-CCM", "2-FARM",
+      "3-LWK", "3-VID",
+      "4-BURG", "4-COMM", "4-TAMP",
+      "5-SUPV",
+      "6-O/C",
+      "7-TRB"
+  ];
+
+  // Trend % uses only the "priority" queues the tableau tracks for trending.
+  // Excludes 2-CCM (not a trend queue) and 3-LWK (Lone Worker, tracked
+  // separately).
   const LIST_TREND = [
-      "1-FIRE", "1-GAS", "1-H/U", "1-MED", 
-      "2-CCM", "2-FARM", 
-      "3-LWK", "3-VID", 
-      "4-BURG", "4-COMM", "4-TAMP", 
+      "1-FIRE", "1-GAS", "1-H/U", "1-MED",
+      "2-FARM",
+      "3-VID",
+      "4-BURG", "4-COMM", "4-TAMP",
       "6-O/C"
   ];
 
@@ -67,9 +84,14 @@ function calculateMetrics(inText, outText) {
                 const timeSec = dur(parts[timeIdx]);
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
-                if (vol > 0 && checkList(code, LIST_SVL_ACK)) {
-                     ackVol += vol; ackW += (vol * timeSec);
+                // SVL uses the narrow list.
+                if (vol > 0 && checkList(code, LIST_SVL)) {
                      svlVol += vol; svlW += (vol * slVal);
+                }
+                // ACK uses the broad list AND filters single-alarm outliers (vol < 2)
+                // to match the tableau's behavior on edge-case queues.
+                if (vol >= 2 && checkList(code, LIST_ACK)) {
+                     ackVol += vol; ackW += (vol * timeSec);
                 }
             }
          }
@@ -142,16 +164,17 @@ function formatTrend(val) {
   if (val === 0) return "0%";
   const isNeg = val < 0;
   const absVal = Math.abs(val);
-  const intPart = Math.floor(absVal);
-  const tenths = Math.floor((absVal * 10) % 10);
-  
-  let finalString;
-  if (tenths >= 5) {
-     finalString = intPart + "." + tenths; 
-  } else {
-     finalString = intPart;
+
+  // User rule: a trend is shown with 1-decimal precision when the tenths
+  // digit is >= 5 — otherwise integer only. Decision is made on the
+  // UNROUNDED tenths so 1.4999 stays "1%", but the displayed number is
+  // rounded so 1.7964 shows as "1.8%" (matching the tableau), not "1.7%".
+  const origTenths = Math.floor((absVal * 10) % 10);
+  if (origTenths < 5) {
+    return (isNeg ? "-" : "+") + Math.floor(absVal) + "%";
   }
-  return (isNeg ? "-" : "+") + finalString + "%";
+  const rounded = Math.round(absVal * 10) / 10;
+  return (isNeg ? "-" : "+") + rounded.toFixed(1) + "%";
 }
 
 function dur(t) { 
