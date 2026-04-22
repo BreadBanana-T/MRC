@@ -202,9 +202,10 @@ var WorkforceTracker = {
           }
         });
         let dataByDay = {};
+        const TIME_ROW_RE = /^\s*\d{1,2}[:\.]\d{2}(?:[:\.]\d{2})?(?:\s*[AP]M)?\s*$/i;
         for (let i = headerIdx + 1; i < lines.length; i++) {
           let cols = this._parseCSVLine(lines[i]);
-          if (cols[0] && cols[0].includes(':')) {
+          if (cols[0] && TIME_ROW_RE.test(cols[0])) {
             let tNorm = this._formatTimeStr(cols[0]);
             Object.keys(colMap).forEach(idx => {
                if (cols[idx] !== undefined) {
@@ -271,7 +272,10 @@ var WorkforceTracker = {
     let archiveMsg = [];
     affectedMonths.forEach(monthStr => {
         try {
+            // Archive all three slices so past-month cycle filters work offline.
             this.archiveUnifiedReport(monthStr, 'ALL');
+            this.archiveUnifiedReport(monthStr, 'WEEK A');
+            this.archiveUnifiedReport(monthStr, 'WEEK B');
             archiveMsg.push(monthStr.substring(0, 7));
         } catch(e) {}
     });
@@ -748,7 +752,10 @@ var WorkforceTracker = {
                         matchedGem = gemData[gName];
                         break;
                     }
-                    if (a.name.includes(gName) || gName.includes(a.name)) {
+                    // Substring fallback: only if both names are long enough to make a spurious
+                    // short-substring match (e.g. "Ali" inside "Alison") unlikely.
+                    let minLen = Math.min(a.name.length, gName.length);
+                    if (minLen >= 8 && (a.name.includes(gName) || gName.includes(a.name))) {
                         matchedGem = gemData[gName];
                         break;
                     }
@@ -811,15 +818,20 @@ var WorkforceTracker = {
       return JSON.stringify(unique);
   },
 
-  getArchivedReport: function(targetPeriod) {
+  getArchivedReport: function(targetPeriod, targetCycle) {
       let sheet = this._getDB('Weekly_Archives_V3');
       if (!sheet || sheet.getLastRow() < 2) return "{}";
-      
+
+      // Map the UI cycle filter to the label stored in the archive.
+      let cycleLabel = null;
+      if (targetCycle === 'WEEK A' || targetCycle === 'WEEK B') cycleLabel = targetCycle;
+      else if (!targetCycle || targetCycle === 'ALL') cycleLabel = 'FULL MONTH';
+      else cycleLabel = targetCycle;
+
       const data = sheet.getDataRange().getDisplayValues();
-      let report = { cycle: "ARCHIVED", period: targetPeriod, data: [] };
+      let report = { cycle: cycleLabel, period: targetPeriod, data: [] };
       for (let i = 1; i < data.length; i++) {
-          if (data[i][2] === targetPeriod) {
-              report.cycle = data[i][1];
+          if (data[i][2] === targetPeriod && data[i][1] === cycleLabel) {
               try { report.data.push(JSON.parse(data[i][6])); } catch(e) {}
           }
       }
@@ -924,25 +936,26 @@ function fetchSyncMetadata() {
   }
 }
 
-function getSmartUnifiedReport(dateStr) {
+function getSmartUnifiedReport(dateStr, cycleFilter) {
     const reqParts = dateStr.split('-');
     const reqY = parseInt(reqParts[0]);
     const reqM = parseInt(reqParts[1]) - 1;
-    
+    const cycle = cycleFilter || 'ALL';
+
     const today = new Date();
     const isCurrentMonth = (reqY === today.getFullYear() && reqM === today.getMonth());
-    
+
     if (isCurrentMonth) {
-        return WorkforceTracker.getUnifiedReport(dateStr, 'ALL');
+        return WorkforceTracker.getUnifiedReport(dateStr, cycle);
     } else {
         const bounds = WorkforceTracker._calculateEpochBoundaries('month', dateStr);
-        const archivedData = WorkforceTracker.getArchivedReport(bounds.label);
-        
+        const archivedData = WorkforceTracker.getArchivedReport(bounds.label, cycle);
+
         let parsed = JSON.parse(archivedData);
         if (parsed.data && parsed.data.length > 0) {
             return archivedData;
         } else {
-            let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, 'ALL'));
+            let liveCalc = JSON.parse(WorkforceTracker.getUnifiedReport(dateStr, cycle));
             liveCalc.cycle = "HISTORICAL RECORD";
             return JSON.stringify(liveCalc);
         }
@@ -952,23 +965,25 @@ function getSmartUnifiedReport(dateStr) {
 function runRetroactiveArchive() {
    const db = WorkforceTracker._getDB('WF_GEM_DATA_V3');
    if (!db || db.getLastRow() < 2) return "No GEM data found to archive.";
-   
+
    let data = db.getRange(2, 1, db.getLastRow()-1, 1).getDisplayValues().flat();
    let months = new Set();
    data.forEach(d => {
        if (d && d.length >= 7) months.add(d.substring(0,7) + "-01");
    });
-   
+
    let todayStr = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM");
    let archivedList = [];
-   
+
    months.forEach(mStr => {
-       if (!mStr.startsWith(todayStr)) { 
+       if (!mStr.startsWith(todayStr)) {
            WorkforceTracker.archiveUnifiedReport(mStr, 'ALL');
+           WorkforceTracker.archiveUnifiedReport(mStr, 'WEEK A');
+           WorkforceTracker.archiveUnifiedReport(mStr, 'WEEK B');
            archivedList.push(mStr.substring(0,7));
        }
    });
-   
+
    return `Successfully retro-archived: ${archivedList.join(', ')}`;
 }
 

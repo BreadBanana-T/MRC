@@ -106,6 +106,6 @@ function archiveUnifiedReport(dateStr, cycleFilter) {
 function getArchiveList() { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchiveList() : "[]";
 }
-function getArchivedReport(period) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period) : "{}"; 
+function getArchivedReport(period, cycleFilter) {
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period, cycleFilter) : "{}";
 }

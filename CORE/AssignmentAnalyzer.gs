@@ -173,7 +173,8 @@ var AssignmentAnalyzer = {
                           if (gnParts.length > 1 && mlParts.length > 1 && gnParts[0] === mlParts[0] && gnParts[1] === mlParts[1]) {
                               matchedLvl = lvl; break;
                           }
-                          if (cleanAgent.includes(mlName) || mlName.includes(cleanAgent)) {
+                          let minLen = Math.min(cleanAgent.length, mlName.length);
+                          if (minLen >= 8 && (cleanAgent.includes(mlName) || mlName.includes(cleanAgent))) {
                               matchedLvl = lvl; break;
                           }
                       }
