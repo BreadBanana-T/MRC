@@ -64,11 +64,26 @@ var WorkforceTracker = {
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
           let isOffshore = false;
-          if (currentID && String(currentID).startsWith("3")) isOffshore = true;
+          let detectedBy = null;
+          if (currentID && String(currentID).startsWith("3")) { isOffshore = true; detectedBy = 'auto-wfm-id'; }
           for (let obj of agentBuffer) {
               if (obj.raw.toUpperCase().includes("TI ") || obj.raw.toUpperCase().includes("OFFSHORE")) {
                   isOffshore = true;
+                  if (!detectedBy) detectedBy = 'auto-wfm-keyword';
                   break;
+              }
+          }
+
+          // Region Registry is the source of truth. A manual / masterlist entry
+          // always wins over anything we detect here. Otherwise we upsert with
+          // the confidence we detected (id-prefix > keyword > default).
+          if (typeof RegionRegistry !== 'undefined') {
+              const registered = RegionRegistry.getRegion(currentAgent);
+              const src = RegionRegistry.getSource(currentAgent);
+              if (registered && (src === 'manual' || src === 'masterlist')) {
+                  isOffshore = registered === 'Offshore';
+              } else {
+                  RegionRegistry.upsert(currentAgent, isOffshore ? 'Offshore' : 'Onshore', detectedBy || 'auto-wfm-default');
               }
           }
           let reg = isOffshore ? "Offshore" : "Onshore";
@@ -153,6 +168,16 @@ var WorkforceTracker = {
               }
 
               let isOff = csvParts[5] && csvParts[5].includes("Offshore");
+              // Registry consultation + upsert, same hierarchy rule as flushAgentBuffer.
+              if (typeof RegionRegistry !== 'undefined' && csvParts[0]) {
+                  const registered = RegionRegistry.getRegion(csvParts[0]);
+                  const src = RegionRegistry.getSource(csvParts[0]);
+                  if (registered && (src === 'manual' || src === 'masterlist')) {
+                      isOff = registered === 'Offshore';
+                  } else {
+                      RegionRegistry.upsert(csvParts[0], isOff ? 'Offshore' : 'Onshore', 'auto-wfm-keyword');
+                  }
+              }
               let pDate = this._parseDate(csvParts[1]);
               
               if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
@@ -325,6 +350,11 @@ var WorkforceTracker = {
               let cleanName = String(r[0]).trim();
               let key = _normalizeAgentKey(cleanName);
               let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+              // Registry is authoritative if set.
+              if (typeof RegionRegistry !== 'undefined') {
+                  const rg = RegionRegistry.getRegion(cleanName);
+                  if (rg) isOffshore = rg === 'Offshore';
+              }
               agents[key] = {
                   name: cleanName,
                   supervisor: r[2] || "Unassigned",
@@ -349,10 +379,15 @@ var WorkforceTracker = {
               let key = _normalizeAgentKey(aName);
               let type = String(row[2]).trim();
               let month = dStr.substring(0, 7);
-              
+
               if (!agents[key]) {
                   let reg = String(row[5]).trim();
                   if (!reg) reg = "Onshore";
+                  // Registry wins over the absence-row region tag.
+                  if (typeof RegionRegistry !== 'undefined') {
+                      const rg = RegionRegistry.getRegion(aName);
+                      if (rg) reg = rg;
+                  }
                   agents[key] = {
                       name: aName, supervisor: "Unknown", region: reg,
                       records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
@@ -617,6 +652,12 @@ var WorkforceTracker = {
                 let displayName = String(r[0]).trim();
                 let key = _normalizeAgentKey(displayName);
                 let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+                // Registry override wins if user manually flipped this agent.
+                if (typeof RegionRegistry !== 'undefined') {
+                    const rg = RegionRegistry.getRegion(displayName);
+                    const src = RegionRegistry.getSource(displayName);
+                    if (rg && src === 'manual') isOffshore = rg === 'Offshore';
+                }
                 mlData[key] = {
                     name: displayName,
                     level: r[1],
@@ -640,6 +681,11 @@ var WorkforceTracker = {
                 agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
             }
             if (reg && String(reg).includes('Offshore')) agentsByKey[key].region = 'Offshore';
+            // Registry is authoritative. Overrides both the row-level region and any MasterList inference.
+            if (typeof RegionRegistry !== 'undefined') {
+                const registryRegion = RegionRegistry.getRegion(name);
+                if (registryRegion) agentsByKey[key].region = registryRegion;
+            }
             return agentsByKey[key];
         };
         Object.keys(mlData).forEach(k => {
@@ -840,6 +886,59 @@ var WorkforceTracker = {
 
       writeToArchiveSheet(ssLocal);
       return `Successfully archived ${report.data.length} agents for ${report.cycle} (${report.period}).`;
+  },
+
+  /**
+   * Real-time staffing balance for the current 15-min IDP bucket.
+   * Positive net = surplus; negative = understaffed. Based on:
+   *   supply  = IDP "open" seats for this 15-min slot (today)
+   *   demand  = IDP "required" seats for same slot
+   * If IDP data isn't available for today, returns null so the UI can hide.
+   */
+  getStaffingBalance: function() {
+    try {
+      const dbIDP = this._getDB('WF_IDP');
+      if (!dbIDP || dbIDP.getLastRow() < 2) return JSON.stringify({ available: false, reason: 'No IDP data' });
+
+      const now = new Date();
+      const tz = 'America/Toronto';
+      const todayStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+      const mins = parseInt(Utilities.formatDate(now, tz, 'H'), 10) * 60 + parseInt(Utilities.formatDate(now, tz, 'm'), 10);
+      const bucketMin = Math.floor(mins / 15) * 15;
+      const bucketLabel = (bucketMin < 600 ? '0' : '') + Math.floor(bucketMin / 60) + ':' + (bucketMin % 60 < 10 ? '0' : '') + (bucketMin % 60);
+
+      const data = dbIDP.getRange(2, 1, dbIDP.getLastRow() - 1, 4).getDisplayValues();
+      let demand = 0, supply = 0, found = false;
+      for (let i = 0; i < data.length; i++) {
+        const rowDate = this._formatDate(data[i][0]);
+        if (rowDate !== todayStr) continue;
+        const rowTime = this._formatTimeStr(String(data[i][1]));
+        if (rowTime !== bucketLabel) continue;
+        demand = parseFloat(String(data[i][2]).replace(',', '.')) || 0;
+        supply = parseFloat(String(data[i][3]).replace(',', '.')) || 0;
+        found = true;
+        break;
+      }
+      if (!found) return JSON.stringify({ available: false, reason: 'No IDP row for ' + todayStr + ' ' + bucketLabel });
+
+      const net = parseFloat((supply - demand).toFixed(2));
+      let status = 'ok';
+      if (net < -2) status = 'critical';
+      else if (net < 0) status = 'warn';
+      else if (net > 3) status = 'surplus';
+
+      return JSON.stringify({
+        available: true,
+        bucket: bucketLabel,
+        date: todayStr,
+        demand: demand,
+        supply: supply,
+        net: net,
+        status: status
+      });
+    } catch (e) {
+      return JSON.stringify({ available: false, reason: 'Error: ' + e.message });
+    }
   },
 
   getArchiveList: function() {

@@ -64,9 +64,13 @@ function compileFloorData() {
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
     
-    // MasterList Offshore Override
+    // Region resolution order: RegionRegistry > MasterList inference > Raw Schedule row.
     let region = row ? row[6] : "Offshore";
     if (ml) region = ml.isOffshore ? "Offshore" : "Onshore";
+    if (typeof RegionRegistry !== 'undefined') {
+        const rg = RegionRegistry.getRegion(rawName);
+        if (rg) region = rg;
+    }
 
     let startEpoch = row ? Number(row[10]) : 0;
     let endEpoch = row ? Number(row[11]) : 0;

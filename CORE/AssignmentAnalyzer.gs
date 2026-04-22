@@ -54,8 +54,20 @@ var AssignmentAnalyzer = {
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
               // Save the 6 columns
-              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]); 
+              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]);
               sheet.getRange(2, 1, validAgents.length, 6).setValues(validAgents);
+
+              // Sync to RegionRegistry with source=masterlist so these entries
+              // outrank future WFM auto-detection but remain overridable manually.
+              if (typeof RegionRegistry !== 'undefined') {
+                  validAgents.forEach(function(row) {
+                      var agentName = row[0];
+                      var loc = String(row[4] || '').toUpperCase();
+                      var emailTi = String(row[5] || '');
+                      var isOffshore = loc.includes('EL SALVADOR') || loc.includes('GUATEMALA') || loc.startsWith('TI') || emailTi.includes('@');
+                      RegionRegistry.upsert(agentName, isOffshore ? 'Offshore' : 'Onshore', 'masterlist');
+                  });
+              }
               return `Success: Locked ${validAgents.length} Active Agents into the engine.\nManagers are permanently ignored.`;
           }
           return "Error: No active agents found in the pasted list.";
@@ -408,3 +420,116 @@ function importNewGEMReport(rawText) { return AssignmentAnalyzer.importGEMData(r
 function fetchAnalyzerData(monthStr) { return AssignmentAnalyzer.getAnalyzerData(monthStr); }
 function processMasterListUpload(rawText) { return AssignmentAnalyzer.importMasterList(rawText); }
 function ignoreAnalyzerAgent(agentName) { return AssignmentAnalyzer.excludeAgent(agentName); }
+
+/**
+ * Coaching cadence red flag.
+ * Scans WF_COACHING for each agent's most recent session. Any agent whose
+ * latest is older than `thresholdDays` (default 30) OR has zero sessions in
+ * the last 90 days is flagged.
+ *
+ * Roster-agnostic: builds the active-agent list from WF_ROLES + WF_COACHING
+ * + WF_ABSENCES presence in the last 60 days (so offshore agents that
+ * aren't in MasterList still get flagged). Region is resolved via
+ * RegionRegistry when available.
+ *
+ * Exclusions list (WF_EXCLUSIONS) is honored.
+ */
+function getCoachingCadenceFlags(thresholdDays) {
+  try {
+    thresholdDays = thresholdDays || 30;
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var now = new Date();
+    var nowMs = now.getTime();
+    var activityWindowMs = 60 * 86400000;
+    var dayMs = 86400000;
+
+    var normKey = function(s) {
+      return (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(s) : String(s || '').trim().toLowerCase();
+    };
+
+    // Build active-agent registry from WF_ROLES (recent 60d activity).
+    var agents = {};
+    var sheets = ['WF_ROLES', 'WF_COACHING', 'WF_ABSENCES'];
+    sheets.forEach(function(name) {
+      var s = ss.getSheetByName(name);
+      if (!s || s.getLastRow() < 2) return;
+      var data = s.getRange(2, 1, s.getLastRow() - 1, 6).getDisplayValues();
+      data.forEach(function(row) {
+        var agent = String(row[0] || '').trim();
+        if (!agent) return;
+        var dStr = String(row[1] || '');
+        if (!dStr.match(/^\d{4}-\d{2}-\d{2}/)) return;
+        var ts = new Date(dStr + 'T12:00:00').getTime();
+        if (isNaN(ts) || (nowMs - ts) > activityWindowMs) return;
+        var k = normKey(agent);
+        if (!agents[k]) agents[k] = { name: agent, lastCoaching: null, coachingCount90d: 0, region: null };
+        if (!agents[k].region && typeof RegionRegistry !== 'undefined') {
+          agents[k].region = RegionRegistry.getRegion(agent);
+        }
+        if (!agents[k].region) {
+          var reg = String(row[5] || '').trim();
+          agents[k].region = (reg === 'Offshore') ? 'Offshore' : 'Onshore';
+        }
+      });
+    });
+
+    // Walk WF_COACHING, tracking latest + 90-day count per agent.
+    var dbCoach = ss.getSheetByName('WF_COACHING');
+    if (dbCoach && dbCoach.getLastRow() > 1) {
+      var data = dbCoach.getRange(2, 1, dbCoach.getLastRow() - 1, 6).getDisplayValues();
+      data.forEach(function(row) {
+        var agent = String(row[0] || '').trim();
+        if (!agent) return;
+        var dStr = String(row[1] || '');
+        if (!dStr.match(/^\d{4}-\d{2}-\d{2}/)) return;
+        var ts = new Date(dStr + 'T12:00:00').getTime();
+        if (isNaN(ts)) return;
+        var k = normKey(agent);
+        if (!agents[k]) return; // not in active window; skip
+        if (agents[k].lastCoaching === null || ts > agents[k].lastCoaching) {
+          agents[k].lastCoaching = ts;
+        }
+        if ((nowMs - ts) <= 90 * dayMs) agents[k].coachingCount90d++;
+      });
+    }
+
+    // Exclusions
+    var excluded = {};
+    var exSheet = ss.getSheetByName('WF_EXCLUSIONS');
+    if (exSheet && exSheet.getLastRow() > 1) {
+      exSheet.getRange(2, 1, exSheet.getLastRow() - 1, 1).getValues().forEach(function(r) {
+        if (r[0]) excluded[normKey(r[0])] = true;
+      });
+    }
+
+    var flags = [];
+    Object.keys(agents).forEach(function(k) {
+      if (excluded[k]) return;
+      var a = agents[k];
+      var daysSince = a.lastCoaching ? Math.floor((nowMs - a.lastCoaching) / dayMs) : null;
+      var flaggedReason = null;
+      if (a.lastCoaching === null) flaggedReason = 'No session on record (60d activity)';
+      else if (daysSince >= thresholdDays) flaggedReason = daysSince + ' days since last session';
+
+      if (flaggedReason) {
+        flags.push({
+          name: a.name,
+          region: a.region || 'Onshore',
+          lastCoachingDate: a.lastCoaching ? Utilities.formatDate(new Date(a.lastCoaching), 'America/Toronto', 'yyyy-MM-dd') : null,
+          daysSince: daysSince,
+          coachingCount90d: a.coachingCount90d,
+          reason: flaggedReason
+        });
+      }
+    });
+    flags.sort(function(a, b) {
+      if (a.daysSince === null) return -1;
+      if (b.daysSince === null) return 1;
+      return b.daysSince - a.daysSince;
+    });
+
+    return JSON.stringify({ threshold: thresholdDays, flags: flags, totalActive: Object.keys(agents).length });
+  } catch (e) {
+    return JSON.stringify({ flags: [], error: e.message });
+  }
+}

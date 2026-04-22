@@ -114,3 +114,15 @@ function getArchivedReport(period, cycleFilter) {
 function getPowerOutages() {
   return (typeof OutageTracker !== 'undefined') ? OutageTracker.fetchAll() : "{}";
 }
+
+// --- STAFFING BALANCE (current 15-min IDP bucket) ---
+function getStaffingBalance() {
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getStaffingBalance() : "{}";
+}
+
+// getOutageAgentCorrelation() defined in CORE/OutageTracker.gs
+// getCoachingCadenceFlags() defined in CORE/AssignmentAnalyzer.gs
+
+function fetchCoachingCadence(thresholdDays) {
+  return (typeof getCoachingCadenceFlags === 'function') ? getCoachingCadenceFlags(thresholdDays) : "{\"flags\":[]}";
+}

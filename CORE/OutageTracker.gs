@@ -154,3 +154,102 @@ var OutageTracker = {
 };
 
 function getPowerOutages() { return OutageTracker.fetchAll(); }
+
+/**
+ * Outage × Onshore Agent correlation.
+ * Returns the subset of province-level outages above a customer threshold,
+ * joined against MasterList Location (office city) and Raw Schedule
+ * (shifts starting in the next N hours).
+ *
+ * Honest framing: this is OFFICE-LEVEL, not home address. The UI should
+ * label it as a situational-awareness hint, not a per-agent alert.
+ */
+function getOutageAgentCorrelation(customerThreshold, lookaheadHours) {
+  try {
+    customerThreshold = customerThreshold || 5000;
+    lookaheadHours = lookaheadHours || 2;
+
+    var outageRaw = OutageTracker.fetchAll();
+    var outages = JSON.parse(outageRaw);
+    if (!outages || !outages.byProvince) return JSON.stringify({ banners: [] });
+
+    // Province -> list of office locations we know about
+    var officeByProv = {
+      BC: ['VANCOUVER', 'BURNABY', 'VICTORIA', 'PRINCE GEORGE'],
+      QC: ['MONTREAL', 'QUEBEC', 'LAVAL', 'GATINEAU', 'LONGUEUIL', 'RIMOUSKI', 'SHERBROOKE'],
+      ON: ['OTTAWA', 'TORONTO', 'MISSISSAUGA', 'HAMILTON', 'CAMBRIDGE', 'LONDON']
+    };
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var mlSheet = ss.getSheetByName('WF_MASTERLIST');
+    var mlRows = (mlSheet && mlSheet.getLastRow() > 1)
+      ? mlSheet.getRange(2, 1, mlSheet.getLastRow() - 1, 6).getDisplayValues()
+      : [];
+
+    // Count onshore agents per office province. Offshore agents are excluded
+    // entirely — Canadian outages don't affect them.
+    var agentsByProv = { BC: 0, QC: 0, ON: 0 };
+    var mlByKey = {};
+    mlRows.forEach(function(r) {
+      var name = String(r[0] || '').trim();
+      if (!name) return;
+      var loc = String(r[4] || '').toUpperCase();
+      if (!loc) return;
+      // Skip offshore locations
+      if (loc.includes('EL SALVADOR') || loc.includes('GUATEMALA') || loc.startsWith('TI')) return;
+      // Consult registry; skip if manually flagged offshore
+      if (typeof RegionRegistry !== 'undefined') {
+        var rg = RegionRegistry.getRegion(name);
+        if (rg === 'Offshore') return;
+      }
+      Object.keys(officeByProv).forEach(function(prov) {
+        if (officeByProv[prov].indexOf(loc) !== -1) {
+          agentsByProv[prov] = (agentsByProv[prov] || 0) + 1;
+          mlByKey[(typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(name) : name.toLowerCase()] = { name: name, prov: prov, loc: loc };
+        }
+      });
+    });
+
+    // Shift-start risk: count agents with shift start within next N hours
+    // from the Raw Schedule. Limits to agents we've already mapped to a
+    // province via MasterList.
+    var startingByProv = { BC: 0, QC: 0, ON: 0 };
+    var rawSheet = ss.getSheetByName('Raw Schedule');
+    if (rawSheet && rawSheet.getLastRow() > 1) {
+      var raw = rawSheet.getRange(2, 1, rawSheet.getLastRow() - 1, 12).getValues();
+      var now = new Date().getTime();
+      var until = now + lookaheadHours * 3600 * 1000;
+      raw.forEach(function(row) {
+        var name = String(row[0] || '').trim();
+        if (!name) return;
+        var startEpoch = Number(row[10]);
+        if (!startEpoch) return;
+        if (startEpoch < now || startEpoch > until) return;
+        var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(name) : name.toLowerCase();
+        var hit = mlByKey[key];
+        if (hit) startingByProv[hit.prov] = (startingByProv[hit.prov] || 0) + 1;
+      });
+    }
+
+    var banners = [];
+    ['BC', 'QC', 'ON'].forEach(function(prov) {
+      var o = outages.byProvince[prov];
+      if (!o || o.customers < customerThreshold) return;
+      banners.push({
+        province: prov,
+        source: o.source,
+        customers: o.customers,
+        outages: o.outages,
+        topRegion: (o.top && o.top[0]) ? o.top[0].region : null,
+        agentsInProvince: agentsByProv[prov] || 0,
+        agentsStarting: startingByProv[prov] || 0,
+        lookaheadHours: lookaheadHours
+      });
+    });
+    banners.sort(function(a, b) { return b.customers - a.customers; });
+
+    return JSON.stringify({ banners: banners, threshold: customerThreshold });
+  } catch (e) {
+    return JSON.stringify({ banners: [], error: e.message });
+  }
+}
