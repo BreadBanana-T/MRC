@@ -109,8 +109,8 @@ var AssignmentAnalyzer = {
               useMasterList = true;
               mlSheet.getDataRange().getDisplayValues().slice(1).forEach(r => {
                   let lvl = parseInt(r[1]);
-                  if (isNaN(lvl)) lvl = 2; 
-                  let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+                  if (isNaN(lvl)) lvl = 2;
+                  let cleanName = _normalizeAgentKey(r[0]);
                   validAgents.set(cleanName, lvl);
               });
           }
@@ -159,17 +159,17 @@ var AssignmentAnalyzer = {
           let prevMap = {};
           validData.forEach(r => {
               let agent = String(r[1]).trim();
-              let cleanAgent = agent.toLowerCase().replace(/\s+/g, ' ');
-              let agentLevel = 2; 
-              
+              let cleanAgent = _normalizeAgentKey(agent);
+              let agentLevel = 2;
+
               if (useMasterList) {
                   let matchedLvl = null;
                   if (validAgents.has(cleanAgent)) {
                       matchedLvl = validAgents.get(cleanAgent);
                   } else {
-                      let gnParts = cleanAgent.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
+                      let gnParts = cleanAgent.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
                       for (let [mlName, lvl] of validAgents.entries()) {
-                          let mlParts = mlName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x => x.length > 1);
+                          let mlParts = mlName.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
                           if (gnParts.length > 1 && mlParts.length > 1 && gnParts[0] === mlParts[0] && gnParts[1] === mlParts[1]) {
                               matchedLvl = lvl; break;
                           }
@@ -280,7 +280,7 @@ var AssignmentAnalyzer = {
           let cols = this._parseCSVLine(lines[i]);
           let agent = cols[colMap.agent];
           if (!agent || agent.toLowerCase().includes('total')) continue;
-          agent = agent.replace(/"/g, '').replace(/\b\w/g, c => c.toUpperCase()).trim();
+          agent = _titleCaseName(agent.replace(/"/g, '').trim());
 
           let tCalls = parseInt(String(cols[colMap.totalCalls]).replace(/,/g, '')) || 0;
           let cAnsw = parseInt(String(cols[colMap.callsAnsw]).replace(/,/g, '')) || 0;

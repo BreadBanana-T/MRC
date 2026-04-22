@@ -1,6 +1,32 @@
 /**
- * MODULE: WORKFORCE TRACKER 
+ * MODULE: WORKFORCE TRACKER
  */
+
+/**
+ * Canonical key for agent-name matching across MasterList, WFM, GEM, and DB_Sessions.
+ * Strips diacritics (é→e), replaces hyphens with spaces, collapses whitespace, lowercases.
+ * Exposed at global scope so AgentMonitor and AssignmentAnalyzer can use the same key.
+ */
+function _normalizeAgentKey(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/-+/g, ' ')
+    .replace(/\s+,/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Unicode-safe title-case. JS \b\w treats accented chars as non-word,
+ * so 'Jaén' would turn into 'JaéN'. This preserves Unicode letters.
+ */
+function _titleCaseName(s) {
+  return String(s == null ? '' : s)
+    .replace(/(^|[\s,\-'])(\S)/g, function(m, p, c) { return p + c.toUpperCase(); })
+    .trim();
+}
 
 var WorkforceTracker = {
 
@@ -297,7 +323,7 @@ var WorkforceTracker = {
       if (dbML && dbML.getLastRow() > 1) {
           dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
               let cleanName = String(r[0]).trim();
-              let key = cleanName.toLowerCase().replace(/\s+/g, ' ');
+              let key = _normalizeAgentKey(cleanName);
               let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
               agents[key] = {
                   name: cleanName,
@@ -312,15 +338,15 @@ var WorkforceTracker = {
               };
           });
       }
-      
+
       if (!dbAbs || dbAbs.getLastRow() < 2) return JSON.stringify({ year: year, profiles: [] });
-      
+
       // 2. Iterate through Absences Database
       dbAbs.getDataRange().getDisplayValues().slice(1).forEach(row => {
           let dStr = this._formatDate(row[1]);
           if (dStr.startsWith(year)) {
               let aName = String(row[0]).trim();
-              let key = aName.toLowerCase().replace(/\s+/g, ' ');
+              let key = _normalizeAgentKey(aName);
               let type = String(row[2]).trim();
               let month = dStr.substring(0, 7);
               
@@ -580,7 +606,7 @@ var WorkforceTracker = {
   getUnifiedReport: function(refDateStr, cycleFilter) {
         const targetCycle = cycleFilter || 'ALL';
         const bounds = this._calculateEpochBoundaries("month", refDateStr);
-        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label, agents: {} };
+        let report = { cycle: targetCycle === 'ALL' ? "FULL MONTH" : targetCycle, period: bounds.label };
         
         const nowEpoch = new Date().getTime();
 
@@ -588,10 +614,11 @@ var WorkforceTracker = {
         const dbML = this._getDB('WF_MASTERLIST');
         if (dbML && dbML.getLastRow() > 1) {
             dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
-                let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+                let displayName = String(r[0]).trim();
+                let key = _normalizeAgentKey(displayName);
                 let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
-                mlData[cleanName] = {
-                    name: String(r[0]).trim(),
+                mlData[key] = {
+                    name: displayName,
                     level: r[1],
                     manager: r[2],
                     skills: r[3],
@@ -601,11 +628,19 @@ var WorkforceTracker = {
             });
         }
 
+        // Internal registry keyed by normalized key so accented / hyphenated names
+        // (e.g. "Jaén-Benitez" in MasterList vs "Jaen Benitez" in WFM/GEM) collapse
+        // to a single agent.
+        let agentsByKey = {};
         const getAg = (name, reg) => {
-            let n = String(name).replace(/\b\w/g, c => c.toUpperCase()).trim();
-            if(!report.agents[n]) report.agents[n] = { name: n, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
-            if (reg && String(reg).includes('Offshore')) report.agents[n].region = 'Offshore';
-            return report.agents[n];
+            let key = _normalizeAgentKey(name);
+            if (!agentsByKey[key]) {
+                // Prefer MasterList's display name when we have one.
+                let displayName = (mlData[key] && mlData[key].name) ? mlData[key].name : String(name).trim();
+                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
+            }
+            if (reg && String(reg).includes('Offshore')) agentsByKey[key].region = 'Offshore';
+            return agentsByKey[key];
         };
         Object.keys(mlData).forEach(k => {
             let ml = mlData[k];
@@ -716,8 +751,8 @@ var WorkforceTracker = {
             dbGEM.getDataRange().getValues().slice(1).forEach(row => {
                 let rowDateStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM") : String(row[0]).substring(0, 7);
                 if (rowDateStr === targetMonth) {
-                    let agName = String(row[1]).replace(/\b\w/g, c => c.toUpperCase()).trim();
-                    gemData[agName] = { 
+                    let agName = _titleCaseName(String(row[1]).trim());
+                    gemData[agName] = {
                         cph: row[2], inPct: row[3], outPct: row[4], aht: fixTime(row[5]),
                         transfers: row[10] || 0, transfPct: row[11] || 0,
                         avgTalk: fixTime(row[12]), avgHold: fixTime(row[13]), avgAcw: fixTime(row[14]),
@@ -729,9 +764,14 @@ var WorkforceTracker = {
         }
 
         let gemKeys = Object.keys(gemData);
-        let finalArr = Object.values(report.agents);
-        finalArr.forEach(a => { 
-            let ml = mlData[String(a.name).trim().toLowerCase().replace(/\s+/g, ' ')];
+        // Index GEM data by normalized key so "Jaen Benitez" matches "Jaén-Benitez".
+        let gemByKey = {};
+        gemKeys.forEach(g => { gemByKey[_normalizeAgentKey(g)] = gemData[g]; });
+
+        let finalArr = Object.values(agentsByKey);
+        finalArr.forEach(a => {
+            let aKey = _normalizeAgentKey(a.name);
+            let ml = mlData[aKey];
             if (ml) {
                 a.level = ml.level;
                 a.manager = ml.manager;
@@ -740,22 +780,23 @@ var WorkforceTracker = {
                 if (ml.isOffshore) a.region = "Offshore";
             }
 
-            ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2))); 
-            let matchedGem = gemData[a.name]; 
+            ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
+            let matchedGem = gemData[a.name] || gemByKey[aKey];
             if (!matchedGem) {
-                let wfmParts = a.name.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
+                let aWords = aKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
                 for(let i=0; i<gemKeys.length; i++) {
                     let gName = gemKeys[i];
-                    let gParts = gName.replace(/,/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(x=>x.length>1);
-                    
-                    if (wfmParts.length > 1 && gParts.length > 1 && wfmParts[0] === gParts[0] && wfmParts[1] === gParts[1]) {
+                    let gKey = _normalizeAgentKey(gName);
+                    let gWords = gKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
+
+                    if (aWords.length > 1 && gWords.length > 1 && aWords[0] === gWords[0] && aWords[1] === gWords[1]) {
                         matchedGem = gemData[gName];
                         break;
                     }
                     // Substring fallback: only if both names are long enough to make a spurious
                     // short-substring match (e.g. "Ali" inside "Alison") unlikely.
-                    let minLen = Math.min(a.name.length, gName.length);
-                    if (minLen >= 8 && (a.name.includes(gName) || gName.includes(a.name))) {
+                    let minLen = Math.min(aKey.length, gKey.length);
+                    if (minLen >= 8 && (aKey.includes(gKey) || gKey.includes(aKey))) {
                         matchedGem = gemData[gName];
                         break;
                     }

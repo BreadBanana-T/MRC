@@ -36,7 +36,7 @@ function compileFloorData() {
   let mlData = {};
   if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
-          let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+          let cleanName = _normalizeAgentKey(r[0]);
           let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
           mlData[cleanName] = {
               level: r[1],
@@ -54,7 +54,7 @@ function compileFloorData() {
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
-    const cleanNameKey = String(rawName).trim().toLowerCase().replace(/\s+/g, ' ');
+    const cleanNameKey = _normalizeAgentKey(rawName);
     const ml = mlData[cleanNameKey] || null;
 
     const persistentData = sheetOverrides.get(cleanNameKey) || {};
