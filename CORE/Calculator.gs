@@ -36,10 +36,13 @@ function calculateMetrics(inText, outText) {
       "7-TRB"
   ];
 
+  // Trend % uses only the "priority" queues the tableau tracks for trending.
+  // Excludes 2-CCM (not a trend queue) and 3-LWK (Lone Worker, tracked
+  // separately).
   const LIST_TREND = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED",
-      "2-CCM", "2-FARM",
-      "3-LWK", "3-VID",
+      "2-FARM",
+      "3-VID",
       "4-BURG", "4-COMM", "4-TAMP",
       "6-O/C"
   ];
@@ -161,16 +164,17 @@ function formatTrend(val) {
   if (val === 0) return "0%";
   const isNeg = val < 0;
   const absVal = Math.abs(val);
-  const intPart = Math.floor(absVal);
-  const tenths = Math.floor((absVal * 10) % 10);
-  
-  let finalString;
-  if (tenths >= 5) {
-     finalString = intPart + "." + tenths; 
-  } else {
-     finalString = intPart;
+
+  // User rule: a trend is shown with 1-decimal precision when the tenths
+  // digit is >= 5 — otherwise integer only. Decision is made on the
+  // UNROUNDED tenths so 1.4999 stays "1%", but the displayed number is
+  // rounded so 1.7964 shows as "1.8%" (matching the tableau), not "1.7%".
+  const origTenths = Math.floor((absVal * 10) % 10);
+  if (origTenths < 5) {
+    return (isNeg ? "-" : "+") + Math.floor(absVal) + "%";
   }
-  return (isNeg ? "-" : "+") + finalString + "%";
+  const rounded = Math.round(absVal * 10) / 10;
+  return (isNeg ? "-" : "+") + rounded.toFixed(1) + "%";
 }
 
 function dur(t) { 
