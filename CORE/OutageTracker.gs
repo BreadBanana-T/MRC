@@ -3,11 +3,33 @@
  * Pulls real-time power outage counts for BC, ON (Hydro One), and QC
  * (Hydro-Québec). All endpoints are publicly served (no API key, no auth).
  *
- * - BC Hydro: documented outage-list.json
- * - Hydro One: public ArcGIS FeatureServer powering their Storm Centre map
- * - Hydro-Québec: undocumented but publicly-served aggregate used by their
- *   info-pannes web map. If HQ changes their URL, update _HQ_URL below;
- *   inspect info-pannes.hydroquebec.com network tab to find the new path.
+ * URLs are overridable via Script Properties without editing code. Keys:
+ *   BC_HYDRO_URL, HYDRO_ONE_URL, HYDRO_QUEBEC_URL
+ *
+ * If a URL is blank (Script Property set to empty string), that fetcher
+ * silently skips and the UI shows "source offline" for that province.
+ *
+ * ────────────────────────────────────────────────────────────────────
+ * FINDING THE HYDRO ONE URL
+ * ────────────────────────────────────────────────────────────────────
+ * Hydro One's Storm Centre backend shifts periodically. Current discovery
+ * recipe:
+ *   1. Open https://stormcentre.hydroone.com/ in Chrome
+ *   2. Open DevTools -> Network tab, filter "query" or "FeatureServer"
+ *   3. Refresh the page. Look for a request hitting a URL like
+ *        https://services*.arcgis.com/<orgId>/arcgis/rest/services/<SvcName>/FeatureServer/0/query
+ *      or a self-hosted variant such as
+ *        https://<host>.hydroone.com/.../rest/services/Outages/MapServer/0/query
+ *   4. Copy the FULL URL including query string, or just the base /query
+ *      path and this module will add the usual params.
+ *   5. Set it via the Apps Script editor:
+ *        setOutageUrl('ON', '<paste full URL here>')
+ *      (See `setOutageUrl` at bottom of this file.)
+ *
+ * BC Hydro's outage-list.json has been stable for years. Hydro-Québec's
+ * bilan.json has drifted a few times — if QC fails, do the same recipe
+ * against info-pannes.hydroquebec.com.
+ * ────────────────────────────────────────────────────────────────────
  *
  * Payload is cached in CacheService for 5 minutes so polling the dashboard
  * doesn't spam the utilities or eat UrlFetch quota.
@@ -17,9 +39,19 @@ var OutageTracker = {
   CACHE_KEY: 'MRC_OUTAGES_V1',
   CACHE_TTL_SECONDS: 300,
 
-  _BC_URL: 'https://www.bchydro.com/power-outages/app/outage-list.json',
-  _HYDRO_ONE_URL: 'https://services1.arcgis.com/qAo1OsXi67t7XgmS/arcgis/rest/services/Outages_External_View/FeatureServer/0/query?where=1%3D1&outFields=*&returnGeometry=false&f=json&resultRecordCount=1000',
-  _HQ_URL: 'https://www.hydroquebec.com/data/pannes/donnees/bilan.json',
+  _DEFAULT_BC_URL: 'https://www.bchydro.com/power-outages/app/outage-list.json',
+  // Intentionally blank by default: Hydro One's ArcGIS endpoint shifts. Set
+  // via setOutageUrl('ON', '...') once discovered (see recipe above).
+  _DEFAULT_HYDRO_ONE_URL: '',
+  _DEFAULT_HQ_URL: 'https://www.hydroquebec.com/data/pannes/donnees/bilan.json',
+
+  _getUrl: function(key, fallback) {
+    try {
+      var v = PropertiesService.getScriptProperties().getProperty(key);
+      if (v === null || v === undefined) return fallback;
+      return v; // explicit empty string = "disabled"
+    } catch (e) { return fallback; }
+  },
 
   fetchAll: function() {
     try {
@@ -35,14 +67,17 @@ var OutageTracker = {
 
     var bc = this._fetchBCHydro();
     if (bc.error) result.errors.push('BC: ' + bc.error);
+    else if (bc.skipped) result.errors.push('BC: not configured');
     else result.byProvince.BC = bc.data;
 
     var on = this._fetchHydroOne();
     if (on.error) result.errors.push('ON: ' + on.error);
+    else if (on.skipped) result.errors.push('ON: URL not configured — run setOutageUrl("ON", "...")');
     else result.byProvince.ON = on.data;
 
     var qc = this._fetchHQ();
     if (qc.error) result.errors.push('QC: ' + qc.error);
+    else if (qc.skipped) result.errors.push('QC: not configured');
     else result.byProvince.QC = qc.data;
 
     var payload = JSON.stringify(result);
@@ -64,7 +99,9 @@ var OutageTracker = {
 
   _fetchBCHydro: function() {
     try {
-      var res = UrlFetchApp.fetch(this._BC_URL, this._commonHeaders());
+      var url = this._getUrl('BC_HYDRO_URL', this._DEFAULT_BC_URL);
+      if (!url) return { skipped: true };
+      var res = UrlFetchApp.fetch(url, this._commonHeaders());
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
       var list = Array.isArray(body) ? body : (body.outages || body.data || []);
@@ -91,7 +128,14 @@ var OutageTracker = {
 
   _fetchHydroOne: function() {
     try {
-      var res = UrlFetchApp.fetch(this._HYDRO_ONE_URL, this._commonHeaders());
+      var url = this._getUrl('HYDRO_ONE_URL', this._DEFAULT_HYDRO_ONE_URL);
+      if (!url) return { skipped: true };
+      // If the user pasted a bare FeatureServer path without /query, append it.
+      if (!/\/query(\?|$)/i.test(url)) {
+        url += (url.indexOf('?') === -1 ? '?' : '&') + 'where=1%3D1&outFields=*&returnGeometry=false&f=json&resultRecordCount=1000';
+        if (!/\/query/i.test(url)) url = url.replace(/(FeatureServer\/\d+)(\?)/i, '$1/query$2');
+      }
+      var res = UrlFetchApp.fetch(url, this._commonHeaders());
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
       if (body.error) throw new Error('ArcGIS: ' + (body.error.message || 'unknown'));
@@ -119,7 +163,9 @@ var OutageTracker = {
 
   _fetchHQ: function() {
     try {
-      var res = UrlFetchApp.fetch(this._HQ_URL, this._commonHeaders());
+      var url = this._getUrl('HYDRO_QUEBEC_URL', this._DEFAULT_HQ_URL);
+      if (!url) return { skipped: true };
+      var res = UrlFetchApp.fetch(url, this._commonHeaders());
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
 
@@ -154,6 +200,37 @@ var OutageTracker = {
 };
 
 function getPowerOutages() { return OutageTracker.fetchAll(); }
+
+/**
+ * Configure a utility's outage URL at runtime. Called from the Apps Script
+ * editor or through google.script.run. Invalidates the cache so the new URL
+ * takes effect on the next dashboard poll.
+ *
+ *   setOutageUrl('BC', 'https://...')     -> set BC Hydro URL
+ *   setOutageUrl('ON', 'https://...')     -> set Hydro One URL (required to enable)
+ *   setOutageUrl('QC', 'https://...')     -> set Hydro-Québec URL
+ *   setOutageUrl('BC', '')                -> disable BC column
+ *   setOutageUrl('ON', null)              -> clear override, revert to default
+ */
+function setOutageUrl(provinceCode, url) {
+  var map = { BC: 'BC_HYDRO_URL', ON: 'HYDRO_ONE_URL', QC: 'HYDRO_QUEBEC_URL' };
+  var key = map[String(provinceCode).toUpperCase()];
+  if (!key) return 'Invalid province. Use BC, ON, or QC.';
+  var props = PropertiesService.getScriptProperties();
+  if (url === null || url === undefined) props.deleteProperty(key);
+  else props.setProperty(key, String(url));
+  try { CacheService.getScriptCache().remove('MRC_OUTAGES_V1'); } catch (e) {}
+  return (url === null || url === undefined) ? ('Cleared ' + key) : ('Set ' + key + ' = ' + url);
+}
+
+function getOutageUrls() {
+  var props = PropertiesService.getScriptProperties();
+  return JSON.stringify({
+    BC: props.getProperty('BC_HYDRO_URL') || '(default)',
+    ON: props.getProperty('HYDRO_ONE_URL') || '(not set — source disabled)',
+    QC: props.getProperty('HYDRO_QUEBEC_URL') || '(default)'
+  });
+}
 
 /**
  * Outage × Onshore Agent correlation.
