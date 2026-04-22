@@ -109,3 +109,8 @@ function getArchiveList() {
 function getArchivedReport(period, cycleFilter) {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period, cycleFilter) : "{}";
 }
+
+// --- POWER OUTAGES (BC Hydro + Hydro One + Hydro-Québec) ---
+function getPowerOutages() {
+  return (typeof OutageTracker !== 'undefined') ? OutageTracker.fetchAll() : "{}";
+}

@@ -161,6 +161,19 @@
         </div>
     </div>
 
+    <div id="outage-modal" class="modal-blur" onclick="closeOutageDrawer()">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:560px; max-width:95%; padding:0; overflow:hidden;">
+          <div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start;">
+             <div>
+                <h2 id="outage-modal-title" style="margin:0 0 6px 0;">Outages</h2>
+                <div id="outage-modal-sub" style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"></div>
+             </div>
+             <button class="btn-icon-sm" onclick="closeOutageDrawer()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+          </div>
+          <div id="outage-modal-list" style="max-height:480px; overflow-y:auto;" class="custom-scrollbar"></div>
+       </div>
+    </div>
+
     <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">
         <i data-lucide="check-circle" width="18"></i>
         <span id="toast-msg">Action Completed</span>

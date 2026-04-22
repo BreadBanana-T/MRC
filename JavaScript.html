@@ -38,7 +38,7 @@
   };
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL'
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -66,7 +66,51 @@
     setInterval(fetchNotifications, 10000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
+    setInterval(fetchOutages, 300000); // 5 min cadence (matches backend CacheService TTL)
+  }
+
+  function fetchOutages() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.outagesData = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getPowerOutages();
+  }
+
+  window.openOutageDrawer = function(prov) {
+      state.outageDrawerProv = prov;
+      var modal = document.getElementById('outage-modal');
+      if (modal) modal.classList.add('open');
+      renderOutageDrawer();
+  };
+  window.closeOutageDrawer = function() {
+      var modal = document.getElementById('outage-modal');
+      if (modal) modal.classList.remove('open');
+      state.outageDrawerProv = null;
+  };
+  function renderOutageDrawer() {
+      var p = state.outageDrawerProv;
+      if (!p || !state.outagesData || !state.outagesData.byProvince[p]) return;
+      var d = state.outagesData.byProvince[p];
+      var titleEl = document.getElementById('outage-modal-title');
+      var subEl = document.getElementById('outage-modal-sub');
+      var listEl = document.getElementById('outage-modal-list');
+      if (!titleEl || !listEl) return;
+      titleEl.innerText = p + ' — ' + (d.customers || 0).toLocaleString() + ' customers affected';
+      subEl.innerText = d.source + ' • ' + (d.outages || 0) + ' active outages';
+      var rows = (d.top || []).map(function(r) {
+          var eta = r.eta ? ('<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">ETA: ' + escapeHTML(String(r.eta)) + '</div>') : '';
+          return '<div style="padding:14px 16px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
+                 '<div style="flex:1; min-width:0;"><div style="font-weight:800; color:var(--text-main); font-size:0.95rem;">' + escapeHTML(r.region || 'Unknown') + '</div>' +
+                 '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(r.cause || '—') + '</div>' + eta + '</div>' +
+                 '<div style="text-align:right; flex-shrink:0;"><div style="font-size:1.25rem; font-weight:800; color:var(--status-alert);">' + (r.customers || 0).toLocaleString() + '</div><div style="font-size:0.65rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">customers</div></div>' +
+                 '</div>';
+      }).join('');
+      listEl.innerHTML = rows || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No active outages.</div>';
+      refreshIcons();
   }
 
   function fetchMetadata() {
@@ -446,6 +490,32 @@
   window.openBreakModal = function() { closeMenu(); var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(!agent) { showToast("Agent data not found"); return; } var container = document.getElementById('break-editor'); container.innerHTML = ""; (agent.rawBreaks || []).forEach(function(b, i) { container.innerHTML += '<div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;"><div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">' + escapeHTML(b.type) + '</div><div style="display:flex; gap:8px;"><input id="bs-' + i + '" class="input-aether" value="' + escapeHTML(b.start || '') + '" style="font-size:0.85rem;"><input id="be-' + i + '" class="input-aether" value="' + escapeHTML(b.end || '') + '" style="font-size:0.85rem;"></div></div>'; }); document.getElementById('break-modal').classList.add('open'); };
   window.openOtModal = function() { closeMenu(); document.getElementById('ot-start').value = ""; document.getElementById('ot-end').value = ""; document.getElementById('ot-modal').classList.add('open'); };
 
+  function renderOutageTile() {
+      var d = state.outagesData;
+      if (!d || !d.byProvince) {
+          return '<div class="aether-card" style="padding:14px 20px; margin-bottom:20px; display:flex; align-items:center; gap:12px; color:var(--text-muted); font-size:0.8rem; font-weight:600;"><i data-lucide="zap" width="14"></i> Loading power-outage feeds…</div>';
+      }
+      var provs = ['BC','ON','QC'];
+      var provLabels = { BC: 'British Columbia', ON: 'Ontario (Hydro One)', QC: 'Québec' };
+      var cols = provs.map(function(p) {
+          var stats = d.byProvince[p];
+          var err = (d.errors || []).find(function(e) { return e.indexOf(p + ':') === 0; });
+          if (!stats) {
+              return '<div onclick="showToast(\'Source offline: ' + escapeHTML(err || 'Unknown') + '\');" style="flex:1; padding:12px 16px; border-left:3px solid var(--text-muted); cursor:help; opacity:0.6;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + p + '</div><div style="font-size:1.4rem; font-weight:800; color:var(--text-muted); margin-top:4px;">—</div><div style="font-size:0.7rem; color:var(--status-alert); font-weight:700; margin-top:2px;">offline</div></div>';
+          }
+          var color = stats.customers > 10000 ? 'var(--status-alert)' : (stats.customers > 1000 ? 'var(--status-warn)' : 'var(--text-main)');
+          var tops = (stats.top || []).slice(0, 2).map(function(t) { return escapeHTML(t.region) + ' (' + (t.customers || 0).toLocaleString() + ')'; }).join(' · ');
+          return '<div onclick="openOutageDrawer(\'' + p + '\');" style="flex:1; padding:12px 16px; border-left:3px solid ' + color + '; cursor:pointer; transition:0.2s;" class="hover-bg" title="' + escapeHTML(stats.source) + '">' +
+                 '<div style="display:flex; justify-content:space-between; align-items:baseline;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + escapeHTML(provLabels[p]) + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:700;">' + (stats.outages || 0) + ' outages</div></div>' +
+                 '<div style="font-size:1.6rem; font-weight:800; color:' + color + '; margin-top:4px; line-height:1;">' + (stats.customers || 0).toLocaleString() + '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:6px;">customers</span></div>' +
+                 (tops ? '<div style="font-size:0.7rem; color:var(--text-secondary); font-weight:600; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + tops + '</div>' : '<div style="font-size:0.7rem; color:var(--status-active); font-weight:700; margin-top:6px;">All clear</div>') +
+                 '</div>';
+      }).join('');
+      var updated = d.updated ? ' • updated ' + escapeHTML(d.updated) : '';
+      var errBadge = (d.errors && d.errors.length) ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:6px; font-weight:700;" title="' + escapeHTML(d.errors.join(' | ')) + '">' + d.errors.length + ' source' + (d.errors.length > 1 ? 's' : '') + ' offline</span>' : '';
+      return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 20px; background:rgba(0,0,0,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages (Real-time)' + errBadge + '</div><div style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</div></div><div style="display:flex;">' + cols + '</div></div>';
+  }
+
   function renderOverview() {
       var unplanCount = (state.agents.unplanned||[]).length;
       var planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
@@ -461,7 +531,8 @@
           eventsHtml = state.calendarEvents.map(function(e, i) { return '<div onclick="openEventModal(' + i + ')" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg"><div style="width:4px; height:30px; background:' + (e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)') + '; border-radius:2px;"></div><div style="flex:1;"><div style="font-weight:700; font-size:0.9rem;">' + escapeHTML(e.title || 'Untitled Event') + '</div><div style="font-size:0.75rem; color:var(--text-muted);"><span style="color:var(--text-main); font-weight:700;">' + escapeHTML(e.date || '') + '</span> • ' + escapeHTML(e.startTime || '') + ' - ' + escapeHTML(e.endTime || '') + '</div></div></div>'; }).join('');
       }
 
-      var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style><div class="grid-bento">' +
+      var outageTileHtml = renderOutageTile();
+      var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>' + outageTileHtml + '<div class="grid-bento">' +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;"><div style="display:flex; justify-content:space-between; align-items:center;"><div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;"><canvas id="chart-overview" style="width:100%; height:120px;"></canvas></div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
                  '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Shrinkage</h4><div id="ov-shrink" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + shrinkPct + '%</div></div>' +
