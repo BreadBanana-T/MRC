@@ -1,0 +1,314 @@
+for the calculator; 
+output; 
+STATS UPDATE:
+SVL OUT: 88%
+SVL IN: 74%
+ACK: 23s
+ASA: 19s
+SAFE: N/A
+
+TRENDS:
+Inbound: -22%
+Outbound: 0%
+
+DELAYS: None
+
+NOTES:
+ %% Coachings Open%%
+
+Real stats; 
+STATS UPDATE:
+SVL OUT: 89%
+SVL IN: 74%
+ACK: 14s
+ASA: 19s
+SAFE: N/A
+
+TRENDS:
+Inbound: -22%
+Outbound: -2%
+
+DELAYS: None
+
+NOTES:
+ %% Coachings Open%%
+
+RAW Inbound stats; 
+IMAGES My Stations 360Last update: 22-04-2026 04:55:52
+Settings Refresh
+DB-InfoMAS-MONITMAS-IVRAVAYA
+Stats - InCust SVC
+Business Unit	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+Monit - Last 30 minutes	8	00:00:09	16	-50%	100	100	00:00:20	04:15	04:15	04:55:00
+Monit - Last 60 minutes	21	00:00:11	27	-22%	85	100	00:00:28	03:45	04:15	04:55:00
+Monit - Intraday	100	00:00:19	134	-25%	74	92	00:03:32	02:15	04:15	04:55:00
+Stats - Last 30 minutes
+Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+MON_GRD	3	00:00:08	0	0%	100	100	00:00:11	04:30	04:30	04:55:00
+MON_ICL	6	00:00:10	5	+20%	100	100	00:00:20	04:30	04:30	04:55:00
+MON_INB	2	00:00:07	2	0%	100	100	00:00:08	04:30	04:30	04:55:00
+MON_LOC	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+MON_MRC	0	00:00:00	2	-100%	100	100	00:00:00	04:30	04:30	04:55:00
+MON_QST	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+MON_SAFE	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+Stats - Last 60 minutes
+Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+MON_GRD	4	00:00:09	4	0%	100	100	00:00:13	04:30	04:30	04:55:00
+MON_ICL	17	00:00:12	15	+13%	82	100	00:00:28	04:30	04:30	04:55:00
+MON_INB	3	00:00:06	9	-67%	100	100	00:00:08	04:30	04:30	04:55:00
+MON_LOC	1	00:00:05	1	0%	100	100	00:00:05	04:30	04:30	04:55:00
+MON_MRC	2	00:00:04	4	-50%	100	100	00:00:09	04:30	04:30	04:55:00
+MON_QST	0	00:00:00	1	-100%	100	100	00:00:00	04:30	04:30	04:55:00
+MON_SAFE	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+Stats - Intraday
+Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+MON_GRD	17	00:00:08	21	-19%	100	100	00:00:18	04:30	04:30	04:55:00
+MON_ICL	61	00:00:14	73	-16%	77	98	00:01:12	04:30	04:30	04:55:00
+MON_INB	38	00:00:27	54	-30%	68	84	00:03:32	04:30	04:30	04:55:00
+MON_LOC	1	00:00:05	6	-83%	100	100	00:00:05	04:30	04:30	04:55:00
+MON_MRC	12	00:00:20	15	-20%	90	90	00:02:38	04:30	04:30	04:55:00
+MON_QST	3	00:00:03	6	-50%	100	100	00:00:04	04:30	04:30	04:55:00
+MON_SAFE	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+Details - Last 30 minutes
+« Prev | 1 | 2 | 3 | Next »
+Split #	Split Name	Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+124	MON_A_MCS_Patrol_EN	MON_GRD	3	00:00:08	2	+50%	100	100	00:00:11	04:00	04:30	04:55:00
+123	MON_A_MCS_Patrol_FR	MON_GRD	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+992	MON_A_ICL_Burg_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+991	MON_A_ICL_Burg_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+988	MON_A_ICL_Fallback_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+987	MON_A_ICL_Fallback_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+994	MON_A_ICL_Std_EN	MON_ICL	5	00:00:09	8	-38%	100	100	00:00:15	04:00	04:30	04:55:00
+993	MON_A_ICL_Std_FR	MON_ICL	1	00:00:20	1	0%	100	100	00:00:20	04:15	04:30	04:55:00
+990	MON_A_ICL_Storm_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+989	MON_A_ICL_Storm_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+426	MON_A_INB_CSFallBck_EN	MON_INB	1	00:00:08	1	0%	100	100	00:00:08	04:15	04:30	04:55:00
+425	MON_A_INB_CSFallBck_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+420	MON_A_INB_CTIalert_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+419	MON_A_INB_CTIalert_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+404	MON_A_INB_KL2_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+Details - Last 60 minutes
+« Prev | 1 | 2 | 3 | Next »
+Split #	Split Name	Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+124	MON_A_MCS_Patrol_EN	MON_GRD	4	00:00:09	4	0%	100	100	00:00:13	03:30	04:30	04:55:00
+123	MON_A_MCS_Patrol_FR	MON_GRD	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+992	MON_A_ICL_Burg_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+991	MON_A_ICL_Burg_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+988	MON_A_ICL_Fallback_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+987	MON_A_ICL_Fallback_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+994	MON_A_ICL_Std_EN	MON_ICL	16	00:00:12	13	+23%	81	100	00:00:28	03:45	04:30	04:55:00
+993	MON_A_ICL_Std_FR	MON_ICL	1	00:00:20	2	-50%	100	100	00:00:20	04:15	04:30	04:55:00
+990	MON_A_ICL_Storm_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+989	MON_A_ICL_Storm_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+426	MON_A_INB_CSFallBck_EN	MON_INB	2	00:00:07	2	0%	100	100	00:00:08	04:15	04:30	04:55:00
+425	MON_A_INB_CSFallBck_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+420	MON_A_INB_CTIalert_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+419	MON_A_INB_CTIalert_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+404	MON_A_INB_KL2_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+Details - Intraday
+« Prev | 1 | 2 | 3 | Next »
+Split #	Split Name	Split Grp	Offered	ASA	Trend	Diff %	SL 20	SL 60	LCW	LCW Interval	Last Data	Refresh
+124	MON_A_MCS_Patrol_EN	MON_GRD	15	00:00:09	18	-17%	100	100	00:00:18	02:30	04:30	04:55:00
+123	MON_A_MCS_Patrol_FR	MON_GRD	2	00:00:04	2	0%	100	100	00:00:05	:15	04:30	04:55:00
+992	MON_A_ICL_Burg_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+991	MON_A_ICL_Burg_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+988	MON_A_ICL_Fallback_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:42	02:45	04:30	04:55:00
+987	MON_A_ICL_Fallback_FR	MON_ICL	2	00:00:57	0	0%	0	50	00:01:12	02:45	04:30	04:55:00
+994	MON_A_ICL_Std_EN	MON_ICL	55	00:00:12	63	-13%	79	100	00:00:46	02:45	04:30	04:55:00
+993	MON_A_ICL_Std_FR	MON_ICL	4	00:00:13	9	-56%	100	100	00:00:20	04:15	04:30	04:55:00
+990	MON_A_ICL_Storm_EN	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+989	MON_A_ICL_Storm_FR	MON_ICL	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+426	MON_A_INB_CSFallBck_EN	MON_INB	20	00:00:46	14	+43%	45	70	00:03:32	02:15	04:30	04:55:00
+425	MON_A_INB_CSFallBck_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+420	MON_A_INB_CTIalert_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+419	MON_A_INB_CTIalert_FR	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+404	MON_A_INB_KL2_EN	MON_INB	0	00:00:00	0	0%	100	100	00:00:00	04:30	04:30	04:55:00
+© 2026 TELUS. All rights reserved. - Version 2.1.8700.29495 - Build 27-10-2023 16:23:10
+
+RAW outbound: 
+IMAGES My Stations 360Last update: 22-04-2026 04:56:50
+Settings Refresh
+DB-InfoMAS-MONITMAS-IVRAVAYA
+Alarm Resp Time - Last 15 min
+« Prev | 1 | 2 | Next »
+Service Type	Description	Actual	ACK	SL
+1-FIRE	MS Fire Alarm	2	00:00:02	100
+1-GAS	MS Gas Alarm	0	00:00:00	100
+1-H/U	MS HoldUp Alarm	0	00:00:00	100
+1-MED	MS Medical Alarm	0	00:00:00	100
+2-CCM	MS CCM	0	00:00:00	100
+2-FARM	MS CCM Farm/Barn Alarm	0	00:00:00	100
+3-LWK	MS Lone Worker Alarm	0	00:00:00	100
+3-VID	MS Video Alarm	0	00:00:00	100
+4-BURG	MS Burglary Alarm	14	00:00:00	100
+4-COMM	MS Communication Loss	3	00:00:21	100
+4-TAMP	MS Tamper Alarm	0	00:00:00	100
+5-SUPF	MS Supervision Fire	24	00:00:00	100
+5-SUPV	MS Supervision	2	00:00:14	100
+6-O/C	MS Open Close (See also NO-O/C	0	00:00:00	100
+7-TRB	MS Trouble	12	00:00:00	100
+Alarm Resp Time - Last 60 min
+« Prev | 1 | 2 | Next »
+Service Type	Description	Actual	Trend	Diff	ACK	SL
+1-FIRE	MS Fire Alarm	2	2	0	00:00:02	100
+1-GAS	MS Gas Alarm	0	0	0	00:00:00	100
+1-H/U	MS HoldUp Alarm	1	0	1	00:00:03	100
+1-MED	MS Medical Alarm	0	0	0	00:00:00	100
+2-CCM	MS CCM	0	0	0	00:00:00	100
+2-FARM	MS CCM Farm/Barn Alarm	0	0	0	00:00:00	100
+3-LWK	MS Lone Worker Alarm	1	3	-2	00:01:33	100
+3-VID	MS Video Alarm	1	1	0	00:01:59	0
+4-BURG	MS Burglary Alarm	63	72	-9	00:00:22	80
+4-COMM	MS Communication Loss	12	9	3	00:02:58	66
+4-TAMP	MS Tamper Alarm	1	2	-1	00:00:02	100
+5-SUPF	MS Supervision Fire	146	178	-32	00:00:00	100
+5-SUPV	MS Supervision	6	10	-4	00:01:13	100
+6-O/C	MS Open Close (See also NO-O/C	7	4	3	00:02:21	100
+7-TRB	MS Trouble	172	46	126	00:00:43	100
+Alarm Resp Time - Intraday
+« Prev | 1 | 2 | Next »
+Service Type	Description	Actual	Trend	Diff	ACK	SL
+1-FIRE	MS Fire Alarm	23	31	-8	00:00:02	100
+1-GAS	MS Gas Alarm	4	1	3	00:00:02	100
+1-H/U	MS HoldUp Alarm	7	4	3	00:00:02	100
+1-MED	MS Medical Alarm	2	2	0	00:00:05	100
+2-CCM	MS CCM	1	3	-2	00:02:22	0
+2-FARM	MS CCM Farm/Barn Alarm	0	2	-2	00:00:00	100
+3-LWK	MS Lone Worker Alarm	3	8	-5	00:00:45	100
+3-VID	MS Video Alarm	2	4	-2	00:01:03	50
+4-BURG	MS Burglary Alarm	316	383	-67	00:00:14	88
+4-COMM	MS Communication Loss	56	66	-10	00:00:41	89
+4-TAMP	MS Tamper Alarm	6	6	0	00:00:29	50
+5-SUPF	MS Supervision Fire	695	985	-290	00:00:01	100
+5-SUPV	MS Supervision	62	37	25	00:00:52	98
+6-O/C	MS Open Close (See also NO-O/C	11	9	2	00:01:39	100
+7-TRB	MS Trouble	361	205	156	00:00:23	100
+Pending Alarm by Service Type
+Service Type	Description	Alarm Main	Oldest Main	Alarm PC	Oldest PC
+7-TRB	MS Trouble	1	11:57:08	0	00:00:00
+Z-OTHER	Other service types	0	00:00:00	0	00:00:00
+Pending Alarm by Alarm Queue
+Alarm Queue (Grp Prio)	Description	Alarm Count	Oldest Waiting
+TS-BAT	TS Low Batt (96-97)	1	11:57:08
+Pending Alarm by Site Type
+Site Type	Description	Alarm Count	Oldest Waiting
+R	Residential	1	11:57:08
+Pending Alarm by Dispatch Location
+Dispatch Location	Description	Alarm Count	Oldest Waiting
+PS03F	FRC - Quebec & Maritimes	1	11:57:08
+Pending Alarm by Site Location
+Site Location	Description	Alarm Count	Oldest Waiting
+PMTL01	PRO QC Montreal FR	1	11:57:08
+Pending Alarm by CS Partition
+CS Partition	Description	Alarm Count	Oldest Waiting
+11	TELUS (Billed in TELUS system)	1	11:57:08
+Logged-in Users by Service Type
+« Prev | 1 | 2 | Next »
+Service Type	Description	User Count
+1-FIRE	MS Fire Alarm	19
+1-GAS	MS Gas Alarm	19
+1-H/U	MS HoldUp Alarm	19
+1-MED	MS Medical Alarm	19
+2-CCM	MS CCM	19
+2-FARM	MS CCM Farm/Barn Alarm	19
+3-LWK	MS Lone Worker Alarm	19
+3-VID	MS Video Alarm	2
+4-BURG	MS Burglary Alarm	19
+4-COMM	MS Communication Loss	19
+4-TAMP	MS Tamper Alarm	19
+5-SUPF	MS Supervision Fire	19
+5-SUPV	MS Supervision	19
+6-O/C	MS Open Close (See also NO-O/C	19
+7-TRB	MS Trouble	19
+Logged-in Users by Alarm Queue
+« Prev | 1 | 2 | 3 | Next »
+Alarm Queue (Grp Prio)	Description	User Count
+0-ICLE	ICL English	3
+0-ICLF	ICL French	3
+1-LIFS	MS Life Safety (1-5; 14-15)	15
+1-LIFU	MS Life Safety ULC Fire (13)	8
+2-CCM	MS Critical Cond (21-25;26-29)	15
+3-AUX	MS Aux. Services (31-35)	13
+4-BURG	MS Burglary (36-39;41-45)	11
+5-SUPV	MS Mech Supv (51-55;56-59)	12
+6-SCHD	MS O/C Schedule (61-65)	12
+7-TRB	MS Trouble (71-75)	12
+8-NRST	MS No Reset (81-86)	12
+8-TPWR	MS Trouble AC Fail (76-79)	12
+MS-GRD	MS Guard Dipatch (101)	13
+MS-IVE	MS Resume IVR Ended (880)	15
+MS-IVP	MS Resume IVR In Prog (881)	15
+Logged-in Users by Site Type
+« Prev | 1 | 2 | Next »
+Site Type	Description	User Count
+B	National Financial	19
+C	Commercial	19
+CB	Custom Business	19
+CH	Custom Home	19
+CHS	Custom Home	19
+D	DVERS	19
+F	Financial	19
+G	Government	19
+H	Health	19
+N	National	19
+R	Residential	19
+RCVR	Receiver	19
+SB	Small Business	19
+SYS	Used By Application	19
+TC	3rd Party Commercial Sub	19
+Logged-in Users by Dispatch Location
+« Prev | 1 | 2 | 3 | 4 | 5 | 6 | 7 | Next »
+Dispatch Location	Description	User Count
+______	NOT ASSIGNED	7
+1	Main Location	19
+A04E	ADT - ENG ULC GENERAL	7
+A04F	ADT - FRC ULC GENERAL	5
+ENCAN	Canada Open English	18
+ENCHS	Custom Home Services English	18
+ENCOM2	Location 2 Commercial English	18
+ENHV2	Location 2 Resi/HV English	18
+ENTCAO	English Tyco Canada Only	18
+ENTGEN	English Tyco General Populatio	18
+ENTWV	Two Way Voice English	18
+ENVID	MASVideo English	2
+ENWHS	Wholesale English	18
+ENWHTW	Wholesale English TWV	18
+ENXIN	Acquisition Cut-In English	18
+Logged-in Users by CS Partition
+CS Partition	Description	User Count
+1	ADT	19
+3	Canada Only	8
+4	ULC	8
+11	TELUS (Billed in TELUS system)	19
+77	IVR Test	2
+95	ICC & Receivers	8
+96	Testing External Applications	2
+97	Training / Testing	2
+98	VRT	2
+99	Copy Account / STypes	8
+Potential Runaway
+CS No	System No	Site No	Count of Signals
+DMP1047	100357297	100250492	772
+RCV1-902	300222494	300123853	813
+IVR Not Started
+« Prev | 1 | 2 | Next »
+Alarm priority	Alarm priority description	CS No	System No	Site No	Alarm server date
+881	MS IVR IN-Progress	A281368373	100748984	100560419	4/22/2026 2:37:38 AM
+881	MS IVR IN-Progress	TC-10-09-1372	300259955	300153835	4/22/2026 2:21:50 AM
+881	MS IVR IN-Progress	A280368739	200731432	200477692	4/22/2026 4:32:51 AM
+881	MS IVR IN-Progress	TC-01-04-5178	300279081	300168969	4/21/2026 9:00:01 PM
+881	MS IVR IN-Progress	A280401751	100564978	100394151	4/22/2026 2:57:19 AM
+881	MS IVR IN-Progress	T080332097	100625238	100443350	4/22/2026 3:02:27 AM
+881	MS IVR IN-Progress	A281205810	200849455	200573715	4/22/2026 2:36:07 AM
+881	MS IVR IN-Progress	TC-01-04-4969	300280010	300169793	4/21/2026 9:00:01 PM
+881	MS IVR IN-Progress	A280332750	100498083	100345713	4/22/2026 4:10:01 AM
+881	MS IVR IN-Progress	A280153907	200591826	200381870	4/21/2026 9:41:26 PM
+881	MS IVR IN-Progress	PA-02-20-8148	300343417	300230323	4/22/2026 4:24:39 AM
+881	MS IVR IN-Progress	C272161908	700184424	700297920	4/21/2026 8:29:27 PM
+881	MS IVR IN-Progress	460F4D0	700683823	700081694	4/21/2026 10:07:36 PM
+883	TS IVR IN-Progress	A281060966	200738955	200482855	3/23/2026 7:31:01 PM
+883	TS IVR IN-Progress	1-5466	700459830	700251640	3/15/2026 9:08:01 PM
+Pending Alarm With No Assignation
+AQ | ST	Alarm count	Event	CS No	Alarm Date	OWT	AQ Usr	ST Usr
+TS-BAT|7-TRB	1	1881 -TR-DELAY-NO RESET	4188268	4/21/2026 4:59:12 PM	11:57:08	X	
+© 2026 TELUS. All rights reserved. - Version 2.1.8700.29495 - Build 27-10-2023 16:23:10
