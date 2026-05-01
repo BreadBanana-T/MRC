@@ -137,20 +137,26 @@ var OutageTracker = {
       }
 
       var total = 0;
+      var unplannedCount = 0;
       var top = [];
       for (var i = 0; i < list.length; i++) {
         var o = list[i];
+        var cause = String(o.cause || o.reason || '');
+        // Skip planned/scheduled work — operationally we only care about
+        // unplanned outages affecting customers right now.
+        if (/\b(planned|scheduled)\b/i.test(cause)) continue;
         var n = this._safeInt(o.numCustomersOut || o.customersAffected || o.customers || o.customerCount);
         total += n;
+        unplannedCount += 1;
         top.push({
           region: o.municipality || o._regionName || o.regionName || o.area || o.location || 'Unknown',
           customers: n,
-          cause: o.cause || o.reason || '—',
+          cause: cause || '—',
           eta: this._fmtEta(o.crewEta || o.crewEtr || o.estTimeOn || o.estimatedRestoration || null)
         });
       }
       top.sort(function(a, b) { return b.customers - a.customers; });
-      return { data: { outages: list.length, customers: total, top: top.slice(0, 10), source: 'BC Hydro' } };
+      return { data: { outages: unplannedCount, customers: total, top: top.slice(0, 10), source: 'BC Hydro' } };
     } catch (e) {
       return { error: e.message };
     }
