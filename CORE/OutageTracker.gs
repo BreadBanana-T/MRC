@@ -90,6 +90,20 @@ var OutageTracker = {
     return isNaN(n) ? 0 : n;
   },
 
+  // ETAs come as Unix epoch in milliseconds (BC Hydro), pre-formatted strings
+  // (Hydro One), or null. Normalize to a short human-readable string.
+  _fmtEta: function(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number' || /^\d{10,}$/.test(String(v))) {
+      var ms = Number(v);
+      if (String(ms).length === 10) ms *= 1000; // seconds → ms
+      try {
+        return Utilities.formatDate(new Date(ms), 'America/Toronto', "MMM d, h:mm a");
+      } catch (e) { return String(v); }
+    }
+    return String(v);
+  },
+
   _commonHeaders: function() {
     return {
       muteHttpExceptions: true,
@@ -104,7 +118,23 @@ var OutageTracker = {
       var res = UrlFetchApp.fetch(url, this._commonHeaders());
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
-      var list = Array.isArray(body) ? body : (body.outages || body.data || []);
+
+      // BC Hydro nests outages two levels deep: body.regions[].outages[].
+      // Older shapes used a flat list at body.outages or the body itself.
+      var list = [];
+      if (Array.isArray(body)) list = body;
+      else if (Array.isArray(body.outages)) list = body.outages;
+      else if (Array.isArray(body.data)) list = body.data;
+      else if (Array.isArray(body.regions)) {
+        body.regions.forEach(function(r) {
+          if (Array.isArray(r.outages)) {
+            r.outages.forEach(function(o) {
+              if (o && !o._regionName) o._regionName = r.name;
+              list.push(o);
+            });
+          }
+        });
+      }
 
       var total = 0;
       var top = [];
@@ -113,10 +143,10 @@ var OutageTracker = {
         var n = this._safeInt(o.numCustomersOut || o.customersAffected || o.customers || o.customerCount);
         total += n;
         top.push({
-          region: o.area || o.region || o.location || o.regionNm || 'Unknown',
+          region: o.municipality || o._regionName || o.regionName || o.area || o.location || 'Unknown',
           customers: n,
           cause: o.cause || o.reason || '—',
-          eta: o.crewEta || o.estTimeOn || o.estimatedRestoration || null
+          eta: this._fmtEta(o.crewEta || o.crewEtr || o.estTimeOn || o.estimatedRestoration || null)
         });
       }
       top.sort(function(a, b) { return b.customers - a.customers; });
@@ -151,7 +181,7 @@ var OutageTracker = {
           region: a.MunicipalityName || a.Municipality || a.LocationDescription || a.Town || a.region || 'Unknown',
           customers: n,
           cause: a.Cause || a.CauseDescription || a.CauseCategory || '—',
-          eta: a.EstimatedRestoration || a.ETR || a.etr || null
+          eta: this._fmtEta(a.EstimatedRestoration || a.ETR || a.etr || null)
         });
       }
       top.sort(function(a, b) { return b.customers - a.customers; });
