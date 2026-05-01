@@ -67,6 +67,7 @@
                 </button>
                 
                 <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region Manager"><i data-lucide="map-pin" width="20"></i></button>
+                <button class="action-btn" id="btn-outage-admin" onclick="openOutageAdmin()" title="Outage URL Settings"><i data-lucide="zap" width="20"></i></button>
                 <button class="action-btn" onclick="openImportModal()"><i data-lucide="download" width="20"></i></button>
             </div>
         </header>
@@ -193,6 +194,19 @@
              <button class="btn-icon-sm" onclick="closeOutageDrawer()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
           </div>
           <div id="outage-modal-list" style="max-height:480px; overflow-y:auto;" class="custom-scrollbar"></div>
+       </div>
+    </div>
+
+    <div id="outage-admin-modal" class="modal-blur" onclick="closeOutageAdmin()">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:640px; max-width:95%; padding:0; overflow:hidden;">
+          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+             <div>
+                <h2 style="margin:0 0 4px 0; font-size:1.25rem;">Outage URL Settings</h2>
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Paste the JSON endpoint each utility uses. Leave blank to disable that source.</div>
+             </div>
+             <button class="btn-icon-sm" onclick="closeOutageAdmin()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+          </div>
+          <div id="outage-admin-body" style="padding:20px 24px; max-height:560px; overflow-y:auto;" class="custom-scrollbar"></div>
        </div>
     </div>
 

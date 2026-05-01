@@ -199,6 +199,91 @@
       google.script.run.withSuccessHandler(function(res) { try { state.syncMeta = JSON.parse(res); render(); } catch(e){} }).fetchSyncMetadata();
   }
 
+  // ───────────────────────────── Outage URL admin ─────────────────────────────
+  window.openOutageAdmin = function() {
+      var modal = document.getElementById('outage-admin-modal');
+      if (modal) modal.classList.add('open');
+      renderOutageAdmin({ loading: true });
+      if (typeof google === 'undefined') { renderOutageAdmin({ urls: { BC:'(local preview)', ON:'(local preview)', QC:'(local preview)' } }); return; }
+      google.script.run.withSuccessHandler(function(res) {
+          try { renderOutageAdmin({ urls: JSON.parse(res) }); }
+          catch(e) { renderOutageAdmin({ error: 'Failed to load current settings.' }); }
+      }).withFailureHandler(function(err) {
+          renderOutageAdmin({ error: (err && err.message) || 'Backend error loading URLs.' });
+      }).getOutageUrls();
+  };
+  window.closeOutageAdmin = function() {
+      var modal = document.getElementById('outage-admin-modal');
+      if (modal) modal.classList.remove('open');
+  };
+  function renderOutageAdmin(opts) {
+      var body = document.getElementById('outage-admin-body');
+      if (!body) return;
+      if (opts.loading) {
+          body.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Loading…</div>';
+          return;
+      }
+      if (opts.error) {
+          body.innerHTML = '<div style="padding:24px; color:var(--status-alert); font-weight:700;">' + escapeHTML(opts.error) + '</div>';
+          return;
+      }
+      var urls = opts.urls || {};
+      var rows = [
+          { code: 'BC', name: 'BC Hydro',          hint: 'outage-list.json (DevTools → Network → filter "outage" or ".json")' },
+          { code: 'ON', name: 'Hydro One',         hint: 'ArcGIS FeatureServer/0/query (DevTools → filter "FeatureServer" or "query")' },
+          { code: 'QC', name: 'Hydro-Québec',      hint: 'bilan.json (DevTools → filter "bilan" or "pannes")' }
+      ];
+      var html = rows.map(function(r) {
+          var current = urls[r.code] || '';
+          var displayed = current && current !== '(default)' && current !== '(not set — source disabled)' ? current : '';
+          var statusBadge = '';
+          if (current === '(default)') statusBadge = '<span style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; padding:2px 8px; background:var(--bg-root); border-radius:8px;">Default</span>';
+          else if (current === '(not set — source disabled)') statusBadge = '<span style="font-size:0.65rem; font-weight:800; color:var(--status-warn); text-transform:uppercase; letter-spacing:1px; padding:2px 8px; background:rgba(245,158,11,0.1); border-radius:8px;">Disabled</span>';
+          else if (current) statusBadge = '<span style="font-size:0.65rem; font-weight:800; color:var(--status-active); text-transform:uppercase; letter-spacing:1px; padding:2px 8px; background:rgba(16,185,129,0.1); border-radius:8px;">Custom</span>';
+          return '' +
+            '<div style="padding:16px 0; border-bottom:1px solid var(--glass-border);">' +
+              '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">' +
+                '<div style="font-weight:800; font-size:0.95rem;">' + r.name + ' <span style="color:var(--text-muted); font-weight:600; font-size:0.8rem;">(' + r.code + ')</span></div>' +
+                statusBadge +
+              '</div>' +
+              '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-bottom:8px;">' + r.hint + '</div>' +
+              '<div style="display:flex; gap:8px;">' +
+                '<input id="outage-url-' + r.code + '" class="input-aether" style="flex:1; height:34px; font-size:0.8rem; font-family:monospace;" placeholder="https://..." value="' + escapeHTML(displayed) + '">' +
+                '<button class="btn btn-primary" onclick="saveOutageUrl(\'' + r.code + '\')" style="height:34px; padding:0 14px; font-size:0.8rem;">Save</button>' +
+                '<button class="btn btn-glass" onclick="clearOutageUrl(\'' + r.code + '\')" style="height:34px; padding:0 12px; font-size:0.8rem;" title="Revert to default">↺</button>' +
+              '</div>' +
+            '</div>';
+      }).join('');
+      body.innerHTML = html +
+          '<div style="padding:16px 4px 4px 4px; font-size:0.75rem; color:var(--text-muted); line-height:1.6;">' +
+          '<b>Tip:</b> Save = use this exact URL. ↺ = clear the override and use the built-in default. Empty value + Save = disable that source completely.' +
+          '</div>';
+      refreshIcons();
+  }
+  window.saveOutageUrl = function(code) {
+      var input = document.getElementById('outage-url-' + code);
+      if (!input) return;
+      var url = input.value.trim();
+      if (typeof google === 'undefined') { showToast('Saved (preview)'); return; }
+      google.script.run.withSuccessHandler(function() {
+          showToast(code + ' URL saved');
+          openOutageAdmin();           // reload to show new status badge
+          fetchOutages();              // refresh dashboard data
+      }).withFailureHandler(function(err) {
+          showToast('Save failed: ' + ((err && err.message) || 'unknown'));
+      }).setOutageUrl(code, url);
+  };
+  window.clearOutageUrl = function(code) {
+      if (typeof google === 'undefined') { showToast('Cleared (preview)'); return; }
+      google.script.run.withSuccessHandler(function() {
+          showToast(code + ' reverted to default');
+          openOutageAdmin();
+          fetchOutages();
+      }).withFailureHandler(function(err) {
+          showToast('Clear failed: ' + ((err && err.message) || 'unknown'));
+      }).setOutageUrl(code, null);
+  };
+
   function fallbackCopyTextToClipboard(text, successMsg) {
       var textArea = document.createElement("textarea");
       textArea.value = text;
