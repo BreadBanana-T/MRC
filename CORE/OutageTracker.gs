@@ -217,27 +217,44 @@ var OutageTracker = {
       var body = JSON.parse(res.getContentText());
 
       // New `bis` endpoint: top-level array of {id, nbClientInterrompu,
-      // nbPanne, nbClientRaccorde}. Older bilan.json wrapped regions in an
-      // object with global totals — handle both.
+      // nbPanne, nbClientRaccorde}. The same outage is reported at every
+      // hierarchy level (region → sub-region → sub-zone), so naively summing
+      // double- or triple-counts. Use the magic id "HQ" for the official
+      // province total, and only 2-char IDs (the 17 admin regions) for the
+      // drawer breakdown to avoid duplicates.
       if (Array.isArray(body)) {
-        var total = 0, outages = 0;
+        var globalEntry = null;
         var top = [];
+        var fallbackTotal = 0, fallbackOutages = 0;
+        var regionNames = {
+          '01': 'Bas-Saint-Laurent', '02': 'Saguenay – Lac-Saint-Jean',
+          '03': 'Capitale-Nationale', '04': 'Mauricie', '05': 'Estrie',
+          '06': 'Montréal', '07': 'Outaouais', '08': 'Abitibi-Témiscamingue',
+          '09': 'Côte-Nord', '10': 'Nord-du-Québec',
+          '11': 'Gaspésie – Îles-de-la-Madeleine', '12': 'Chaudière-Appalaches',
+          '13': 'Laval', '14': 'Lanaudière', '15': 'Laurentides',
+          '16': 'Montérégie', '17': 'Centre-du-Québec'
+        };
         for (var i = 0; i < body.length; i++) {
           var e = body[i] || {};
+          var id = String(e.id == null ? '' : e.id);
           var c = this._safeInt(e.nbClientInterrompu);
           var p = this._safeInt(e.nbPanne);
-          total += c;
-          outages += p;
-          if (c > 0 || p > 0) {
-            top.push({
-              region: 'Zone ' + (e.id || '?'),
-              customers: c,
-              cause: '—',
-              eta: null
-            });
+          if (id.toUpperCase() === 'HQ') {
+            globalEntry = { customers: c, outages: p };
+            continue;
+          }
+          if (id.length === 2 && /^\d{2}$/.test(id)) {
+            fallbackTotal += c;
+            fallbackOutages += p;
+            if (c > 0 || p > 0) {
+              top.push({ region: regionNames[id] || ('Region ' + id), customers: c, cause: '—', eta: null });
+            }
           }
         }
         top.sort(function(a, b) { return b.customers - a.customers; });
+        var total = globalEntry ? globalEntry.customers : fallbackTotal;
+        var outages = globalEntry ? globalEntry.outages : fallbackOutages;
         return { data: { outages: outages, customers: total, top: top.slice(0, 10), source: 'Hydro-Québec' } };
       }
 

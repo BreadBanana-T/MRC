@@ -190,7 +190,10 @@
                  '<div style="text-align:right; flex-shrink:0;"><div style="font-size:1.25rem; font-weight:800; color:var(--status-alert);">' + (r.customers || 0).toLocaleString() + '</div><div style="font-size:0.65rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">customers</div></div>' +
                  '</div>';
       }).join('');
-      listEl.innerHTML = rows || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No active outages.</div>';
+      var emptyMsg = (d.outages > 0)
+          ? 'Per-region breakdown not available from this source.<div style="font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-top:8px;">Headline counts are accurate; the utility just doesn\'t expose region-level detail in this feed.</div>'
+          : 'No active outages.';
+      listEl.innerHTML = rows || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">' + emptyMsg + '</div>';
       refreshIcons();
   }
 
