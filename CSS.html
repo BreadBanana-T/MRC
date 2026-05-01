@@ -1,38 +1,45 @@
 <style>
   :root {
-    --bg-root: #f0f4f8;
+    --bg-root: #eef2fb;
     --bg-blob-1: #c7d2fe;
     --bg-blob-2: #fbcfe8;
-    --glass-surface: rgba(255, 255, 255, 0.9);
-    --glass-border: 1px solid rgba(255, 255, 255, 1);
-    --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.08);
-    --card-bg: rgba(255, 255, 255, 0.65);
+    --glass-surface: rgba(255, 255, 255, 0.78);
+    --glass-border: 1px solid rgba(99, 102, 241, 0.10);
+    --glass-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 -30px 60px -30px rgba(99, 102, 241, 0.10) inset, 0 24px 48px -24px rgba(31, 38, 135, 0.18), 0 8px 18px -10px rgba(99, 102, 241, 0.16);
+    --glass-shadow-hover: 0 1px 0 rgba(255,255,255,1) inset, 0 -36px 70px -30px rgba(99, 102, 241, 0.16) inset, 0 36px 70px -28px rgba(31, 38, 135, 0.24), 0 18px 36px -16px rgba(99, 102, 241, 0.26);
+    --card-bg:
+        radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.05) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(244, 246, 255, 0.95) 100%);
     --text-main: #0f172a;
     --text-secondary: #475569;
     --text-muted: #94a3b8;
     --accent-primary: #4f46e5;
     --accent-glow: 0 4px 20px rgba(99, 102, 241, 0.2);
-    
+
     /* STATUS COLORS */
     --status-active: #059669;
     --status-break: #d97706;
     --status-alert: #dc2626;
+    --status-warn: #d97706;
     --status-role: #7c3aed;
     --status-ulc: #f97316;
-    
+
     --region-on: #0ea5e9;
     --region-off: #8b5cf6;
-    --radius-panel: 24px;
+    --radius-panel: 22px;
     --font-ui: 'Outfit', sans-serif;
   }
   body.dark {
-    --bg-root: #020408;
+    --bg-root: #050810;
     --bg-blob-1: #1e1b4b;
     --bg-blob-2: #312e81;
-    --glass-surface: rgba(20, 20, 28, 0.8);
-    --glass-border: 1px solid rgba(255, 255, 255, 0.1);
-    --glass-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-    --card-bg: rgba(255, 255, 255, 0.05);
+    --glass-surface: rgba(20, 22, 32, 0.78);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.06);
+    --glass-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 -40px 80px -40px rgba(99, 102, 241, 0.16) inset, 0 30px 70px -30px rgba(0, 0, 0, 0.55), 0 14px 26px -14px rgba(99, 102, 241, 0.18);
+    --glass-shadow-hover: 0 1px 0 rgba(255,255,255,0.10) inset, 0 -40px 90px -40px rgba(99, 102, 241, 0.26) inset, 0 50px 110px -30px rgba(0, 0, 0, 0.7), 0 28px 50px -20px rgba(99, 102, 241, 0.32);
+    --card-bg:
+        radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.10) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(20, 22, 32, 0.85) 0%, rgba(12, 14, 22, 0.95) 100%);
     --text-main: #ffffff;
     --text-secondary: #a5b4fc;
     --text-muted: #94a3b8;
@@ -40,6 +47,7 @@
     --status-active: #34d399;
     --status-break: #fbbf24;
     --status-alert: #f87171;
+    --status-warn: #fbbf24;
     --status-role: #c084fc;
     --status-ulc: #fb923c;
     --region-on: #38bdf8;
@@ -165,7 +173,57 @@
   .action-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-color: var(--accent-primary); }
 
   .viewport { flex: 1; overflow-y: auto; overflow-x: hidden; border-radius: var(--radius-panel); padding-bottom: 80px; padding-right: 12px; min-height: 0; }
-  .aether-card { background: var(--card-bg); backdrop-filter: blur(20px); border: var(--glass-border); border-radius: var(--radius-panel); padding: 32px; box-shadow: var(--glass-shadow); transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+  /* Aurora base — every card gets the depth + hairline treatment automatically.
+     Hero/data tiles can opt into the rotating animated edge via .tile-aurora. */
+  .aether-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: var(--glass-border);
+      border-radius: var(--radius-panel);
+      padding: 32px;
+      box-shadow: var(--glass-shadow);
+      transition:
+          transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+          box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      isolation: isolate;
+  }
+  .aether-card:hover { box-shadow: var(--glass-shadow-hover); }
+  /* Subtle static hairline highlight on the top edge — adds dimensionality
+     without the visual noise of rotating borders on every card. */
+  .aether-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(
+          135deg,
+          rgba(255, 255, 255, 0.18) 0%,
+          rgba(255, 255, 255, 0) 35%,
+          rgba(99, 102, 241, 0.12) 100%
+      );
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+              mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+              mask-composite: exclude;
+      pointer-events: none;
+      z-index: 0;
+  }
+  body:not(.dark) .aether-card::before {
+      background: linear-gradient(
+          135deg,
+          rgba(255, 255, 255, 1) 0%,
+          rgba(255, 255, 255, 0) 30%,
+          rgba(99, 102, 241, 0.18) 100%
+      );
+  }
+  .aether-card > * { position: relative; z-index: 1; }
   
   .sticky-header { position: sticky; top: 10px; z-index: 100; background: var(--glass-surface); backdrop-filter: blur(25px); border: var(--glass-border); border-radius: 20px; box-shadow: var(--glass-shadow); padding: 12px 24px; margin-bottom: 24px; display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; }
 
@@ -305,10 +363,10 @@
       .top-deck { padding: 0 16px; }
   }
   
-  /* --- SMART TOGGLE MENU LOGIC (< 1100px) ---
-     Triggered earlier than the bento breakpoint to keep the header from
-     crowding once nav (6 items) + actions (8 icons) + brand all need to fit. */
-  @media (max-width: 1100px) {
+  /* --- SMART TOGGLE MENU LOGIC (< 1280px) ---
+     Triggered before the bento breakpoint because nav (6 items) + actions
+     (8 icons) + brand crowd each other long before things truly break. */
+  @media (max-width: 1280px) {
       .top-deck {
           flex-wrap: nowrap;
           min-height: 64px;
@@ -355,43 +413,11 @@
     inherits: false;
   }
 
-  .tile-aurora {
-      position: relative;
-      isolation: isolate;
-      background:
-          radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.10) 0%, transparent 55%),
-          linear-gradient(180deg, rgba(20, 22, 32, 0.85) 0%, rgba(12, 14, 22, 0.95) 100%);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 22px;
-      overflow: hidden;
-      box-shadow:
-          0 1px 0 rgba(255, 255, 255, 0.06) inset,
-          0 -40px 80px -40px rgba(99, 102, 241, 0.18) inset,
-          0 30px 70px -30px rgba(0, 0, 0, 0.55),
-          0 18px 32px -18px rgba(99, 102, 241, 0.18);
-      transition:
-          transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
-          box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  body:not(.dark) .tile-aurora {
-      background:
-          radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.06) 0%, transparent 55%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(244, 246, 255, 0.95) 100%);
-      border: 1px solid rgba(99, 102, 241, 0.12);
-      box-shadow:
-          0 1px 0 rgba(255, 255, 255, 0.9) inset,
-          0 -40px 80px -40px rgba(99, 102, 241, 0.10) inset,
-          0 30px 60px -30px rgba(31, 38, 135, 0.18),
-          0 12px 24px -12px rgba(99, 102, 241, 0.16);
-  }
-
-  /* Animated rotating conic-gradient hairline (the "alive" edge). */
+  /* Hero variant: swap the static hairline for an animated conic-gradient
+     ring, and lift a touch more on hover. Inherits everything else from
+     the .aether-card base. */
+  .tile-aurora:hover { transform: translateY(-3px); }
   .tile-aurora::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      padding: 1px;
       background: conic-gradient(
           from var(--aurora-angle, 0deg),
           rgba(56, 189, 248, 0)   0%,
@@ -401,34 +427,20 @@
           rgba(56, 189, 248, 0)   68%,
           rgba(56, 189, 248, 0)   100%
       );
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-              mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-              mask-composite: exclude;
       animation: aurora-spin 9s linear infinite;
-      pointer-events: none;
-      z-index: 0;
       opacity: 0.85;
   }
-
-  .tile-aurora:hover {
-      transform: translateY(-3px);
-      box-shadow:
-          0 1px 0 rgba(255, 255, 255, 0.10) inset,
-          0 -40px 90px -40px rgba(99, 102, 241, 0.28) inset,
-          0 50px 110px -30px rgba(0, 0, 0, 0.7),
-          0 28px 50px -20px rgba(99, 102, 241, 0.32);
+  body:not(.dark) .tile-aurora::before {
+      background: conic-gradient(
+          from var(--aurora-angle, 0deg),
+          rgba(56, 189, 248, 0)   0%,
+          rgba(99, 102, 241, 0.55) 18%,
+          rgba(129, 140, 248, 0.55) 33%,
+          rgba(168, 85, 247, 0.45) 50%,
+          rgba(99, 102, 241, 0)   68%,
+          rgba(99, 102, 241, 0)   100%
+      );
   }
-  body:not(.dark) .tile-aurora:hover {
-      box-shadow:
-          0 1px 0 rgba(255, 255, 255, 1) inset,
-          0 -40px 80px -40px rgba(99, 102, 241, 0.16) inset,
-          0 40px 80px -30px rgba(31, 38, 135, 0.25),
-          0 20px 40px -15px rgba(99, 102, 241, 0.28);
-  }
-
-  /* Children sit above ::before/::after */
-  .tile-aurora > * { position: relative; z-index: 2; }
 
   @keyframes aurora-spin {
       to { --aurora-angle: 360deg; }

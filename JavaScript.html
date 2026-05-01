@@ -47,7 +47,7 @@
               var header = document.querySelector('.top-deck');
               var icon = document.getElementById('header-toggle-icon');
               if (!header) return;
-              if (window.innerWidth > 1100 && header.classList.contains('show-actions')) {
+              if (window.innerWidth > 1280 && header.classList.contains('show-actions')) {
                   header.classList.remove('show-actions');
                   if (icon) icon.setAttribute('data-lucide', 'chevron-left');
                   if (typeof refreshIcons === 'function') refreshIcons();
