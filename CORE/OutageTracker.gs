@@ -216,30 +216,54 @@ var OutageTracker = {
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
 
-      // HQ bilan.json historically: { global:{clients,pannes}, regions:[{nom,clients,pannes}] }
-      // Shape occasionally drifts; be defensive.
+      // New `bis` endpoint: top-level array of {id, nbClientInterrompu,
+      // nbPanne, nbClientRaccorde}. Older bilan.json wrapped regions in an
+      // object with global totals — handle both.
+      if (Array.isArray(body)) {
+        var total = 0, outages = 0;
+        var top = [];
+        for (var i = 0; i < body.length; i++) {
+          var e = body[i] || {};
+          var c = this._safeInt(e.nbClientInterrompu);
+          var p = this._safeInt(e.nbPanne);
+          total += c;
+          outages += p;
+          if (c > 0 || p > 0) {
+            top.push({
+              region: 'Zone ' + (e.id || '?'),
+              customers: c,
+              cause: '—',
+              eta: null
+            });
+          }
+        }
+        top.sort(function(a, b) { return b.customers - a.customers; });
+        return { data: { outages: outages, customers: total, top: top.slice(0, 10), source: 'Hydro-Québec' } };
+      }
+
+      // Legacy bilan.json shape.
       var regions = body.regions || body.list || body.data || [];
       var global = body.global || body.summary || body.total || {};
 
-      var total = this._safeInt(global.clients || global.clientsAffected || global.clientsSansElectricite);
-      var outages = this._safeInt(global.pannes || global.outages);
+      var totalLegacy = this._safeInt(global.clients || global.clientsAffected || global.clientsSansElectricite);
+      var outagesLegacy = this._safeInt(global.pannes || global.outages);
 
-      var top = [];
-      for (var i = 0; i < regions.length; i++) {
-        var r = regions[i];
-        top.push({
+      var topLegacy = [];
+      for (var j = 0; j < regions.length; j++) {
+        var r = regions[j];
+        topLegacy.push({
           region: r.nom || r.name || r.region || r.regionNom || 'Unknown',
           customers: this._safeInt(r.clients || r.customers || r.clientsSansElectricite),
           cause: '—',
           eta: null
         });
       }
-      top.sort(function(a, b) { return b.customers - a.customers; });
+      topLegacy.sort(function(a, b) { return b.customers - a.customers; });
 
-      if (!total) total = top.reduce(function(s, r) { return s + r.customers; }, 0);
-      if (!outages) outages = regions.length;
+      if (!totalLegacy) totalLegacy = topLegacy.reduce(function(s, r) { return s + r.customers; }, 0);
+      if (!outagesLegacy) outagesLegacy = regions.length;
 
-      return { data: { outages: outages, customers: total, top: top.slice(0, 10), source: 'Hydro-Québec (unofficial)' } };
+      return { data: { outages: outagesLegacy, customers: totalLegacy, top: topLegacy.slice(0, 10), source: 'Hydro-Québec' } };
     } catch (e) {
       return { error: e.message };
     }
