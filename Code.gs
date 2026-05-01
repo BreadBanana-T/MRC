@@ -106,6 +106,23 @@ function archiveUnifiedReport(dateStr, cycleFilter) {
 function getArchiveList() { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchiveList() : "[]";
 }
-function getArchivedReport(period) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period) : "{}"; 
+function getArchivedReport(period, cycleFilter) {
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getArchivedReport(period, cycleFilter) : "{}";
+}
+
+// --- POWER OUTAGES (BC Hydro + Hydro One + Hydro-Québec) ---
+function getPowerOutages() {
+  return (typeof OutageTracker !== 'undefined') ? OutageTracker.fetchAll() : "{}";
+}
+
+// --- STAFFING BALANCE (current 15-min IDP bucket) ---
+function getStaffingBalance() {
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getStaffingBalance() : "{}";
+}
+
+// getOutageAgentCorrelation() defined in CORE/OutageTracker.gs
+// getCoachingCadenceFlags() defined in CORE/AssignmentAnalyzer.gs
+
+function fetchCoachingCadence(thresholdDays) {
+  return (typeof getCoachingCadenceFlags === 'function') ? getCoachingCadenceFlags(thresholdDays) : "{\"flags\":[]}";
 }

@@ -160,7 +160,23 @@ function pushAgent(roster, name, id, buf, defY, defM, defD) {
      if(parts.length === 2) cleanName = `${parts[1].trim()} ${parts[0].trim()}`;
   }
 
-  roster.push([cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, buf.isOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks), buf.role, buf.absentType, startEpoch, endEpoch]);
+  let finalOffshore = buf.isOffshore;
+  // Prefer ID prefix 3 as the strongest positive signal; otherwise the keyword/flag
+  // accumulated on the buffer. Consult & upsert the Region Registry so the result
+  // is durable across imports and can be manually overridden.
+  if (typeof RegionRegistry !== 'undefined') {
+      const registered = RegionRegistry.getRegion(cleanName);
+      const src = RegionRegistry.getSource(cleanName);
+      if (registered && (src === 'manual' || src === 'masterlist')) {
+          finalOffshore = registered === 'Offshore';
+      } else {
+          const source = (id && String(id).startsWith('3')) ? 'auto-wfm-id'
+                        : (buf.isOffshore ? 'auto-wfm-keyword' : 'auto-wfm-default');
+          RegionRegistry.upsert(cleanName, finalOffshore ? 'Offshore' : 'Onshore', source);
+      }
+  }
+
+  roster.push([cleanName, id, finalDateStr, buf.start || "", buf.end || "", type, finalOffshore ? "Offshore" : "Onshore", JSON.stringify(buf.breaks), buf.role, buf.absentType, startEpoch, endEpoch]);
 }
 
 function safeParseDateStr(ds, defY, defM, defD) {

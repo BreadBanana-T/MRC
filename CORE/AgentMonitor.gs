@@ -36,7 +36,7 @@ function compileFloorData() {
   let mlData = {};
   if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
-          let cleanName = String(r[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+          let cleanName = _normalizeAgentKey(r[0]);
           let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
           mlData[cleanName] = {
               level: r[1],
@@ -54,7 +54,7 @@ function compileFloorData() {
   const SCORES = { 'active': 50, 'startingSoon': 45, 'training': 30, 'unplanned': 20, 'vacation': 10, 'planned': 10, 'off': 0 };
 
   const processEntry = (rawName, row) => {
-    const cleanNameKey = String(rawName).trim().toLowerCase().replace(/\s+/g, ' ');
+    const cleanNameKey = _normalizeAgentKey(rawName);
     const ml = mlData[cleanNameKey] || null;
 
     const persistentData = sheetOverrides.get(cleanNameKey) || {};
@@ -64,9 +64,13 @@ function compileFloorData() {
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
     let shiftType = row ? row[5] : "Off";
     
-    // MasterList Offshore Override
+    // Region resolution order: RegionRegistry > MasterList inference > Raw Schedule row.
     let region = row ? row[6] : "Offshore";
     if (ml) region = ml.isOffshore ? "Offshore" : "Onshore";
+    if (typeof RegionRegistry !== 'undefined') {
+        const rg = RegionRegistry.getRegion(rawName);
+        if (rg) region = rg;
+    }
 
     let startEpoch = row ? Number(row[10]) : 0;
     let endEpoch = row ? Number(row[11]) : 0;
