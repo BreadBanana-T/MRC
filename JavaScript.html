@@ -37,6 +37,25 @@
       refreshIcons();
   };
 
+  // Reset show-actions when the viewport widens past the responsive breakpoint
+  // so the desktop layout doesn't keep the actions-only state stuck on.
+  (function() {
+      var resizeTimer = null;
+      window.addEventListener('resize', function() {
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(function() {
+              var header = document.querySelector('.top-deck');
+              var icon = document.getElementById('header-toggle-icon');
+              if (!header) return;
+              if (window.innerWidth > 1100 && header.classList.contains('show-actions')) {
+                  header.classList.remove('show-actions');
+                  if (icon) icon.setAttribute('data-lucide', 'chevron-left');
+                  if (typeof refreshIcons === 'function') refreshIcons();
+              }
+          }, 120);
+      });
+  })();
+
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
   };
@@ -180,14 +199,28 @@
       var subEl = document.getElementById('outage-modal-sub');
       var listEl = document.getElementById('outage-modal-list');
       if (!titleEl || !listEl) return;
-      titleEl.innerText = p + ' — ' + (d.customers || 0).toLocaleString() + ' customers affected';
-      subEl.innerText = d.source + ' • ' + (d.outages || 0) + ' active outages';
+      var totalCust = d.customers || 0;
+      var totalOut = d.outages || 0;
+      var headSev = totalCust >= 5000 ? 'var(--status-alert)' : totalCust >= 500 ? 'var(--status-warn)' : 'var(--accent-primary)';
+      titleEl.innerHTML = '<span style="display:inline-block; padding:4px 10px; background:' + headSev + '; color:#fff; border-radius:8px; font-size:0.75rem; font-weight:800; letter-spacing:1px; vertical-align:middle; margin-right:10px;">' + escapeHTML(p) + '</span><span style="font-variant-numeric:tabular-nums;">' + totalCust.toLocaleString() + '</span> <span style="font-size:0.85rem; font-weight:600; color:var(--text-muted);">customer' + (totalCust === 1 ? '' : 's') + ' affected</span>';
+      subEl.innerHTML = '<span style="display:inline-flex; align-items:center; gap:6px;"><i data-lucide="zap" width="13"></i> ' + escapeHTML(d.source || 'Unknown') + '</span> &nbsp;•&nbsp; <span>' + totalOut.toLocaleString() + ' active outage' + (totalOut === 1 ? '' : 's') + '</span>';
+      var maxCustomers = (d.top || []).reduce(function(m, r) { return Math.max(m, r.customers || 0); }, 0) || 1;
       var rows = (d.top || []).map(function(r) {
-          var eta = r.eta ? ('<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">ETA: ' + escapeHTML(String(r.eta)) + '</div>') : '';
-          return '<div style="padding:14px 16px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
-                 '<div style="flex:1; min-width:0;"><div style="font-weight:800; color:var(--text-main); font-size:0.95rem;">' + escapeHTML(r.region || 'Unknown') + '</div>' +
-                 '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(r.cause || '—') + '</div>' + eta + '</div>' +
-                 '<div style="text-align:right; flex-shrink:0;"><div style="font-size:1.25rem; font-weight:800; color:var(--status-alert);">' + (r.customers || 0).toLocaleString() + '</div><div style="font-size:0.65rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">customers</div></div>' +
+          var n = r.customers || 0;
+          // Severity color by share of the largest outage in the list.
+          var pct = n / maxCustomers;
+          var sev = pct >= 0.66 ? 'var(--status-alert)' : pct >= 0.25 ? 'var(--status-warn)' : 'var(--accent-primary)';
+          var barWidth = Math.max(4, Math.round(pct * 100));
+          var eta = r.eta ? ('<div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; align-items:center; gap:4px;"><i data-lucide="clock" width="11"></i> ETA ' + escapeHTML(String(r.eta)) + '</div>') : '';
+          return '<div style="padding:14px 18px; border-bottom:1px solid var(--glass-border); position:relative;">' +
+                   '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
+                     '<div style="flex:1; min-width:0;">' +
+                       '<div style="font-weight:800; color:var(--text-main); font-size:0.95rem; display:flex; align-items:center; gap:8px;"><div style="width:6px; height:6px; border-radius:50%; background:' + sev + '; flex-shrink:0;"></div>' + escapeHTML(r.region || 'Unknown') + '</div>' +
+                       '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(r.cause || '—') + '</div>' + eta +
+                     '</div>' +
+                     '<div style="text-align:right; flex-shrink:0;"><div style="font-size:1.4rem; font-weight:800; color:' + sev + '; line-height:1; font-variant-numeric:tabular-nums;">' + n.toLocaleString() + '</div><div style="font-size:0.62rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;">customers</div></div>' +
+                   '</div>' +
+                   '<div style="height:3px; margin-top:12px; background:var(--bg-root); border-radius:2px; overflow:hidden;"><div style="width:' + barWidth + '%; height:100%; background:' + sev + '; transition:width 0.4s ease;"></div></div>' +
                  '</div>';
       }).join('');
       var emptyMsg = (d.outages > 0)
