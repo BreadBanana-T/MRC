@@ -771,7 +771,7 @@
       var outageTileHtml = renderOutageTile();
       var correlationHtml = renderOutageCorrelationBanner();
       var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>' + correlationHtml + outageTileHtml + '<div class="grid-bento">' +
-                 '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px;"><div style="display:flex; justify-content:space-between; align-items:center;"><div><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Service Level</div><div id="ov-sl-text" style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px;">Response Time</div><div id="ov-ack-text" style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:120px; width:100%; margin-top:20px; display:flex;"><canvas id="chart-overview" style="width:100%; height:120px;"></canvas></div></div>' +
+                 '<div class="aether-card tile-aurora" data-aurora-tile="sl" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px; padding:28px;"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;"><div><div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;"><span class="aurora-pulse"></span> Service Level</div><div class="aurora-num" data-aurora-num="sl" style="font-size:3.8rem; font-weight:800; line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div class="aurora-label" style="margin-bottom:10px;">Response Time</div><div data-aurora-num="ack" style="font-size:2.2rem; font-weight:800; color:var(--text-main); line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:130px; width:100%; margin-top:24px; display:flex;"><canvas id="chart-overview" style="width:100%; height:130px;"></canvas></div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
                  '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
                  renderStaffingTile() +
@@ -1170,12 +1170,97 @@
       var canvas = document.getElementById('chart-overview'); if (!canvas) return; var ctx = canvas.getContext('2d');
       var labels = state.slHistory.map(function(d){return d.name || '';}); var slData = state.slHistory.map(function(d){return d.val || 0;}); var rawAck = state.slHistory.map(function(d){return d.ack || 0;});
       if (charts.overview) { charts.overview.destroy(); charts.overview = null; }
-      var gradientSL = ctx.createLinearGradient(0, 0, 0, canvas.height || 200); gradientSL.addColorStop(0, 'rgba(99, 102, 241, 0.4)'); gradientSL.addColorStop(1, 'rgba(99, 102, 241, 0.0)'); 
-      var gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200); gradientACK.addColorStop(0, 'rgba(244, 63, 94, 0.4)'); gradientACK.addColorStop(1, 'rgba(244, 63, 94, 0.0)');
-      var isDark = document.body.classList.contains('dark'); var gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'; var textColor = isDark ? '#94a3b8' : '#64748b';
-      var shadowPlugin = { id: 'shadowPluginLine', beforeDatasetsDraw: function(chart) { var ctx = chart.ctx; ctx.save(); ctx.shadowColor = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(99, 102, 241, 0.3)'; ctx.shadowBlur = 12; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 6; }, afterDatasetsDraw: function(chart) { chart.ctx.restore(); } };
+      // Aurora palette: SL = cyan, ACK = magenta. Big translucent area fills,
+      // strong glow via shadowBlur on each draw pass for a neon line effect.
+      var SL_HEX  = '#38bdf8';
+      var ACK_HEX = '#f472b6';
+      var gradientSL  = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      gradientSL.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
+      gradientSL.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      var gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      gradientACK.addColorStop(0, 'rgba(244, 114, 182, 0.35)');
+      gradientACK.addColorStop(1, 'rgba(244, 114, 182, 0)');
 
-      charts.overview = new Chart(ctx, { type: 'line', plugins: [shadowPlugin], data: { labels: labels, datasets: [ { label: 'Service Level (%)', data: slData, borderColor: '#4f46e5', backgroundColor: gradientSL, borderWidth: 3, fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 6, pointBackgroundColor: '#4f46e5', pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y' }, { label: 'Response Time (s)', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: '#f43f5e', backgroundColor: gradientACK, borderWidth: 3, borderDash: [6, 4], fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 6, pointBackgroundColor: '#f43f5e', pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' } ] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false, }, plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, boxHeight: 8, font: { family: "'Outfit', sans-serif", weight: '700', size: 11 }, color: textColor } }, tooltip: { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)', titleColor: isDark ? '#fff' : '#0f172a', bodyColor: isDark ? '#cbd5e1' : '#475569', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', borderWidth: 1, titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' }, bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' }, padding: 12, cornerRadius: 12, boxPadding: 6, usePointStyle: true, callbacks: { label: function(context) { var label = context.dataset.label || ''; if (label) { label = label.replace(' (%)', '').replace(' (s)', '') + ': '; } if (context.datasetIndex === 0) { label += context.raw + '%'; } else { label += rawAck[context.dataIndex] + 's'; } return label; } } } }, scales: { x: { grid: { display: false, drawBorder: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }, y: { type: 'linear', display: true, position: 'left', min: 0, max: 100, grid: { color: gridColor, drawBorder: false, borderDash: [5, 5] }, ticks: { callback: function(value){return value + '%';}, font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 } }, y1: { type: 'linear', display: true, position: 'right', min: 0, suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, grid: { display: false, drawBorder: false }, ticks: { callback: function(value){return value + 's';}, font: { family: "'Outfit', sans-serif", weight: '600' }, color: textColor, padding: 10 } } }, animation: { duration: 1500, easing: 'easeOutQuart' } } });
+      var isDark = document.body.classList.contains('dark');
+      var gridColor = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(15, 23, 42, 0.04)';
+      var textColor = isDark ? 'rgba(255,255,255,0.45)' : '#64748b';
+
+      // Neon glow plugin: layered shadow casts that bloom around each line.
+      // Drawing the line three times with decreasing blur is the cleanest way
+      // to fake the multi-stroke "outer-glow then inner-glow" look.
+      var neonGlow = {
+          id: 'auroraNeon',
+          beforeDatasetsDraw: function(chart) {
+              var c = chart.ctx;
+              c.save();
+              c.shadowColor = isDark ? 'rgba(56, 189, 248, 0.75)' : 'rgba(99, 102, 241, 0.45)';
+              c.shadowBlur = 24;
+              c.shadowOffsetX = 0;
+              c.shadowOffsetY = 0;
+          },
+          afterDatasetsDraw: function(chart) { chart.ctx.restore(); }
+      };
+
+      charts.overview = new Chart(ctx, {
+          type: 'line',
+          plugins: [neonGlow],
+          data: {
+              labels: labels,
+              datasets: [
+                  { label: 'Service Level', data: slData, borderColor: SL_HEX, backgroundColor: gradientSL, borderWidth: 2.5, fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: SL_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, pointHoverBorderWidth: 2, yAxisID: 'y' },
+                  { label: 'Response Time', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: ACK_HEX, backgroundColor: gradientACK, borderWidth: 2.5, borderDash: [4, 5], fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: ACK_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' }
+              ]
+          },
+          options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                  legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, boxHeight: 8, font: { family: "'Outfit', sans-serif", weight: '700', size: 11 }, color: textColor } },
+                  tooltip: {
+                      backgroundColor: isDark ? 'rgba(15, 18, 30, 0.92)' : 'rgba(255, 255, 255, 0.96)',
+                      titleColor: isDark ? '#fff' : '#0f172a',
+                      bodyColor: isDark ? '#cbd5e1' : '#475569',
+                      borderColor: isDark ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.18)',
+                      borderWidth: 1,
+                      titleFont: { family: "'Outfit', sans-serif", size: 13, weight: '800' },
+                      bodyFont: { family: "'Outfit', sans-serif", size: 12, weight: '600' },
+                      padding: 12, cornerRadius: 14, boxPadding: 6, usePointStyle: true,
+                      callbacks: { label: function(ctx2) { var l = ctx2.dataset.label || ''; if (l) l += ': '; if (ctx2.datasetIndex === 0) l += ctx2.raw + '%'; else l += rawAck[ctx2.dataIndex] + 's'; return l; } }
+                  }
+              },
+              scales: {
+                  x: { grid: { display: false, drawBorder: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+                  y:  { type: 'linear', display: true, position: 'left',  min: 0, max: 100, grid: { color: gridColor, drawBorder: false, borderDash: [4, 6] }, ticks: { callback: function(v){return v + '%';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } },
+                  y1: { type: 'linear', display: true, position: 'right', min: 0, suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, grid: { display: false, drawBorder: false }, ticks: { callback: function(v){return v + 's';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } }
+              },
+              animation: { duration: 1600, easing: 'easeOutCubic' }
+          }
+      });
   }
+
+  // ─────────────── Aurora interactions: cursor-aware spotlight on tiles ───────────────
+  // One throttled document-level handler; cheap and resilient to re-renders.
+  (function() {
+      var rafId = null;
+      var lastEvent = null;
+      function update() {
+          rafId = null;
+          if (!lastEvent) return;
+          var tiles = document.querySelectorAll('.tile-aurora');
+          for (var i = 0; i < tiles.length; i++) {
+              var t = tiles[i];
+              var r = t.getBoundingClientRect();
+              if (lastEvent.clientX >= r.left && lastEvent.clientX <= r.right && lastEvent.clientY >= r.top && lastEvent.clientY <= r.bottom) {
+                  t.style.setProperty('--mx', (lastEvent.clientX - r.left) + 'px');
+                  t.style.setProperty('--my', (lastEvent.clientY - r.top) + 'px');
+              }
+          }
+      }
+      document.addEventListener('mousemove', function(e) {
+          lastEvent = e;
+          if (rafId === null) rafId = requestAnimationFrame(update);
+      }, { passive: true });
+  })();
 
 </script>

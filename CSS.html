@@ -342,4 +342,148 @@
       .agent-row { grid-template-columns: 4px minmax(90px, 1fr) auto 70px; }
       .row-id { display: none; }
   }
+
+  /* ─────────────── AURORA TILE (vertical slice — Service Level card) ───────────────
+     Sleek, dark-first treatment: layered shadows for depth, animated conic
+     hairline border, cursor-aware spotlight, gradient-text headline numbers,
+     count-up animation hook. Scoped to .tile-aurora so other cards are
+     untouched until the look is approved. */
+
+  @property --aurora-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  .tile-aurora {
+      position: relative;
+      isolation: isolate;
+      background:
+          radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.10) 0%, transparent 55%),
+          linear-gradient(180deg, rgba(20, 22, 32, 0.85) 0%, rgba(12, 14, 22, 0.95) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 22px;
+      overflow: hidden;
+      box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.06) inset,
+          0 -40px 80px -40px rgba(99, 102, 241, 0.18) inset,
+          0 30px 70px -30px rgba(0, 0, 0, 0.55),
+          0 18px 32px -18px rgba(99, 102, 241, 0.18);
+      transition:
+          transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+          box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body:not(.dark) .tile-aurora {
+      background:
+          radial-gradient(120% 80% at 50% 0%, rgba(99, 102, 241, 0.06) 0%, transparent 55%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(244, 246, 255, 0.95) 100%);
+      border: 1px solid rgba(99, 102, 241, 0.12);
+      box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.9) inset,
+          0 -40px 80px -40px rgba(99, 102, 241, 0.10) inset,
+          0 30px 60px -30px rgba(31, 38, 135, 0.18),
+          0 12px 24px -12px rgba(99, 102, 241, 0.16);
+  }
+
+  /* Animated rotating conic-gradient hairline (the "alive" edge). */
+  .tile-aurora::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      background: conic-gradient(
+          from var(--aurora-angle, 0deg),
+          rgba(56, 189, 248, 0)   0%,
+          rgba(56, 189, 248, 0.55) 18%,
+          rgba(129, 140, 248, 0.55) 33%,
+          rgba(244, 114, 182, 0.55) 50%,
+          rgba(56, 189, 248, 0)   68%,
+          rgba(56, 189, 248, 0)   100%
+      );
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+              mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+              mask-composite: exclude;
+      animation: aurora-spin 9s linear infinite;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.85;
+  }
+
+  /* Cursor-following spotlight. JS sets --mx/--my on hover. */
+  .tile-aurora::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(
+          520px circle at var(--mx, 50%) var(--my, 50%),
+          rgba(129, 140, 248, 0.18),
+          transparent 45%
+      );
+      opacity: 0;
+      transition: opacity 0.5s;
+      pointer-events: none;
+      z-index: 1;
+  }
+  .tile-aurora:hover::after { opacity: 1; }
+  .tile-aurora:hover {
+      transform: translateY(-3px);
+      box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.10) inset,
+          0 -40px 90px -40px rgba(99, 102, 241, 0.28) inset,
+          0 50px 110px -30px rgba(0, 0, 0, 0.7),
+          0 28px 50px -20px rgba(99, 102, 241, 0.32);
+  }
+  body:not(.dark) .tile-aurora:hover {
+      box-shadow:
+          0 1px 0 rgba(255, 255, 255, 1) inset,
+          0 -40px 80px -40px rgba(99, 102, 241, 0.16) inset,
+          0 40px 80px -30px rgba(31, 38, 135, 0.25),
+          0 20px 40px -15px rgba(99, 102, 241, 0.28);
+  }
+
+  /* Children sit above ::before/::after */
+  .tile-aurora > * { position: relative; z-index: 2; }
+
+  @keyframes aurora-spin {
+      to { --aurora-angle: 360deg; }
+  }
+
+  /* Headline numbers — gradient text, tabular nums, tight tracking. */
+  .aurora-num {
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 45%, #f472b6 100%);
+      -webkit-background-clip: text;
+              background-clip: text;
+      color: transparent;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.025em;
+      filter: drop-shadow(0 4px 16px rgba(129, 140, 248, 0.35));
+  }
+  body:not(.dark) .aurora-num {
+      filter: drop-shadow(0 2px 10px rgba(99, 102, 241, 0.20));
+  }
+
+  /* Eyebrow labels */
+  .aurora-label {
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.55);
+  }
+  body:not(.dark) .aurora-label { color: rgba(15, 23, 42, 0.55); }
+
+  /* Live-pulse dot (e.g. for "live" indicator) */
+  .aurora-pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
+      animation: aurora-pulse 2s ease-out infinite;
+  }
+  @keyframes aurora-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6); }
+      70%  { box-shadow: 0 0 0 12px rgba(56, 189, 248, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+  }
 </style>
