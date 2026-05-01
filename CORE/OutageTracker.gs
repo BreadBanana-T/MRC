@@ -166,8 +166,10 @@ var OutageTracker = {
     try {
       var url = this._getUrl('HYDRO_ONE_URL', this._DEFAULT_HYDRO_ONE_URL);
       if (!url) return { skipped: true };
-      // If the user pasted a bare FeatureServer path without /query, append it.
-      if (!/\/query(\?|$)/i.test(url)) {
+      // If the URL points at an ArcGIS FeatureServer without /query, append it.
+      // Kubra URLs (kubra.io/.../data.json) need no rewriting.
+      var isKubra = /kubra\.io|\/data\.json(\?|$)/i.test(url);
+      if (!isKubra && !/\/query(\?|$)/i.test(url)) {
         url += (url.indexOf('?') === -1 ? '?' : '&') + 'where=1%3D1&outFields=*&returnGeometry=false&f=json&resultRecordCount=1000';
         if (!/\/query/i.test(url)) url = url.replace(/(FeatureServer\/\d+)(\?)/i, '$1/query$2');
       }
@@ -175,8 +177,17 @@ var OutageTracker = {
       if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
       var body = JSON.parse(res.getContentText());
       if (body.error) throw new Error('ArcGIS: ' + (body.error.message || 'unknown'));
-      var features = body.features || [];
 
+      // Kubra "summary-1/data.json" — totals only, no per-outage detail.
+      if (body.summaryFileData && Array.isArray(body.summaryFileData.totals) && body.summaryFileData.totals.length) {
+        var t = body.summaryFileData.totals[0] || {};
+        var total = this._safeInt(t.total_cust_a && t.total_cust_a.val);
+        var outages = this._safeInt(t.total_outages);
+        return { data: { outages: outages, customers: total, top: [], source: 'Hydro One' } };
+      }
+
+      // ArcGIS FeatureServer — per-outage detail.
+      var features = body.features || [];
       var total = 0;
       var top = [];
       for (var i = 0; i < features.length; i++) {
@@ -191,7 +202,7 @@ var OutageTracker = {
         });
       }
       top.sort(function(a, b) { return b.customers - a.customers; });
-      return { data: { outages: features.length, customers: total, top: top.slice(0, 10), source: 'Hydro One (rural ON)' } };
+      return { data: { outages: features.length, customers: total, top: top.slice(0, 10), source: 'Hydro One' } };
     } catch (e) {
       return { error: e.message };
     }
