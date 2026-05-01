@@ -1170,35 +1170,37 @@
       var canvas = document.getElementById('chart-overview'); if (!canvas) return; var ctx = canvas.getContext('2d');
       var labels = state.slHistory.map(function(d){return d.name || '';}); var slData = state.slHistory.map(function(d){return d.val || 0;}); var rawAck = state.slHistory.map(function(d){return d.ack || 0;});
       if (charts.overview) { charts.overview.destroy(); charts.overview = null; }
-      // Aurora palette: SL = cyan, ACK = magenta. Big translucent area fills,
-      // strong glow via shadowBlur on each draw pass for a neon line effect.
+      // Aurora palette. SL is the hero (cyan, filled, full glow). ACK is the
+      // supporting line (warm amber, no fill, dashed) so the two read at a
+      // glance instead of competing for attention.
       var SL_HEX  = '#38bdf8';
-      var ACK_HEX = '#f472b6';
+      var ACK_HEX = '#fbbf24';
       var gradientSL  = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
       gradientSL.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
       gradientSL.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      var gradientACK = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
-      gradientACK.addColorStop(0, 'rgba(244, 114, 182, 0.35)');
-      gradientACK.addColorStop(1, 'rgba(244, 114, 182, 0)');
 
       var isDark = document.body.classList.contains('dark');
       var gridColor = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(15, 23, 42, 0.04)';
       var textColor = isDark ? 'rgba(255,255,255,0.45)' : '#64748b';
 
-      // Neon glow plugin: layered shadow casts that bloom around each line.
-      // Drawing the line three times with decreasing blur is the cleanest way
-      // to fake the multi-stroke "outer-glow then inner-glow" look.
+      // Per-dataset glow: SL gets a strong cyan bloom (hero), ACK gets a
+      // gentler amber halo so it's visible without competing.
       var neonGlow = {
           id: 'auroraNeon',
-          beforeDatasetsDraw: function(chart) {
+          beforeDatasetDraw: function(chart, args) {
               var c = chart.ctx;
               c.save();
-              c.shadowColor = isDark ? 'rgba(56, 189, 248, 0.75)' : 'rgba(99, 102, 241, 0.45)';
-              c.shadowBlur = 24;
+              if (args.index === 0) {
+                  c.shadowColor = 'rgba(56, 189, 248, 0.75)';
+                  c.shadowBlur = 22;
+              } else {
+                  c.shadowColor = 'rgba(251, 191, 36, 0.55)';
+                  c.shadowBlur = 10;
+              }
               c.shadowOffsetX = 0;
               c.shadowOffsetY = 0;
           },
-          afterDatasetsDraw: function(chart) { chart.ctx.restore(); }
+          afterDatasetDraw: function(chart) { chart.ctx.restore(); }
       };
 
       charts.overview = new Chart(ctx, {
@@ -1207,8 +1209,8 @@
           data: {
               labels: labels,
               datasets: [
-                  { label: 'Service Level', data: slData, borderColor: SL_HEX, backgroundColor: gradientSL, borderWidth: 2.5, fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: SL_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, pointHoverBorderWidth: 2, yAxisID: 'y' },
-                  { label: 'Response Time', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: ACK_HEX, backgroundColor: gradientACK, borderWidth: 2.5, borderDash: [4, 5], fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: ACK_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' }
+                  { label: 'Service Level', data: slData, borderColor: SL_HEX, backgroundColor: gradientSL, borderWidth: 3, fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: SL_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, pointHoverBorderWidth: 2, yAxisID: 'y' },
+                  { label: 'Response Time', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: ACK_HEX, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [3, 6], fill: false, tension: 0.45, pointRadius: 0, pointHoverRadius: 6, pointBackgroundColor: ACK_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' }
               ]
           },
           options: {
@@ -1239,28 +1241,5 @@
       });
   }
 
-  // ─────────────── Aurora interactions: cursor-aware spotlight on tiles ───────────────
-  // One throttled document-level handler; cheap and resilient to re-renders.
-  (function() {
-      var rafId = null;
-      var lastEvent = null;
-      function update() {
-          rafId = null;
-          if (!lastEvent) return;
-          var tiles = document.querySelectorAll('.tile-aurora');
-          for (var i = 0; i < tiles.length; i++) {
-              var t = tiles[i];
-              var r = t.getBoundingClientRect();
-              if (lastEvent.clientX >= r.left && lastEvent.clientX <= r.right && lastEvent.clientY >= r.top && lastEvent.clientY <= r.bottom) {
-                  t.style.setProperty('--mx', (lastEvent.clientX - r.left) + 'px');
-                  t.style.setProperty('--my', (lastEvent.clientY - r.top) + 'px');
-              }
-          }
-      }
-      document.addEventListener('mousemove', function(e) {
-          lastEvent = e;
-          if (rafId === null) rafId = requestAnimationFrame(update);
-      }, { passive: true });
-  })();
 
 </script>
