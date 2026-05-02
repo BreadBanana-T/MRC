@@ -1127,10 +1127,11 @@
   
   // Threshold above which the paste won't survive a single google.script.run
   // call (it silently drops with no error). Anything bigger is sent in
-  // ~80 KB pieces via cache and assembled server-side. 800 KB leaves
-  // headroom under the ~1 MB practical limit.
+  // ~50 KB pieces via cache and assembled server-side. UTF-8 accented
+  // chars are 2 bytes each, so 50K chars stays comfortably under
+  // CacheService's 100 KB per-value byte limit even for pure French text.
   var DIRECT_LIMIT = 800 * 1024;
-  var CHUNK_SIZE   = 80 * 1024;
+  var CHUNK_SIZE   = 50 * 1024;
 
   function _chunkUpload(text, kind, onSuccess, onFailure) {
       var token = 't' + Date.now() + Math.random().toString(36).slice(2, 8);
