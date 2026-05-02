@@ -214,3 +214,59 @@ function clearAgentRegion(name) {
   var ok = RegionRegistry.remove(name);
   return ok ? 'OK' : 'Not found';
 }
+
+/**
+ * One-shot cleanup: scans WF_REGION_MAP, regroups rows by the current
+ * normalized key (which now folds "Last, First" and "First Last" into
+ * the same hash), and keeps one row per agent picking the highest-
+ * priority source (manual > masterlist > auto-wfm-id > auto-wfm-keyword)
+ * with most recent timestamp as tiebreaker.
+ *
+ * Run once from the Apps Script editor after pulling the new code.
+ * Returns a summary like "Deduped 312 rows → 287 unique agents".
+ */
+function dedupeRegionRegistry() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('WF_REGION_MAP');
+  if (!sheet || sheet.getLastRow() < 2) return 'No data to dedupe.';
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues();
+  var groups = {};
+  rows.forEach(function(r) {
+    if (!r[0] && !r[1]) return; // skip blank
+    var displayName = String(r[1] || r[0] || '').trim();
+    var newKey = (typeof _normalizeAgentKey === 'function')
+                    ? _normalizeAgentKey(displayName)
+                    : String(displayName).toLowerCase().trim();
+    if (!newKey) return;
+    if (!groups[newKey]) groups[newKey] = [];
+    groups[newKey].push({
+      display: displayName,
+      region: String(r[2] || 'Onshore'),
+      source: String(r[3] || 'auto-wfm-keyword'),
+      ts: r[4] || null
+    });
+  });
+  var rank = { 'manual': 4, 'masterlist': 3, 'auto-wfm-id': 2, 'auto-wfm-keyword': 1, 'auto-wfm-default': 0 };
+  var winners = [];
+  var dupesRemoved = 0;
+  Object.keys(groups).forEach(function(k) {
+    var g = groups[k];
+    if (g.length > 1) dupesRemoved += g.length - 1;
+    g.sort(function(a, b) {
+      var d = (rank[b.source] || 0) - (rank[a.source] || 0);
+      if (d !== 0) return d;
+      return (new Date(b.ts || 0).getTime()) - (new Date(a.ts || 0).getTime());
+    });
+    var w = g[0];
+    // Prefer the longer/more readable display name among the duplicates.
+    var bestDisplay = g.reduce(function(acc, x) {
+      return (x.display.length > acc.length) ? x.display : acc;
+    }, w.display);
+    winners.push([k, bestDisplay, w.region, w.source, w.ts || new Date()]);
+  });
+  // Replace sheet contents
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+  if (winners.length) sheet.getRange(2, 1, winners.length, 5).setValues(winners);
+  RegionRegistry._invalidate();
+  return 'Deduped ' + rows.length + ' rows → ' + winners.length + ' unique agents (' + dupesRemoved + ' duplicates removed).';
+}
