@@ -562,16 +562,7 @@
           
           if (activeId) { var reFocus = document.getElementById(activeId); if (reFocus) { reFocus.focus(); if (cursorStart !== null) { try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {} } } }
           
-          // Charts only rebuild when their underlying data changed. Without
-          // this guard the SL line redraws on every render — including the
-          // ones triggered by floor polling every couple of seconds.
-          if (state.view === 'overview') {
-              var slKey = JSON.stringify(state.slHistory || []);
-              if (slKey !== state._lastSlKey || !charts.overview) {
-                  state._lastSlKey = slKey;
-                  initOverviewChart();
-              }
-          }
+          if (state.view === 'overview') initOverviewChart();
           if (state.view === 'tracker' && state.trackerMode !== 'absences') initTrackerChart();
       } catch(err) {
           console.error("Critical Render Error:", err);
