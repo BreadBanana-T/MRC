@@ -1130,41 +1130,64 @@
   window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
   window.runImportAction = function() {
-      var t = document.getElementById('import-text').value; if(!t) return;
-      var btn = event.target; var originalText = btn.innerText; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true;
-      closeImportModal(); showToast("Syncing Database...");
+      // Capture inputs synchronously, before the modal close detaches anything.
+      var textArea = document.getElementById('import-text');
+      var t = textArea ? textArea.value : '';
+      if (!t) { console.warn('[sync] no text, abort'); return; }
+      var btn = (typeof event !== 'undefined' && event && event.target) ? event.target : document.querySelector('#import-modal .btn-primary');
+      if (!btn) { console.error('[sync] no button reference — bailing'); return; }
+      var originalText = btn.innerText;
+      btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
+      btn.disabled = true;
+      closeImportModal();
+      showToast("Syncing Database...");
+      console.log('[sync] start, text length=' + t.length);
+
       var settled = false;
       var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
-      // Safety timeout — if neither callback fires within 90s, surface a clear
-      // error rather than leaving the button frozen on "Syncing..." forever.
-      var timeoutId = setTimeout(function() {
-          if (settled) return;
+      var done = function(label, msg) {
+          if (settled) { console.log('[sync] ' + label + ' (already settled, ignored)'); return; }
           settled = true;
+          clearTimeout(timeoutId);
           resetBtn();
-          showToast('Sync timed out after 90s — check Apps Script execution log');
+          console.log('[sync] settled via ' + label + ': ' + msg);
+          if (msg) showToast(msg);
+      };
+      var timeoutId = setTimeout(function() {
+          done('TIMEOUT', 'Sync timed out after 90s — check Apps Script execution log');
       }, 90000);
-      if(typeof google !== 'undefined') {
-          google.script.run.withFailureHandler(function(err) {
-              showToast('Raw schedule write failed: ' + ((err && err.message) || 'unknown'));
-          }).runImport(t);
-          google.script.run.withSuccessHandler(function(trackerResult) {
-              if (settled) return; settled = true; clearTimeout(timeoutId);
-              resetBtn();
-              var msg = (trackerResult == null) ? 'Schedule Synced (empty result from backend)' : String(trackerResult);
-              showToast(msg);
+
+      if (typeof google === 'undefined') {
+          done('NO_GOOGLE', 'google.script.run not available (preview mode?)');
+          return;
+      }
+
+      // The two backend calls write to different sheet families, both needed.
+      google.script.run
+          .withSuccessHandler(function() { console.log('[sync] runImport ok'); })
+          .withFailureHandler(function(err) {
+              console.error('[sync] runImport FAILED', err);
+              showToast('Raw write failed: ' + ((err && err.message) || 'unknown'));
+          })
+          .runImport(t);
+
+      google.script.run
+          .withSuccessHandler(function(trackerResult) {
+              console.log('[sync] importWorkforceData ok:', trackerResult);
+              var msg = (trackerResult == null) ? 'Schedule Synced (empty result)' : String(trackerResult);
+              done('SUCCESS', msg);
               fetchData(); fetchMetadata();
               if (state.view === 'tracker') fetchTrackerData();
               if (state.view === 'insights') fetchInsightData();
               var notifMsg = "Global Update: WFM Schedule Refreshed.";
               if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) { notifMsg = "Global Update: IDP Heatmap Refreshed."; }
               google.script.run.addGlobalNotification(notifMsg);
-          }).withFailureHandler(function(err) {
-              if (settled) return; settled = true; clearTimeout(timeoutId);
-              resetBtn();
-              var detail = (err && err.message) ? err.message : 'Unknown error — check Apps Script execution log';
-              showToast('Sync failed: ' + detail);
-          }).importWorkforceData(t, t);
-      }
+          })
+          .withFailureHandler(function(err) {
+              console.error('[sync] importWorkforceData FAILED', err);
+              done('FAILURE', 'Sync failed: ' + ((err && err.message) || 'unknown error — check Apps Script execution log'));
+          })
+          .importWorkforceData(t, t);
   };
 
   window.openEventModal = function(idx) { var e = state.calendarEvents[idx]; if(!e) return; document.getElementById('evt-modal-title').innerText = escapeHTML(e.title || ''); document.getElementById('evt-modal-time').innerText = escapeHTML(e.date || '') + " • " + escapeHTML(e.startTime || '') + " - " + escapeHTML(e.endTime || ''); document.getElementById('evt-modal-desc').innerHTML = escapeHTML(e.description || "No description provided."); document.getElementById('event-modal').classList.add('open'); };
