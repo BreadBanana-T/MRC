@@ -28,21 +28,17 @@
         <header class="top-deck">
             <div class="brand">
                 <div class="brand-logo-diamond"><div class="brand-logo-inner"></div></div>
-                <span>MRC Operations Portal</span>
+                <span class="brand-text">MRC Operations Portal</span>
             </div>
-            
-            <nav class="nav-island">
-                <button class="nav-btn active" id="btn-overview" onclick="setView('overview')">Dashboard</button>
-                <button class="nav-btn" id="btn-agents" onclick="setView('agents')">Floor</button>
-                <button class="nav-btn" id="btn-scripts" onclick="setView('scripts')">Scripts</button>
-                <button class="nav-btn" id="btn-weather" onclick="setView('weather')">Weather</button>
-                <button class="nav-btn" id="btn-calc" onclick="setView('calc')">Calculator</button>
-                <button class="nav-btn" id="btn-tracker" onclick="setView('tracker')">Tracker</button>
-            </nav>
 
-            <button class="action-toggle-btn" id="header-toggle-btn" onclick="toggleHeaderActions()" title="Toggle Action Tools">
-                <i data-lucide="chevron-left" id="header-toggle-icon" width="20"></i>
-            </button>
+            <nav class="nav-island">
+                <button class="nav-btn active" id="btn-overview" onclick="setView('overview')"><i data-lucide="layout-dashboard" width="16"></i><span>Dashboard</span></button>
+                <button class="nav-btn" id="btn-agents" onclick="setView('agents')"><i data-lucide="users" width="16"></i><span>Floor</span></button>
+                <button class="nav-btn" id="btn-scripts" onclick="setView('scripts')"><i data-lucide="file-text" width="16"></i><span>Scripts</span></button>
+                <button class="nav-btn" id="btn-weather" onclick="setView('weather')"><i data-lucide="cloud" width="16"></i><span>Weather</span></button>
+                <button class="nav-btn" id="btn-calc" onclick="setView('calc')"><i data-lucide="calculator" width="16"></i><span>Calculator</span></button>
+                <button class="nav-btn" id="btn-tracker" onclick="setView('tracker')"><i data-lucide="activity" width="16"></i><span>Tracker</span></button>
+            </nav>
 
             <div class="action-group">
                 <div class="kpi-row">

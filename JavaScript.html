@@ -27,34 +27,10 @@
       if (state.notifOpen && panel && !panel.contains(e.target) && (!bellBtn || !bellBtn.contains(e.target))) toggleNotifPanel();
   });
 
-  window.toggleHeaderActions = function() {
-      var header = document.querySelector('.top-deck');
-      var icon = document.getElementById('header-toggle-icon');
-      if (!header || !icon) return;
-      header.classList.toggle('show-actions');
-      if (header.classList.contains('show-actions')) icon.setAttribute('data-lucide', 'chevron-right');
-      else icon.setAttribute('data-lucide', 'chevron-left');
-      refreshIcons();
-  };
-
-  // Reset show-actions when the viewport widens past the responsive breakpoint
-  // so the desktop layout doesn't keep the actions-only state stuck on.
-  (function() {
-      var resizeTimer = null;
-      window.addEventListener('resize', function() {
-          if (resizeTimer) clearTimeout(resizeTimer);
-          resizeTimer = setTimeout(function() {
-              var header = document.querySelector('.top-deck');
-              var icon = document.getElementById('header-toggle-icon');
-              if (!header) return;
-              if (window.innerWidth > 1500 && header.classList.contains('show-actions')) {
-                  header.classList.remove('show-actions');
-                  if (icon) icon.setAttribute('data-lucide', 'chevron-left');
-                  if (typeof refreshIcons === 'function') refreshIcons();
-              }
-          }, 120);
-      });
-  })();
+  // Header toggle removed — nav now collapses to icons in CSS via media
+  // queries. Stub kept so any stale onclick attributes in cached pages
+  // don't throw a ReferenceError.
+  window.toggleHeaderActions = function() {};
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
@@ -575,8 +551,17 @@
           
           if (activeId) { var reFocus = document.getElementById(activeId); if (reFocus) { reFocus.focus(); if (cursorStart !== null) { try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {} } } }
           
-          if(state.view === 'overview') initOverviewChart();
-          if(state.view === 'tracker' && state.trackerMode !== 'absences') initTrackerChart(); 
+          // Charts only rebuild when their underlying data changed. Without
+          // this guard the SL line redraws on every render — including the
+          // ones triggered by floor polling every couple of seconds.
+          if (state.view === 'overview') {
+              var slKey = JSON.stringify(state.slHistory || []);
+              if (slKey !== state._lastSlKey || !charts.overview) {
+                  state._lastSlKey = slKey;
+                  initOverviewChart();
+              }
+          }
+          if (state.view === 'tracker' && state.trackerMode !== 'absences') initTrackerChart();
       } catch(err) {
           console.error("Critical Render Error:", err);
           var c = document.getElementById('content');
@@ -1130,52 +1115,22 @@
   window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
   window.runImportAction = function() {
-      // Capture inputs synchronously, before the modal close detaches anything.
-      var textArea = document.getElementById('import-text');
-      var t = textArea ? textArea.value : '';
-      if (!t) { console.warn('[sync] no text, abort'); return; }
-      var btn = (typeof event !== 'undefined' && event && event.target) ? event.target : document.querySelector('#import-modal .btn-primary');
-      if (!btn) { console.error('[sync] no button reference — bailing'); return; }
+      var t = document.getElementById('import-text').value; if(!t) return;
+      var btn = event.target;
       var originalText = btn.innerText;
       btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
       btn.disabled = true;
       closeImportModal();
       showToast("Syncing Database...");
-      console.log('[sync] start, text length=' + t.length);
-
-      var settled = false;
-      var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
-      var done = function(label, msg) {
-          if (settled) { console.log('[sync] ' + label + ' (already settled, ignored)'); return; }
-          settled = true;
-          clearTimeout(timeoutId);
-          resetBtn();
-          console.log('[sync] settled via ' + label + ': ' + msg);
-          if (msg) showToast(msg);
-      };
-      var timeoutId = setTimeout(function() {
-          done('TIMEOUT', 'Sync timed out after 90s — check Apps Script execution log');
-      }, 90000);
-
-      if (typeof google === 'undefined') {
-          done('NO_GOOGLE', 'google.script.run not available (preview mode?)');
-          return;
-      }
-
-      // The two backend calls write to different sheet families, both needed.
-      google.script.run
-          .withSuccessHandler(function() { console.log('[sync] runImport ok'); })
-          .withFailureHandler(function(err) {
-              console.error('[sync] runImport FAILED', err);
-              showToast('Raw write failed: ' + ((err && err.message) || 'unknown'));
-          })
-          .runImport(t);
-
+      if (typeof google === 'undefined') return;
+      // Fire-and-forget for the raw schedule writer (unchanged from the
+      // original working version), then importWorkforceData drives the UI.
+      google.script.run.runImport(t);
       google.script.run
           .withSuccessHandler(function(trackerResult) {
-              console.log('[sync] importWorkforceData ok:', trackerResult);
-              var msg = (trackerResult == null) ? 'Schedule Synced (empty result)' : String(trackerResult);
-              done('SUCCESS', msg);
+              var finalMsg = (trackerResult && String(trackerResult).indexOf("Error") !== -1) ? "Schedule Synced" : (trackerResult || "Schedule Synced");
+              showToast(finalMsg);
+              btn.innerHTML = originalText; btn.disabled = false;
               fetchData(); fetchMetadata();
               if (state.view === 'tracker') fetchTrackerData();
               if (state.view === 'insights') fetchInsightData();
@@ -1184,8 +1139,8 @@
               google.script.run.addGlobalNotification(notifMsg);
           })
           .withFailureHandler(function(err) {
-              console.error('[sync] importWorkforceData FAILED', err);
-              done('FAILURE', 'Sync failed: ' + ((err && err.message) || 'unknown error — check Apps Script execution log'));
+              btn.innerHTML = originalText; btn.disabled = false;
+              showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
           })
           .importWorkforceData(t, t);
   };

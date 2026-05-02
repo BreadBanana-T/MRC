@@ -137,7 +137,17 @@
   }
   .nav-island::-webkit-scrollbar { display: none; } 
   
-  .nav-btn { appearance: none; -webkit-appearance: none; height: 34px; padding: 0 14px; border-radius: 17px; border: none; cursor: pointer; font-weight: 600; color: var(--text-muted); background: transparent; transition: 0.2s; white-space: nowrap; flex-shrink: 0; font-size: 0.9rem; }
+  .nav-btn {
+      appearance: none; -webkit-appearance: none;
+      height: 34px; padding: 0 14px;
+      border-radius: 17px; border: none;
+      cursor: pointer; font-weight: 600;
+      color: var(--text-muted); background: transparent;
+      transition: 0.2s; white-space: nowrap; flex-shrink: 0;
+      font-size: 0.9rem;
+      display: inline-flex; align-items: center; gap: 8px;
+  }
+  .nav-btn > i { flex-shrink: 0; }
   .nav-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.1); }
   .nav-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
   
@@ -354,42 +364,30 @@
   .sort-btn.active-ulc { background: var(--status-ulc); color: #fff; border-color: var(--status-ulc); box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3); }
   .sort-btn.active-tower { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); box-shadow: var(--accent-glow); }
   
-  @media (max-width: 1400px) { .grid-bento { grid-template-columns: repeat(2, 1fr); } }
-  
-  @media (max-width: 1100px) { 
-      .grid-split { grid-template-columns: 1fr; } 
-      .agent-row { grid-template-columns: 4px minmax(100px, 1fr) 70px minmax(100px, 1.5fr) 80px; } 
-      .kpi-row, .kpi-divider, .brand span { display: none; } 
-      .top-deck { padding: 0 16px; }
+  /* Toggle button is dead — kept hidden in case any old class lingers. */
+  .action-toggle-btn { display: none !important; }
+
+  /* Responsive ladder, simplest possible. As the window narrows we drop
+     elements in priority order:
+        < 1400px : KPI strip in header (svl/ack/time).
+        < 1280px : nav button labels (icons only).
+        < 1100px : brand wordmark.
+        <  900px : bento collapses to single column. */
+  @media (max-width: 1400px) {
+      .grid-bento { grid-template-columns: repeat(2, 1fr); }
+      .kpi-row, .kpi-divider { display: none; }
   }
-  
-  /* --- TOGGLE MENU LOGIC (< 1500px) ---
-     Below this width, actions tuck into the toggle drawer so the nav
-     row always has unambiguous space for all 6 buttons. Above it, both
-     panes are visible side by side. The threshold is set generously to
-     guarantee nav never has to scroll or clip on common laptop widths. */
-  @media (max-width: 1500px) {
-      .top-deck {
-          flex-wrap: nowrap;
-          min-height: 64px;
-          padding: 0 12px;
-          gap: 10px;
-      }
 
-      /* Toggle visible — flips between nav row and actions row. */
-      .action-toggle-btn { display: flex; }
+  @media (max-width: 1280px) {
+      .nav-btn > span { display: none; }
+      .nav-btn { padding: 0 10px; }
+  }
 
-      /* Default state: nav row visible, actions tucked away. */
-      .action-group { display: none !important; }
-      .nav-island { flex: 0 0 auto; }
-
-      /* Toggled state: actions visible, nav tucked away. */
-      .top-deck.show-actions .nav-island { display: none !important; }
-      .top-deck.show-actions .action-group {
-          display: flex !important;
-          flex: 1 1 auto;
-          justify-content: flex-end;
-      }
+  @media (max-width: 1100px) {
+      .grid-split { grid-template-columns: 1fr; }
+      .agent-row { grid-template-columns: 4px minmax(100px, 1fr) 70px minmax(100px, 1.5fr) 80px; }
+      .brand-text { display: none; }
+      .top-deck { padding: 0 14px; gap: 10px; }
   }
 
   @media (max-width: 900px) {
