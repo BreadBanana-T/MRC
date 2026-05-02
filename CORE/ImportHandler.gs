@@ -12,10 +12,16 @@ function processWFMImport(rawText, forcedDate) {
   ss.setSpreadsheetTimeZone("America/Toronto");
   let sheet = ss.getSheetByName("Raw Schedule");
   if (!sheet) { sheet = ss.insertSheet("Raw Schedule"); }
-  
-  sheet.clear();
-  sheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
-  sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+
+  // Batch RegionRegistry writes — pushAgent calls upsert() once per agent,
+  // and without batching each call costs 2 sheet API round-trips. With
+  // 100+ agents that's the difference between 30-150s of overhead and ~0.
+  if (typeof RegionRegistry !== 'undefined') RegionRegistry.beginBatch();
+
+  try {
+    sheet.clear();
+    sheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
+    sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
 
   const lines = rawText.split(/\r?\n/);
   let rosterData = [];
@@ -107,14 +113,17 @@ function processWFMImport(rawText, forcedDate) {
     }
   }
 
-  if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
-  
-  if (rosterData.length > 0) {
-    sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
-    if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
-    return `Synced ${rosterData.length} entries successfully to Local Database.`;
+    if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
+
+    if (rosterData.length > 0) {
+      sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
+      if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
+      return `Synced ${rosterData.length} entries successfully to Local Database.`;
+    }
+    return "No valid data found.";
+  } finally {
+    if (typeof RegionRegistry !== 'undefined') RegionRegistry.commitBatch();
   }
-  return "No valid data found.";
 }
 
 function resetBuffer() { return { breaks: [], start: null, end: null, dateStr: null, absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false }; }

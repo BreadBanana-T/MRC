@@ -39,6 +39,13 @@ var WorkforceTracker = {
     ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP', 'WF_ABSENCES'].forEach(n => {
        if(!ss.getSheetByName(n)) ss.insertSheet(n);
     });
+    // Same per-agent sheet-write problem as ImportHandler — RegionRegistry
+    // is consulted/upserted inside flushAgentBuffer for every agent in the
+    // import. Wrap the whole import in a batch so writes are coalesced
+    // into one sheet read + one sheet write at the end.
+    var _regionBatch = (typeof RegionRegistry !== 'undefined');
+    if (_regionBatch) RegionRegistry.beginBatch();
+    try {
     let msg = [];
     let schedDates = [];
     let idpDates = [];
@@ -333,6 +340,9 @@ var WorkforceTracker = {
 
     if (msg.length === 0) return `Basic Schedule Synced. (Auto-Archived: ${archiveMsg.join(', ')})`;
     return `Synced: ${msg.join(' | ')}. Auto-Archived: ${archiveMsg.join(', ')}`;
+    } finally {
+      if (_regionBatch) RegionRegistry.commitBatch();
+    }
   },
 
   // NEW: Engine to fetch Yearly Agent Profiles

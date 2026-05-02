@@ -28,6 +28,45 @@ var RegionRegistry = {
   _cacheTs: 0,
   _CACHE_TTL_MS: 30000,
 
+  // Batch mode: accumulate upserts in memory during a bulk import, flush
+  // them all in a single sheet write at the end. Without this, each agent
+  // costs 2 sheet API round-trips (~100-500ms each) and big imports hang
+  // for minutes.
+  _batchMode: false,
+  _batchChanges: null,
+
+  beginBatch: function() {
+    this._batchMode = true;
+    this._batchChanges = {};
+    this._loadMap(); // pre-warm cache so per-row reads are free
+  },
+
+  commitBatch: function() {
+    if (!this._batchMode) return 0;
+    var changes = this._batchChanges || {};
+    this._batchMode = false;
+    this._batchChanges = null;
+    var changeKeys = Object.keys(changes);
+    if (!changeKeys.length) return 0;
+    var sheet = this._getSheet();
+    var lastRow = sheet.getLastRow();
+    var existing = (lastRow > 1) ? sheet.getRange(2, 1, lastRow - 1, this.HEADERS.length).getValues() : [];
+    var indexByKey = {};
+    for (var i = 0; i < existing.length; i++) indexByKey[String(existing[i][0])] = i;
+    var added = [];
+    for (var k = 0; k < changeKeys.length; k++) {
+      var key = changeKeys[k];
+      var c = changes[key];
+      var row = [key, c.display, c.region, c.source, c.lastConfirmed];
+      if (indexByKey[key] !== undefined) existing[indexByKey[key]] = row;
+      else added.push(row);
+    }
+    if (existing.length) sheet.getRange(2, 1, existing.length, this.HEADERS.length).setValues(existing);
+    if (added.length) sheet.getRange(sheet.getLastRow() + 1, 1, added.length, this.HEADERS.length).setValues(added);
+    this._invalidate();
+    return changeKeys.length;
+  },
+
   _getSheet: function() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(this.SHEET);
@@ -101,7 +140,18 @@ var RegionRegistry = {
       var oldRank = this._SOURCE_RANK[existing.source] || 0;
       var newRank = this._SOURCE_RANK[source] || 0;
       if (newRank < oldRank) return false;
-      // Same rank + same region = refresh timestamp only. Different region at same rank = accept (latest wins).
+    }
+
+    var display = String(agentName).trim();
+    var now = new Date();
+
+    // Batch path: stash in memory + update cache so subsequent reads in
+    // the same batch see the new value. Single sheet write happens later
+    // in commitBatch().
+    if (this._batchMode) {
+      this._batchChanges[key] = { display: display, region: region, source: source, lastConfirmed: now };
+      m[key] = { key: key, display: display, region: region, source: source, lastConfirmed: now };
+      return true;
     }
 
     var sheet = this._getSheet();
@@ -114,8 +164,6 @@ var RegionRegistry = {
       }
     }
 
-    var display = String(agentName).trim();
-    var now = new Date();
     if (rowNum === -1) {
       sheet.appendRow([key, display, region, source, now]);
     } else {
