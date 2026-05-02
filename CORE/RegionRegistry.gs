@@ -264,8 +264,11 @@ function dedupeRegionRegistry() {
     }, w.display);
     winners.push([k, bestDisplay, w.region, w.source, w.ts || new Date()]);
   });
-  // Replace sheet contents
-  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+  // Replace sheet contents. clearContent (not deleteRows) avoids the
+  // "cannot delete all non-frozen rows" error Sheets throws when the
+  // dedupe leaves the sheet temporarily empty.
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn() || 5).clearContent();
   if (winners.length) sheet.getRange(2, 1, winners.length, 5).setValues(winners);
   RegionRegistry._invalidate();
   return 'Deduped ' + rows.length + ' rows → ' + winners.length + ' unique agents (' + dupesRemoved + ' duplicates removed).';
