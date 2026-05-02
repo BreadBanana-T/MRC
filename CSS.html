@@ -120,24 +120,24 @@
   .kpi-box h4 { margin: 0; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; }
   .kpi-box div { font-size: 1.2rem; font-weight: 800; color: var(--text-main); font-variant-numeric: tabular-nums; white-space: nowrap; }
   
-  .nav-island { 
-      display: flex; 
-      flex-direction: row; 
-      gap: 4px; 
-      background: rgba(0,0,0,0.05); 
-      padding: 4px; 
-      border-radius: 50px; 
-      align-items: center; 
-      overflow-x: auto; 
-      scrollbar-width: none; 
-      white-space: nowrap; 
-      flex-wrap: nowrap; 
-      flex: 1 1 auto; 
-      min-width: 0; 
+  .nav-island {
+      display: flex;
+      flex-direction: row;
+      gap: 2px;
+      background: rgba(0,0,0,0.05);
+      padding: 3px;
+      border-radius: 50px;
+      align-items: center;
+      white-space: nowrap;
+      flex-wrap: nowrap;
+      /* Don't grow past content width and don't allow buttons to be clipped.
+         If the header truly can't fit nav + actions, the toggle takes over
+         (handled by the responsive breakpoint below). */
+      flex: 0 0 auto;
   }
   .nav-island::-webkit-scrollbar { display: none; } 
   
-  .nav-btn { appearance: none; -webkit-appearance: none; height: 36px; padding: 0 20px; border-radius: 18px; border: none; cursor: pointer; font-weight: 600; color: var(--text-muted); background: transparent; transition: 0.2s; white-space: nowrap; flex-shrink: 0; }
+  .nav-btn { appearance: none; -webkit-appearance: none; height: 34px; padding: 0 14px; border-radius: 17px; border: none; cursor: pointer; font-weight: 600; color: var(--text-muted); background: transparent; transition: 0.2s; white-space: nowrap; flex-shrink: 0; font-size: 0.9rem; }
   .nav-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.1); }
   .nav-btn.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
   
@@ -160,12 +160,12 @@
   body.dark .action-toggle-btn { background: rgba(255,255,255,0.05); }
   .action-toggle-btn:hover { background: var(--accent-primary); color: white; border-color: var(--accent-primary); }
 
-  .action-group { 
-      display: flex; 
-      align-items: center; 
-      gap: 12px; 
-      flex-shrink: 0; 
-      flex-wrap: nowrap; 
+  .action-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
   }
   
   .action-btn { appearance: none; -webkit-appearance: none; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.05); border: var(--glass-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; position: relative; flex-shrink: 0; }
@@ -363,11 +363,12 @@
       .top-deck { padding: 0 16px; }
   }
   
-  /* --- SMART TOGGLE MENU LOGIC (< 1400px) ---
-     Triggered well before the bento breakpoint because nav (6 items) +
-     actions (8 icons) + brand crowd each other long before they truly
-     break — Tracker is the first casualty on 1280×800 laptops. */
-  @media (max-width: 1400px) {
+  /* --- TOGGLE MENU LOGIC (< 1500px) ---
+     Below this width, actions tuck into the toggle drawer so the nav
+     row always has unambiguous space for all 6 buttons. Above it, both
+     panes are visible side by side. The threshold is set generously to
+     guarantee nav never has to scroll or clip on common laptop widths. */
+  @media (max-width: 1500px) {
       .top-deck {
           flex-wrap: nowrap;
           min-height: 64px;
@@ -375,24 +376,20 @@
           gap: 10px;
       }
 
-      /* Toggle button visible — switches between nav and actions panes. */
+      /* Toggle visible — flips between nav row and actions row. */
       .action-toggle-btn { display: flex; }
 
-      /* Default mobile state: nav visible, actions hidden. */
+      /* Default state: nav row visible, actions tucked away. */
       .action-group { display: none !important; }
-      .nav-island { display: flex; flex: 1 1 auto; overflow-x: auto; min-width: 0; }
+      .nav-island { flex: 0 0 auto; }
 
-      /* Active mobile state: actions visible, nav hidden. */
+      /* Toggled state: actions visible, nav tucked away. */
       .top-deck.show-actions .nav-island { display: none !important; }
       .top-deck.show-actions .action-group {
           display: flex !important;
           flex: 1 1 auto;
           justify-content: flex-end;
-          overflow-x: auto;
-          scrollbar-width: none;
-          min-width: 0;
       }
-      .top-deck.show-actions .action-group::-webkit-scrollbar { display: none; }
   }
 
   @media (max-width: 900px) {

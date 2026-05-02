@@ -47,7 +47,7 @@
               var header = document.querySelector('.top-deck');
               var icon = document.getElementById('header-toggle-icon');
               if (!header) return;
-              if (window.innerWidth > 1400 && header.classList.contains('show-actions')) {
+              if (window.innerWidth > 1500 && header.classList.contains('show-actions')) {
                   header.classList.remove('show-actions');
                   if (icon) icon.setAttribute('data-lucide', 'chevron-left');
                   if (typeof refreshIcons === 'function') refreshIcons();
@@ -1133,15 +1133,25 @@
       var t = document.getElementById('import-text').value; if(!t) return;
       var btn = event.target; var originalText = btn.innerText; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true;
       closeImportModal(); showToast("Syncing Database...");
+      var settled = false;
       var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
+      // Safety timeout — if neither callback fires within 90s, surface a clear
+      // error rather than leaving the button frozen on "Syncing..." forever.
+      var timeoutId = setTimeout(function() {
+          if (settled) return;
+          settled = true;
+          resetBtn();
+          showToast('Sync timed out after 90s — check Apps Script execution log');
+      }, 90000);
       if(typeof google !== 'undefined') {
           google.script.run.withFailureHandler(function(err) {
               showToast('Raw schedule write failed: ' + ((err && err.message) || 'unknown'));
           }).runImport(t);
           google.script.run.withSuccessHandler(function(trackerResult) {
+              if (settled) return; settled = true; clearTimeout(timeoutId);
               resetBtn();
               var msg = (trackerResult == null) ? 'Schedule Synced (empty result from backend)' : String(trackerResult);
-              showToast(msg.indexOf('Error') !== -1 ? msg : msg);
+              showToast(msg);
               fetchData(); fetchMetadata();
               if (state.view === 'tracker') fetchTrackerData();
               if (state.view === 'insights') fetchInsightData();
@@ -1149,6 +1159,7 @@
               if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) { notifMsg = "Global Update: IDP Heatmap Refreshed."; }
               google.script.run.addGlobalNotification(notifMsg);
           }).withFailureHandler(function(err) {
+              if (settled) return; settled = true; clearTimeout(timeoutId);
               resetBtn();
               var detail = (err && err.message) ? err.message : 'Unknown error — check Apps Script execution log';
               showToast('Sync failed: ' + detail);
