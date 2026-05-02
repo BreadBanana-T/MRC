@@ -32,8 +32,19 @@
   // don't throw a ReferenceError.
   window.toggleHeaderActions = function() {};
 
+  // Local "yyyy-mm-dd" — never use toISOString().split('T')[0] for default
+  // dates. ISO returns UTC, so at 10 PM Toronto the user is rolled forward
+  // a day. This pulls the local-calendar date instead.
+  function localDateStr(d) {
+      d = d || new Date();
+      var y = d.getFullYear();
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+  }
+
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: new Date().toISOString().split('T')[0], insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: new Date().toISOString().split('T')[0], trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -334,7 +345,7 @@
       state.trackerRange = val; state.trackerCycleFilter = 'ALL'; 
       var parts = state.trackerDate.split('-'); var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
       var selDate = new Date(y, m-1, d, 12, 0, 0); 
-      if (val === 'month' || val === 'quarter') { selDate.setDate(1); state.trackerDate = selDate.toISOString().split('T')[0]; } 
+      if (val === 'month' || val === 'quarter') { selDate.setDate(1); state.trackerDate = localDateStr(selDate); } 
       else if (val === 'week') { var day = selDate.getDay(); var offset = (day >= 3) ? (day - 3) : (day + 4); selDate.setDate(selDate.getDate() - offset); var ny = selDate.getFullYear(); var nm = selDate.getMonth() + 1; var nd = selDate.getDate(); state.trackerDate = ny + "-" + (nm < 10 ? '0'+nm : nm) + "-" + (nd < 10 ? '0'+nd : nd); }
       fetchTrackerData(); render();
   };
