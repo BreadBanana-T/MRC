@@ -1126,22 +1126,43 @@
   window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
   window.runImportAction = function() {
-      var t = document.getElementById('import-text').value; if(!t) return;
+      console.log('[sync] click');
+      var t = document.getElementById('import-text').value; if(!t) { console.warn('[sync] empty text'); return; }
       var btn = event.target;
       var originalText = btn.innerText;
       btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
       btn.disabled = true;
       closeImportModal();
       showToast("Syncing Database...");
-      if (typeof google === 'undefined') return;
-      // Fire-and-forget for the raw schedule writer (unchanged from the
-      // original working version), then importWorkforceData drives the UI.
-      google.script.run.runImport(t);
+      console.log('[sync] text length=' + t.length + ', google=' + (typeof google));
+      if (typeof google === 'undefined') {
+          btn.innerHTML = originalText; btn.disabled = false;
+          showToast('google.script.run unavailable — preview mode?');
+          return;
+      }
+      var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
+      // Backstop: if NEITHER handler fires within 90s (network drop, auth
+      // re-prompt, etc.), reset the button so the user isn't trapped.
+      var timeoutId = setTimeout(function() {
+          console.error('[sync] BACKSTOP TIMEOUT — neither handler fired in 90s');
+          resetBtn();
+          showToast('Sync timed out — check Apps Script execution log');
+      }, 90000);
+
+      // Fire raw-schedule writer first (independent), then the workforce
+      // import which drives the UI on completion.
+      google.script.run
+          .withSuccessHandler(function(r) { console.log('[sync] runImport ok:', r); })
+          .withFailureHandler(function(err) { console.error('[sync] runImport failed:', err); })
+          .runImport(t);
+
       google.script.run
           .withSuccessHandler(function(trackerResult) {
+              clearTimeout(timeoutId);
+              console.log('[sync] importWorkforceData ok:', trackerResult);
+              resetBtn();
               var finalMsg = (trackerResult && String(trackerResult).indexOf("Error") !== -1) ? "Schedule Synced" : (trackerResult || "Schedule Synced");
               showToast(finalMsg);
-              btn.innerHTML = originalText; btn.disabled = false;
               fetchData(); fetchMetadata();
               if (state.view === 'tracker') fetchTrackerData();
               if (state.view === 'insights') fetchInsightData();
@@ -1150,7 +1171,9 @@
               google.script.run.addGlobalNotification(notifMsg);
           })
           .withFailureHandler(function(err) {
-              btn.innerHTML = originalText; btn.disabled = false;
+              clearTimeout(timeoutId);
+              console.error('[sync] importWorkforceData failed:', err);
+              resetBtn();
               showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
           })
           .importWorkforceData(t, t);
