@@ -108,10 +108,7 @@
       min-height: 72px;
       z-index: 50;
       gap: 16px;
-      /* Allow the action-group to wrap to a second row when the viewport
-         is too narrow to fit brand + nav + actions on one line. Better
-         than the alternative (silent overflow off the right edge). */
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       min-width: 0;
   }
   .brand, .nav-island, .action-group { flex-shrink: 0; }
@@ -371,27 +368,36 @@
   /* Toggle button is dead — kept hidden in case any old class lingers. */
   .action-toggle-btn { display: none !important; }
 
-  /* Responsive ladder, simplest possible. As the window narrows we drop
-     elements in priority order:
-        < 1400px : KPI strip in header (svl/ack/time).
-        < 1280px : nav button labels (icons only).
-        < 1100px : brand wordmark.
+  /* Responsive ladder, single row, never wraps, never clips:
+        < 1500px : KPI strip in header drops (svl/ack/time)
+        < 1300px : nav button labels drop → icon-only nav
+        < 1180px : secondary action buttons drop (region, outage URL,
+                   import) — kept reachable via the modals/menus they
+                   open from elsewhere; these icons aren't visible
+                   often enough to fight for space here.
+        < 1100px : brand wordmark drops, nav gap tightens further
         <  900px : bento collapses to single column. */
-  @media (max-width: 1400px) {
+  @media (max-width: 1500px) {
       .grid-bento { grid-template-columns: repeat(2, 1fr); }
       .kpi-row, .kpi-divider { display: none; }
   }
 
-  @media (max-width: 1280px) {
+  @media (max-width: 1300px) {
       .nav-btn > span { display: none; }
-      .nav-btn { padding: 0 10px; }
+      .nav-btn { padding: 0 10px; gap: 0; }
+      .nav-island { gap: 1px; }
+  }
+
+  @media (max-width: 1180px) {
+      #btn-region, #btn-outage-admin { display: none; }
+      .action-group { gap: 6px; }
   }
 
   @media (max-width: 1100px) {
       .grid-split { grid-template-columns: 1fr; }
       .agent-row { grid-template-columns: 4px minmax(100px, 1fr) 70px minmax(100px, 1.5fr) 80px; }
       .brand-text { display: none; }
-      .top-deck { padding: 0 14px; gap: 10px; }
+      .top-deck { padding: 0 12px; gap: 8px; }
   }
 
   @media (max-width: 900px) {

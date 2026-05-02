@@ -4,16 +4,23 @@
 
 /**
  * Canonical key for agent-name matching across MasterList, WFM, GEM, and DB_Sessions.
- * Strips diacritics (é→e), replaces hyphens with spaces, collapses whitespace, lowercases.
- * Exposed at global scope so AgentMonitor and AssignmentAnalyzer can use the same key.
+ * Handles "Last, First" vs "First Last" by always flipping to "first last" form
+ * before hashing — without this, the same person can appear under two
+ * different keys in WF_REGION_MAP and the Region Manager UI.
+ * Also strips diacritics (é→e), replaces hyphens with spaces, collapses
+ * whitespace, lowercases.
  */
 function _normalizeAgentKey(s) {
-  return String(s == null ? '' : s)
-    .normalize('NFD')
+  var raw = String(s == null ? '' : s).trim();
+  // "Aazzaz, Hamza" → "Hamza Aazzaz" so both source formats land on the same key.
+  var parts = raw.split(',');
+  if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+    raw = parts[1].trim() + ' ' + parts[0].trim();
+  }
+  return raw.normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/-+/g, ' ')
-    .replace(/\s+,/g, ',')
     .replace(/\s+/g, ' ')
     .trim();
 }
