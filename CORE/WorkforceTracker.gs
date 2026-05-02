@@ -4,25 +4,30 @@
 
 /**
  * Canonical key for agent-name matching across MasterList, WFM, GEM, and DB_Sessions.
- * Handles "Last, First" vs "First Last" by always flipping to "first last" form
- * before hashing — without this, the same person can appear under two
- * different keys in WF_REGION_MAP and the Region Manager UI.
- * Also strips diacritics (é→e), replaces hyphens with spaces, collapses
- * whitespace, lowercases.
+ * The same person shows up in different sources in any of these forms:
+ *   "Bennani, Mohammed"   (Last, First — comma)
+ *   "Mohammed Bennani"    (First Last  — no comma)
+ *   "Bennani Mohammed"    (Last First  — no comma, French-Canadian style)
+ * To collapse all of them into the same key, we strip diacritics + commas
+ * + hyphens, lowercase, and SORT the tokens alphabetically. Order-agnostic
+ * so any combination of first/last + comma yes/no produces the same hash.
  */
 function _normalizeAgentKey(s) {
   var raw = String(s == null ? '' : s).trim();
-  // "Aazzaz, Hamza" → "Hamza Aazzaz" so both source formats land on the same key.
-  var parts = raw.split(',');
-  if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
-    raw = parts[1].trim() + ' ' + parts[0].trim();
-  }
-  return raw.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+  if (!raw) return '';
+  var clean = raw
+    .replace(/,/g, ' ')        // commas treated as separators, not part of the name
+    .normalize('NFD')          // decompose accented chars
+    .replace(/[̀-ͯ]/g, '') // strip combining marks
     .toLowerCase()
-    .replace(/-+/g, ' ')
+    .replace(/[-_]+/g, ' ')    // hyphens/underscores → spaces
+    .replace(/[^\w\s]/g, ' ')  // any other punctuation → space
     .replace(/\s+/g, ' ')
     .trim();
+  if (!clean) return '';
+  var tokens = clean.split(' ').filter(Boolean);
+  tokens.sort();
+  return tokens.join(' ');
 }
 
 /**
