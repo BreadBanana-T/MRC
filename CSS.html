@@ -363,10 +363,11 @@
       .top-deck { padding: 0 16px; }
   }
   
-  /* --- SMART TOGGLE MENU LOGIC (< 1280px) ---
-     Triggered before the bento breakpoint because nav (6 items) + actions
-     (8 icons) + brand crowd each other long before things truly break. */
-  @media (max-width: 1280px) {
+  /* --- SMART TOGGLE MENU LOGIC (< 1400px) ---
+     Triggered well before the bento breakpoint because nav (6 items) +
+     actions (8 icons) + brand crowd each other long before they truly
+     break — Tracker is the first casualty on 1280×800 laptops. */
+  @media (max-width: 1400px) {
       .top-deck {
           flex-wrap: nowrap;
           min-height: 64px;

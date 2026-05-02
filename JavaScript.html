@@ -47,7 +47,7 @@
               var header = document.querySelector('.top-deck');
               var icon = document.getElementById('header-toggle-icon');
               if (!header) return;
-              if (window.innerWidth > 1280 && header.classList.contains('show-actions')) {
+              if (window.innerWidth > 1400 && header.classList.contains('show-actions')) {
                   header.classList.remove('show-actions');
                   if (icon) icon.setAttribute('data-lucide', 'chevron-left');
                   if (typeof refreshIcons === 'function') refreshIcons();
@@ -722,7 +722,7 @@
       }
       var color = s.status === 'critical' ? 'var(--status-alert)' : (s.status === 'warn' ? 'var(--status-warn)' : (s.status === 'surplus' ? 'var(--status-active)' : 'var(--text-main)'));
       var sign = s.net > 0 ? '+' : '';
-      return '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Net = Open seats − Required for current 15-min IDP bucket"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Net Staffing</h4><div style="font-size:2.5rem; font-weight:800; color:' + color + ';">' + sign + s.net + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + s.supply + ' open / ' + s.demand + ' req @ ' + escapeHTML(s.bucket) + '</div></div>';
+      return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Net = Open seats − Required for current 15-min IDP bucket"><div class="aurora-label" style="margin-bottom:10px;">Net Staffing</div><div style="font-size:2.8rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + sign + s.net + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + s.supply + ' open / ' + s.demand + ' req @ ' + escapeHTML(s.bucket) + '</div></div>';
   }
 
   function renderOutageTile() {
@@ -748,7 +748,7 @@
       }).join('');
       var updated = d.updated ? ' • updated ' + escapeHTML(d.updated) : '';
       var errBadge = (d.errors && d.errors.length) ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:6px; font-weight:700;" title="' + escapeHTML(d.errors.join(' | ')) + '">' + d.errors.length + ' source' + (d.errors.length > 1 ? 's' : '') + ' offline</span>' : '';
-      return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 20px; background:rgba(0,0,0,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages (Real-time)' + errBadge + '</div><div style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</div></div><div style="display:flex;">' + cols + '</div></div>';
+      return '<div class="aether-card tile-aurora" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:12px 20px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages (Real-time)' + errBadge + '</div><div style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</div></div><div style="display:flex;">' + cols + '</div></div>';
   }
 
   function renderOverview() {
@@ -1129,14 +1129,31 @@
   window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
   window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
-  window.runImportAction = function() { 
-      var t = document.getElementById('import-text').value; if(!t) return; 
+  window.runImportAction = function() {
+      var t = document.getElementById('import-text').value; if(!t) return;
       var btn = event.target; var originalText = btn.innerText; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true;
-      closeImportModal(); showToast("Syncing Database..."); 
+      closeImportModal(); showToast("Syncing Database...");
+      var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
       if(typeof google !== 'undefined') {
-          google.script.run.runImport(t);
-          google.script.run.withSuccessHandler(function(trackerResult) { var finalMsg = trackerResult.indexOf("Error") !== -1 ? "Schedule Synced" : trackerResult; showToast(finalMsg); btn.innerHTML = originalText; btn.disabled = false; fetchData(); fetchMetadata(); if (state.view === 'tracker') fetchTrackerData(); if (state.view === 'insights') fetchInsightData(); let notifMsg = "Global Update: WFM Schedule Refreshed."; if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) { notifMsg = "Global Update: IDP Heatmap Refreshed."; } google.script.run.addGlobalNotification(notifMsg); }).withFailureHandler(function(err) { btn.innerHTML = originalText; btn.disabled = false; showToast("Schedule Synced"); fetchData(); fetchMetadata(); if (state.view === 'tracker') fetchTrackerData(); if (state.view === 'insights') fetchInsightData(); }).importWorkforceData(t, t); 
-      } 
+          google.script.run.withFailureHandler(function(err) {
+              showToast('Raw schedule write failed: ' + ((err && err.message) || 'unknown'));
+          }).runImport(t);
+          google.script.run.withSuccessHandler(function(trackerResult) {
+              resetBtn();
+              var msg = (trackerResult == null) ? 'Schedule Synced (empty result from backend)' : String(trackerResult);
+              showToast(msg.indexOf('Error') !== -1 ? msg : msg);
+              fetchData(); fetchMetadata();
+              if (state.view === 'tracker') fetchTrackerData();
+              if (state.view === 'insights') fetchInsightData();
+              var notifMsg = "Global Update: WFM Schedule Refreshed.";
+              if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) { notifMsg = "Global Update: IDP Heatmap Refreshed."; }
+              google.script.run.addGlobalNotification(notifMsg);
+          }).withFailureHandler(function(err) {
+              resetBtn();
+              var detail = (err && err.message) ? err.message : 'Unknown error — check Apps Script execution log';
+              showToast('Sync failed: ' + detail);
+          }).importWorkforceData(t, t);
+      }
   };
 
   window.openEventModal = function(idx) { var e = state.calendarEvents[idx]; if(!e) return; document.getElementById('evt-modal-title').innerText = escapeHTML(e.title || ''); document.getElementById('evt-modal-time').innerText = escapeHTML(e.date || '') + " • " + escapeHTML(e.startTime || '') + " - " + escapeHTML(e.endTime || ''); document.getElementById('evt-modal-desc').innerHTML = escapeHTML(e.description || "No description provided."); document.getElementById('event-modal').classList.add('open'); };
