@@ -94,24 +94,37 @@
       min-width: 0; 
   }
   
-  /* --- BULLETPROOF HEADER BASE --- */
+  /* --- HEADER: TWO-ROW LAYOUT ---
+     Row 1: brand (left) + actions (right) — small footprint, never crowded.
+     Row 2: navigation tabs centered, full width — has its own row so it
+            never has to fight with actions for horizontal space. This is
+            the layout pattern Linear / Notion / Slack use, and it never
+            breaks at any viewport width because the two groups don't
+            share a row. */
   .top-deck {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
+      flex-direction: column;
       background: var(--glass-surface);
       backdrop-filter: blur(25px);
       border: var(--glass-border);
-      padding: 0 24px;
+      padding: 10px 24px;
       border-radius: var(--radius-panel);
       box-shadow: var(--glass-shadow);
-      min-height: 72px;
       z-index: 50;
-      gap: 16px;
-      flex-wrap: nowrap;
+      gap: 8px;
       min-width: 0;
   }
-  .brand, .nav-island, .action-group { flex-shrink: 0; }
+  .top-deck-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+  }
+  .top-deck-primary {
+      justify-content: space-between;
+      flex-wrap: nowrap;
+      width: 100%;
+  }
   
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
   .brand-logo-diamond { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 6px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 8px; }
@@ -130,11 +143,10 @@
       border-radius: 50px;
       align-items: center;
       white-space: nowrap;
-      flex-wrap: nowrap;
-      /* Don't grow past content width and don't allow buttons to be clipped.
-         If the header truly can't fit nav + actions, the toggle takes over
-         (handled by the responsive breakpoint below). */
-      flex: 0 0 auto;
+      flex-wrap: wrap;            /* nav buttons may wrap on very narrow phones */
+      justify-content: center;    /* center within its own full-width row */
+      align-self: center;
+      max-width: 100%;
   }
   .nav-island::-webkit-scrollbar { display: none; } 
   
@@ -368,36 +380,24 @@
   /* Toggle button is dead — kept hidden in case any old class lingers. */
   .action-toggle-btn { display: none !important; }
 
-  /* Responsive ladder, single row, never wraps, never clips:
-        < 1500px : KPI strip in header drops (svl/ack/time)
-        < 1300px : nav button labels drop → icon-only nav
-        < 1180px : secondary action buttons drop (region, outage URL,
-                   import) — kept reachable via the modals/menus they
-                   open from elsewhere; these icons aren't visible
-                   often enough to fight for space here.
-        < 1100px : brand wordmark drops, nav gap tightens further
+  /* Responsive ladder. Two-row header rarely needs adjustment because
+     brand+actions and nav each have their own row and don't compete.
+        < 1400px : KPI strip drops — purely an information-density choice.
+        < 1100px : grid splits collapse, brand wordmark drops, nav goes
+                   to icon-only to fit phone widths.
         <  900px : bento collapses to single column. */
-  @media (max-width: 1500px) {
+  @media (max-width: 1400px) {
       .grid-bento { grid-template-columns: repeat(2, 1fr); }
       .kpi-row, .kpi-divider { display: none; }
-  }
-
-  @media (max-width: 1300px) {
-      .nav-btn > span { display: none; }
-      .nav-btn { padding: 0 10px; gap: 0; }
-      .nav-island { gap: 1px; }
-  }
-
-  @media (max-width: 1180px) {
-      #btn-region, #btn-outage-admin { display: none; }
-      .action-group { gap: 6px; }
   }
 
   @media (max-width: 1100px) {
       .grid-split { grid-template-columns: 1fr; }
       .agent-row { grid-template-columns: 4px minmax(100px, 1fr) 70px minmax(100px, 1.5fr) 80px; }
       .brand-text { display: none; }
-      .top-deck { padding: 0 12px; gap: 8px; }
+      .nav-btn > span { display: none; }
+      .nav-btn { padding: 0 10px; gap: 0; }
+      .top-deck { padding: 8px 14px; }
   }
 
   @media (max-width: 900px) {
