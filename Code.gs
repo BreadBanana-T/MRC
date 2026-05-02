@@ -92,8 +92,41 @@ function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsT
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 
 }
-function importWorkforceData(sched, idp) { 
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error"; 
+function importWorkforceData(sched, idp) {
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error";
+}
+
+// ── Chunked upload transport ──────────────────────────────────────────────
+// google.script.run reliably carries ~1 MB; large WFM/IDP pastes blow past
+// that and get dropped silently with no error and no response. Chunk the
+// text into ~80 KB pieces (safely under CacheService's 100 KB per-key cap),
+// stash each in cache, then assemble + process server-side in one go.
+function uploadChunk(token, index, total, chunk) {
+  var cache = CacheService.getScriptCache();
+  cache.put('uplk_' + token + '_' + index, chunk, 600); // 10 min TTL
+  return index + 1;
+}
+
+function processChunkedImport(token, total, kind) {
+  var cache = CacheService.getScriptCache();
+  var keys = [];
+  for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
+  var bag = cache.getAll(keys); // single batched read
+  var parts = [];
+  for (var j = 0; j < total; j++) {
+    var p = bag['uplk_' + token + '_' + j];
+    if (p == null) throw new Error('Missing chunk ' + j + ' of ' + total);
+    parts.push(p);
+  }
+  cache.removeAll(keys); // cleanup
+  var fullText = parts.join('');
+  if (kind === 'idp') {
+    return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
+  }
+  // Schedule path: write Raw Schedule via ImportHandler, then run the
+  // workforce parser. Same two-call pattern as the small-payload path.
+  if (typeof ImportHandler !== 'undefined') ImportHandler.run(fullText);
+  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(fullText, '') : 'Error';
 }
 
 // --- GRAND UNIFIED TRACKER & ARCHIVES ---

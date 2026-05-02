@@ -1125,6 +1125,47 @@
   window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
   window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
   
+  // Threshold above which the paste won't survive a single google.script.run
+  // call (it silently drops with no error). Anything bigger is sent in
+  // ~80 KB pieces via cache and assembled server-side. 800 KB leaves
+  // headroom under the ~1 MB practical limit.
+  var DIRECT_LIMIT = 800 * 1024;
+  var CHUNK_SIZE   = 80 * 1024;
+
+  function _chunkUpload(text, kind, onSuccess, onFailure) {
+      var token = 't' + Date.now() + Math.random().toString(36).slice(2, 8);
+      var total = Math.ceil(text.length / CHUNK_SIZE);
+      console.log('[sync] chunked upload: ' + total + ' chunks of ~' + CHUNK_SIZE + ' bytes');
+      var sent = 0;
+      function next() {
+          if (sent >= total) {
+              console.log('[sync] all chunks uploaded, processing server-side');
+              showToast('Processing ' + Math.round(text.length / 1024) + ' KB…');
+              google.script.run
+                  .withSuccessHandler(onSuccess)
+                  .withFailureHandler(onFailure)
+                  .processChunkedImport(token, total, kind);
+              return;
+          }
+          var slice = text.slice(sent * CHUNK_SIZE, (sent + 1) * CHUNK_SIZE);
+          google.script.run
+              .withSuccessHandler(function() {
+                  sent++;
+                  if (sent === 1 || sent % 5 === 0 || sent === total) {
+                      console.log('[sync] uploaded ' + sent + '/' + total);
+                      showToast('Uploading ' + sent + '/' + total + '…');
+                  }
+                  next();
+              })
+              .withFailureHandler(function(err) {
+                  console.error('[sync] chunk ' + sent + ' failed:', err);
+                  onFailure(err);
+              })
+              .uploadChunk(token, sent, total, slice);
+      }
+      next();
+  }
+
   window.runImportAction = function() {
       console.log('[sync] click');
       var t = document.getElementById('import-text').value; if(!t) { console.warn('[sync] empty text'); return; }
@@ -1133,7 +1174,6 @@
       btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
       btn.disabled = true;
       closeImportModal();
-      showToast("Syncing Database...");
       console.log('[sync] text length=' + t.length + ', google=' + (typeof google));
       if (typeof google === 'undefined') {
           btn.innerHTML = originalText; btn.disabled = false;
@@ -1141,42 +1181,42 @@
           return;
       }
       var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
-      // Backstop: if NEITHER handler fires within 90s (network drop, auth
-      // re-prompt, etc.), reset the button so the user isn't trapped.
-      var timeoutId = setTimeout(function() {
-          console.error('[sync] BACKSTOP TIMEOUT — neither handler fired in 90s');
+
+      // Detect kind so we don't waste the wire by sending the same blob as
+      // both schedule AND IDP. Flip the branch on commit message accordingly.
+      var lower = t.toLowerCase();
+      var isIdp = lower.includes('occupied seats') || lower.includes('sièges occupés');
+      var kind = isIdp ? 'idp' : 'sched';
+
+      var onSuccess = function(trackerResult) {
+          console.log('[sync] success:', trackerResult);
           resetBtn();
-          showToast('Sync timed out — check Apps Script execution log');
-      }, 90000);
+          var msg = (trackerResult && String(trackerResult).indexOf('Error') !== -1) ? 'Schedule Synced' : (trackerResult || 'Schedule Synced');
+          showToast(msg);
+          fetchData(); fetchMetadata();
+          if (state.view === 'tracker') fetchTrackerData();
+          if (state.view === 'insights') fetchInsightData();
+          var notifMsg = isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.';
+          google.script.run.addGlobalNotification(notifMsg);
+      };
+      var onFailure = function(err) {
+          console.error('[sync] failure:', err);
+          resetBtn();
+          showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
+      };
 
-      // Fire raw-schedule writer first (independent), then the workforce
-      // import which drives the UI on completion.
-      google.script.run
-          .withSuccessHandler(function(r) { console.log('[sync] runImport ok:', r); })
-          .withFailureHandler(function(err) { console.error('[sync] runImport failed:', err); })
-          .runImport(t);
-
-      google.script.run
-          .withSuccessHandler(function(trackerResult) {
-              clearTimeout(timeoutId);
-              console.log('[sync] importWorkforceData ok:', trackerResult);
-              resetBtn();
-              var finalMsg = (trackerResult && String(trackerResult).indexOf("Error") !== -1) ? "Schedule Synced" : (trackerResult || "Schedule Synced");
-              showToast(finalMsg);
-              fetchData(); fetchMetadata();
-              if (state.view === 'tracker') fetchTrackerData();
-              if (state.view === 'insights') fetchInsightData();
-              var notifMsg = "Global Update: WFM Schedule Refreshed.";
-              if (t.toLowerCase().includes("occupied seats") || t.toLowerCase().includes("sièges occupés")) { notifMsg = "Global Update: IDP Heatmap Refreshed."; }
-              google.script.run.addGlobalNotification(notifMsg);
-          })
-          .withFailureHandler(function(err) {
-              clearTimeout(timeoutId);
-              console.error('[sync] importWorkforceData failed:', err);
-              resetBtn();
-              showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
-          })
-          .importWorkforceData(t, t);
+      if (t.length > DIRECT_LIMIT) {
+          console.log('[sync] paste is ' + Math.round(t.length / 1024) + ' KB — using chunked upload');
+          showToast('Large paste (' + Math.round(t.length / 1024) + ' KB) — chunking…');
+          _chunkUpload(t, kind, onSuccess, onFailure);
+      } else {
+          showToast('Syncing Database...');
+          if (kind === 'sched') google.script.run.runImport(t); // raw-schedule writer (small only)
+          google.script.run
+              .withSuccessHandler(onSuccess)
+              .withFailureHandler(onFailure)
+              .importWorkforceData(isIdp ? '' : t, isIdp ? t : '');
+      }
   };
 
   window.openEventModal = function(idx) { var e = state.calendarEvents[idx]; if(!e) return; document.getElementById('evt-modal-title').innerText = escapeHTML(e.title || ''); document.getElementById('evt-modal-time').innerText = escapeHTML(e.date || '') + " • " + escapeHTML(e.startTime || '') + " - " + escapeHTML(e.endTime || ''); document.getElementById('evt-modal-desc').innerHTML = escapeHTML(e.description || "No description provided."); document.getElementById('event-modal').classList.add('open'); };
