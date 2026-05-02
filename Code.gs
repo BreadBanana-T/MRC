@@ -108,25 +108,37 @@ function uploadChunk(token, index, total, chunk) {
 }
 
 function processChunkedImport(token, total, kind) {
+  Logger.log('[chunkedImport] start: token=' + token + ' total=' + total + ' kind=' + kind);
   var cache = CacheService.getScriptCache();
   var keys = [];
   for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
-  var bag = cache.getAll(keys); // single batched read
+  var bag = cache.getAll(keys);
   var parts = [];
+  var missing = 0;
   for (var j = 0; j < total; j++) {
     var p = bag['uplk_' + token + '_' + j];
-    if (p == null) throw new Error('Missing chunk ' + j + ' of ' + total);
+    if (p == null) { missing++; continue; }
     parts.push(p);
   }
-  cache.removeAll(keys); // cleanup
+  if (missing) throw new Error(missing + ' of ' + total + ' chunks missing from cache (TTL expired?)');
+  cache.removeAll(keys);
   var fullText = parts.join('');
+  Logger.log('[chunkedImport] assembled ' + fullText.length + ' chars');
+  var t0 = new Date().getTime();
+  var result;
   if (kind === 'idp') {
-    return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
+    result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
+  } else {
+    if (typeof ImportHandler !== 'undefined') {
+      Logger.log('[chunkedImport] running ImportHandler...');
+      ImportHandler.run(fullText);
+      Logger.log('[chunkedImport] ImportHandler done at +' + (new Date().getTime() - t0) + 'ms');
+    }
+    Logger.log('[chunkedImport] running WorkforceTracker.importData...');
+    result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(fullText, '') : 'Error';
   }
-  // Schedule path: write Raw Schedule via ImportHandler, then run the
-  // workforce parser. Same two-call pattern as the small-payload path.
-  if (typeof ImportHandler !== 'undefined') ImportHandler.run(fullText);
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(fullText, '') : 'Error';
+  Logger.log('[chunkedImport] done at +' + (new Date().getTime() - t0) + 'ms; result=' + result);
+  return result;
 }
 
 // --- GRAND UNIFIED TRACKER & ARCHIVES ---

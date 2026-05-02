@@ -1188,7 +1188,24 @@
       var isIdp = lower.includes('occupied seats') || lower.includes('sièges occupés');
       var kind = isIdp ? 'idp' : 'sched';
 
+      // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
+      // import takes that long and times out, the failure handler may not
+      // fire reliably. Reset the button + refresh data ourselves so the
+      // user never has to reload the page.
+      var settled = false;
+      var backstop = setTimeout(function() {
+          if (settled) return;
+          settled = true;
+          console.warn('[sync] BACKSTOP — server did not respond in 3 min; refreshing UI anyway');
+          resetBtn();
+          showToast('Sync took too long — refreshing data; check Apps Script log');
+          fetchData(); fetchMetadata();
+          if (state.view === 'tracker') fetchTrackerData();
+          if (state.view === 'insights') fetchInsightData();
+      }, 180000);
+
       var onSuccess = function(trackerResult) {
+          if (settled) return; settled = true; clearTimeout(backstop);
           console.log('[sync] success:', trackerResult);
           resetBtn();
           var msg = (trackerResult && String(trackerResult).indexOf('Error') !== -1) ? 'Schedule Synced' : (trackerResult || 'Schedule Synced');
@@ -1200,6 +1217,7 @@
           google.script.run.addGlobalNotification(notifMsg);
       };
       var onFailure = function(err) {
+          if (settled) return; settled = true; clearTimeout(backstop);
           console.error('[sync] failure:', err);
           resetBtn();
           showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
