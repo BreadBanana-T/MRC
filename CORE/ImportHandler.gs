@@ -8,6 +8,7 @@ const ImportHandler = {
 
 function processWFMImport(rawText, forcedDate) {
   if (!rawText) return "Error: No text provided.";
+  Logger.log('[wfm] start, text len=' + rawText.length);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ss.setSpreadsheetTimeZone("America/Toronto");
   let sheet = ss.getSheetByName("Raw Schedule");
@@ -19,19 +20,27 @@ function processWFMImport(rawText, forcedDate) {
   if (typeof RegionRegistry !== 'undefined') RegionRegistry.beginBatch();
 
   try {
-    sheet.clear();
+    // sheet.clear() is O(rows) and can take 30-60s on a sheet that's been
+    // populated several times. deleteRows + clearContents on the header
+    // range is much faster and gets the same end-state.
+    var t0 = new Date().getTime();
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+    sheet.getRange(1, 1, 1, sheet.getLastColumn() || 12).clearContent();
+    Logger.log('[wfm] sheet reset in ' + (new Date().getTime() - t0) + 'ms (was ' + lastRow + ' rows)');
     sheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
     sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
 
   const lines = rawText.split(/\r?\n/);
+  Logger.log('[wfm] parsing ' + lines.length + ' lines');
   let rosterData = [];
   let currentAgent = null;
   let currentID = null;
   let buffer = resetBuffer();
-  
+
   if (!forcedDate) forcedDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
   const [defY, defM, defD] = forcedDate.split('-').map(Number);
-  
+
   const rgxAgent = /Agent:\s*(\d+)\s*(.*)/i;
   const rgxAnyDateLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
   const rgxShiftLine = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(\d{1,2}:\d{2}\s*[AP]M)/i;
@@ -114,15 +123,27 @@ function processWFMImport(rawText, forcedDate) {
   }
 
     if (currentAgent) pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
+    Logger.log('[wfm] parsed ' + rosterData.length + ' entries in ' + (new Date().getTime() - t0) + 'ms');
 
     if (rosterData.length > 0) {
+      var tWrite = new Date().getTime();
       sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
-      if (typeof AgentMonitor !== 'undefined') AgentMonitor.getPayload();
+      Logger.log('[wfm] setValues done in ' + (new Date().getTime() - tWrite) + 'ms');
+      if (typeof AgentMonitor !== 'undefined') {
+        var tMon = new Date().getTime();
+        AgentMonitor.getPayload();
+        Logger.log('[wfm] AgentMonitor.getPayload done in ' + (new Date().getTime() - tMon) + 'ms');
+      }
+      Logger.log('[wfm] total ' + (new Date().getTime() - t0) + 'ms');
       return `Synced ${rosterData.length} entries successfully to Local Database.`;
     }
     return "No valid data found.";
   } finally {
-    if (typeof RegionRegistry !== 'undefined') RegionRegistry.commitBatch();
+    if (typeof RegionRegistry !== 'undefined') {
+      var tCommit = new Date().getTime();
+      RegionRegistry.commitBatch();
+      Logger.log('[wfm] RegionRegistry.commitBatch in ' + (new Date().getTime() - tCommit) + 'ms');
+    }
   }
 }
 
