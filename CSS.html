@@ -452,6 +452,29 @@
       to { --aurora-angle: 360deg; }
   }
 
+  /* Red Flags grid: masonry-style 2-column layout via CSS columns. Cards
+     size to their content so the entire list is visible (good for screen-
+     shots), and shorter cards stack so taller cards can extend without
+     leaving a gap. column-fill:balance keeps both columns roughly equal
+     in total height. */
+  .rf-grid {
+      column-count: 2;
+      column-gap: 24px;
+      column-fill: balance;
+      padding-bottom: 40px;
+  }
+  .rf-card {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      display: inline-block !important;
+      width: 100%;
+      margin-bottom: 24px;
+  }
+  @media (max-width: 1100px) {
+      .rf-grid { column-count: 1; }
+  }
+
   /* Headline numbers — clean off-white with an icy glow. No rainbow. */
   .aurora-num {
       color: #f1f5f9;
