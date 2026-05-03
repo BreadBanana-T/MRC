@@ -94,18 +94,19 @@
       min-width: 0; 
   }
   
-  /* --- HEADER: ADAPTIVE 1-ROW / 2-ROW LAYOUT ---
-     HTML order: brand, nav, action-group (3 direct children).
-        Wide (>= 1500px) — single flex row, justify-content:space-between
-                            puts brand left, nav center, actions right.
-        Mid  (1100–1500px) — CSS grid: row 1 brand+actions, row 2 nav full-width.
-        Narrow (< 1100px)  — same grid + nav goes icon-only, brand wordmark drops. */
+  /* --- HEADER: GRID-BASED, BOTH WIDE AND NARROW ---
+     HTML must be 3 direct children of .top-deck:
+       <div class="brand">
+       <nav class="nav-island">
+       <div class="action-group">
+     Each child is explicitly placed via grid-area, no auto-placement,
+     so element order in HTML doesn't affect layout. */
   .top-deck {
-      display: flex;
-      flex-direction: row;
-      flex-wrap: nowrap;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      grid-template-areas: "brand nav actions";
       align-items: center;
-      justify-content: space-between;
+      gap: 16px;
       background: var(--glass-surface);
       backdrop-filter: blur(25px);
       border: var(--glass-border);
@@ -114,26 +115,23 @@
       box-shadow: var(--glass-shadow);
       min-height: 64px;
       z-index: 50;
-      gap: 16px;
       min-width: 0;
   }
-  .brand, .nav-island, .action-group { flex-shrink: 0; }
+  .brand        { grid-area: brand; }
+  .nav-island   { grid-area: nav; justify-self: center; }
+  .action-group { grid-area: actions; justify-self: end; }
 
   @media (max-width: 1500px) {
+      /* Stack: brand+actions on top row, nav full-width on row 2. */
       .top-deck {
-          display: grid;
           grid-template-columns: auto 1fr;
           grid-template-areas:
               "brand   actions"
               "nav     nav";
-          align-items: center;
           row-gap: 6px;
           padding: 8px 20px;
           min-height: 0;
       }
-      .brand        { grid-area: brand; }
-      .action-group { grid-area: actions; justify-self: end; }
-      .nav-island   { grid-area: nav; justify-self: center; }
   }
   
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
