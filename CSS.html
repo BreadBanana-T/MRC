@@ -95,12 +95,10 @@
   }
   
   /* --- HEADER: SINGLE ROW, ALWAYS ---
-     Strategy: never stack, never wrap. Children shrink/hide gracefully
-     in priority order as the viewport narrows.
-       Always visible: brand logo, nav text, theme, bell, flag, import
-       Hide at < 1500: KPI strip
-       Hide at < 1300: brand wordmark
-       Hide at < 1180: secondary action buttons (region, outage, insights) */
+     KPI strip is hidden permanently — it duplicates the big SVL/ACK
+     numbers on the Service Level chart card right below. With KPI gone
+     the header has comfortable room for brand + nav + actions at any
+     reasonable viewport width. */
   .top-deck {
       display: flex;
       flex-direction: row;
@@ -119,16 +117,13 @@
       min-width: 0;
   }
   .brand        { flex: 0 0 auto; }
-  .nav-island   { flex: 0 1 auto; min-width: 0; }
+  .nav-island   { flex: 0 0 auto; }
   .action-group { flex: 0 0 auto; }
+  /* KPI strip retired from the header — same data is on the SL chart card. */
+  .kpi-row, .kpi-divider { display: none !important; }
 
-  @media (max-width: 1500px) {
-      .kpi-row, .kpi-divider { display: none; }
-  }
-  @media (max-width: 1300px) {
-      .brand-text { display: none; }
-  }
-  @media (max-width: 1180px) {
+  @media (max-width: 1300px) { .brand-text { display: none; } }
+  @media (max-width: 1100px) {
       #btn-region, #btn-outage-admin, #btn-insights { display: none; }
       .top-deck { padding: 0 14px; gap: 8px; }
   }
