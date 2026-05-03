@@ -26,36 +26,9 @@
     
     <div class="app-shell" id="main-layout">
         <header class="top-deck">
-            <div class="top-deck-row top-deck-primary">
-                <div class="brand">
-                    <div class="brand-logo-diamond"><div class="brand-logo-inner"></div></div>
-                    <span class="brand-text">MRC Operations Portal</span>
-                </div>
-
-                <div class="action-group">
-                    <div class="kpi-row">
-                        <div class="kpi-box"><h4>SVL</h4><div id="hdr-sl">--</div></div>
-                        <div class="kpi-box"><h4>ACK</h4><div id="hdr-ack" style="color:var(--text-secondary);">--</div></div>
-                        <div class="kpi-box"><h4>Time</h4><div id="clock">00:00</div></div>
-                    </div>
-                    <div class="kpi-divider" style="height:30px; width:1px; background:var(--glass-border); margin: 0 8px;"></div>
-
-                    <div class="theme-switch" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
-                        <div class="theme-switch-thumb">
-                            <i data-lucide="sun" class="theme-switch-icon icon-sun" width="14"></i>
-                            <i data-lucide="moon" class="theme-switch-icon icon-moon" width="14"></i>
-                        </div>
-                    </div>
-
-                    <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()" title="Notifications"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
-                    <button class="action-btn" id="btn-insights" onclick="setView('insights')" title="Insights"><i data-lucide="bar-chart-2" width="20"></i></button>
-                    <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags">
-                        <i data-lucide="flag" width="20" color="var(--status-alert)" fill="rgba(220, 38, 38, 0.2)"></i>
-                    </button>
-                    <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region Manager"><i data-lucide="map-pin" width="20"></i></button>
-                    <button class="action-btn" id="btn-outage-admin" onclick="openOutageAdmin()" title="Outage URL Settings"><i data-lucide="zap" width="20"></i></button>
-                    <button class="action-btn" onclick="openImportModal()" title="Import"><i data-lucide="download" width="20"></i></button>
-                </div>
+            <div class="brand">
+                <div class="brand-logo-diamond"><div class="brand-logo-inner"></div></div>
+                <span class="brand-text">MRC Operations Portal</span>
             </div>
 
             <nav class="nav-island">
@@ -66,6 +39,31 @@
                 <button class="nav-btn" id="btn-calc" onclick="setView('calc')"><i data-lucide="calculator" width="16"></i><span>Calculator</span></button>
                 <button class="nav-btn" id="btn-tracker" onclick="setView('tracker')"><i data-lucide="activity" width="16"></i><span>Tracker</span></button>
             </nav>
+
+            <div class="action-group">
+                <div class="kpi-row">
+                    <div class="kpi-box"><h4>SVL</h4><div id="hdr-sl">--</div></div>
+                    <div class="kpi-box"><h4>ACK</h4><div id="hdr-ack" style="color:var(--text-secondary);">--</div></div>
+                    <div class="kpi-box"><h4>Time</h4><div id="clock">00:00</div></div>
+                </div>
+                <div class="kpi-divider" style="height:30px; width:1px; background:var(--glass-border); margin: 0 8px;"></div>
+
+                <div class="theme-switch" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
+                    <div class="theme-switch-thumb">
+                        <i data-lucide="sun" class="theme-switch-icon icon-sun" width="14"></i>
+                        <i data-lucide="moon" class="theme-switch-icon icon-moon" width="14"></i>
+                    </div>
+                </div>
+
+                <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()" title="Notifications"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
+                <button class="action-btn" id="btn-insights" onclick="setView('insights')" title="Insights"><i data-lucide="bar-chart-2" width="20"></i></button>
+                <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags">
+                    <i data-lucide="flag" width="20" color="var(--status-alert)" fill="rgba(220, 38, 38, 0.2)"></i>
+                </button>
+                <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region Manager"><i data-lucide="map-pin" width="20"></i></button>
+                <button class="action-btn" id="btn-outage-admin" onclick="openOutageAdmin()" title="Outage URL Settings"><i data-lucide="zap" width="20"></i></button>
+                <button class="action-btn" onclick="openImportModal()" title="Import"><i data-lucide="download" width="20"></i></button>
+            </div>
         </header>
         <main class="viewport" id="content"></main>
     </div>
