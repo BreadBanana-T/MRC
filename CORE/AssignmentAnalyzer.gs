@@ -42,8 +42,15 @@ var AssignmentAnalyzer = {
               let emailTI = colEmailTI > -1 ? cols[colEmailTI] : "";
 
               let isManager = job.toLowerCase().includes('manager') || job.toLowerCase().includes('supervisor') || job.toLowerCase().includes('director');
+              // Status field is rarely updated in practice — agents who've
+              // been here a year may still show "Short term" or "Hired".
+              // Switched from a positive "must say active" filter to a
+              // negative "must NOT say terminated/etc" filter so outdated
+              // status values don't silently drop real agents.
+              let s = status.toLowerCase();
+              let isInactive = s.includes('terminated') || s.includes('resigned') || s.includes('inactive') || s.includes('separated') || s === 'left';
 
-              if (name && status.toLowerCase().includes('active') && !isManager) {
+              if (name && !isInactive && !isManager) {
                   validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI]);
               }
           }
