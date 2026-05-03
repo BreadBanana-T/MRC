@@ -198,8 +198,13 @@ var AssignmentAnalyzer = {
                           }
                       }
                   }
-                  if (matchedLvl === null) return;
-                  agentLevel = matchedLvl;
+                  // No MasterList match — pass through with default level 2
+                  // instead of dropping the agent. The MasterList stays useful
+                  // as a manager filter (managers never enter it in the first
+                  // place via the job-title check at import), but isn't a
+                  // hard gate anymore: agents missing because the MasterList
+                  // is stale still appear in Red Flags.
+                  agentLevel = (matchedLvl === null) ? 2 : matchedLvl;
               }
               
               if (exclusions.has(agent)) return;
