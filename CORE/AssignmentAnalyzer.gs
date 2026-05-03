@@ -235,9 +235,15 @@ var AssignmentAnalyzer = {
                   aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls
               };
 
-              if (c.inPct >= 0.75) {
+              // Match the Excel "Assignment Tracker 2026" Red Flag rules.
+              // RedFlagHooks!B4 source: FILTER where In% >= 0.75 AND volume >= 5.
+              // RedFlagHooks!J4 source: subset of B where T×C >= 0.50.
+              // The two lists OVERLAP — a high-In% high-T×C agent appears in
+              // both. Out of Scope is the broader candidate set; Red Flags is
+              // the tighter "needs balancing" subset (their tasks ARE calls).
+              if (c.inPct >= 0.75 && c.totalCalls >= 5) {
+                  outOfScopeList.push(payload);
                   if (c.tasksXCalls >= 0.50 || c.totalCalls === 0) inboundList.push(payload);
-                  else outOfScopeList.push(payload);
               }
               if (c.outPct >= 0.75 && c.level >= 2) outboundList.push(payload);
               if (c.cph > 0 && c.cph <= 7.3) cphList.push(payload);
