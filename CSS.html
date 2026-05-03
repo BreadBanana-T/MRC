@@ -94,36 +94,47 @@
       min-width: 0; 
   }
   
-  /* --- HEADER: TWO-ROW LAYOUT ---
-     Row 1: brand (left) + actions (right) — small footprint, never crowded.
-     Row 2: navigation tabs centered, full width — has its own row so it
-            never has to fight with actions for horizontal space. This is
-            the layout pattern Linear / Notion / Slack use, and it never
-            breaks at any viewport width because the two groups don't
-            share a row. */
+  /* --- HEADER: ADAPTIVE 1-ROW / 2-ROW LAYOUT ---
+     Wide viewports (>= 1500px): single row, brand · nav · actions.
+     Below that: stack — brand+actions on row 1, nav full-width on row 2.
+     Below 1100: nav goes icon-only, brand wordmark drops. */
   .top-deck {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      align-items: center;
       background: var(--glass-surface);
       backdrop-filter: blur(25px);
       border: var(--glass-border);
-      padding: 10px 24px;
+      padding: 0 24px;
       border-radius: var(--radius-panel);
       box-shadow: var(--glass-shadow);
+      min-height: 64px;
       z-index: 50;
-      gap: 8px;
+      gap: 16px;
       min-width: 0;
   }
   .top-deck-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
+      display: contents; /* Children flatten into the parent row at wide widths. */
   }
-  .top-deck-primary {
-      justify-content: space-between;
-      flex-wrap: nowrap;
-      width: 100%;
+  .brand, .nav-island, .action-group { flex-shrink: 0; }
+
+  @media (max-width: 1500px) {
+      /* Stack: row 1 = brand + actions, row 2 = nav */
+      .top-deck {
+          flex-direction: column;
+          padding: 8px 20px;
+          gap: 6px;
+      }
+      .top-deck-row {
+          display: flex;
+          width: 100%;
+          align-items: center;
+          gap: 12px;
+      }
+      .top-deck-primary { justify-content: space-between; }
+      .nav-island { align-self: center; }
   }
   
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }

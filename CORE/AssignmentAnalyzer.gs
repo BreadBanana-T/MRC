@@ -568,9 +568,9 @@ function debugMissingFromMasterList(targetMonth) {
   Logger.log('MasterList keys loaded: ' + keys.size);
 
   // Walk analyzer log sheet (assignment analyzer logs the GEM data here)
-  var ag = ss.getSheetByName('Analyzer_Logs') || ss.getSheetByName('Analyzer Logs') || ss.getSheetByName('GEM_Logs');
+  var ag = ss.getSheetByName('WF_GEM_DATA_V3') || ss.getSheetByName('Analyzer_Logs') || ss.getSheetByName('GEM_Logs');
   if (!ag) {
-    Logger.log('No analyzer log sheet found. Looked for: Analyzer_Logs, Analyzer Logs, GEM_Logs');
+    Logger.log('No analyzer log sheet found. Looked for: WF_GEM_DATA_V3, Analyzer_Logs, GEM_Logs');
     Logger.log('Available sheets: ' + ss.getSheets().map(function(s) { return s.getName(); }).join(', '));
     return;
   }
