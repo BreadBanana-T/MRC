@@ -459,7 +459,7 @@
      in total height. */
   .rf-grid {
       column-count: 2;
-      column-gap: 24px;
+      column-gap: 18px;
       column-fill: balance;
       padding-bottom: 40px;
   }
@@ -469,8 +469,15 @@
       -webkit-column-break-inside: avoid;
       display: inline-block !important;
       width: 100%;
-      margin-bottom: 24px;
+      margin-bottom: 18px;
   }
+  /* Compact row spacing inside Red Flags cards — much tighter than the
+     default to keep total height short for screenshots. */
+  .rf-card table { font-size: 0.8rem; }
+  .rf-card thead th { padding: 8px 12px !important; font-size: 0.65rem !important; }
+  .rf-card tbody td { padding: 6px 12px !important; }
+  .rf-card tbody tr td:first-child { padding: 6px 12px !important; gap: 8px !important; }
+  .rf-card .btn-icon-sm { width: 22px; height: 22px; }
   @media (max-width: 1100px) {
       .rf-grid { column-count: 1; }
   }
