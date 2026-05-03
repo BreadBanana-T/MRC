@@ -540,3 +540,63 @@ function getCoachingCadenceFlags(thresholdDays) {
     return JSON.stringify({ flags: [], error: e.message });
   }
 }
+
+/**
+ * One-shot diagnostic: for a given month, report which agents are present
+ * in the GEM analyzer logs but missing from WF_MASTERLIST (and therefore
+ * silently dropped by the Red Flag categorizer at line ~194). Run from
+ * the editor: select `debugMissingFromMasterList` → Run.
+ */
+function debugMissingFromMasterList(targetMonth) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Build masterlist key set
+  var ml = ss.getSheetByName('WF_MASTERLIST');
+  var keys = new Set();
+  if (ml && ml.getLastRow() > 1) {
+    ml.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+      var k = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(r[0]) : String(r[0] || '').trim().toLowerCase();
+      if (k) keys.add(k);
+    });
+  }
+  Logger.log('MasterList keys loaded: ' + keys.size);
+
+  // Walk analyzer log sheet (assignment analyzer logs the GEM data here)
+  var ag = ss.getSheetByName('Analyzer_Logs') || ss.getSheetByName('Analyzer Logs') || ss.getSheetByName('GEM_Logs');
+  if (!ag) {
+    Logger.log('No analyzer log sheet found. Looked for: Analyzer_Logs, Analyzer Logs, GEM_Logs');
+    Logger.log('Available sheets: ' + ss.getSheets().map(function(s) { return s.getName(); }).join(', '));
+    return;
+  }
+  Logger.log('Reading from sheet: ' + ag.getName());
+  var rows = ag.getDataRange().getDisplayValues();
+  var header = rows[0];
+  var data = rows.slice(1);
+  Logger.log('Total rows: ' + data.length);
+
+  if (!targetMonth) {
+    // Use the latest month present
+    var months = {};
+    data.forEach(function(r) { var m = String(r[0]); if (m) months[m] = (months[m] || 0) + 1; });
+    targetMonth = Object.keys(months).sort().pop();
+  }
+  Logger.log('Target month: ' + targetMonth);
+
+  var presentInGEM = 0, missingFromML = [];
+  data.forEach(function(r) {
+    if (String(r[0]) !== targetMonth) return;
+    presentInGEM++;
+    var agent = String(r[1] || '').trim();
+    if (!agent) return;
+    var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(agent) : agent.toLowerCase();
+    if (!keys.has(key)) {
+      missingFromML.push({ name: agent, key: key });
+    }
+  });
+
+  Logger.log('Agents in GEM for ' + targetMonth + ': ' + presentInGEM);
+  Logger.log('Missing from MasterList: ' + missingFromML.length);
+  missingFromML.slice(0, 50).forEach(function(m) {
+    Logger.log('  - ' + m.name + '   (key="' + m.key + '")');
+  });
+  if (missingFromML.length > 50) Logger.log('  ... ' + (missingFromML.length - 50) + ' more');
+}
