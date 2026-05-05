@@ -401,7 +401,6 @@ var WorkforceTracker = {
               let aName = String(row[0]).trim();
               let key = _normalizeAgentKey(aName);
               let type = String(row[2]).trim();
-              let month = dStr.substring(0, 7);
               let start = String(row[3]).trim();
               let end = String(row[4]).trim();
 
@@ -412,7 +411,6 @@ var WorkforceTracker = {
               if (!agents[key]) {
                   let reg = String(row[5]).trim();
                   if (!reg) reg = "Onshore";
-                  // Registry wins over the absence-row region tag.
                   if (typeof RegionRegistry !== 'undefined') {
                       const rg = RegionRegistry.getRegion(aName);
                       if (rg) reg = rg;
@@ -425,17 +423,46 @@ var WorkforceTracker = {
               }
 
               agents[key].records.push({ date: dStr, type: type, start: start, end: end });
-
-              // Increment global totals
-              if (agents[key].totals[type] !== undefined) agents[key].totals[type]++;
-              else agents[key].totals[type] = 1;
-
-              agents[key].totalAbsences++;
-
-              // Monthly aggregator (for Flagging system)
-              if (!agents[key].monthlyCounts[month]) agents[key].monthlyCounts[month] = 0;
-              agents[key].monthlyCounts[month]++;
           }
+      });
+
+      // 2b. Merge same-day same-type segments (e.g. split-shift UNAB
+      // morning + afternoon → single entry spanning earliest start to
+      // latest end). Then compute totals from the merged records.
+      const self = this;
+      Object.values(agents).forEach(ag => {
+          let groups = {};
+          ag.records.forEach(r => {
+              let gk = r.date + '|' + r.type;
+              if (!groups[gk]) groups[gk] = [];
+              groups[gk].push(r);
+          });
+          let merged = [];
+          Object.keys(groups).forEach(gk => {
+              let segs = groups[gk];
+              if (segs.length === 1) { merged.push(segs[0]); return; }
+              let earliest = segs[0], latest = segs[0];
+              let earliestMins = self._timeToMins(segs[0].start);
+              let latestMins = self._timeToMins(segs[0].end);
+              segs.forEach(s => {
+                  let sm = self._timeToMins(s.start);
+                  let em = self._timeToMins(s.end);
+                  if (sm < earliestMins) { earliestMins = sm; earliest = s; }
+                  if (em > latestMins) { latestMins = em; latest = s; }
+              });
+              merged.push({ date: segs[0].date, type: segs[0].type, start: earliest.start, end: latest.end });
+          });
+          ag.records = merged;
+          ag.totals = { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 };
+          ag.monthlyCounts = {};
+          ag.totalAbsences = 0;
+          merged.forEach(r => {
+              if (ag.totals[r.type] !== undefined) ag.totals[r.type]++;
+              else ag.totals[r.type] = 1;
+              ag.totalAbsences++;
+              let m = r.date.substring(0, 7);
+              ag.monthlyCounts[m] = (ag.monthlyCounts[m] || 0) + 1;
+          });
       });
       
       let profiles = [];
