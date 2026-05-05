@@ -393,7 +393,8 @@ var WorkforceTracker = {
 
       if (!dbAbs || dbAbs.getLastRow() < 2) return JSON.stringify({ year: year, profiles: [] });
 
-      // 2. Iterate through Absences Database
+      // 2. Iterate through Absences Database (de-dup identical rows)
+      let seenAbs = {};
       dbAbs.getDataRange().getDisplayValues().slice(1).forEach(row => {
           let dStr = this._formatDate(row[1]);
           if (dStr.startsWith(year)) {
@@ -401,6 +402,12 @@ var WorkforceTracker = {
               let key = _normalizeAgentKey(aName);
               let type = String(row[2]).trim();
               let month = dStr.substring(0, 7);
+              let start = String(row[3]).trim();
+              let end = String(row[4]).trim();
+
+              let dedupKey = key + '|' + dStr + '|' + type + '|' + start + '|' + end;
+              if (seenAbs[dedupKey]) return;
+              seenAbs[dedupKey] = true;
 
               if (!agents[key]) {
                   let reg = String(row[5]).trim();
@@ -416,15 +423,15 @@ var WorkforceTracker = {
                       monthlyCounts: {}, totalAbsences: 0, flags: 0, flaggedMonths: []
                   };
               }
-              
-              agents[key].records.push({ date: dStr, type: type, start: row[3], end: row[4] });
-              
+
+              agents[key].records.push({ date: dStr, type: type, start: start, end: end });
+
               // Increment global totals
               if (agents[key].totals[type] !== undefined) agents[key].totals[type]++;
               else agents[key].totals[type] = 1;
-              
+
               agents[key].totalAbsences++;
-              
+
               // Monthly aggregator (for Flagging system)
               if (!agents[key].monthlyCounts[month]) agents[key].monthlyCounts[month] = 0;
               agents[key].monthlyCounts[month]++;

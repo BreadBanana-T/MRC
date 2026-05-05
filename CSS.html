@@ -330,6 +330,8 @@
   
   .heatmap-cell { border-radius: 8px; transition: transform 0.2s, box-shadow 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 0; }
   .heatmap-cell:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10; }
+  .heatmap-cell.idp-static { transition: none; animation: none !important; opacity: 1 !important; transform: none !important; }
+  .heatmap-cell.idp-static:hover { transform: none !important; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
   .status-surplus { background: rgba(5, 150, 105, 0.15); color: var(--status-active); border: 1px solid rgba(5, 150, 105, 0.2); }
   .status-risk { background: rgba(220, 38, 38, 0.15); color: var(--status-alert); border: 1px solid rgba(220, 38, 38, 0.2); }
   .status-neutral { background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--glass-border); }
