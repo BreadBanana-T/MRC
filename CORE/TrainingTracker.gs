@@ -15,7 +15,7 @@ const TrainingTracker = {
   DEFS_SHEET: "Training_Defs",
   TRK_SHEET: "Training_Tracker",
 
-  EMPLOYEE_STATUS_OPTS: ["Active", "Long Term Disability", "Maternity/Paternity Leave", "Short Term Disability"],
+  EMPLOYEE_STATUS_OPTS: ["Active", "Long Term Disability", "Maternity/Paternity Leave", "Short Term Disability", "Personal Leave"],
   TRAINING_STATUS_OPTS: ["Completed", "LOA", "No Longer Employed"],
   REGION_SCOPE_OPTS: ["Onshore", "Both"],
 
@@ -324,6 +324,131 @@ const TrainingTracker = {
       sheet.getRange(sheet.getLastRow() + 1, 1, toAdd.length, this.TRK_HEADERS.length).setValues(toAdd);
     }
     return JSON.stringify({ ok: true, added: toAdd.length });
+  },
+
+  // ── Bulk import from an existing Corporate Training Tracker tab ────────────
+  // One paste = one training. The tab name is the title (supplied by the user
+  // since it isn't in the copied cells). Creates/updates the def, then merges
+  // every parsed person row into the tracker. Re-importing is safe: people are
+  // matched by normalized name and overwritten in place rather than duplicated.
+  importTrainingSheet: function(payloadJson) {
+    let p;
+    try { p = (typeof payloadJson === "string") ? JSON.parse(payloadJson) : payloadJson; }
+    catch (e) { return JSON.stringify({ ok: false, error: "Bad payload" }); }
+    if (!p || !p.title || !p.raw) return JSON.stringify({ ok: false, error: "Missing title or pasted data" });
+
+    const title = String(p.title).trim();
+    const scope = (this.REGION_SCOPE_OPTS.indexOf(p.regionScope) !== -1) ? p.regionScope : "Both";
+
+    // 1. Resolve or create the training definition (match by title, case-insensitive).
+    const defsSheet = this._getDefsSheet();
+    const defs = this._readDefs();
+    let existing = null;
+    for (let i = 0; i < defs.length; i++) {
+      if (defs[i].title && defs[i].title.trim().toLowerCase() === title.toLowerCase()) { existing = defs[i]; break; }
+    }
+
+    let trainingId, created = false;
+    if (existing) {
+      trainingId = existing.id;
+      // Only overwrite video links when the import actually supplies them.
+      if (p.videoLinkEN || p.videoLinkFR) {
+        const dRows = defsSheet.getRange(2, 1, defsSheet.getLastRow() - 1, this.DEFS_HEADERS.length).getDisplayValues();
+        for (let j = 0; j < dRows.length; j++) {
+          if (dRows[j][0] === trainingId) {
+            defsSheet.getRange(j + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
+              trainingId, existing.title,
+              p.videoLinkEN || dRows[j][2], p.videoLinkFR || dRows[j][3],
+              existing.regionScope || scope, dRows[j][5] || "", existing.notes || ""
+            ]]);
+            break;
+          }
+        }
+      }
+    } else {
+      trainingId = "TR-" + Date.now();
+      const createdDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
+      defsSheet.appendRow([trainingId, title, p.videoLinkEN || "", p.videoLinkFR || "", scope, createdDate, p.notes || ""]);
+      created = true;
+    }
+
+    // 2. Parse the pasted tab into clean rows.
+    const parsed = this._parseImportRows(p.raw);
+    if (parsed.length === 0) {
+      return JSON.stringify({ ok: true, trainingId: trainingId, title: title, created: created, imported: 0, added: 0, updated: 0, completed: 0, warn: "No employee rows detected — check that you pasted the data cells." });
+    }
+
+    // 3. Merge-upsert into the tracker (match by trainingId + normalized name).
+    const trkSheet = this._getTrackerSheet();
+    const all = (trkSheet.getLastRow() > 1)
+      ? trkSheet.getRange(2, 1, trkSheet.getLastRow() - 1, this.TRK_HEADERS.length).getValues()
+      : [];
+    const indexByKey = {};
+    for (let k = 0; k < all.length; k++) {
+      if (String(all[k][0]) === trainingId) indexByKey[_normalizeAgentKey(all[k][1])] = k;
+    }
+
+    let added = 0, updated = 0, completed = 0;
+    parsed.forEach(function(row) {
+      if (row.trainingStatus === "Completed") completed++;
+      const key = _normalizeAgentKey(row.name);
+      const newRow = [trainingId, row.name, row.employeeStatus, row.trainingStatus, row.completionDate, row.comment];
+      if (Object.prototype.hasOwnProperty.call(indexByKey, key)) { all[indexByKey[key]] = newRow; updated++; }
+      else { indexByKey[key] = all.length; all.push(newRow); added++; }
+    });
+
+    // 4. Write the full data region back, keeping the date column as literal text.
+    if (all.length > 0) {
+      trkSheet.getRange(2, 5, all.length, 1).setNumberFormat("@");
+      trkSheet.getRange(2, 1, all.length, this.TRK_HEADERS.length).setValues(all);
+    }
+
+    return JSON.stringify({ ok: true, trainingId: trainingId, title: title, created: created, imported: parsed.length, added: added, updated: updated, completed: completed });
+  },
+
+  // Parse a pasted Corporate Training Tracker tab. Anchors on the Employee
+  // Status column (a controlled vocabulary) to locate genuine data rows, which
+  // sidesteps the summary block, instructions and multi-line headers entirely.
+  _parseImportRows: function(raw) {
+    const EMP = {}; this.EMPLOYEE_STATUS_OPTS.forEach(function(o){ EMP[o.toLowerCase()] = o; });
+    const TRN = {}; this.TRAINING_STATUS_OPTS.forEach(function(o){ TRN[o.toLowerCase()] = o; });
+
+    const out = [];
+    const lines = String(raw).replace(/\r/g, "").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const cells = lines[i].split("\t").map(function(c){ return (c || "").trim(); });
+
+      // Locate the employee-status anchor.
+      let si = -1;
+      for (let c = 0; c < cells.length; c++) {
+        if (cells[c] && Object.prototype.hasOwnProperty.call(EMP, cells[c].toLowerCase())) { si = c; break; }
+      }
+      if (si < 1) continue; // need at least a name cell in front of the status
+
+      // Name = nearest non-empty cell before the status column.
+      let name = "";
+      for (let n = si - 1; n >= 0; n--) { if (cells[n]) { name = cells[n]; break; } }
+      if (!name) continue;
+
+      // Fixed source layout: name | status | rule(1/0) | trainingStatus | count(1/0) | date | comment
+      const employeeStatus = EMP[cells[si].toLowerCase()];
+      const trainingStatus = TRN[(cells[si + 2] || "").toLowerCase()] || "";
+      const completionDate = this._parseMDY(cells[si + 4] || "");
+      const comment = cells[si + 5] || "";
+
+      out.push({ name: name, employeeStatus: employeeStatus, trainingStatus: trainingStatus, completionDate: completionDate, comment: comment });
+    }
+    return out;
+  },
+
+  // "5/3/2026" -> "2026-05-03". Pass through already-ISO dates; blank otherwise.
+  _parseMDY: function(v) {
+    v = String(v || "").trim();
+    if (!v) return "";
+    const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    return "";
   }
 };
 
@@ -334,3 +459,4 @@ function deleteTraining(id) { return TrainingTracker.deleteTraining(id); }
 function getTrainingRoster(id) { return TrainingTracker.getTrainingRoster(id); }
 function setTrainingCompletion(id, name, es, ts, date, comment) { return TrainingTracker.setTrainingCompletion(id, name, es, ts, date, comment); }
 function seedTrainingRoster(id) { return TrainingTracker.seedRoster(id); }
+function importTrainingSheet(payloadJson) { return TrainingTracker.importTrainingSheet(payloadJson); }
