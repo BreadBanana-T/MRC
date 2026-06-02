@@ -184,7 +184,15 @@ const TrainingTracker = {
 
   // ── Floor cross-reference ────────────────────────────────────────────────
   // key(normalized name) -> { display, region, active }
+  // Cached ~90s: compileFloorData() is expensive and this runs on every
+  // training switch / roster load. Stale-by-90s is fine for a "working now" dot.
   getFloorIndex: function() {
+    let cache = null;
+    try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+    if (cache) {
+      try { const hit = cache.get("TT_FLOOR_IDX"); if (hit) return JSON.parse(hit); } catch (e) {}
+    }
+
     const idx = {};
     let floor = {};
     try { floor = JSON.parse(compileFloorData()); } catch (e) { floor = {}; }
@@ -221,6 +229,7 @@ const TrainingTracker = {
       }
     } catch (e) {}
 
+    if (cache) { try { cache.put("TT_FLOOR_IDX", JSON.stringify(idx), 90); } catch (e) {} }
     return idx;
   },
 
