@@ -1280,7 +1280,7 @@
           // block (Name → Comment), every employee in the same alphabetical
           // order, so a single paste at the first name cell refills the sheet.
           var copyCount = r.copyList ? r.copyList.split('\n').filter(function(x){ return x.trim(); }).length : 0;
-          var copyPanel = '<div style="padding:18px 28px; border-bottom:1px solid var(--glass-border); background:var(--bg-root);"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="font-weight:800; font-size:0.85rem; color:var(--text-main); display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-list" width="16"></i> Paste-back list · matches the corporate tracker 1:1 (' + copyCount + ' rows)</span><button class="btn btn-primary" style="height:32px; font-size:0.78rem;" onclick="copyTrainingList()"><i data-lucide="copy" width="14"></i> Copy</button></div><div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Click <b>Copy</b>, open the corporate tracker, click the <b>first name cell</b> (top of the Employee Name column) and paste. It fills every row exactly — names included so alignment is self-checking.</div><textarea readonly class="input-aether custom-scrollbar" style="width:100%; height:90px; font-family:monospace; font-size:0.8rem; resize:vertical; padding-top:10px;" placeholder="Import a training to build the paste-back list.">' + escapeHTML(r.copyList || '') + '</textarea></div>';
+          var copyPanel = '<div style="padding:18px 28px; border-bottom:1px solid var(--glass-border); background:var(--bg-root);"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="font-weight:800; font-size:0.85rem; color:var(--text-main); display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-list" width="16"></i> Paste-back list · full roster, completed &amp; not (' + copyCount + ' rows)</span><button class="btn btn-primary" style="height:32px; font-size:0.78rem;" onclick="copyTrainingList()"><i data-lucide="copy" width="14"></i> Copy</button></div><div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Click <b>Copy</b>, open the corporate tracker, click the <b>first name cell</b> (top of the Employee Name column) and paste. Everyone is included — completed and outstanding, plus any new hires from the floor — names first, so the corporate sheet is updated in one shot.</div><textarea readonly class="input-aether custom-scrollbar" style="width:100%; height:90px; font-family:monospace; font-size:0.8rem; resize:vertical; padding-top:10px;" placeholder="Import a training to build the paste-back list.">' + escapeHTML(r.copyList || '') + '</textarea></div>';
 
           // Roster grid — split into Live (outstanding) and Completed buckets.
           var bucket = state.trackerBucket || 'live';
@@ -1370,10 +1370,10 @@
   window.openTrainingImport = function() {
       var ov = document.getElementById('training-import-overlay'); if (!ov) return;
       document.getElementById('tr-imp-title').value = "";
-      document.getElementById('tr-imp-scope').value = "Both";
       document.getElementById('tr-imp-raw').value = "";
       ov.classList.add('open');
       if (window.lucide) lucide.createIcons();
+      setTimeout(function(){ var el = document.getElementById('tr-imp-title'); if (el) el.focus(); }, 50);
   };
   window.closeTrainingImport = function() { var ov = document.getElementById('training-import-overlay'); if (ov) ov.classList.remove('open'); };
   window.runTrainingImport = function() {
@@ -1384,7 +1384,7 @@
       if (typeof google === 'undefined') return;
       var payload = {
           title: title,
-          regionScope: document.getElementById('tr-imp-scope').value || 'Both',
+          regionScope: 'Both',
           raw: raw
       };
       showToast("Importing roster...");

@@ -283,13 +283,12 @@ const TrainingTracker = {
       outstanding: rows.filter(r => !DONE[r.trainingStatus]).length
     };
 
-    // Paste-ready copy list: an exact, row-for-row replica of the corporate
-    // tracker's editable block (columns B→H), every employee in the same
-    // alphabetical order. Drop floor-only new hires so the row count matches
-    // the source sheet 1:1 — pasting at the first name cell refills it blind.
-    // Dates are emitted as M/D/YYYY to match the source formatting exactly.
+    // Paste-ready copy list: the FULL roster — everyone, completed or not,
+    // including new hires picked up from the floor — formatted as the
+    // corporate tracker's block (columns B→H) in alphabetical order. Paste at
+    // the first name cell to refresh the whole sheet in one shot. Dates are
+    // emitted as M/D/YYYY to match the source formatting exactly.
     const copyList = rows
-      .filter(r => r.flag !== "floor-only")
       .map(r => [
         r.name,
         r.employeeStatus,
