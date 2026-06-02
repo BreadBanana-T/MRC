@@ -139,15 +139,23 @@ const TrainingTracker = {
     const scope = (this.REGION_SCOPE_OPTS.indexOf(p.regionScope) !== -1) ? p.regionScope : "Both";
     let id = p.id;
 
+    // Manual editor sends a links[] array; fall back to the legacy EN/FR fields.
+    const cleanLinks = (Array.isArray(p.links))
+      ? p.links.filter(function(l){ return l && l.url; }).map(function(l){ return { label: String(l.label || "Link").trim(), url: String(l.url).trim() }; })
+      : this._linksFromEnFr(p.videoLinkEN, p.videoLinkFR);
+    const linksJson = JSON.stringify(cleanLinks);
+    // Keep the legacy video columns in sync from the links array when present.
+    const vEN = (cleanLinks.filter(function(l){ return /video/i.test(l.label) && /en/i.test(l.label); })[0] || {}).url || p.videoLinkEN || "";
+    const vFR = (cleanLinks.filter(function(l){ return /video/i.test(l.label) && /fr/i.test(l.label); })[0] || {}).url || p.videoLinkFR || "";
+
     if (id) {
       // Update in place.
       const rows = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues() : [];
       for (let i = 0; i < rows.length; i++) {
         if (rows[i][0] === id) {
           const cur = sheet.getRange(i + 2, 1, 1, this.DEFS_HEADERS.length).getDisplayValues()[0];
-          // Preserve auto-detected links (cur[7]); the manual editor doesn't manage them.
           sheet.getRange(i + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
-            id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, cur[5] || "", p.notes || "", cur[7] || ""
+            id, p.title, vEN, vFR, scope, cur[5] || "", p.notes || "", linksJson
           ]]);
           return JSON.stringify({ ok: true, id: id });
         }
@@ -156,8 +164,7 @@ const TrainingTracker = {
     // New record.
     id = "TR-" + Date.now();
     const createdDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-    const links = JSON.stringify(this._linksFromEnFr(p.videoLinkEN, p.videoLinkFR));
-    sheet.appendRow([id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, createdDate, p.notes || "", links]);
+    sheet.appendRow([id, p.title, vEN, vFR, scope, createdDate, p.notes || "", linksJson]);
     return JSON.stringify({ ok: true, id: id });
   },
 
@@ -451,23 +458,25 @@ const TrainingTracker = {
     return out;
   },
 
-  // Scan pasted text for every URL and label each by the keywords next to it
-  // (video/quiz/form + EN/FR/onshore/offshore). Order preserved, duplicates
-  // (same url + same label) dropped.
+  // Scan pasted text for links and label each by the keywords next to it
+  // (video/quiz/form/survey + EN/FR/onshore/offshore). Catches full http(s)
+  // URLs AND internal "go/…" shortlinks. Text-only references with no URL
+  // can't be auto-detected — those are added via the manual link editor.
   _detectLinks: function(raw) {
     const lines = String(raw || "").replace(/\r/g, "").split("\n");
-    const urlRe = /(https?:\/\/[^\s"'<>)\]]+)/g;
+    const urlRe = /(https?:\/\/[^\s"'<>)\]]+|(?:^|[\s:])go\/[A-Za-z0-9._~\-\/?#=&]+)/gi;
     const out = [], seen = {};
     lines.forEach(function(line) {
       let m;
       while ((m = urlRe.exec(line)) !== null) {
-        const url = m[1].replace(/[.,;]+$/, "");
+        let url = m[1].replace(/^[\s:]+/, "").replace(/[.,;]+$/, "");
         const prefix = line.slice(0, m.index).toLowerCase();
         const u = url.toLowerCase();
+        if (u.indexOf("go/") === 0) url = "http://" + url; // make go-links clickable
 
         let type = "Link";
         if (prefix.indexOf("video") !== -1 || u.indexOf("benevity") !== -1 || u.indexOf("youtu") !== -1 || u.indexOf("vimeo") !== -1) type = "Video";
-        else if (prefix.indexOf("quiz") !== -1) type = "Quiz";
+        else if (prefix.indexOf("quiz") !== -1 || prefix.indexOf("survey") !== -1) type = "Quiz";
         else if (prefix.indexOf("form") !== -1 || u.indexOf("docs.google.com/forms") !== -1 || u.indexOf("forms.gle") !== -1 || u.indexOf("forms.office") !== -1) type = "Form";
 
         let tag = "";

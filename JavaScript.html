@@ -1368,6 +1368,8 @@
       document.getElementById('tr-form-title').value = "";
       document.getElementById('tr-form-en').value = "";
       document.getElementById('tr-form-fr').value = "";
+      document.getElementById('tr-form-qen').value = "";
+      document.getElementById('tr-form-qfr').value = "";
       document.getElementById('tr-form-scope').value = "Both";
       document.getElementById('tr-form-notes').value = "";
       ov.classList.add('open');
@@ -1420,8 +1422,20 @@
       var ov = document.getElementById('training-overlay'); if (!ov) return;
       document.getElementById('training-compose-title').innerText = "Edit Training";
       document.getElementById('tr-form-title').value = t.title || "";
-      document.getElementById('tr-form-en').value = t.videoLinkEN || "";
-      document.getElementById('tr-form-fr').value = t.videoLinkFR || "";
+      // Spread the saved links across the four slots by their label keywords.
+      var lk = (t.links && t.links.length) ? t.links.slice() : [];
+      var pickLink = function(typeRe, langRe) {
+          for (var i = 0; i < lk.length; i++) { if (lk[i] && lk[i].url && typeRe.test(lk[i].label || '') && (!langRe || langRe.test(lk[i].label || ''))) { var u = lk[i].url; lk.splice(i, 1); return u; } }
+          return '';
+      };
+      var vEN = pickLink(/video/i, /en/i) || t.videoLinkEN || '';
+      var vFR = pickLink(/video/i, /fr/i) || t.videoLinkFR || '';
+      var qEN = pickLink(/quiz|form|survey/i, /en/i) || pickLink(/quiz|form|survey/i, null);
+      var qFR = pickLink(/quiz|form|survey/i, /fr/i);
+      document.getElementById('tr-form-en').value = vEN;
+      document.getElementById('tr-form-fr').value = vFR;
+      document.getElementById('tr-form-qen').value = qEN;
+      document.getElementById('tr-form-qfr').value = qFR;
       document.getElementById('tr-form-scope').value = t.regionScope || "Both";
       document.getElementById('tr-form-notes').value = t.notes || "";
       ov.classList.add('open');
@@ -1430,11 +1444,12 @@
   window.saveTrainingDef = function() {
       var title = document.getElementById('tr-form-title').value.trim();
       if (!title) { showToast("Title is required."); return; }
+      var L = function(label, id) { var v = (document.getElementById(id).value || '').trim(); return v ? { label: label, url: v } : null; };
+      var links = [ L('Video EN', 'tr-form-en'), L('Video FR', 'tr-form-fr'), L('Quiz EN', 'tr-form-qen'), L('Quiz FR', 'tr-form-qfr') ].filter(function(x){ return x; });
       var payload = {
           id: state.editingTrainingId || "",
           title: title,
-          videoLinkEN: document.getElementById('tr-form-en').value.trim(),
-          videoLinkFR: document.getElementById('tr-form-fr').value.trim(),
+          links: links,
           regionScope: document.getElementById('tr-form-scope').value,
           notes: document.getElementById('tr-form-notes').value.trim()
       };
