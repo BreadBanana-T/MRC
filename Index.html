@@ -187,7 +187,7 @@
                 </div>
                 <div>
                     <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Paste the whole tab here</label>
-                    <textarea id="tr-imp-raw" class="input-aether custom-scrollbar" style="margin-top:6px; width:100%; height:240px; resize:vertical; font-family:monospace; white-space:pre; font-size:0.78rem; padding-top:10px;" placeholder="Click here, then Ctrl+V..."></textarea>
+                    <textarea id="tr-imp-raw" onpaste="handleImportPaste(event)" class="input-aether custom-scrollbar" style="margin-top:6px; width:100%; height:240px; resize:vertical; font-family:monospace; white-space:pre; font-size:0.78rem; padding-top:10px;" placeholder="Click here, then Ctrl+V..."></textarea>
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:12px;">

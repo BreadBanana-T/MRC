@@ -1269,8 +1269,11 @@
           }
           var linkBtns = links.map(function(l) {
               var lab = (l.label || 'Link').toLowerCase();
-              var ic = (lab.indexOf('video') !== -1) ? 'play-circle' : ((lab.indexOf('quiz') !== -1 || lab.indexOf('form') !== -1) ? 'clipboard-check' : 'link');
-              return '<a href="' + escapeHTML(l.url) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="' + ic + '" width="14"></i> ' + escapeHTML(l.label || 'Link') + '</a>';
+              var ic = (lab.indexOf('video') !== -1) ? 'play-circle' : ((lab.indexOf('quiz') !== -1 || lab.indexOf('form') !== -1 || lab.indexOf('survey') !== -1) ? 'clipboard-check' : 'link');
+              return '<span style="display:inline-flex; align-items:center;">' +
+                  '<a href="' + escapeHTML(l.url) + '" target="_blank" rel="noopener" class="btn btn-glass" title="Open in new tab" style="height:32px; font-size:0.78rem; text-decoration:none; border-radius:8px 0 0 8px;"><i data-lucide="' + ic + '" width="14"></i> ' + escapeHTML(l.label || 'Link') + '</a>' +
+                  '<button class="btn btn-glass" title="Copy link" onclick="copyLinkUrl(\'' + escapeHTML(l.url) + '\')" style="height:32px; width:30px; padding:0; border-radius:0 8px 8px 0; border-left:none;"><i data-lucide="copy" width="13"></i></button>' +
+              '</span>';
           }).join('');
 
           var head = '<div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;"><div><div style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Training Tracker · ' + escapeHTML(t.regionScope === 'Onshore' ? 'Onshore only' : (t.regionScope === 'Offshore' ? 'Offshore only' : 'Onshore + Offshore')) + '</div><div style="font-weight:800; font-size:1.7rem; color:var(--text-main); line-height:1.2;">' + escapeHTML(t.title) + '</div></div><div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' + linkBtns + '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="editTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="edit-2" width="14"></i> Edit</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem; color:var(--status-alert); border-color:var(--status-alert);" onclick="delTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="trash-2" width="14"></i> Delete</button></div></div>';
@@ -1330,6 +1333,7 @@
 
   window.selectTraining = function(id) { state.selectedTrainingId = id; state.trainingRoster = null; fetchTrainingData(); render(); };
   window.setTrackerBucket = function(b) { state.trackerBucket = b; render(); };
+  window.copyLinkUrl = function(url) { if (!url) { showToast("No link to copy."); return; } fallbackCopyTextToClipboard(url, "Link copied: " + url); };
   window.copyTrainingList = function() { var txt = (state.trainingRoster && state.trainingRoster.copyList) || ''; if (!txt) { showToast("Nothing to copy yet."); return; } fallbackCopyTextToClipboard(txt, "Copied " + txt.split('\n').filter(function(x){return x.trim();}).length + " rows — paste at the first name cell."); };
 
   window.saveTrainingCompletion = function(i) {
@@ -1381,11 +1385,44 @@
       document.getElementById('tr-imp-title').value = "";
       document.getElementById('tr-imp-scope').value = "Both";
       document.getElementById('tr-imp-raw').value = "";
+      window._importHtmlLinks = [];
       ov.classList.add('open');
       if (window.lucide) lucide.createIcons();
       setTimeout(function(){ var el = document.getElementById('tr-imp-title'); if (el) el.focus(); }, 50);
   };
   window.closeTrainingImport = function() { var ov = document.getElementById('training-import-overlay'); if (ov) ov.classList.remove('open'); };
+  // On paste, mine the clipboard's HTML copy for real hyperlinks — these
+  // survive even when the cell only shows display text (plain-text paste drops
+  // them). We DON'T preventDefault, so the plain text still fills the box.
+  window.handleImportPaste = function(e) {
+      window._importHtmlLinks = [];
+      try {
+          var cd = e.clipboardData || window.clipboardData;
+          var html = cd ? cd.getData('text/html') : '';
+          if (!html) return;
+          var div = document.createElement('div'); div.innerHTML = html;
+          var anchors = div.querySelectorAll('a[href]');
+          var out = [], seen = {};
+          for (var i = 0; i < anchors.length; i++) {
+              var a = anchors[i];
+              var url = a.getAttribute('href') || '';
+              if (!url) continue;
+              // Context = the text just BEFORE this link (e.g. "EN link:"), not
+              // the whole cell — otherwise every link inherits every keyword.
+              var parts = [], node = a.previousSibling, hops = 0;
+              while (node && hops < 5) {
+                  if (node.nodeName === 'BR' || node.nodeName === 'A') break;
+                  parts.unshift(node.textContent || '');
+                  node = node.previousSibling; hops++;
+              }
+              var ctx = (parts.join(' ') + ' ' + (a.textContent || '')).replace(/\s+/g, ' ').trim();
+              var key = url + '|' + ctx.toLowerCase();
+              if (seen[key]) continue; seen[key] = true;
+              out.push({ url: url, ctx: ctx });
+          }
+          window._importHtmlLinks = out;
+      } catch (err) { window._importHtmlLinks = []; }
+  };
   window.runTrainingImport = function() {
       var title = (document.getElementById('tr-imp-title').value || '').trim();
       var raw = document.getElementById('tr-imp-raw').value || '';
@@ -1395,7 +1432,8 @@
       var payload = {
           title: title,
           regionScope: document.getElementById('tr-imp-scope').value || 'Both',
-          raw: raw
+          raw: raw,
+          htmlLinks: window._importHtmlLinks || []
       };
       showToast("Importing roster...");
       google.script.run.withSuccessHandler(function(res) {
@@ -1432,6 +1470,10 @@
       var vFR = pickLink(/video/i, /fr/i) || t.videoLinkFR || '';
       var qEN = pickLink(/quiz|form|survey/i, /en/i) || pickLink(/quiz|form|survey/i, null);
       var qFR = pickLink(/quiz|form|survey/i, /fr/i);
+      // Fallbacks: drop any remaining generic links into empty slots by language.
+      if (!vEN) vEN = pickLink(/./, /en/i);
+      if (!vFR) vFR = pickLink(/./, /fr/i);
+      if (!qEN) qEN = pickLink(/./, null);
       document.getElementById('tr-form-en').value = vEN;
       document.getElementById('tr-form-fr').value = vFR;
       document.getElementById('tr-form-qen').value = qEN;

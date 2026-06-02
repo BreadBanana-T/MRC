@@ -386,8 +386,9 @@ const TrainingTracker = {
     }
 
     // Auto-detect every link in the pasted block (videos, quizzes, forms…),
-    // labelled by the keyword sitting next to each URL.
-    const links = this._detectLinks(p.raw);
+    // labelled by the keyword sitting next to each URL, then fold in any
+    // hyperlinks recovered from the clipboard HTML (URLs hidden behind text).
+    const links = this._mergeHtmlLinks(this._detectLinks(p.raw), p.htmlLinks);
     const linksJson = JSON.stringify(links);
     const pick = (re) => { const m = links.filter(l => re.test(l.label.toLowerCase()))[0]; return m ? m.url : ""; };
     const vEN = pick(/video.*en|en.*video/), vFR = pick(/video.*fr|fr.*video/);
@@ -465,32 +466,56 @@ const TrainingTracker = {
   _detectLinks: function(raw) {
     const lines = String(raw || "").replace(/\r/g, "").split("\n");
     const urlRe = /(https?:\/\/[^\s"'<>)\]]+|(?:^|[\s:])go\/[A-Za-z0-9._~\-\/?#=&]+)/gi;
-    const out = [], seen = {};
-    lines.forEach(function(line) {
+    const out = [];
+    lines.forEach((line) => {
       let m;
       while ((m = urlRe.exec(line)) !== null) {
-        let url = m[1].replace(/^[\s:]+/, "").replace(/[.,;]+$/, "");
-        const prefix = line.slice(0, m.index).toLowerCase();
-        const u = url.toLowerCase();
-        if (u.indexOf("go/") === 0) url = "http://" + url; // make go-links clickable
-
-        let type = "Link";
-        if (prefix.indexOf("video") !== -1 || u.indexOf("benevity") !== -1 || u.indexOf("youtu") !== -1 || u.indexOf("vimeo") !== -1) type = "Video";
-        else if (prefix.indexOf("quiz") !== -1 || prefix.indexOf("survey") !== -1) type = "Quiz";
-        else if (prefix.indexOf("form") !== -1 || u.indexOf("docs.google.com/forms") !== -1 || u.indexOf("forms.gle") !== -1 || u.indexOf("forms.office") !== -1) type = "Form";
-
-        let tag = "";
-        if (prefix.indexOf("onshore") !== -1) tag = "Onshore";
-        else if (prefix.indexOf("offshore") !== -1) tag = "Offshore";
-        else if (/(^|[^a-z])(fr|french|francais|français)([^a-z]|$)/.test(prefix)) tag = "FR";
-        else if (/(^|[^a-z])(en|english|anglais)([^a-z]|$)/.test(prefix)) tag = "EN";
-
-        const label = (type + (tag ? " " + tag : "")).trim();
-        const dedupeKey = label + "|" + url;
-        if (!seen[dedupeKey]) { seen[dedupeKey] = true; out.push({ label: label, url: url }); }
+        const url = m[1].replace(/^[\s:]+/, "").replace(/[.,;]+$/, "");
+        // Context = the text before the URL on this line (the "EN link:" label).
+        this._addClassifiedLink(out, line.slice(0, m.index), url);
       }
     });
     return out;
+  },
+
+  // Classify a link by the surrounding context text and push it (deduped) onto
+  // `out`. Shared by text scanning and the HTML-clipboard hyperlink path.
+  _addClassifiedLink: function(out, context, url) {
+    if (!url) return;
+    url = String(url).replace(/[.,;]+$/, "");
+    let u = url.toLowerCase();
+    if (u.indexOf("go/") === 0) { url = "http://" + url; u = url.toLowerCase(); }
+    const ctx = String(context || "").toLowerCase();
+
+    let type = "Link";
+    if (ctx.indexOf("video") !== -1 || u.indexOf("benevity") !== -1 || u.indexOf("youtu") !== -1 || u.indexOf("vimeo") !== -1) type = "Video";
+    else if (ctx.indexOf("quiz") !== -1 || ctx.indexOf("survey") !== -1) type = "Quiz";
+    else if (ctx.indexOf("form") !== -1 || u.indexOf("docs.google.com/forms") !== -1 || u.indexOf("forms.gle") !== -1 || u.indexOf("forms.office") !== -1) type = "Form";
+
+    let tag = "";
+    if (ctx.indexOf("onshore") !== -1) tag = "Onshore";
+    else if (ctx.indexOf("offshore") !== -1) tag = "Offshore";
+    else if (/(^|[^a-z])(fr|french|francais|français)([^a-z]|$)/.test(ctx)) tag = "FR";
+    else if (/(^|[^a-z])(en|english|anglais)([^a-z]|$)/.test(ctx)) tag = "EN";
+
+    const label = (type + (tag ? " " + tag : "")).trim();
+    const dedupeKey = label + "|" + url;
+    for (let i = 0; i < out.length; i++) { if ((out[i].label + "|" + out[i].url) === dedupeKey) return; }
+    out.push({ label: label, url: url });
+  },
+
+  // Merge hyperlinks pulled from the clipboard HTML (recovers URLs that are
+  // hidden behind display text, which plain-text paste drops). Each entry is
+  // { url, ctx } where ctx is the surrounding cell text used for labelling.
+  _mergeHtmlLinks: function(links, htmlLinks) {
+    if (!Array.isArray(htmlLinks)) return links;
+    htmlLinks.forEach((h) => {
+      if (!h || !h.url) return;
+      const u = String(h.url).toLowerCase();
+      if (u.indexOf("http") !== 0 && u.indexOf("go/") !== 0) return; // skip mailto/anchors/etc.
+      this._addClassifiedLink(links, h.ctx || "", h.url);
+    });
+    return links;
   },
 
   // Parse a pasted Corporate Training Tracker tab. Anchors on the Employee
