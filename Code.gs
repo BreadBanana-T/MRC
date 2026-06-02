@@ -96,6 +96,13 @@ function importWorkforceData(sched, idp) {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error";
 }
 
+// --- OVERTIME TRACKER (WFM-derived OT codes, onshore only) ---
+function getOvertimeAnalytics(mode, date, region, cycle) {
+  return (typeof OvertimeTracker !== 'undefined')
+    ? OvertimeTracker.getAnalytics(mode, date, region, cycle)
+    : JSON.stringify({ error: "OvertimeTracker not loaded." });
+}
+
 // ── Chunked upload transport ──────────────────────────────────────────────
 // google.script.run reliably carries ~1 MB; large WFM/IDP pastes blow past
 // that and get dropped silently with no error and no response. Chunk the
