@@ -734,7 +734,7 @@ var WorkforceTracker = {
             if (!agentsByKey[key]) {
                 // Prefer MasterList's display name when we have one.
                 let displayName = (mlData[key] && mlData[key].name) ? mlData[key].name : String(name).trim();
-                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0 };
+                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0, ot: 0 };
             }
             if (reg && String(reg).includes('Offshore')) agentsByKey[key].region = 'Offshore';
             // Registry is authoritative. Overrides both the row-level region and any MasterList inference.
@@ -837,6 +837,42 @@ var WorkforceTracker = {
             });
         }
 
+        // Overtime (Overtime_Tracking): worked OT hours, kept SEPARATE from `total`
+        // (total = off-phone hours; OT is extra time on the phones). Columns:
+        // [0]Timestamp [1]Agent [2]OT Start [3]OT End [4]Break Start [5]Break End [6]DateStr.
+        const dbOT = this._getDB('Overtime_Tracking');
+        if (dbOT && dbOT.getLastRow() > 1) {
+            let processedOT = new Set();
+            dbOT.getDataRange().getDisplayValues().slice(1).forEach(row => {
+                let agent = String(row[1]).trim();
+                if (!agent) return;
+                let dStr = this._formatDate(row[6]) || this._formatDate(row[0]);
+                if (!dStr || dStr < sStr || dStr > eStr) return;
+                let rY = parseInt(dStr.substring(0,4)), rM = parseInt(dStr.substring(5,7)), rD = parseInt(dStr.substring(8,10));
+                if (isNaN(rY) || isNaN(rM) || isNaN(rD)) return;
+
+                let sMins = this._timeToMins(row[2]);
+                let eMinsR = this._timeToMins(row[3]);
+                let hash = `${agent}_${dStr}_${sMins}_${eMinsR}`;
+                if (processedOT.has(hash)) return; processedOT.add(hash);
+
+                let eMins = eMinsR < sMins ? eMinsR + 1440 : eMinsR;
+                let gross = eMins - sMins;
+                // Subtract the OT break, if one was logged.
+                let bs = this._timeToMins(row[4]), be = this._timeToMins(row[5]);
+                let brk = 0;
+                if (bs !== be) { let beA = be < bs ? be + 1440 : be; brk = beA - bs; }
+                let netHours = (gross - brk) / 60;
+                if (netHours <= 0) return;
+
+                let epoch = new Date(rY, rM-1, rD, Math.floor(sMins/60), sMins%60, 0, 0).getTime();
+                if (epoch >= bounds.start && epoch <= bounds.end && epoch <= nowEpoch) {
+                    if (targetCycle !== 'ALL' && this._getCycleForEpoch(epoch) !== targetCycle) return;
+                    getAg(agent).ot += netHours; // intentionally NOT added to .total
+                }
+            });
+        }
+
         const dbGEM = this._getDB('WF_GEM_DATA_V3');
         let gemData = {};
         if (dbGEM && dbGEM.getLastRow() > 1) {
@@ -882,7 +918,7 @@ var WorkforceTracker = {
                 if (ml.isOffshore) a.region = "Offshore";
             }
 
-            ['acsu','coach','safe','icl','ulc','tower','total'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
+            ['acsu','coach','safe','icl','ulc','tower','total','ot'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
             let matchedGem = gemData[a.name] || gemByKey[aKey];
             if (!matchedGem) {
                 let aWords = aKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
