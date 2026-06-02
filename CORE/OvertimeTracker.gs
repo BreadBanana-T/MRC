@@ -21,7 +21,8 @@
  * PAY RULE (per product owner): every code present in the schedule counts as
  * paid OT -- including the CB break codes. Breaks are NOT broken out; they fold
  * into their rate/bucket total. Anything not coded is unpaid and not counted.
- * Liability figure = weighted cost units = sum(x1 hours)*1.0 + sum(x1.5 hours)*1.5.
+ * Hours are reported split by rate (x1 / x1.5) and by queue bucket; there is
+ * no dollar/cost figure -- this purely tallies overtime hours.
  */
 
 var OvertimeTracker = {
@@ -246,7 +247,7 @@ var OvertimeTracker = {
   /**
    * Analytics engine for the Overtime tracker UI. Shaped to match
    * WorkforceTracker.getAnalytics so the existing renderTracker can reuse it,
-   * plus an "otTotals" block with the rate/bucket/cost breakdown.
+   * plus an "otTotals" block with the rate (x1/x1.5) and bucket breakdown.
    */
   getAnalytics: function (mode, refDate, regionFilter, cycleFilter) {
     regionFilter = regionFilter || 'Onshore';
@@ -325,7 +326,7 @@ var OvertimeTracker = {
     });
 
     var totals = { all: 0, morning: 0, evening: 0, night: 0, count: events.length };
-    var otTotals = { x1: 0, x15: 0, cost: 0, OnQueue: 0, OffQueue: 0, Other: 0, SAFE: 0 };
+    var otTotals = { x1: 0, x15: 0, OnQueue: 0, OffQueue: 0, Other: 0, SAFE: 0 };
     events.forEach(function (e) {
       totals.all += e.hours;
       if (e.shift === 'Morning') totals.morning += e.hours;
@@ -335,7 +336,6 @@ var OvertimeTracker = {
       if (e.rate === 1.5) otTotals.x15 += e.hours; else otTotals.x1 += e.hours;
       if (otTotals[e.bucket] !== undefined) otTotals[e.bucket] += e.hours;
     });
-    otTotals.cost = parseFloat((otTotals.x1 * 1.0 + otTotals.x15 * 1.5).toFixed(2));
     otTotals.x1 = parseFloat(otTotals.x1.toFixed(2));
     otTotals.x15 = parseFloat(otTotals.x15.toFixed(2));
     ['OnQueue', 'OffQueue', 'Other', 'SAFE'].forEach(function (b) { otTotals[b] = parseFloat(otTotals[b].toFixed(2)); });

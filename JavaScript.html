@@ -1196,14 +1196,13 @@
 
       var otSummaryHtml = '';
       if (isOvertime) {
-          var ot = d.otTotals || { x1: 0, x15: 0, cost: 0, OnQueue: 0, OffQueue: 0, Other: 0, SAFE: 0 };
+          var ot = d.otTotals || { x1: 0, x15: 0, OnQueue: 0, OffQueue: 0, Other: 0, SAFE: 0 };
           var bucketRow = function(lbl, val) { return '<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--glass-border);"><span style="font-size:0.8rem; color:var(--text-muted); font-weight:700;">' + lbl + '</span><span style="font-size:0.85rem; font-weight:800; color:var(--text-main);">' + escapeHTML((val || 0).toFixed(2)) + 'h</span></div>'; };
-          otSummaryHtml = '<div class="aether-card" style="padding:20px;"><div style="font-size:0.75rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="dollar-sign" width="14"></i> OT Rate Breakdown</div>' +
+          otSummaryHtml = '<div class="aether-card" style="padding:20px;"><div style="font-size:0.75rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="layers" width="14"></i> OT Rate Breakdown</div>' +
               '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">' +
                   '<div style="background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:14px; text-align:center;"><div style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">Straight &times;1</div><div style="font-size:1.6rem; font-weight:800; color:var(--text-main); line-height:1.1;">' + escapeHTML((ot.x1 || 0).toFixed(2)) + 'h</div></div>' +
                   '<div style="background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:14px; text-align:center;"><div style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">Premium &times;1.5</div><div style="font-size:1.6rem; font-weight:800; color:var(--text-main); line-height:1.1;">' + escapeHTML((ot.x15 || 0).toFixed(2)) + 'h</div></div>' +
               '</div>' +
-              '<div style="background:linear-gradient(90deg, rgba(99,102,241,0.12), transparent); border-left:4px solid var(--accent-primary); border-radius:8px; padding:12px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Weighted Cost Units</span><span style="font-size:1.4rem; font-weight:800; color:var(--accent-primary);">' + escapeHTML((ot.cost || 0).toFixed(2)) + '</span></div>' +
               '<div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">By Queue Bucket</div>' +
               bucketRow('On Queue', ot.OnQueue) + bucketRow('Off Queue', ot.OffQueue) + bucketRow('Other', ot.Other) + bucketRow('SAFE', ot.SAFE) +
           '</div>';
