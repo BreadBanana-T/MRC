@@ -1273,7 +1273,7 @@
               return '<a href="' + escapeHTML(l.url) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="' + ic + '" width="14"></i> ' + escapeHTML(l.label || 'Link') + '</a>';
           }).join('');
 
-          var head = '<div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;"><div><div style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Training Tracker · ' + escapeHTML((t.regionScope === 'Onshore') ? 'Onshore only' : 'Onshore + Offshore') + '</div><div style="font-weight:800; font-size:1.7rem; color:var(--text-main); line-height:1.2;">' + escapeHTML(t.title) + '</div></div><div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' + linkBtns + '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="editTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="edit-2" width="14"></i> Edit</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem; color:var(--status-alert); border-color:var(--status-alert);" onclick="delTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="trash-2" width="14"></i> Delete</button></div></div>';
+          var head = '<div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;"><div><div style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Training Tracker · ' + escapeHTML(t.regionScope === 'Onshore' ? 'Onshore only' : (t.regionScope === 'Offshore' ? 'Offshore only' : 'Onshore + Offshore')) + '</div><div style="font-weight:800; font-size:1.7rem; color:var(--text-main); line-height:1.2;">' + escapeHTML(t.title) + '</div></div><div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' + linkBtns + '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="editTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="edit-2" width="14"></i> Edit</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem; color:var(--status-alert); border-color:var(--status-alert);" onclick="delTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="trash-2" width="14"></i> Delete</button></div></div>';
 
           // Counts strip (mirrors source 122 / 107 / 102 aggregates).
           head += '<div style="display:flex; gap:14px; margin-top:18px; flex-wrap:wrap;"><div class="insight-pill"><span>Employees</span> <b style="color:var(--text-main);">' + (counts.totalEmployees || 0) + '</b></div><div class="insight-pill"><span>Expecting</span> <b style="color:var(--text-main);">' + (counts.expecting || 0) + '</b></div><div class="insight-pill"><span>Completed</span> <b style="color:var(--status-active, #10b981);">' + (counts.completed || 0) + '</b></div><div class="insight-pill"><span>Outstanding</span> <b style="color:var(--status-alert);">' + (counts.outstanding || 0) + '</b></div>' + (disc.notOnFloor.length ? '<div class="insight-pill"><span>Not on floor</span> <b style="color:var(--text-muted);">' + disc.notOnFloor.length + '</b></div>' : '') + '</div></div>';
@@ -1377,6 +1377,7 @@
   window.openTrainingImport = function() {
       var ov = document.getElementById('training-import-overlay'); if (!ov) return;
       document.getElementById('tr-imp-title').value = "";
+      document.getElementById('tr-imp-scope').value = "Both";
       document.getElementById('tr-imp-raw').value = "";
       ov.classList.add('open');
       if (window.lucide) lucide.createIcons();
@@ -1391,7 +1392,7 @@
       if (typeof google === 'undefined') return;
       var payload = {
           title: title,
-          regionScope: 'Both',
+          regionScope: document.getElementById('tr-imp-scope').value || 'Both',
           raw: raw
       };
       showToast("Importing roster...");

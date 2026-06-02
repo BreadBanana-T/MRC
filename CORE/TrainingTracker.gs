@@ -17,7 +17,7 @@ const TrainingTracker = {
 
   EMPLOYEE_STATUS_OPTS: ["Active", "Long Term Disability", "Maternity/Paternity Leave", "Short Term Disability", "Personal Leave"],
   TRAINING_STATUS_OPTS: ["Completed", "LOA", "No Longer Employed"],
-  REGION_SCOPE_OPTS: ["Onshore", "Both"],
+  REGION_SCOPE_OPTS: ["Onshore", "Offshore", "Both"],
 
   DEFS_HEADERS: ["id", "title", "videoLinkEN", "videoLinkFR", "regionScope", "createdDate", "notes", "links"],
   TRK_HEADERS: ["trainingId", "employeeName", "employeeStatus", "trainingStatus", "completionDate", "comment"],
@@ -388,18 +388,18 @@ const TrainingTracker = {
     let trainingId, created = false;
     if (existing) {
       trainingId = existing.id;
-      // Refresh the detected links whenever any were found in this paste.
-      if (links.length) {
-        const dRows = defsSheet.getRange(2, 1, defsSheet.getLastRow() - 1, this.DEFS_HEADERS.length).getDisplayValues();
-        for (let j = 0; j < dRows.length; j++) {
-          if (dRows[j][0] === trainingId) {
-            defsSheet.getRange(j + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
-              trainingId, existing.title,
-              vEN || dRows[j][2], vFR || dRows[j][3],
-              existing.regionScope || scope, dRows[j][5] || "", existing.notes || "", linksJson
-            ]]);
-            break;
-          }
+      // Always refresh the def row: honour the chosen scope, keep detected
+      // links (or preserve existing ones when this paste had none).
+      const dRows = defsSheet.getRange(2, 1, defsSheet.getLastRow() - 1, this.DEFS_HEADERS.length).getDisplayValues();
+      for (let j = 0; j < dRows.length; j++) {
+        if (dRows[j][0] === trainingId) {
+          defsSheet.getRange(j + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
+            trainingId, existing.title,
+            vEN || dRows[j][2], vFR || dRows[j][3],
+            scope, dRows[j][5] || "", existing.notes || "",
+            links.length ? linksJson : (dRows[j][7] || "")
+          ]]);
+          break;
         }
       }
     } else {
