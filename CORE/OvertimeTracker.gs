@@ -1,27 +1,27 @@
 /**
  * MODULE: OVERTIME TRACKER  (WFM / IEX schedule-derived overtime)
  *
- * Deliberately isolated in its own file so the overtime pay logic — which is
- * liability-sensitive — can be audited and changed without touching the
+ * Deliberately isolated in its own file so the overtime pay logic -- which is
+ * liability-sensitive -- can be audited and changed without touching the
  * furlough / coaching / roles classification in WorkforceTracker.gs.
  *
  * WHAT IT DOES
  *   - Re-parses the SAME pasted WFM schedule (its own independent pass) and
  *     extracts only the overtime-coded activity segments.
  *   - Onshore agents only (for now). Offshore (TI) is skipped, mirroring the
- *     furlough tracker's `!isOffshore` gate.
- *   - Writes to its own sheet `WF_OVERTIME` via a destructive upsert keyed by
+ *     furlough tracker's "!isOffshore" gate.
+ *   - Writes to its own sheet "WF_OVERTIME" via a destructive upsert keyed by
  *     agent+date, so re-pasting a corrected schedule self-heals.
  *
- * THE CODE TAXONOMY  (3 axes — see OT_CODES below)
- *   Rate   : OTST… = x1 (straight time) | bare OT… (no ST) = x1.5 (premium)
+ * THE CODE TAXONOMY  (3 axes -- see OT_CODES below)
+ *   Rate   : OTST... = x1 (straight time) | bare OT... (no ST) = x1.5 (premium)
  *   Bucket : OFQ/ODQ = Off Queue | OTHR = Other | SAFE = SAFE | else On Queue
  *   Break  : trailing CB = a paid OT break
  *
  * PAY RULE (per product owner): every code present in the schedule counts as
- * paid OT — including the CB break codes. Breaks are NOT broken out; they fold
+ * paid OT -- including the CB break codes. Breaks are NOT broken out; they fold
  * into their rate/bucket total. Anything not coded is unpaid and not counted.
- * Liability figure = weighted cost units = Σ(x1 hours)·1.0 + Σ(x1.5 hours)·1.5.
+ * Liability figure = weighted cost units = sum(x1 hours)*1.0 + sum(x1.5 hours)*1.5.
  */
 
 var OvertimeTracker = {
@@ -29,9 +29,9 @@ var OvertimeTracker = {
   SHEET: 'WF_OVERTIME',
   HEADERS: ['Agent Name', 'Date', 'Code', 'Rate', 'Bucket', 'IsBreak', 'Start Time', 'End Time', 'Region'],
 
-  // Full code table. `c` is matched as a whole token (case-insensitive). The
+  // Full code table. "c" is matched as a whole token (case-insensitive). The
   // list is sorted longest-first at call time so OTSTOTHRCB wins over OTST,
-  // and OTST wins over OT — critical because every code shares the "OT" stem.
+  // and OTST wins over OT -- critical because every code shares the "OT" stem.
   OT_CODES: [
     { c: 'OTSTOTHRCB', rate: 1.0, bucket: 'Other',    brk: true  },
     { c: 'OTSTOFQCB',  rate: 1.0, bucket: 'OffQueue', brk: true  },
@@ -65,7 +65,7 @@ var OvertimeTracker = {
     // like "OTHER MEETING" (which is not in the table, so it won't match).
     var compact = sDot.replace(/[^A-Z]/g, '');
 
-    // 1) Short-code path — try each known code as a standalone token, longest
+    // 1) Short-code path -- try each known code as a standalone token, longest
     //    first. This is the most reliable signal when present.
     var codes = this.OT_CODES.slice().sort(function (a, b) {
       return b.c.replace(/\s/g, '').length - a.c.replace(/\s/g, '').length;
@@ -77,12 +77,12 @@ var OvertimeTracker = {
       }
     }
 
-    // 2) Description path — only engage when the French/English overtime
+    // 2) Description path -- only engage when the French/English overtime
     //    wording is present, so non-OT activities never leak in.
     var hasPhrase = /HEURES?\s*SUPP/.test(sDot) || /\bOVERTIME\b/.test(s) || /^OT(\b|\d)/.test(compact);
     if (!hasPhrase) return null;
 
-    // Rate: explicit 1.5 wins; explicit x1 / 1x => straight; bare OT => premium.
+    // Rate: explicit 1.5 wins; explicit x1 / 1x = straight; bare OT = premium.
     var rate;
     if (/1\s*[.,]\s*5/.test(sDot)) rate = 1.5;
     else if (/\bX?\s*1\s*X?\b/.test(s) || /OTST/.test(compact)) rate = 1.0;
@@ -104,7 +104,7 @@ var OvertimeTracker = {
   // Human-readable label used in the UI log + chart.
   label: function (rate, bucket) {
     var b = bucket === 'OffQueue' ? 'Off Queue' : (bucket === 'OnQueue' ? 'On Queue' : bucket);
-    return b + ' ×' + (rate === 1.5 ? '1.5' : '1');
+    return b + ' x' + (rate === 1.5 ? '1.5' : '1');
   },
 
   /**
@@ -120,7 +120,7 @@ var OvertimeTracker = {
     var self = this;
     var cleanOT = [];
 
-    var segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&']+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
+    var segmentRegex = /([a-zA-Z\u00C0-\u00FF0-9\/\(\)\s\-\.&']+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
     var dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
 
     var lines = schedRaw.split(/\r?\n/).filter(function (l) { return l.trim().length > 0; });
@@ -246,7 +246,7 @@ var OvertimeTracker = {
   /**
    * Analytics engine for the Overtime tracker UI. Shaped to match
    * WorkforceTracker.getAnalytics so the existing renderTracker can reuse it,
-   * plus an `otTotals` block with the rate/bucket/cost breakdown.
+   * plus an "otTotals" block with the rate/bucket/cost breakdown.
    */
   getAnalytics: function (mode, refDate, regionFilter, cycleFilter) {
     regionFilter = regionFilter || 'Onshore';
@@ -350,7 +350,7 @@ var OvertimeTracker = {
   }
 };
 
-// ── Router exports (called from Code.gs / google.script.run) ─────────────────
+// Router exports (called from Code.gs / google.script.run)
 function importOvertimeData(schedRaw) {
   return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importFromSchedule(schedRaw) : 'Error';
 }
