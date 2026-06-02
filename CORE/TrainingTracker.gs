@@ -230,13 +230,14 @@ const TrainingTracker = {
     const training = defs.filter(d => d.id === trainingId)[0] || null;
     if (!training) return JSON.stringify({ training: null, rows: [], counts: {}, copyList: "", discrepancies: { newHires: [], notOnFloor: [] } });
 
-    const onshoreOnly = training.regionScope === "Onshore";
     const floorIdx = this.getFloorIndex();
     const trkRows = this._readTrackerRows().filter(r => r.trainingId === trainingId);
 
     const union = {};
 
-    // 1. Seed from tracker rows (source of truth for status/date/comment).
+    // The imported tracker list IS the roster — full stop. Nobody is ever
+    // added from the floor: people not in the list aren't meant to take this
+    // training. The floor is read ONLY to light up who is working right now.
     trkRows.forEach(r => {
       const key = _normalizeAgentKey(r.employeeName);
       const f = floorIdx[key];
@@ -249,18 +250,6 @@ const TrainingTracker = {
         completionDate: r.completionDate || "",
         comment: r.comment || "",
         flag: f ? "matched" : "tracker-only"
-      };
-    });
-
-    // 2. Add floor/masterlist people not yet in the tracker (possible new hires).
-    Object.keys(floorIdx).forEach(key => {
-      if (union[key]) return;
-      const f = floorIdx[key];
-      if (onshoreOnly && f.region !== "Onshore") return; // smart region scope
-      union[key] = {
-        name: f.display, region: f.region, active: !!f.active,
-        employeeStatus: "Active", trainingStatus: "", completionDate: "", comment: "",
-        flag: "floor-only"
       };
     });
 
