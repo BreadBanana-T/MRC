@@ -248,6 +248,15 @@ var WorkforceTracker = {
         this._executeDestructiveUpsert('WF_ABSENCES', cleanAbsences, ['Agent Name', 'Date', 'Type', 'Start Time', 'End Time', 'Region']);
         msg.push(`Absences`);
       }
+
+      // Overtime is parsed in its own isolated module (WF_OVERTIME sheet).
+      // Wrapped so any OT parse error can never break the core import above.
+      try {
+        if (typeof OvertimeTracker !== 'undefined') {
+          var otRes = OvertimeTracker.importFromSchedule(schedRaw);
+          if (otRes && otRes.indexOf('segment') !== -1) msg.push('Overtime');
+        }
+      } catch (otErr) { Logger.log('[OT] import skipped: ' + otErr); }
     }
 
     if (idpRaw && idpRaw.trim().length > 0) {
