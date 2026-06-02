@@ -86,7 +86,7 @@
   }
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -542,7 +542,11 @@
           }).fetchAbsenceProfiles(state.trackerDate.substring(0,4));
           return;
       }
-      
+      if (state.trackerMode === 'training') {
+          fetchTrainingData(myToken);
+          return;
+      }
+
       google.script.run.withSuccessHandler(function(res) {
           if (myToken !== trackerFetchToken) return; 
           try { state.trackerData = JSON.parse(res); } catch(e) {}
@@ -554,6 +558,41 @@
           if (state.view === 'tracker') render();
           showToast("Data error: " + err.message);
       }).getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode, state.trackerRegion, state.trackerCycleFilter);
+  }
+
+  function fetchTrainingData(parentToken) {
+      if (typeof google === 'undefined') return;
+      var myToken = (parentToken !== undefined) ? parentToken : ++trackerFetchToken;
+      state.trackerLoading = true;
+      google.script.run.withSuccessHandler(function(defsRes) {
+          if (myToken !== trackerFetchToken) return;
+          try { state.trainingDefs = JSON.parse(defsRes) || []; } catch(e) { state.trainingDefs = []; }
+          if (!state.selectedTrainingId || !state.trainingDefs.some(function(d){ return d.id === state.selectedTrainingId; })) {
+              state.selectedTrainingId = state.trainingDefs.length ? state.trainingDefs[0].id : null;
+          }
+          if (!state.selectedTrainingId) {
+              state.trainingRoster = null;
+              state.trackerLoading = false;
+              if (state.view === 'tracker') render();
+              return;
+          }
+          google.script.run.withSuccessHandler(function(rosterRes) {
+              if (myToken !== trackerFetchToken) return;
+              try { state.trainingRoster = JSON.parse(rosterRes); } catch(e) { state.trainingRoster = null; }
+              state.trackerLoading = false;
+              if (state.view === 'tracker') render();
+          }).withFailureHandler(function(err) {
+              if (myToken !== trackerFetchToken) return;
+              state.trackerLoading = false;
+              if (state.view === 'tracker') render();
+              showToast("Training data error: " + err.message);
+          }).getTrainingRoster(state.selectedTrainingId);
+      }).withFailureHandler(function(err) {
+          if (myToken !== trackerFetchToken) return;
+          state.trackerLoading = false;
+          if (state.view === 'tracker') render();
+          showToast("Training data error: " + err.message);
+      }).getTrainings();
   }
 
   function applyPendingUpdates() { var now=Date.now(); for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
@@ -605,7 +644,7 @@
           if (activeId) { var reFocus = document.getElementById(activeId); if (reFocus) { reFocus.focus(); if (cursorStart !== null) { try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {} } } }
           
           if (state.view === 'overview') initOverviewChart();
-          if (state.view === 'tracker' && state.trackerMode !== 'absences') initTrackerChart();
+          if (state.view === 'tracker' && state.trackerMode !== 'absences' && state.trackerMode !== 'training') initTrackerChart();
       } catch(err) {
           console.error("Critical Render Error:", err);
           var c = document.getElementById('content');
@@ -1013,6 +1052,7 @@
   function renderTracker() {
       var isCoach = state.trackerMode === 'coaching';
       var isAbsences = state.trackerMode === 'absences';
+      var isTraining = state.trackerMode === 'training';
       var d = state.trackerData || {};
 
       var schedText = "Loading..."; var idpText = "Awaiting Sync..."; var muText = "";
@@ -1025,7 +1065,7 @@
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center; margin-bottom: ' + (isAbsences ? '24px' : '0') + ';">' +
                        '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;"><span><i data-lucide="calendar-check" width="10"></i> ' + schedText + '</span></div></div>';
 
-      if (!isAbsences) {
+      if (!isAbsences && !isTraining) {
           headerHtml += '<div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">';
           if (state.trackerRange === 'week') {
               headerHtml += '<button onclick="toggleCycleFilter(\'WEEK A\');" style="background:' + (d.cycle === 'WEEK A' ? 'var(--accent-primary)' : 'var(--card-bg)') + '; color:' + (d.cycle === 'WEEK A' ? 'white' : 'var(--text-muted)') + '; border:' + (d.cycle === 'WEEK A' ? 'none' : '1px solid var(--glass-border)') + '; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK A</button><button onclick="toggleCycleFilter(\'WEEK B\');" style="background:' + (d.cycle === 'WEEK B' ? 'var(--accent-primary)' : 'var(--card-bg)') + '; color:' + (d.cycle === 'WEEK B' ? 'white' : 'var(--text-muted)') + '; border:' + (d.cycle === 'WEEK B' ? 'none' : '1px solid var(--glass-border)') + '; padding:4px 16px; border-radius:12px; font-weight:800; font-size:0.8rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">WEEK B</button>';
@@ -1041,14 +1081,16 @@
           headerHtml += '<div class="nav-island" style="background:var(--card-bg); border:var(--glass-border); margin-right:12px;"><button class="nav-btn ' + (state.trackerRegion==='All'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'All\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">All</button><button class="nav-btn ' + (state.trackerRegion==='Onshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Onshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Onshore</button><button class="nav-btn ' + (state.trackerRegion==='Offshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Offshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Offshore</button></div>';
       }
 
-      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\') state.trackerRegion=\'Onshore\'; fetchTrackerData();"><option value="furlough" ' + (state.trackerMode==='furlough'?'selected':'') + '>Furlough Tracker</option><option value="coaching" ' + (state.trackerMode==='coaching'?'selected':'') + '>Coaching Tracker</option><option value="absences" ' + (state.trackerMode==='absences'?'selected':'') + '>Absence Tracker</option></select>';
+      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\') state.trackerRegion=\'Onshore\'; fetchTrackerData();"><option value="furlough" ' + (state.trackerMode==='furlough'?'selected':'') + '>Furlough Tracker</option><option value="coaching" ' + (state.trackerMode==='coaching'?'selected':'') + '>Coaching Tracker</option><option value="absences" ' + (state.trackerMode==='absences'?'selected':'') + '>Absence Tracker</option><option value="training" ' + (state.trackerMode==='training'?'selected':'') + '>Training Tracker</option></select>';
 
-      if (!isAbsences) {
-          headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);"><option value="day" ' + (state.trackerRange==='day'?'selected':'') + '>Daily</option><option value="week" ' + (state.trackerRange==='week'?'selected':'') + '>Weekly</option><option value="month" ' + (state.trackerRange==='month'?'selected':'') + '>Monthly</option><option value="quarter" ' + (state.trackerRange==='quarter'?'selected':'') + '>Quarterly</option></select><input type="date" class="input-aether" style="width:auto; height:34px;" value="' + state.trackerDate + '" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">';
-      } else {
+      if (isAbsences) {
           headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerDate=this.value+\'-01-01\'; state.selectedAbsenceAgent=null; state.absenceMonthFilter=\'ALL\'; fetchTrackerData();"><option value="2026" ' + (state.trackerDate.substring(0,4)==='2026'?'selected':'') + '>Year: 2026</option><option value="2025" ' + (state.trackerDate.substring(0,4)==='2025'?'selected':'') + '>Year: 2025</option></select>';
+      } else if (!isTraining) {
+          headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);"><option value="day" ' + (state.trackerRange==='day'?'selected':'') + '>Daily</option><option value="week" ' + (state.trackerRange==='week'?'selected':'') + '>Weekly</option><option value="month" ' + (state.trackerRange==='month'?'selected':'') + '>Monthly</option><option value="quarter" ' + (state.trackerRange==='quarter'?'selected':'') + '>Quarterly</option></select><input type="date" class="input-aether" style="width:auto; height:34px;" value="' + state.trackerDate + '" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">';
       }
       headerHtml += '</div></div>';
+
+      if (isTraining) return headerHtml + renderTrainingTracker();
 
       if (state.trackerLoading) {
           var loadingTitle = isAbsences ? "Compiling Agent Profiles..." : "Analyzing WFM Calendar...";
@@ -1190,6 +1232,164 @@
 
       return headerHtml + gridHtml + '<div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;"><div style="display:flex; flex-direction:column; gap:24px;"><div class="aether-card" style="padding:24px;"><div style="text-align:center; margin-bottom:20px;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + (d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0) + '</div></div><div class="chart-3d-container" style="height:260px; width:100%; display:flex; justify-content:center; padding: 10px;"><canvas id="tracker-chart"></canvas></div></div><div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;"><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0) + 'h</div></div></div></div><div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;"><div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span><input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div></div>';
   }
+
+  var TRAINING_EMP_OPTS = ['Active', 'Long Term Disability', 'Maternity/Paternity Leave', 'Short Term Disability'];
+  var TRAINING_STATUS_OPTS = ['', 'Completed', 'LOA', 'No Longer Employed'];
+
+  function renderTrainingTracker() {
+      var defs = state.trainingDefs || [];
+
+      // Left pane: training library.
+      var listHtml = defs.map(function(t) {
+          var isActive = state.selectedTrainingId === t.id;
+          var scopeBadge = '<span style="font-size:0.6rem; font-weight:800; padding:2px 8px; border-radius:8px; letter-spacing:0.5px; ' + (t.regionScope === 'Onshore' ? 'background:rgba(99,102,241,0.12); color:var(--accent-primary);' : 'background:rgba(16,185,129,0.12); color:var(--status-active, #10b981);') + '">' + escapeHTML((t.regionScope || 'Both').toUpperCase()) + '</span>';
+          return '<div onclick="selectTraining(\'' + escapeHTML(t.id) + '\')" class="aether-card hover-bg" style="padding:14px 16px; cursor:pointer; margin-bottom:10px; border:2px solid ' + (isActive ? 'var(--accent-primary)' : 'transparent') + '; border-left:4px solid ' + (isActive ? 'var(--accent-primary)' : 'var(--glass-border)') + '; box-shadow:' + (isActive ? '0 8px 25px rgba(99,102,241,0.2)' : 'none') + ';"><div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;"><span style="font-weight:800; font-size:1rem; color:var(--text-main); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHTML(t.title || 'Untitled') + '</span>' + scopeBadge + '</div><div style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">Created ' + escapeHTML(t.createdDate || '—') + '</div></div>';
+      }).join('') || '<div style="text-align:center; padding:30px; color:var(--text-muted); font-weight:600; border:2px dashed var(--glass-border); border-radius:16px;">No trainings yet. Create one to start.</div>';
+
+      var leftPane = '<div style="width:320px; flex-shrink:0; display:flex; flex-direction:column; gap:14px;"><button class="btn btn-primary" style="height:48px; font-size:0.95rem; border-radius:14px;" onclick="openTrainingCompose()"><i data-lucide="plus" width="18"></i> New Training</button><div class="custom-scrollbar" style="flex:1; overflow-y:auto; max-height:calc(100vh - 230px); padding-right:6px;">' + listHtml + '</div></div>';
+
+      // Right pane.
+      var rightPane;
+      if (state.trackerLoading && !state.trainingRoster) {
+          rightPane = '<div class="aether-card" style="flex:1; padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:450px;"><div style="width:50px; height:50px; border:4px solid var(--glass-border); border-top-color:var(--accent-primary); border-radius:50%; animation:spin 0.8s cubic-bezier(0.68,-0.55,0.265,1.55) infinite; margin-bottom:24px;"></div><h3 style="margin:0; color:var(--text-main);">Cross-referencing the floor...</h3></div>';
+      } else if (!state.selectedTrainingId || !state.trainingRoster || !state.trainingRoster.training) {
+          rightPane = '<div class="aether-card" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); border:2px dashed var(--glass-border); background:transparent; box-shadow:none; min-height:450px;"><i data-lucide="graduation-cap" width="48" style="opacity:0.3; margin-bottom:16px;"></i><h3 style="margin:0;">No Training Selected</h3><p style="font-size:0.9rem;">Select a training, or create one with the button on the left.</p></div>';
+      } else {
+          var r = state.trainingRoster;
+          var t = r.training;
+          var counts = r.counts || {};
+          var disc = r.discrepancies || { newHires: [], notOnFloor: [] };
+
+          var linkBtns = '';
+          if (t.videoLinkEN) linkBtns += '<a href="' + escapeHTML(t.videoLinkEN) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="play-circle" width="14"></i> Video EN</a>';
+          if (t.videoLinkFR) linkBtns += '<a href="' + escapeHTML(t.videoLinkFR) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="play-circle" width="14"></i> Vidéo FR</a>';
+
+          var head = '<div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;"><div><div style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Training Tracker · ' + escapeHTML((t.regionScope === 'Onshore') ? 'Onshore only' : 'Onshore + Offshore') + '</div><div style="font-weight:800; font-size:1.7rem; color:var(--text-main); line-height:1.2;">' + escapeHTML(t.title) + '</div></div><div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' + linkBtns + '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="seedTraining()"><i data-lucide="user-plus" width="14"></i> Seed from Floor</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="editTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="edit-2" width="14"></i> Edit</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem; color:var(--status-alert); border-color:var(--status-alert);" onclick="delTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="trash-2" width="14"></i></button></div></div>';
+
+          // Counts strip (mirrors source 122 / 107 / 102 aggregates).
+          head += '<div style="display:flex; gap:14px; margin-top:18px; flex-wrap:wrap;"><div class="insight-pill"><span>Employees</span> <b style="color:var(--text-main);">' + (counts.totalEmployees || 0) + '</b></div><div class="insight-pill"><span>Completed</span> <b style="color:var(--status-active, #10b981);">' + (counts.completed || 0) + '</b></div><div class="insight-pill"><span>Outstanding</span> <b style="color:var(--status-alert);">' + (counts.outstanding || 0) + '</b></div>' + (disc.newHires.length ? '<div class="insight-pill"><span>New hires (floor)</span> <b style="color:var(--accent-primary);">' + disc.newHires.length + '</b></div>' : '') + (disc.notOnFloor.length ? '<div class="insight-pill"><span>Not on floor</span> <b style="color:var(--text-muted);">' + disc.notOnFloor.length + '</b></div>' : '') + '</div></div>';
+
+          // Copy panel: non-completers who are Active AND currently working.
+          var copyCount = r.copyList ? r.copyList.split('\n').filter(function(x){ return x.trim(); }).length : 0;
+          var copyPanel = '<div style="padding:18px 28px; border-bottom:1px solid var(--glass-border); background:var(--bg-root);"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><span style="font-weight:800; font-size:0.85rem; color:var(--text-main); display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-list" width="16"></i> Copy list · Active &amp; working, not completed (' + copyCount + ')</span><button class="btn btn-primary" style="height:32px; font-size:0.78rem;" onclick="copyTrainingList()"><i data-lucide="copy" width="14"></i> Copy</button></div><textarea readonly class="input-aether custom-scrollbar" style="width:100%; height:90px; font-family:monospace; font-size:0.8rem; resize:vertical; padding-top:10px;" placeholder="Nobody outstanding right now — everyone working is done. 🎉">' + escapeHTML(r.copyList || '') + '</textarea></div>';
+
+          // Roster grid.
+          var search = (state.trackerSearch || '').toLowerCase();
+          var gridRows = (r.rows || []).map(function(row, i) {
+              if (search && row.name.toLowerCase().indexOf(search) === -1) return '';
+              var empSel = '<select class="input-aether" id="tr-es-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" onchange="saveTrainingCompletion(' + i + ')">' + TRAINING_EMP_OPTS.map(function(o){ return '<option value="' + escapeHTML(o) + '"' + (row.employeeStatus === o ? ' selected' : '') + '>' + escapeHTML(o) + '</option>'; }).join('') + '</select>';
+              var trnSel = '<select class="input-aether" id="tr-ts-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" onchange="saveTrainingCompletion(' + i + ')">' + TRAINING_STATUS_OPTS.map(function(o){ return '<option value="' + escapeHTML(o) + '"' + (row.trainingStatus === o ? ' selected' : '') + '>' + (o === '' ? '— Not done —' : escapeHTML(o)) + '</option>'; }).join('') + '</select>';
+              var dateInp = '<input type="date" class="input-aether" id="tr-date-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" value="' + escapeHTML(row.completionDate || '') + '" onchange="saveTrainingCompletion(' + i + ')">';
+              var cmInp = '<input type="text" class="input-aether" id="tr-cm-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" value="' + escapeHTML(row.comment || '') + '" placeholder="Comment" onchange="saveTrainingCompletion(' + i + ')">';
+              var flagBadge = '';
+              if (row.flag === 'floor-only') flagBadge = '<span style="font-size:0.58rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.12); padding:1px 6px; border-radius:6px; margin-left:6px;">NEW HIRE</span>';
+              else if (row.flag === 'tracker-only') flagBadge = '<span style="font-size:0.58rem; font-weight:800; color:var(--text-muted); background:var(--glass-border); padding:1px 6px; border-radius:6px; margin-left:6px;">NOT ON FLOOR</span>';
+              var workDot = row.active ? '<span title="Currently working" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--status-active, #10b981); margin-right:8px; box-shadow:0 0 6px rgba(16,185,129,0.6);"></span>' : '<span title="Not on floor now" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--glass-border); margin-right:8px;"></span>';
+              var regionTag = '<span style="font-size:0.62rem; color:var(--text-muted); font-weight:700;">' + escapeHTML(row.region || '—') + '</span>';
+              return '<tr style="border-bottom:1px solid var(--glass-border);"><td style="padding:8px 12px; min-width:200px;">' + workDot + '<span style="font-weight:700; color:var(--text-main); font-size:0.85rem;">' + escapeHTML(row.name) + '</span>' + flagBadge + '<div style="margin-left:16px;">' + regionTag + '</div></td><td style="padding:8px 6px; width:200px;">' + empSel + '</td><td style="padding:8px 6px; width:160px;">' + trnSel + '</td><td style="padding:8px 6px; width:150px;">' + dateInp + '</td><td style="padding:8px 6px; min-width:160px;">' + cmInp + '</td></tr>';
+          }).join('');
+
+          var grid = '<div style="flex:1; overflow:auto; padding:0;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; z-index:5; background:var(--card-bg);"><tr style="border-bottom:2px solid var(--glass-border);"><th style="padding:10px 12px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Training Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Completion</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Comment</th></tr></thead><tbody>' + gridRows + '</tbody></table></div>';
+
+          var gridHeader = '<div style="padding:14px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; background:var(--card-bg);"><span style="font-weight:800; color:var(--text-main); font-size:1rem;">Completion Roster</span><input id="tracker-search" type="text" class="input-aether" style="width:220px; height:32px; font-size:0.8rem;" placeholder="Search employee..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div>';
+
+          rightPane = '<div class="aether-card" style="flex:1; min-width:0; padding:0; display:flex; flex-direction:column; height:calc(100vh - 200px); min-height:600px; overflow:hidden;">' + head + copyPanel + gridHeader + grid + '</div>';
+      }
+
+      return '<div style="display:flex; gap:24px; align-items:start; padding-top:16px; padding-bottom:24px;">' + leftPane + rightPane + '</div>';
+  }
+
+  window.selectTraining = function(id) { state.selectedTrainingId = id; state.trainingRoster = null; fetchTrainingData(); render(); };
+  window.copyTrainingList = function() { var txt = (state.trainingRoster && state.trainingRoster.copyList) || ''; if (!txt) { showToast("Nothing to copy — all clear."); return; } fallbackCopyTextToClipboard(txt, "Copied " + txt.split('\n').filter(function(x){return x.trim();}).length + " names!"); };
+
+  window.saveTrainingCompletion = function(i) {
+      if (typeof google === 'undefined' || !state.trainingRoster || !state.trainingRoster.rows[i]) return;
+      var row = state.trainingRoster.rows[i];
+      var es = (document.getElementById('tr-es-' + i) || {}).value || 'Active';
+      var ts = (document.getElementById('tr-ts-' + i) || {}).value || '';
+      var date = (document.getElementById('tr-date-' + i) || {}).value || '';
+      var cm = (document.getElementById('tr-cm-' + i) || {}).value || '';
+      // Optimistic local update so the copy list / counts feel instant after refetch.
+      row.employeeStatus = es; row.trainingStatus = ts; row.completionDate = date; row.comment = cm;
+      var id = state.selectedTrainingId;
+      google.script.run.withSuccessHandler(function() {
+          fetchTrainingData();
+      }).withFailureHandler(function(err) {
+          showToast("Save failed: " + err.message);
+      }).setTrainingCompletion(id, row.name, es, ts, date, cm);
+  };
+
+  window.seedTraining = function() {
+      if (typeof google === 'undefined' || !state.selectedTrainingId) return;
+      showToast("Seeding roster from floor...");
+      google.script.run.withSuccessHandler(function(res) {
+          var added = 0; try { added = JSON.parse(res).added; } catch(e) {}
+          showToast(added ? ("Added " + added + " employee(s).") : "Roster already up to date.");
+          fetchTrainingData();
+      }).withFailureHandler(function(err) {
+          showToast("Seed failed: " + err.message);
+      }).seedTrainingRoster(state.selectedTrainingId);
+  };
+
+  window.openTrainingCompose = function() {
+      state.editingTrainingId = null;
+      var ov = document.getElementById('training-overlay'); if (!ov) return;
+      document.getElementById('training-compose-title').innerText = "New Training";
+      document.getElementById('tr-form-title').value = "";
+      document.getElementById('tr-form-en').value = "";
+      document.getElementById('tr-form-fr').value = "";
+      document.getElementById('tr-form-scope').value = "Both";
+      document.getElementById('tr-form-notes').value = "";
+      ov.classList.add('open');
+  };
+  window.closeTrainingCompose = function() { var ov = document.getElementById('training-overlay'); if (ov) ov.classList.remove('open'); };
+
+  window.editTraining = function(id) {
+      var t = (state.trainingDefs || []).filter(function(x){ return x.id === id; })[0];
+      if (!t) return;
+      state.editingTrainingId = id;
+      var ov = document.getElementById('training-overlay'); if (!ov) return;
+      document.getElementById('training-compose-title').innerText = "Edit Training";
+      document.getElementById('tr-form-title').value = t.title || "";
+      document.getElementById('tr-form-en').value = t.videoLinkEN || "";
+      document.getElementById('tr-form-fr').value = t.videoLinkFR || "";
+      document.getElementById('tr-form-scope').value = t.regionScope || "Both";
+      document.getElementById('tr-form-notes').value = t.notes || "";
+      ov.classList.add('open');
+  };
+
+  window.saveTrainingDef = function() {
+      var title = document.getElementById('tr-form-title').value.trim();
+      if (!title) { showToast("Title is required."); return; }
+      var payload = {
+          id: state.editingTrainingId || "",
+          title: title,
+          videoLinkEN: document.getElementById('tr-form-en').value.trim(),
+          videoLinkFR: document.getElementById('tr-form-fr').value.trim(),
+          regionScope: document.getElementById('tr-form-scope').value,
+          notes: document.getElementById('tr-form-notes').value.trim()
+      };
+      if (typeof google === 'undefined') { closeTrainingCompose(); return; }
+      google.script.run.withSuccessHandler(function(res) {
+          var d = {}; try { d = JSON.parse(res); } catch(e) {}
+          if (d.ok) { state.selectedTrainingId = d.id || state.selectedTrainingId; showToast("Training saved"); closeTrainingCompose(); fetchTrainingData(); }
+          else { showToast(d.error || "Save failed"); }
+      }).withFailureHandler(function(err) {
+          showToast("Save failed: " + err.message);
+      }).saveTraining(JSON.stringify(payload));
+  };
+
+  window.delTraining = function(id) {
+      if (!confirm("Delete this training and all its completion records? This cannot be undone.")) return;
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function() {
+          showToast("Training deleted");
+          if (state.selectedTrainingId === id) { state.selectedTrainingId = null; state.trainingRoster = null; }
+          fetchTrainingData();
+      }).withFailureHandler(function(err) {
+          showToast("Delete failed: " + err.message);
+      }).deleteTraining(id);
+  };
 
   function renderCalc() {
      return '<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether custom-scrollbar" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether custom-scrollbar" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';

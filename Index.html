@@ -121,6 +121,43 @@
         </div>
     </div>
 
+    <div id="training-overlay" class="modal-blur" onclick="closeTrainingCompose()">
+        <div class="modal-window" style="width:560px; max-width:95%;" onclick="event.stopPropagation()">
+            <h2 id="training-compose-title" style="margin-top:0;">New Training</h2>
+            <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:20px;">
+                <div>
+                    <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Training Title</label>
+                    <input id="tr-form-title" class="input-aether" style="margin-top:6px;" placeholder="e.g. Benevity 2026 Refresher">
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+                    <div>
+                        <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Video link (EN)</label>
+                        <input id="tr-form-en" class="input-aether" style="margin-top:6px;" placeholder="https://telus.benevity.org/...">
+                    </div>
+                    <div>
+                        <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Video link (FR)</label>
+                        <input id="tr-form-fr" class="input-aether" style="margin-top:6px;" placeholder="https://telus.benevity.org/fr/...">
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Applies to</label>
+                    <select id="tr-form-scope" class="input-aether" style="margin-top:6px;">
+                        <option value="Both">Onshore + Offshore</option>
+                        <option value="Onshore">Onshore only</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Notes (optional)</label>
+                    <textarea id="tr-form-notes" class="input-aether" style="margin-top:6px; height:70px; padding-top:10px; resize:none;" placeholder="Internal notes / comments"></textarea>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button class="btn btn-glass" onclick="closeTrainingCompose()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTrainingDef()"><i data-lucide="save" width="18"></i> Save Training</button>
+            </div>
+        </div>
+    </div>
+
     <div id="event-modal" class="modal-blur" onclick="document.getElementById('event-modal').classList.remove('open')">
        <div class="modal-window" onclick="event.stopPropagation()" style="width:500px;">
           <h2 id="evt-modal-title" style="margin-top:0;">Event Title</h2>
