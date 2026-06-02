@@ -19,7 +19,7 @@ const TrainingTracker = {
   TRAINING_STATUS_OPTS: ["Completed", "LOA", "No Longer Employed"],
   REGION_SCOPE_OPTS: ["Onshore", "Both"],
 
-  DEFS_HEADERS: ["id", "title", "videoLinkEN", "videoLinkFR", "regionScope", "createdDate", "notes"],
+  DEFS_HEADERS: ["id", "title", "videoLinkEN", "videoLinkFR", "regionScope", "createdDate", "notes", "links"],
   TRK_HEADERS: ["trainingId", "employeeName", "employeeStatus", "trainingStatus", "completionDate", "comment"],
 
   // ── Sheet bootstrap ──────────────────────────────────────────────────────
@@ -97,10 +97,19 @@ const TrainingTracker = {
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
     const data = sheet.getRange(2, 1, lastRow - 1, this.DEFS_HEADERS.length).getDisplayValues();
-    return data.filter(r => r[0]).map(r => ({
-      id: r[0], title: r[1], videoLinkEN: r[2], videoLinkFR: r[3],
-      regionScope: r[4] || "Both", createdDate: r[5], notes: r[6]
-    }));
+    return data.filter(r => r[0]).map(r => {
+      let links = [];
+      try { links = r[7] ? (JSON.parse(r[7]) || []) : []; } catch (e) { links = []; }
+      // Backward compat: synthesize links from the legacy EN/FR video columns.
+      if ((!links || !links.length)) {
+        if (r[2]) links.push({ label: "Video EN", url: r[2] });
+        if (r[3]) links.push({ label: "Video FR", url: r[3] });
+      }
+      return {
+        id: r[0], title: r[1], videoLinkEN: r[2], videoLinkFR: r[3],
+        regionScope: r[4] || "Both", createdDate: r[5], notes: r[6], links: links
+      };
+    });
   },
 
   _readTrackerRows: function() {
@@ -136,8 +145,9 @@ const TrainingTracker = {
       for (let i = 0; i < rows.length; i++) {
         if (rows[i][0] === id) {
           const cur = sheet.getRange(i + 2, 1, 1, this.DEFS_HEADERS.length).getDisplayValues()[0];
+          // Preserve auto-detected links (cur[7]); the manual editor doesn't manage them.
           sheet.getRange(i + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
-            id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, cur[5] || "", p.notes || ""
+            id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, cur[5] || "", p.notes || "", cur[7] || ""
           ]]);
           return JSON.stringify({ ok: true, id: id });
         }
@@ -146,7 +156,8 @@ const TrainingTracker = {
     // New record.
     id = "TR-" + Date.now();
     const createdDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-    sheet.appendRow([id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, createdDate, p.notes || ""]);
+    const links = JSON.stringify(this._linksFromEnFr(p.videoLinkEN, p.videoLinkFR));
+    sheet.appendRow([id, p.title, p.videoLinkEN || "", p.videoLinkFR || "", scope, createdDate, p.notes || "", links]);
     return JSON.stringify({ ok: true, id: id });
   },
 
@@ -255,17 +266,39 @@ const TrainingTracker = {
 
     const rows = Object.keys(union).map(k => union[k]).sort((a, b) => a.name.localeCompare(b.name));
 
+    // Mirror the corporate tracker's two formula columns so the UI + copy list
+    // stay 1:1 with the source sheet.
+    //   Planning (D)   = 1 when Active and not "No Longer Employed", else 0  (→ "expecting")
+    //   Completion (F) = 1 when Training Status is "Completed", else 0       (→ "completed")
+    rows.forEach(r => {
+      r.planningRule = (r.employeeStatus === "Active" && r.trainingStatus !== "No Longer Employed") ? 1 : 0;
+      r.completionCount = (r.trainingStatus === "Completed") ? 1 : 0;
+    });
+
     const DONE = { "Completed": true, "LOA": true, "No Longer Employed": true };
     const counts = {
       totalEmployees: rows.length,
-      completed: rows.filter(r => r.trainingStatus === "Completed").length,
+      expecting: rows.filter(r => r.planningRule === 1).length,
+      completed: rows.filter(r => r.completionCount === 1).length,
       outstanding: rows.filter(r => !DONE[r.trainingStatus]).length
     };
 
-    // Copy list: NON-COMPLETERS who are Active AND currently working on the floor.
+    // Paste-ready copy list: an exact, row-for-row replica of the corporate
+    // tracker's editable block (columns B→H), every employee in the same
+    // alphabetical order. Drop floor-only new hires so the row count matches
+    // the source sheet 1:1 — pasting at the first name cell refills it blind.
+    // Dates are emitted as M/D/YYYY to match the source formatting exactly.
     const copyList = rows
-      .filter(r => r.employeeStatus === "Active" && r.trainingStatus !== "Completed" && r.active === true)
-      .map(r => r.name + "\t" + r.employeeStatus)
+      .filter(r => r.flag !== "floor-only")
+      .map(r => [
+        r.name,
+        r.employeeStatus,
+        r.planningRule,
+        r.trainingStatus,
+        r.completionCount,
+        this._toMDY(r.completionDate),
+        r.comment || ""
+      ].join("\t"))
       .join("\n");
 
     const discrepancies = {
@@ -348,18 +381,25 @@ const TrainingTracker = {
       if (defs[i].title && defs[i].title.trim().toLowerCase() === title.toLowerCase()) { existing = defs[i]; break; }
     }
 
+    // Auto-detect every link in the pasted block (videos, quizzes, forms…),
+    // labelled by the keyword sitting next to each URL.
+    const links = this._detectLinks(p.raw);
+    const linksJson = JSON.stringify(links);
+    const pick = (re) => { const m = links.filter(l => re.test(l.label.toLowerCase()))[0]; return m ? m.url : ""; };
+    const vEN = pick(/video.*en|en.*video/), vFR = pick(/video.*fr|fr.*video/);
+
     let trainingId, created = false;
     if (existing) {
       trainingId = existing.id;
-      // Only overwrite video links when the import actually supplies them.
-      if (p.videoLinkEN || p.videoLinkFR) {
+      // Refresh the detected links whenever any were found in this paste.
+      if (links.length) {
         const dRows = defsSheet.getRange(2, 1, defsSheet.getLastRow() - 1, this.DEFS_HEADERS.length).getDisplayValues();
         for (let j = 0; j < dRows.length; j++) {
           if (dRows[j][0] === trainingId) {
             defsSheet.getRange(j + 2, 1, 1, this.DEFS_HEADERS.length).setValues([[
               trainingId, existing.title,
-              p.videoLinkEN || dRows[j][2], p.videoLinkFR || dRows[j][3],
-              existing.regionScope || scope, dRows[j][5] || "", existing.notes || ""
+              vEN || dRows[j][2], vFR || dRows[j][3],
+              existing.regionScope || scope, dRows[j][5] || "", existing.notes || "", linksJson
             ]]);
             break;
           }
@@ -368,7 +408,7 @@ const TrainingTracker = {
     } else {
       trainingId = "TR-" + Date.now();
       const createdDate = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-dd");
-      defsSheet.appendRow([trainingId, title, p.videoLinkEN || "", p.videoLinkFR || "", scope, createdDate, p.notes || ""]);
+      defsSheet.appendRow([trainingId, title, vEN, vFR, scope, createdDate, p.notes || "", linksJson]);
       created = true;
     }
 
@@ -403,7 +443,48 @@ const TrainingTracker = {
       trkSheet.getRange(2, 1, all.length, this.TRK_HEADERS.length).setValues(all);
     }
 
-    return JSON.stringify({ ok: true, trainingId: trainingId, title: title, created: created, imported: parsed.length, added: added, updated: updated, completed: completed });
+    return JSON.stringify({ ok: true, trainingId: trainingId, title: title, created: created, imported: parsed.length, added: added, updated: updated, completed: completed, linksDetected: links.length });
+  },
+
+  // Build a links array from the legacy EN/FR video fields (manual entry path).
+  _linksFromEnFr: function(en, fr) {
+    const out = [];
+    if (en) out.push({ label: "Video EN", url: String(en).trim() });
+    if (fr) out.push({ label: "Video FR", url: String(fr).trim() });
+    return out;
+  },
+
+  // Scan pasted text for every URL and label each by the keywords next to it
+  // (video/quiz/form + EN/FR/onshore/offshore). Order preserved, duplicates
+  // (same url + same label) dropped.
+  _detectLinks: function(raw) {
+    const lines = String(raw || "").replace(/\r/g, "").split("\n");
+    const urlRe = /(https?:\/\/[^\s"'<>)\]]+)/g;
+    const out = [], seen = {};
+    lines.forEach(function(line) {
+      let m;
+      while ((m = urlRe.exec(line)) !== null) {
+        const url = m[1].replace(/[.,;]+$/, "");
+        const prefix = line.slice(0, m.index).toLowerCase();
+        const u = url.toLowerCase();
+
+        let type = "Link";
+        if (prefix.indexOf("video") !== -1 || u.indexOf("benevity") !== -1 || u.indexOf("youtu") !== -1 || u.indexOf("vimeo") !== -1) type = "Video";
+        else if (prefix.indexOf("quiz") !== -1) type = "Quiz";
+        else if (prefix.indexOf("form") !== -1 || u.indexOf("docs.google.com/forms") !== -1 || u.indexOf("forms.gle") !== -1 || u.indexOf("forms.office") !== -1) type = "Form";
+
+        let tag = "";
+        if (prefix.indexOf("onshore") !== -1) tag = "Onshore";
+        else if (prefix.indexOf("offshore") !== -1) tag = "Offshore";
+        else if (/(^|[^a-z])(fr|french|francais|français)([^a-z]|$)/.test(prefix)) tag = "FR";
+        else if (/(^|[^a-z])(en|english|anglais)([^a-z]|$)/.test(prefix)) tag = "EN";
+
+        const label = (type + (tag ? " " + tag : "")).trim();
+        const dedupeKey = label + "|" + url;
+        if (!seen[dedupeKey]) { seen[dedupeKey] = true; out.push({ label: label, url: url }); }
+      }
+    });
+    return out;
   },
 
   // Parse a pasted Corporate Training Tracker tab. Anchors on the Employee
@@ -449,6 +530,14 @@ const TrainingTracker = {
     if (m) return m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
     return "";
+  },
+
+  // "2026-05-03" -> "5/3/2026" (no leading zeros) to mirror the source sheet.
+  _toMDY: function(v) {
+    v = String(v || "").trim();
+    const m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return parseInt(m[2], 10) + "/" + parseInt(m[3], 10) + "/" + m[1];
+    return v; // already M/D/YYYY or blank — pass through
   }
 };
 

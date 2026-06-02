@@ -161,21 +161,11 @@
     <div id="training-import-overlay" class="modal-blur" onclick="closeTrainingImport()">
         <div class="modal-window" style="width:660px; max-width:95%;" onclick="event.stopPropagation()">
             <h2 style="margin-top:0;">Import Training from Sheet</h2>
-            <p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5;">Paste one tab from your Corporate Training Tracker — copy the whole sheet (Ctrl+A, Ctrl+C); the summary &amp; instruction rows are ignored automatically. People are matched by name and their status, completion date and comments are filled in. Re-importing the same training just updates it, never duplicates.</p>
+            <p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5;">Paste one tab from your Corporate Training Tracker — copy the whole sheet (Ctrl+A, Ctrl+C); the summary &amp; instruction rows are ignored automatically. People are matched by name, and <b>video / quiz / form links are detected and saved for you</b>. Re-importing the same training just updates it, never duplicates.</p>
             <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:20px;">
                 <div>
                     <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Training Title <span style="color:var(--status-alert);">*</span></label>
                     <input id="tr-imp-title" class="input-aether" style="margin-top:6px;" placeholder="Use the sheet tab name, e.g. Benevity VILT 2026">
-                </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-                    <div>
-                        <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Video link (EN)</label>
-                        <input id="tr-imp-en" class="input-aether" style="margin-top:6px;" placeholder="optional">
-                    </div>
-                    <div>
-                        <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Video link (FR)</label>
-                        <input id="tr-imp-fr" class="input-aether" style="margin-top:6px;" placeholder="optional">
-                    </div>
                 </div>
                 <div>
                     <label style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Applies to</label>

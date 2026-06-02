@@ -86,7 +86,7 @@
   }
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live'
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -1260,22 +1260,35 @@
           var counts = r.counts || {};
           var disc = r.discrepancies || { newHires: [], notOnFloor: [] };
 
-          var linkBtns = '';
-          if (t.videoLinkEN) linkBtns += '<a href="' + escapeHTML(t.videoLinkEN) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="play-circle" width="14"></i> Video EN</a>';
-          if (t.videoLinkFR) linkBtns += '<a href="' + escapeHTML(t.videoLinkFR) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="play-circle" width="14"></i> Vidéo FR</a>';
+          var links = (t.links && t.links.length) ? t.links : [];
+          if (!links.length) {
+              if (t.videoLinkEN) links.push({ label: 'Video EN', url: t.videoLinkEN });
+              if (t.videoLinkFR) links.push({ label: 'Video FR', url: t.videoLinkFR });
+          }
+          var linkBtns = links.map(function(l) {
+              var lab = (l.label || 'Link').toLowerCase();
+              var ic = (lab.indexOf('video') !== -1) ? 'play-circle' : ((lab.indexOf('quiz') !== -1 || lab.indexOf('form') !== -1) ? 'clipboard-check' : 'link');
+              return '<a href="' + escapeHTML(l.url) + '" target="_blank" class="btn btn-glass" style="height:32px; font-size:0.78rem; text-decoration:none;"><i data-lucide="' + ic + '" width="14"></i> ' + escapeHTML(l.label || 'Link') + '</a>';
+          }).join('');
 
           var head = '<div style="padding:24px 28px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.02);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;"><div><div style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">Training Tracker · ' + escapeHTML((t.regionScope === 'Onshore') ? 'Onshore only' : 'Onshore + Offshore') + '</div><div style="font-weight:800; font-size:1.7rem; color:var(--text-main); line-height:1.2;">' + escapeHTML(t.title) + '</div></div><div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">' + linkBtns + '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="seedTraining()"><i data-lucide="user-plus" width="14"></i> Seed from Floor</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="editTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="edit-2" width="14"></i> Edit</button><button class="btn btn-glass" style="height:32px; font-size:0.78rem; color:var(--status-alert); border-color:var(--status-alert);" onclick="delTraining(\'' + escapeHTML(t.id) + '\')"><i data-lucide="trash-2" width="14"></i></button></div></div>';
 
           // Counts strip (mirrors source 122 / 107 / 102 aggregates).
-          head += '<div style="display:flex; gap:14px; margin-top:18px; flex-wrap:wrap;"><div class="insight-pill"><span>Employees</span> <b style="color:var(--text-main);">' + (counts.totalEmployees || 0) + '</b></div><div class="insight-pill"><span>Completed</span> <b style="color:var(--status-active, #10b981);">' + (counts.completed || 0) + '</b></div><div class="insight-pill"><span>Outstanding</span> <b style="color:var(--status-alert);">' + (counts.outstanding || 0) + '</b></div>' + (disc.newHires.length ? '<div class="insight-pill"><span>New hires (floor)</span> <b style="color:var(--accent-primary);">' + disc.newHires.length + '</b></div>' : '') + (disc.notOnFloor.length ? '<div class="insight-pill"><span>Not on floor</span> <b style="color:var(--text-muted);">' + disc.notOnFloor.length + '</b></div>' : '') + '</div></div>';
+          head += '<div style="display:flex; gap:14px; margin-top:18px; flex-wrap:wrap;"><div class="insight-pill"><span>Employees</span> <b style="color:var(--text-main);">' + (counts.totalEmployees || 0) + '</b></div><div class="insight-pill"><span>Expecting</span> <b style="color:var(--text-main);">' + (counts.expecting || 0) + '</b></div><div class="insight-pill"><span>Completed</span> <b style="color:var(--status-active, #10b981);">' + (counts.completed || 0) + '</b></div><div class="insight-pill"><span>Outstanding</span> <b style="color:var(--status-alert);">' + (counts.outstanding || 0) + '</b></div>' + (disc.newHires.length ? '<div class="insight-pill"><span>New hires (floor)</span> <b style="color:var(--accent-primary);">' + disc.newHires.length + '</b></div>' : '') + (disc.notOnFloor.length ? '<div class="insight-pill"><span>Not on floor</span> <b style="color:var(--text-muted);">' + disc.notOnFloor.length + '</b></div>' : '') + '</div></div>';
 
-          // Copy panel: non-completers who are Active AND currently working.
+          // Copy panel: an exact, row-for-row replica of the corporate tracker
+          // block (Name → Comment), every employee in the same alphabetical
+          // order, so a single paste at the first name cell refills the sheet.
           var copyCount = r.copyList ? r.copyList.split('\n').filter(function(x){ return x.trim(); }).length : 0;
-          var copyPanel = '<div style="padding:18px 28px; border-bottom:1px solid var(--glass-border); background:var(--bg-root);"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><span style="font-weight:800; font-size:0.85rem; color:var(--text-main); display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-list" width="16"></i> Copy list · Active &amp; working, not completed (' + copyCount + ')</span><button class="btn btn-primary" style="height:32px; font-size:0.78rem;" onclick="copyTrainingList()"><i data-lucide="copy" width="14"></i> Copy</button></div><textarea readonly class="input-aether custom-scrollbar" style="width:100%; height:90px; font-family:monospace; font-size:0.8rem; resize:vertical; padding-top:10px;" placeholder="Nobody outstanding right now — everyone working is done. 🎉">' + escapeHTML(r.copyList || '') + '</textarea></div>';
+          var copyPanel = '<div style="padding:18px 28px; border-bottom:1px solid var(--glass-border); background:var(--bg-root);"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><span style="font-weight:800; font-size:0.85rem; color:var(--text-main); display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-list" width="16"></i> Paste-back list · matches the corporate tracker 1:1 (' + copyCount + ' rows)</span><button class="btn btn-primary" style="height:32px; font-size:0.78rem;" onclick="copyTrainingList()"><i data-lucide="copy" width="14"></i> Copy</button></div><div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:10px; line-height:1.4;">Click <b>Copy</b>, open the corporate tracker, click the <b>first name cell</b> (top of the Employee Name column) and paste. It fills every row exactly — names included so alignment is self-checking.</div><textarea readonly class="input-aether custom-scrollbar" style="width:100%; height:90px; font-family:monospace; font-size:0.8rem; resize:vertical; padding-top:10px;" placeholder="Import a training to build the paste-back list.">' + escapeHTML(r.copyList || '') + '</textarea></div>';
 
-          // Roster grid.
+          // Roster grid — split into Live (outstanding) and Completed buckets.
+          var bucket = state.trackerBucket || 'live';
           var search = (state.trackerSearch || '').toLowerCase();
           var gridRows = (r.rows || []).map(function(row, i) {
+              var isDone = row.trainingStatus === 'Completed';
+              if (bucket === 'completed' && !isDone) return '';
+              if (bucket === 'live' && isDone) return '';
               if (search && row.name.toLowerCase().indexOf(search) === -1) return '';
               var empSel = '<select class="input-aether" id="tr-es-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" onchange="saveTrainingCompletion(' + i + ')">' + TRAINING_EMP_OPTS.map(function(o){ return '<option value="' + escapeHTML(o) + '"' + (row.employeeStatus === o ? ' selected' : '') + '>' + escapeHTML(o) + '</option>'; }).join('') + '</select>';
               var trnSel = '<select class="input-aether" id="tr-ts-' + i + '" style="height:30px; font-size:0.78rem; width:100%;" onchange="saveTrainingCompletion(' + i + ')">' + TRAINING_STATUS_OPTS.map(function(o){ return '<option value="' + escapeHTML(o) + '"' + (row.trainingStatus === o ? ' selected' : '') + '>' + (o === '' ? '— Not done —' : escapeHTML(o)) + '</option>'; }).join('') + '</select>';
@@ -1289,9 +1302,18 @@
               return '<tr style="border-bottom:1px solid var(--glass-border);"><td style="padding:8px 12px; min-width:200px;">' + workDot + '<span style="font-weight:700; color:var(--text-main); font-size:0.85rem;">' + escapeHTML(row.name) + '</span>' + flagBadge + '<div style="margin-left:16px;">' + regionTag + '</div></td><td style="padding:8px 6px; width:200px;">' + empSel + '</td><td style="padding:8px 6px; width:160px;">' + trnSel + '</td><td style="padding:8px 6px; width:150px;">' + dateInp + '</td><td style="padding:8px 6px; min-width:160px;">' + cmInp + '</td></tr>';
           }).join('');
 
-          var grid = '<div style="flex:1; overflow:auto; padding:0;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; z-index:5; background:var(--card-bg);"><tr style="border-bottom:2px solid var(--glass-border);"><th style="padding:10px 12px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Training Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Completion</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Comment</th></tr></thead><tbody>' + gridRows + '</tbody></table></div>';
+          var emptyMsg = (bucket === 'completed') ? 'No completions yet.' : 'Nobody outstanding — everyone\'s done. 🎉';
+          var tbody = gridRows.replace(/^\s+|\s+$/g, '') ? gridRows : '<tr><td colspan="5" style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">' + emptyMsg + '</td></tr>';
+          var grid = '<div style="flex:1; overflow:auto; padding:0;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; z-index:5; background:var(--card-bg);"><tr style="border-bottom:2px solid var(--glass-border);"><th style="padding:10px 12px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Employee Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Training Status</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Completion</th><th style="padding:10px 6px; text-align:left; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">Comment</th></tr></thead><tbody>' + tbody + '</tbody></table></div>';
 
-          var gridHeader = '<div style="padding:14px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; background:var(--card-bg);"><span style="font-weight:800; color:var(--text-main); font-size:1rem;">Completion Roster</span><input id="tracker-search" type="text" class="input-aether" style="width:220px; height:32px; font-size:0.8rem;" placeholder="Search employee..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div>';
+          var liveCount = (r.rows || []).filter(function(x){ return x.trainingStatus !== 'Completed'; }).length;
+          var doneCount = (r.rows || []).filter(function(x){ return x.trainingStatus === 'Completed'; }).length;
+          var tabBtn = function(key, label, n, color) {
+              var on = bucket === key;
+              return '<button onclick="setTrackerBucket(\'' + key + '\')" class="btn" style="height:32px; font-size:0.8rem; font-weight:800; border-radius:10px; ' + (on ? 'background:' + color + '; color:#fff; border:1px solid ' + color + ';' : 'background:transparent; color:var(--text-muted); border:1px solid var(--glass-border);') + '">' + label + ' <span style="opacity:0.85;">' + n + '</span></button>';
+          };
+          var bucketTabs = '<div style="display:flex; gap:8px;">' + tabBtn('live', 'Live', liveCount, 'var(--status-alert)') + tabBtn('completed', 'Completed', doneCount, 'var(--status-active, #10b981)') + '</div>';
+          var gridHeader = '<div style="padding:14px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; background:var(--card-bg);">' + bucketTabs + '<input id="tracker-search" type="text" class="input-aether" style="width:220px; height:32px; font-size:0.8rem;" placeholder="Search employee..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div>';
 
           rightPane = '<div class="aether-card" style="flex:1; min-width:0; padding:0; display:flex; flex-direction:column; height:calc(100vh - 200px); min-height:600px; overflow:hidden;">' + head + copyPanel + gridHeader + grid + '</div>';
       }
@@ -1300,7 +1322,8 @@
   }
 
   window.selectTraining = function(id) { state.selectedTrainingId = id; state.trainingRoster = null; fetchTrainingData(); render(); };
-  window.copyTrainingList = function() { var txt = (state.trainingRoster && state.trainingRoster.copyList) || ''; if (!txt) { showToast("Nothing to copy — all clear."); return; } fallbackCopyTextToClipboard(txt, "Copied " + txt.split('\n').filter(function(x){return x.trim();}).length + " names!"); };
+  window.setTrackerBucket = function(b) { state.trackerBucket = b; render(); };
+  window.copyTrainingList = function() { var txt = (state.trainingRoster && state.trainingRoster.copyList) || ''; if (!txt) { showToast("Nothing to copy yet."); return; } fallbackCopyTextToClipboard(txt, "Copied " + txt.split('\n').filter(function(x){return x.trim();}).length + " rows — paste at the first name cell."); };
 
   window.saveTrainingCompletion = function(i) {
       if (typeof google === 'undefined' || !state.trainingRoster || !state.trainingRoster.rows[i]) return;
@@ -1347,8 +1370,6 @@
   window.openTrainingImport = function() {
       var ov = document.getElementById('training-import-overlay'); if (!ov) return;
       document.getElementById('tr-imp-title').value = "";
-      document.getElementById('tr-imp-en').value = "";
-      document.getElementById('tr-imp-fr').value = "";
       document.getElementById('tr-imp-scope').value = "Both";
       document.getElementById('tr-imp-raw').value = "";
       ov.classList.add('open');
@@ -1363,8 +1384,6 @@
       if (typeof google === 'undefined') return;
       var payload = {
           title: title,
-          videoLinkEN: (document.getElementById('tr-imp-en').value || '').trim(),
-          videoLinkFR: (document.getElementById('tr-imp-fr').value || '').trim(),
           regionScope: document.getElementById('tr-imp-scope').value || 'Both',
           raw: raw
       };
@@ -1372,7 +1391,8 @@
       google.script.run.withSuccessHandler(function(res) {
           var d = {}; try { d = JSON.parse(res); } catch(e) {}
           if (d.ok) {
-              showToast((d.created ? 'Created "' : 'Updated "') + d.title + '" · ' + d.imported + ' imported (' + d.completed + ' completed)');
+              var linkNote = d.linksDetected ? (' · ' + d.linksDetected + ' link(s) detected') : '';
+              showToast((d.created ? 'Created "' : 'Updated "') + d.title + '" · ' + d.imported + ' imported (' + d.completed + ' completed)' + linkNote);
               state.selectedTrainingId = d.trainingId;
               state.trainingRoster = null;
               closeTrainingImport();
