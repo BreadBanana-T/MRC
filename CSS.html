@@ -204,8 +204,11 @@
      Hero/data tiles can opt into the rotating animated edge via .tile-aurora. */
   .aether-card {
       background: var(--card-bg);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      /* Lighter blur radius: cards re-sample/blur the backdrop on every
+         repaint (scroll, hover), and cost scales with the radius. 10px keeps
+         the frosted-glass look at roughly half the per-frame work of 20px. */
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: var(--glass-border);
       border-radius: var(--radius-panel);
       padding: 32px;
