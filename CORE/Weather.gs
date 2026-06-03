@@ -45,69 +45,126 @@ var WeatherService = {
         return days[d.getUTCDay()];
     };
 
-    // --- 1. FETCH WEATHER FROM OPEN-METEO (cached + resilient) ---
-    // open-meteo rate-limits Google's shared egress IPs, returning a non-200
-    // with no body. The old code only handled HTTP 200, so any throttle left
-    // the tiles blank. Now: serve a fresh (~20 min) cache when we have one to
-    // avoid hammering the API, and on ANY failure fall back to the last good
-    // result kept durably in Script Properties — so weather never blanks.
+    // --- 1. FETCH WEATHER (cached + 3-provider fallback chain) ---
+    // No single weather host is reliable from Google's shared egress IPs (they
+    // get rate-limited). So we try three independent providers IN ORDER until
+    // one returns usable data:  open-meteo -> MET Norway -> wttr.in.
+    // Successful pulls are cached (~20 min) so we rarely hit the network, and
+    // mirrored to Script Properties as a durable last-good backup. If all three
+    // fail AND we have no backup, only then do we show "API Offline".
     var WX_KEY = 'WX_DATA_V1';
     var wxCache = null; try { wxCache = CacheService.getScriptCache(); } catch (eC) {}
     var wxProps = null; try { wxProps = PropertiesService.getScriptProperties(); } catch (eP) {}
+
+    // Map MET Norway symbol_code -> our condition text.
+    var symbolToText = function(s) {
+        s = String(s || "").replace(/_(day|night|polartwilight)$/, "");
+        var m = {
+            clearsky: "Clear", fair: "Mainly Clear", partlycloudy: "Partly Cloudy", cloudy: "Overcast",
+            fog: "Fog", lightrain: "Light Rain", rain: "Rain", heavyrain: "Heavy Rain",
+            lightrainshowers: "Light Showers", rainshowers: "Showers", heavyrainshowers: "Heavy Showers",
+            lightsnow: "Light Snow", snow: "Snow", heavysnow: "Heavy Snow",
+            lightsnowshowers: "Light Snow", snowshowers: "Snow Showers", heavysnowshowers: "Heavy Snow Showers",
+            sleet: "Sleet", lightsleet: "Sleet", heavysleet: "Heavy Sleet",
+            rainandthunder: "Thunderstorm", heavyrainandthunder: "Heavy Thunderstorm", thunderstorm: "Thunderstorm"
+        };
+        return m[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "Unknown");
+    };
+    var blankData = function() { var w = {}; for (var i = 0; i < cities.length; i++) { w[cities[i].province] = []; } return w; };
+    var enough = function(w) { if (!w) return false; var n = 0; for (var k in w) { if (w.hasOwnProperty(k)) n += w[k].length; } return n >= Math.ceil(cities.length / 2); };
+
+    // Provider A — open-meteo (one bulk call, WMO codes).
+    var pOpenMeteo = function() {
+        var lats = cities.map(function(c){return c.lat;}).join(",");
+        var lons = cities.map(function(c){return c.lon;}).join(",");
+        var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats + "&longitude=" + lons + "&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto";
+        var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+        if (res.getResponseCode() !== 200) { console.error("open-meteo non-200: " + res.getResponseCode()); return null; }
+        var data = JSON.parse(res.getContentText());
+        var w = blankData();
+        for (var i = 0; i < cities.length; i++) {
+            try {
+                var ld = data[i];
+                var fc = [];
+                for (var d = 1; d <= 3; d++) {
+                    fc.push({ day: getDayName(ld.daily.time[d]), temp: Math.round(ld.daily.temperature_2m_max[d]) + "°", wind: Math.round(ld.daily.wind_speed_10m_max[d]).toString() });
+                }
+                w[cities[i].province].push({ id: cities[i].id, name: cities[i].name, temp: Math.round(ld.current.temperature_2m), wind: Math.round(ld.current.wind_speed_10m).toString(), condition: wmoToText(ld.current.weather_code), forecast: fc });
+            } catch (e) {}
+        }
+        return w;
+    };
+
+    // Provider B — MET Norway (per-city; needs a User-Agent; wind m/s -> km/h).
+    var pMetNo = function() {
+        var reqs = cities.map(function(c){ return { url: "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=" + c.lat + "&lon=" + c.lon, headers: { "User-Agent": "MRC-Ops-Dashboard/1.0 (github.com/BreadBanana-T/MRC)" }, muteHttpExceptions: true }; });
+        var resps = UrlFetchApp.fetchAll(reqs);
+        var w = blankData();
+        for (var i = 0; i < cities.length; i++) {
+            try {
+                if (resps[i].getResponseCode() !== 200) continue;
+                var ts = JSON.parse(resps[i].getContentText()).properties.timeseries;
+                var inst = ts[0].data.instant.details;
+                var sym = ((ts[0].data.next_1_hours || ts[0].data.next_6_hours || { summary: {} }).summary || {}).symbol_code || "";
+                var byDay = {};
+                for (var k = 0; k < ts.length; k++) {
+                    var day = ts[k].time.substring(0, 10); var det = ts[k].data.instant.details;
+                    if (!byDay[day]) byDay[day] = { t: -999, wn: 0 };
+                    if (det.air_temperature != null) byDay[day].t = Math.max(byDay[day].t, det.air_temperature);
+                    if (det.wind_speed != null) byDay[day].wn = Math.max(byDay[day].wn, det.wind_speed * 3.6);
+                }
+                var days = Object.keys(byDay).sort(); var fc = [];
+                for (var dn = 1; dn < days.length && fc.length < 3; dn++) {
+                    fc.push({ day: getDayName(days[dn]), temp: Math.round(byDay[days[dn]].t) + "°", wind: Math.round(byDay[days[dn]].wn).toString() });
+                }
+                w[cities[i].province].push({ id: cities[i].id, name: cities[i].name, temp: Math.round(inst.air_temperature), wind: Math.round((inst.wind_speed || 0) * 3.6).toString(), condition: symbolToText(sym), forecast: fc });
+            } catch (e) {}
+        }
+        return w;
+    };
+
+    // Provider C — wttr.in (per-city; already km/h, plain-text conditions).
+    var pWttr = function() {
+        var reqs = cities.map(function(c){ return { url: "https://wttr.in/" + c.lat + "," + c.lon + "?format=j1", muteHttpExceptions: true }; });
+        var resps = UrlFetchApp.fetchAll(reqs);
+        var w = blankData();
+        for (var i = 0; i < cities.length; i++) {
+            try {
+                if (resps[i].getResponseCode() !== 200) continue;
+                var j = JSON.parse(resps[i].getContentText());
+                var cur = j.current_condition[0];
+                var fc = [];
+                for (var d = 1; d < (j.weather || []).length && fc.length < 3; d++) {
+                    var wd = j.weather[d];
+                    var wWind = (wd.hourly && wd.hourly[4]) ? wd.hourly[4].windspeedKmph : ((wd.hourly && wd.hourly[0]) ? wd.hourly[0].windspeedKmph : "0");
+                    fc.push({ day: getDayName(wd.date), temp: Math.round(parseFloat(wd.maxtempC)) + "°", wind: Math.round(parseFloat(wWind)).toString() });
+                }
+                var desc = (cur.weatherDesc && cur.weatherDesc[0]) ? cur.weatherDesc[0].value : "";
+                w[cities[i].province].push({ id: cities[i].id, name: cities[i].name, temp: Math.round(parseFloat(cur.temp_C)), wind: Math.round(parseFloat(cur.windspeedKmph)).toString(), condition: desc, forecast: fc });
+            } catch (e) {}
+        }
+        return w;
+    };
 
     var freshStr = null;
     if (wxCache) { try { freshStr = wxCache.get(WX_KEY); } catch (e) {} }
     if (freshStr) { try { weatherData = JSON.parse(freshStr); } catch (e) { freshStr = null; } }
 
     if (!freshStr) {
-        var fetchedOk = false;
-        try {
-            var lats = cities.map(function(c){return c.lat;}).join(",");
-            var lons = cities.map(function(c){return c.lon;}).join(",");
-            var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats + "&longitude=" + lons + "&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto";
-
-            var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-            var code = res.getResponseCode();
-
-            if (code === 200) {
-                var data = JSON.parse(res.getContentText());
-
-                for (var i = 0; i < cities.length; i++) {
-                    var city = cities[i];
-                    var locData = data[i];
-
-                    var curTemp = Math.round(locData.current.temperature_2m);
-                    var curCond = wmoToText(locData.current.weather_code);
-
-                    var wSpeed = Math.round(locData.current.wind_speed_10m);
-                    var windStr = wSpeed > 0 ? wSpeed.toString() : "0";
-
-                    var forecastData = [];
-                    for (var d = 1; d <= 3; d++) {
-                        var dayName = getDayName(locData.daily.time[d]);
-                        var fTemp = Math.round(locData.daily.temperature_2m_max[d]) + "°";
-                        var fWind = Math.round(locData.daily.wind_speed_10m_max[d]).toString();
-                        forecastData.push({ day: dayName, temp: fTemp, wind: fWind });
-                    }
-
-                    weatherData[city.province].push({
-                        id: city.id, name: city.name, temp: curTemp, wind: windStr, condition: curCond, forecast: forecastData
-                    });
-                }
-
-                fetchedOk = true;
-                var okStr = JSON.stringify(weatherData);
-                if (wxCache) { try { wxCache.put(WX_KEY, okStr, 1200); } catch (e) {} }   // 20-min cache
-                if (wxProps) { try { wxProps.setProperty(WX_KEY, okStr); } catch (e) {} } // durable backup
-            } else {
-                console.error("Open-Meteo non-200: " + code);
-            }
-        } catch (e) {
-            console.error("Open-Meteo Error: " + e.toString());
+        var providers = [pOpenMeteo, pMetNo, pWttr];
+        var got = null;
+        for (var pi = 0; pi < providers.length && !enough(got); pi++) {
+            try { var r = providers[pi](); if (enough(r)) got = r; } catch (e) { console.error("WX provider " + pi + " failed: " + e); }
         }
 
-        if (!fetchedOk) {
-            // Transient failure — serve the last good result instead of blanking.
+        if (got) {
+            weatherData = got;
+            var okStr = JSON.stringify(weatherData);
+            if (wxCache) { try { wxCache.put(WX_KEY, okStr, 1200); } catch (e) {} }   // 20-min cache
+            if (wxProps) { try { wxProps.setProperty(WX_KEY, okStr); } catch (e) {} } // durable backup
+        } else {
+            // All three providers failed — serve the last good result; only show
+            // "API Offline" if we've genuinely never succeeded.
             var backup = null;
             if (wxProps) { try { backup = wxProps.getProperty(WX_KEY); } catch (e) {} }
             if (backup) { try { weatherData = JSON.parse(backup); } catch (e) { backup = null; } }
