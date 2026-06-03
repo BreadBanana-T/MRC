@@ -45,43 +45,77 @@ var WeatherService = {
         return days[d.getUTCDay()];
     };
 
-    try {
-        var lats = cities.map(function(c){return c.lat;}).join(",");
-        var lons = cities.map(function(c){return c.lon;}).join(",");
-        var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats + "&longitude=" + lons + "&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto";
-        
-        var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-        
-        if (res.getResponseCode() === 200) {
-            var data = JSON.parse(res.getContentText());
-            
-            for (var i = 0; i < cities.length; i++) {
-                var city = cities[i];
-                var locData = data[i]; 
-                
-                var curTemp = Math.round(locData.current.temperature_2m);
-                var curCond = wmoToText(locData.current.weather_code);
-                
-                var wSpeed = Math.round(locData.current.wind_speed_10m);
-                var windStr = wSpeed > 0 ? wSpeed.toString() : "0";
-                
-                var forecastData = [];
-                for (var d = 1; d <= 3; d++) {
-                    var dayName = getDayName(locData.daily.time[d]);
-                    var fTemp = Math.round(locData.daily.temperature_2m_max[d]) + "°";
-                    var fWind = Math.round(locData.daily.wind_speed_10m_max[d]).toString();
-                    forecastData.push({ day: dayName, temp: fTemp, wind: fWind });
+    // --- 1. FETCH WEATHER FROM OPEN-METEO (cached + resilient) ---
+    // open-meteo rate-limits Google's shared egress IPs, returning a non-200
+    // with no body. The old code only handled HTTP 200, so any throttle left
+    // the tiles blank. Now: serve a fresh (~20 min) cache when we have one to
+    // avoid hammering the API, and on ANY failure fall back to the last good
+    // result kept durably in Script Properties — so weather never blanks.
+    var WX_KEY = 'WX_DATA_V1';
+    var wxCache = null; try { wxCache = CacheService.getScriptCache(); } catch (eC) {}
+    var wxProps = null; try { wxProps = PropertiesService.getScriptProperties(); } catch (eP) {}
+
+    var freshStr = null;
+    if (wxCache) { try { freshStr = wxCache.get(WX_KEY); } catch (e) {} }
+    if (freshStr) { try { weatherData = JSON.parse(freshStr); } catch (e) { freshStr = null; } }
+
+    if (!freshStr) {
+        var fetchedOk = false;
+        try {
+            var lats = cities.map(function(c){return c.lat;}).join(",");
+            var lons = cities.map(function(c){return c.lon;}).join(",");
+            var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lats + "&longitude=" + lons + "&current=temperature_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&timezone=auto";
+
+            var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+            var code = res.getResponseCode();
+
+            if (code === 200) {
+                var data = JSON.parse(res.getContentText());
+
+                for (var i = 0; i < cities.length; i++) {
+                    var city = cities[i];
+                    var locData = data[i];
+
+                    var curTemp = Math.round(locData.current.temperature_2m);
+                    var curCond = wmoToText(locData.current.weather_code);
+
+                    var wSpeed = Math.round(locData.current.wind_speed_10m);
+                    var windStr = wSpeed > 0 ? wSpeed.toString() : "0";
+
+                    var forecastData = [];
+                    for (var d = 1; d <= 3; d++) {
+                        var dayName = getDayName(locData.daily.time[d]);
+                        var fTemp = Math.round(locData.daily.temperature_2m_max[d]) + "°";
+                        var fWind = Math.round(locData.daily.wind_speed_10m_max[d]).toString();
+                        forecastData.push({ day: dayName, temp: fTemp, wind: fWind });
+                    }
+
+                    weatherData[city.province].push({
+                        id: city.id, name: city.name, temp: curTemp, wind: windStr, condition: curCond, forecast: forecastData
+                    });
                 }
-                
-                weatherData[city.province].push({
-                    id: city.id, name: city.name, temp: curTemp, wind: windStr, condition: curCond, forecast: forecastData
-                });
+
+                fetchedOk = true;
+                var okStr = JSON.stringify(weatherData);
+                if (wxCache) { try { wxCache.put(WX_KEY, okStr, 1200); } catch (e) {} }   // 20-min cache
+                if (wxProps) { try { wxProps.setProperty(WX_KEY, okStr); } catch (e) {} } // durable backup
+            } else {
+                console.error("Open-Meteo non-200: " + code);
             }
+        } catch (e) {
+            console.error("Open-Meteo Error: " + e.toString());
         }
-    } catch (e) {
-        console.error("Open-Meteo Error: " + e.toString());
-        for(var c=0; c<cities.length; c++) {
-            weatherData[cities[c].province].push({ id: cities[c].id, name: cities[c].name, temp: "--", wind: "ERR", condition: "API Offline", forecast: [] });
+
+        if (!fetchedOk) {
+            // Transient failure — serve the last good result instead of blanking.
+            var backup = null;
+            if (wxProps) { try { backup = wxProps.getProperty(WX_KEY); } catch (e) {} }
+            if (backup) { try { weatherData = JSON.parse(backup); } catch (e) { backup = null; } }
+            if (!backup) {
+                for (var c = 0; c < cities.length; c++) {
+                    weatherData[cities[c].province].push({ id: cities[c].id, name: cities[c].name, temp: "--", wind: "ERR", condition: "API Offline", forecast: [] });
+                }
+            }
         }
     }
 
