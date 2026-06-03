@@ -422,7 +422,7 @@
   .tile-aurora:hover { transform: translateY(-3px); }
   .tile-aurora::before {
       background: conic-gradient(
-          from var(--aurora-angle, 0deg),
+          from 135deg,
           rgba(56, 189, 248, 0)   0%,
           rgba(56, 189, 248, 0.55) 18%,
           rgba(129, 140, 248, 0.55) 33%,
@@ -430,12 +430,15 @@
           rgba(56, 189, 248, 0)   68%,
           rgba(56, 189, 248, 0)   100%
       );
-      animation: aurora-spin 9s linear infinite;
+      /* Static gradient hairline. The previous `aurora-spin` animation
+         interpolated the conic-gradient angle, which forced a full repaint
+         every frame on every visible .tile-aurora tile — pinning the CPU.
+         Kept static so the look stays without the per-frame cost. */
       opacity: 0.85;
   }
   body:not(.dark) .tile-aurora::before {
       background: conic-gradient(
-          from var(--aurora-angle, 0deg),
+          from 135deg,
           rgba(56, 189, 248, 0)   0%,
           rgba(99, 102, 241, 0.55) 18%,
           rgba(129, 140, 248, 0.55) 33%,
