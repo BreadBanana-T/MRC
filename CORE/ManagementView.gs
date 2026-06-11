@@ -8,15 +8,23 @@
  *
  * Pulls straight from the raw segment sheets (WF_OVERTIME, WF_ROLES,
  * WF_COACHING, WF_FURLOUGH, WF_ABSENCES, Stats History) so it never depends
- * on the Week A/B epoch logic used by the floor trackers. Hours are capped
- * at "now" so the current week reads as week-to-date, not the full pasted
- * schedule.
+ * on the Week A/B epoch logic used by the floor trackers.
+ *
+ * ACCURACY RULES (kept consistent with WorkforceTracker / OvertimeTracker):
+ *   - Segments that wrap midnight are split at 24:00 and each part is
+ *     attributed to its own calendar day, so hours never leak across a
+ *     week boundary (mirrors _getShiftSplits day attribution).
+ *   - A segment counts once its start time has passed ("week-to-date"),
+ *     so future pasted schedule days never inflate the current week.
+ *   - Rows are de-duplicated on agent+date+activity+start+end exactly like
+ *     the trackers' eventHash, so re-pasted schedules can't double count.
+ *   - Absences count distinct agent+day+type — a split-shift absence is
+ *     ONE absence, matching getAbsenceProfiles' merge logic.
  */
 
 var ManagementView = {
 
   TZ: 'America/Toronto',
-  ROLE_KEYS: { SAFE: 'safe', TOWER: 'tower', ICL: 'icl', ULC: 'ulc' },
 
   _anchorDay: function(anchor) { return anchor === 'sun' ? 0 : 3; },
 
@@ -55,19 +63,28 @@ var ManagementView = {
     };
   },
 
-  _segHours: function(WT, startStr, endStr) {
-    var s = WT._timeToMins(startStr), e = WT._timeToMins(endStr);
-    if (s < 0 || e < 0) return 0;
-    if (e < s) e += 1440;
-    return (e - s) / 60;
-  },
-
-  // Epoch (noon local) for a 'yyyy-MM-dd' string; -1 when unparseable.
-  _dateEpoch: function(dStr) {
+  // Midnight epoch (local) for a 'yyyy-MM-dd' string; -1 when unparseable.
+  _dayStartEpoch: function(dStr) {
     if (!dStr || dStr.length < 10) return -1;
     var y = parseInt(dStr.substring(0, 4), 10), m = parseInt(dStr.substring(5, 7), 10), d = parseInt(dStr.substring(8, 10), 10);
     if (isNaN(y) || isNaN(m) || isNaN(d)) return -1;
-    return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+    return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  },
+
+  /**
+   * Split a start/end time pair into parts that never cross midnight.
+   * Each part carries the epoch of its own start moment, so:
+   *   - week attribution is exact at week boundaries, and
+   *   - the "has this started yet" cap works per part, not per row.
+   */
+  _splitParts: function(WT, dayStartMs, startStr, endStr) {
+    var s = WT._timeToMins(startStr), e = WT._timeToMins(endStr);
+    if (s < 0 || e < 0 || e === s) return [];
+    if (e > s) return [{ epoch: dayStartMs + s * 60000, hours: (e - s) / 60 }];
+    // Wraps midnight: tail of day 1 + head of day 2.
+    var parts = [{ epoch: dayStartMs + s * 60000, hours: (1440 - s) / 60 }];
+    if (e > 0) parts.push({ epoch: dayStartMs + 86400000, hours: e / 60 });
+    return parts;
   },
 
   _windowIndex: function(wins, epoch) {
@@ -89,20 +106,25 @@ var ManagementView = {
     var nowMs = Date.now();
     var topOt = {}, topSafe = {}, topTower = {};
 
-    // Generic segment-sheet walker: [Agent, Date, <kind>, Start, End, Region]
-    var walk = function(sheetName, onRow) {
+    // Generic hour-segment walker: [Agent, Date, <kind>, Start, End, Region].
+    // onPart(wi, row, hours) is called once per midnight-split part that has
+    // already started and lands in a reported week.
+    var walkHours = function(sheetName, onPart) {
       var db = WT._getDB(sheetName);
       if (!db || db.getLastRow() < 2) return;
       var seen = {};
       db.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
         var dStr = WT._formatDate(row[1]);
-        var epoch = self._dateEpoch(dStr);
-        if (epoch < 0 || epoch > nowMs) return; // week-to-date, not future schedule
-        var wi = self._windowIndex(wins, epoch);
-        if (wi === -1) return;
+        var dayMs = self._dayStartEpoch(dStr);
+        if (dayMs < 0) return;
         var hash = row[0] + '|' + dStr + '|' + String(row[2]).substring(0, 12) + '|' + row[3] + '|' + row[4];
         if (seen[hash]) return; seen[hash] = true;
-        onRow(wi, row);
+        self._splitParts(WT, dayMs, row[3], row[4]).forEach(function(part) {
+          if (part.epoch > nowMs) return;
+          var wi = self._windowIndex(wins, part.epoch);
+          if (wi === -1) return;
+          onPart(wi, row, part.hours);
+        });
       });
     };
 
@@ -113,30 +135,29 @@ var ManagementView = {
         var seenOt = {};
         dbOt.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
           var dStr = WT._formatDate(row[1]);
-          var epoch = self._dateEpoch(dStr);
-          if (epoch < 0 || epoch > nowMs) return;
-          var wi = self._windowIndex(wins, epoch);
-          if (wi === -1) return;
+          var dayMs = self._dayStartEpoch(dStr);
+          if (dayMs < 0) return;
           var hash = row[0] + '|' + dStr + '|' + row[2] + '|' + row[6] + '|' + row[7];
           if (seenOt[hash]) return; seenOt[hash] = true;
-          var h = self._segHours(WT, row[6], row[7]);
-          if (!h) return;
           var rate = parseFloat(row[3]) || 1.0;
-          weeks[wi].ot += h;
-          if (rate === 1.5) weeks[wi].otX15 += h; else weeks[wi].otX1 += h;
-          if (wi === curIdx) {
-            var nm = String(row[0]).trim();
-            topOt[nm] = (topOt[nm] || 0) + h;
-          }
+          self._splitParts(WT, dayMs, row[6], row[7]).forEach(function(part) {
+            if (part.epoch > nowMs) return;
+            var wi = self._windowIndex(wins, part.epoch);
+            if (wi === -1) return;
+            weeks[wi].ot += part.hours;
+            if (rate === 1.5) weeks[wi].otX15 += part.hours; else weeks[wi].otX1 += part.hours;
+            if (wi === curIdx) {
+              var nm = String(row[0]).trim();
+              topOt[nm] = (topOt[nm] || 0) + part.hours;
+            }
+          });
         });
       }
     } catch (e) {}
 
     // Roles — WF_ROLES: [Agent, Date, Role, Start, End, Region]
     try {
-      walk('WF_ROLES', function(wi, row) {
-        var h = self._segHours(WT, row[3], row[4]);
-        if (!h) return;
+      walkHours('WF_ROLES', function(wi, row, h) {
         var role = String(row[2]).toUpperCase();
         var nm = String(row[0]).trim();
         if (role.indexOf('SAFE') !== -1) {
@@ -154,11 +175,28 @@ var ManagementView = {
     } catch (e) {}
 
     // Coaching + ACSU hours
-    try { walk('WF_COACHING', function(wi, row) { weeks[wi].coach += self._segHours(WT, row[3], row[4]); }); } catch (e) {}
-    try { walk('WF_FURLOUGH', function(wi, row) { weeks[wi].acsu += self._segHours(WT, row[3], row[4]); }); } catch (e) {}
+    try { walkHours('WF_COACHING', function(wi, row, h) { weeks[wi].coach += h; }); } catch (e) {}
+    try { walkHours('WF_FURLOUGH', function(wi, row, h) { weeks[wi].acsu += h; }); } catch (e) {}
 
-    // Absences — count distinct agent+day+type
-    try { walk('WF_ABSENCES', function(wi) { weeks[wi].absences += 1; }); } catch (e) {}
+    // Absences — distinct agent+day+type, so split-shift segments collapse
+    // to ONE absence exactly like the Absence tracker's merge step. Counts
+    // appear as soon as the day has started.
+    try {
+      var dbAbs = WT._getDB('WF_ABSENCES');
+      if (dbAbs && dbAbs.getLastRow() > 1) {
+        var seenAbs = {};
+        dbAbs.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+          var dStr = WT._formatDate(row[1]);
+          var dayMs = self._dayStartEpoch(dStr);
+          if (dayMs < 0 || dayMs > nowMs) return;
+          var wi = self._windowIndex(wins, dayMs + 43200000); // midday, robust vs DST
+          if (wi === -1) return;
+          var key = row[0] + '|' + dStr + '|' + String(row[2]).trim();
+          if (seenAbs[key]) return; seenAbs[key] = true;
+          weeks[wi].absences += 1;
+        });
+      }
+    } catch (e) {}
 
     // Service level — weekly averages from Stats History
     try {
