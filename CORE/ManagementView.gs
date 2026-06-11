@@ -1,10 +1,11 @@
 /**
  * MODULE: MANAGEMENT VIEW
  *
- * Weekly aggregation engine for the Management dashboard. Reports by full
- * weeks in EITHER convention — no Week A/B cycle filters here:
- *   anchor = 'wed' → ops week, Wednesday → Tuesday ("7-7")
- *   anchor = 'sun' → corporate week, Sunday → Saturday
+ * Weekly aggregation engine for the Management dashboard — the upper-
+ * management lens. CORPORATE WEEKS ONLY (Sunday → Saturday), broad and
+ * graphical. The ops dashboard/trackers keep their own 7-7 Wed–Wed world
+ * and Week A/B cycles; none of that applies here, and the anchor is locked
+ * server-side so the two views can never drift into each other.
  *
  * Pulls straight from the raw segment sheets (WF_OVERTIME, WF_ROLES,
  * WF_COACHING, WF_FURLOUGH, WF_ABSENCES, Stats History) so it never depends
@@ -95,7 +96,9 @@ var ManagementView = {
   },
 
   getDashboard: function(anchor, weeksBack) {
-    anchor = anchor === 'sun' ? 'sun' : 'wed';
+    // Locked to corporate weeks regardless of what the caller passes —
+    // the Management view must never show ops (Wed–Wed) weeks.
+    anchor = 'sun';
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     if (!WT) return JSON.stringify({ error: 'Engine unavailable.' });
 

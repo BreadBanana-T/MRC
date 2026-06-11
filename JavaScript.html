@@ -86,7 +86,7 @@
   }
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtAnchor: 'wed', mgmtLoading: false
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -1591,8 +1591,9 @@
   };
 
   // ───────────────────────────── MANAGEMENT VIEW ─────────────────────────────
-  window.setMgmtAnchor = function(a) { state.mgmtAnchor = a; fetchMgmtData(); render(); };
-
+  // Upper-management lens: corporate weeks (Sunday–Saturday) ONLY, purely
+  // graphical and digestible. The ops trackers keep the 7-7 Wed–Wed world
+  // and Week A/B cycles — none of that leaks in here.
   function fetchMgmtData() {
       state.mgmtLoading = true;
       if (typeof google === 'undefined') { state.mgmtLoading = false; return; }
@@ -1604,18 +1605,14 @@
           state.mgmtData = { error: (err && err.message) || 'Backend error.' };
           state.mgmtLoading = false;
           if (state.view === 'mgmt') render();
-      }).getManagementDashboard(state.mgmtAnchor, 8);
+      }).getManagementDashboard('sun', 12);
   }
 
   function renderMgmt() {
-      var anchorBtn = function(label, val) {
-          var active = state.mgmtAnchor === val;
-          return '<button onclick="setMgmtAnchor(\'' + val + '\')" class="sort-btn ' + (active ? 'active' : '') + '" style="text-transform:none; letter-spacing:0;">' + label + '</button>';
-      };
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between;">' +
-          '<div><h2 style="margin:0; font-size:1.3rem;">Management View</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">Full-week aggregates · week-to-date for the current week · no Week A/B cycles</div></div>' +
+          '<div><h2 style="margin:0; font-size:1.3rem;">Management View</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">Corporate weeks · Sunday–Saturday · 12-week trend · current week shown to date</div></div>' +
           '<div style="display:flex; gap:8px; align-items:center;">' +
-          anchorBtn('Ops Week · Wed–Tue', 'wed') + anchorBtn('Corporate · Sun–Sat', 'sun') +
+          '<span style="font-size:0.7rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.1); padding:4px 12px; border-radius:12px; letter-spacing:0.5px;">SUN–SAT</span>' +
           '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
           '</div></div>';
 
@@ -1673,7 +1670,7 @@
       return headerHtml + kpisHtml +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Overtime Hours by Week', 'mgmt-chart-ot', 'straight &times;1 vs premium &times;1.5') +
-          chartCard('Role Hours by Week', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower') +
+          chartCard('Off-Phone Hours by Week', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower · Coaching · ACSU') +
           '</div>' +
           '<div style="margin-bottom:24px;">' + chartCard('Service Level vs Absences', 'mgmt-chart-sl', 'weekly avg SL (line) against absence count (bars)') + '</div>' +
           '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px; padding-bottom:40px;">' +
@@ -1714,10 +1711,12 @@
       var elRoles = document.getElementById('mgmt-chart-roles');
       if (elRoles) {
           charts.mgmtRoles = new Chart(elRoles.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
-              { label: 'SAFE', data: weeks.map(function(w) { return w.safe; }), backgroundColor: '#34d399', borderRadius: 6, maxBarThickness: 34 },
-              { label: 'ICL', data: weeks.map(function(w) { return w.icl; }), backgroundColor: '#c084fc', borderRadius: 6, maxBarThickness: 34 },
-              { label: 'ULC', data: weeks.map(function(w) { return w.ulc; }), backgroundColor: '#fb923c', borderRadius: 6, maxBarThickness: 34 },
-              { label: 'Tower', data: weeks.map(function(w) { return w.tower; }), backgroundColor: '#38bdf8', borderRadius: 6, maxBarThickness: 34 }
+              { label: 'SAFE', data: weeks.map(function(w) { return w.safe; }), backgroundColor: '#34d399', borderRadius: 6, maxBarThickness: 30 },
+              { label: 'ICL', data: weeks.map(function(w) { return w.icl; }), backgroundColor: '#c084fc', borderRadius: 6, maxBarThickness: 30 },
+              { label: 'ULC', data: weeks.map(function(w) { return w.ulc; }), backgroundColor: '#fb923c', borderRadius: 6, maxBarThickness: 30 },
+              { label: 'Tower', data: weeks.map(function(w) { return w.tower; }), backgroundColor: '#38bdf8', borderRadius: 6, maxBarThickness: 30 },
+              { label: 'Coaching', data: weeks.map(function(w) { return w.coach; }), backgroundColor: '#fbbf24', borderRadius: 6, maxBarThickness: 30 },
+              { label: 'ACSU', data: weeks.map(function(w) { return w.acsu; }), backgroundColor: '#94a3b8', borderRadius: 6, maxBarThickness: 30 }
           ] }, options: baseOpts(true) });
       }
       var elSl = document.getElementById('mgmt-chart-sl');
