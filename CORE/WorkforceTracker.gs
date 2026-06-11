@@ -119,9 +119,12 @@ var WorkforceTracker = {
               let absType = "";
               if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
               else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
-              else if (actLower.includes('compu')) { isAbsence = true; absType = 'COMPU'; }
-              else if (actLower.includes('comp') && !actLower.includes('compu')) { isAbsence = true; absType = 'COMP'; }
-              else if (actLower.includes('alu')) { isAbsence = true; absType = 'ALU'; }
+              else if (/\bcompu\b/.test(actLower)) { isAbsence = true; absType = 'COMPU'; }
+              // Whole-word matches only: a bare substring check turned activities
+              // like "Compliance" into COMP and "Evaluation" into ALU absences,
+              // silently inflating absence counts.
+              else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
+              else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
               else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
 
               let roleType = "";
@@ -173,9 +176,12 @@ var WorkforceTracker = {
               let absType = "";
               if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
               else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
-              else if (actLower.includes('compu')) { isAbsence = true; absType = 'COMPU'; }
-              else if (actLower.includes('comp') && !actLower.includes('compu')) { isAbsence = true; absType = 'COMP'; }
-              else if (actLower.includes('alu')) { isAbsence = true; absType = 'ALU'; }
+              else if (/\bcompu\b/.test(actLower)) { isAbsence = true; absType = 'COMPU'; }
+              // Whole-word matches only: a bare substring check turned activities
+              // like "Compliance" into COMP and "Evaluation" into ALU absences,
+              // silently inflating absence counts.
+              else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
+              else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
               else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
               
               let roleType = "";
