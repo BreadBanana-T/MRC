@@ -1109,6 +1109,12 @@
       return '<span style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.10); border:1px solid var(--accent-primary); padding:5px 12px; border-radius:8px; white-space:nowrap;">' + text + '</span>';
   }
 
+  // Absence taxonomy helpers (mirror the backend constants):
+  // ALU = late (partial miss), ASCLU/SLU/Furlough/ACSU = approved voluntary
+  // leave (not absenteeism at all).
+  function isLateType(t) { return /\balu\b/i.test(String(t || '')); }
+  function isApprovedLeaveType(t) { return /\b(asclu|slu|furlough|acsu)\b/i.test(String(t || '')); }
+
   // Standard Bradford Factor bands (S² × D): <50 low, 50–124 monitor,
   // 125–449 high, 450+ critical.
   function bradfordBand(score) {
@@ -1183,7 +1189,7 @@
               return '<div class="hover-bg" style="padding:14px 16px; margin-bottom:8px; border-radius:12px; background:var(--card-bg); cursor:pointer; display:flex; flex-direction:row; justify-content:space-between; align-items:center; border:2px solid ' + (isSel ? 'var(--accent-primary)' : 'transparent') + '; box-shadow:0 2px 8px rgba(0,0,0,0.02); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
                   '<div style="display:flex; flex-direction:column; justify-content:center; overflow:hidden;">' +
                       '<div style="font-weight:800; font-size:0.95rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(p.name) + '</div>' +
-                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Total: <span style="color:var(--text-main);">' + p.totalAbsences + '</span> &nbsp;·&nbsp; BF <span style="color:' + bfBand.color + '; font-weight:800;" title="Bradford Factor ' + (p.bradford || 0) + ' (' + bfBand.label + ')">' + (p.bradford || 0) + '</span></div>' +
+                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Total: <span style="color:var(--text-main);">' + p.totalAbsences + '</span>' + (p.lates ? ' &nbsp;·&nbsp; <span style="color:var(--status-warn); font-weight:800;" title="ALU — showed up late, not a full absence">Late ' + p.lates + '</span>' : '') + ' &nbsp;·&nbsp; BF <span style="color:' + bfBand.color + '; font-weight:800;" title="Bradford Factor ' + (p.bradford || 0) + ' (' + bfBand.label + ')">' + (p.bradford || 0) + '</span></div>' +
                   '</div>' +
                   '<div style="display:flex; gap:8px; align-items:center; flex-shrink:0;">' + 
                       flagIcon + 
@@ -1245,7 +1251,9 @@
                   } else {
                       displayTotals = p.totals;
                   }
-                  var displayTotalAbsences = isMonthFiltered ? filteredRecs.length : p.totalAbsences;
+                  var realRecs = filteredRecs.filter(function(r) { return !isLateType(r.type) && !isApprovedLeaveType(r.type); });
+                  var lateRecsCount = filteredRecs.filter(function(r) { return isLateType(r.type); }).length;
+                  var displayTotalAbsences = isMonthFiltered ? realRecs.length : p.totalAbsences;
                   var totalLabel;
                   if (isMonthFiltered) {
                       var monthDate = new Date(state.absenceMonthFilter + '-01T00:00:00');
@@ -1253,11 +1261,13 @@
                   } else {
                       totalLabel = 'Total YTD';
                   }
-                  var monthTotalHtml = isMonthFiltered ? '<div style="font-size:0.85rem; font-weight:700; color:var(--text-main); background:rgba(0,0,0,0.05); padding:4px 12px; border-radius:12px;">Month Total: ' + filteredRecs.length + '</div>' : '';
+                  var monthTotalHtml = isMonthFiltered ? '<div style="font-size:0.85rem; font-weight:700; color:var(--text-main); background:rgba(0,0,0,0.05); padding:4px 12px; border-radius:12px;">Month Total: ' + realRecs.length + (lateRecsCount ? ' <span style="color:var(--status-warn);">· Late ' + lateRecsCount + '</span>' : '') + '</div>' : '';
 
                   var timeline = filteredRecs.map(function(r) { return '<div style="display:flex; justify-content:space-between; padding:16px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><div style="display:flex; align-items:center; gap:16px;"><div style="width:44px; height:44px; border-radius:12px; background:rgba(220,38,38,0.1); color:var(--status-alert); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.75rem;">' + escapeHTML(r.type.substring(0,4)) + '</div><div style="text-align:left;"><div style="font-weight:800; color:var(--text-main); font-size:1.05rem; margin-bottom:4px;">' + escapeHTML(r.type) + '</div><div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i data-lucide="calendar" width="14" style="vertical-align:middle; margin-right:4px;"></i>' + escapeHTML(r.date) + ' &bull; ' + escapeHTML(r.start) + ' - ' + escapeHTML(r.end) + '</div></div></div></div>'; }).join('');
 
-                  var badges = Object.keys(displayTotals).filter(function(k) { return displayTotals[k] > 0; }).map(function(k) { return '<div style="background:var(--card-bg); border:1px solid var(--glass-border); padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 100px; box-shadow:0 2px 8px rgba(0,0,0,0.02);"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">' + escapeHTML(k) + '</span><span style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + displayTotals[k] + '</span></div>'; }).join('');
+                  var badges = Object.keys(displayTotals).filter(function(k) { return displayTotals[k] > 0; }).map(function(k) { var tagLabel = escapeHTML(k) + (isLateType(k) ? ' · LATE' : (isApprovedLeaveType(k) ? ' · APPROVED' : ''));
+                  var tagColor = isLateType(k) ? 'var(--status-warn)' : (isApprovedLeaveType(k) ? 'var(--status-active)' : 'var(--text-muted)');
+                  return '<div style="background:var(--card-bg); border:1px solid var(--glass-border); padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 100px; box-shadow:0 2px 8px rgba(0,0,0,0.02);"><span style="font-size:0.75rem; font-weight:800; color:' + tagColor + '; text-transform:uppercase;">' + tagLabel + '</span><span style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + displayTotals[k] + '</span></div>'; }).join('');
                   // Bradford card is always YTD (the score is a yearly measure;
                   // month filtering doesn't apply to it).
                   var bfBandSel = bradfordBand(p.bradford || 0);
@@ -1265,7 +1275,7 @@
                   
                   var flagBanner = p.flags > 0 ? '<div style="background:linear-gradient(90deg, rgba(239,68,68,0.1), transparent); border-left:4px solid var(--status-alert); padding:20px; border-radius:12px; margin-bottom:24px; display:flex; gap:16px; align-items:center; text-align:left;"><i data-lucide="flag" width="32" style="color:var(--status-alert);"></i><div><div style="font-weight:800; color:var(--status-alert); font-size:1.05rem; margin-bottom:4px;">Repetitive Absenteeism Flag</div><div style="font-size:0.9rem; color:var(--text-main); font-weight:600;">This agent triggered <b style="color:var(--status-alert);">' + p.flags + '</b> monthly flags (4+ absences in a single month).</div><div style="font-size:0.85rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Flagged Months: <span style="color:var(--text-main);">' + p.flaggedMonths.join(', ') + '</span></div></div></div>' : '';
 
-                  rightPane = '<div class="aether-card" style="height:calc(100vh - 160px); min-height:600px; display:flex; flex-direction:column; padding:0; overflow:hidden;"><div style="padding:32px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.015); text-align:left;"><div style="margin-bottom:20px;"><button class="btn btn-glass" style="height:32px; font-size:0.8rem;" onclick="state.selectedAbsenceAgent=null; render();"><i data-lucide="arrow-left" width="14"></i> Back to Dashboard</button></div><div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;"><div><div style="font-size:0.75rem; font-weight:800; color:var(--status-alert); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:8px; display:flex; align-items:center; gap:6px;"><i data-lucide="user-x" width="14"></i> Absence Tracker</div><div style="font-weight:800; font-size:2.2rem; color:var(--text-main); line-height:1.1; margin-bottom:8px; letter-spacing:-0.5px;">' + escapeHTML(p.name) + '</div><div style="font-size:0.95rem; color:var(--text-muted); font-weight:600;">Supervisor: <span style="color:var(--text-main);">' + escapeHTML(p.supervisor) + '</span></div></div><div style="text-align:right;"><div style="font-size:3.5rem; font-weight:800; color:var(--status-alert); line-height:1; letter-spacing:-2px;">' + displayTotalAbsences + '</div><div style="font-size:0.8rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-top:4px;">' + escapeHTML(totalLabel) + '</div></div></div>' + flagBanner + '<div style="display:flex; gap:16px; flex-wrap:wrap;">' + badges + '</div></div><div style="padding:16px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); position:sticky; top:0; z-index:10;"><span style="font-weight:800; color:var(--text-main); font-size:1.1rem; display:flex; align-items:center; gap:12px;">Absence Timeline ' + monthTotalHtml + '</span><select class="input-aether" style="width:160px; height:34px; font-size:0.85rem; font-weight:700;" onchange="state.absenceMonthFilter=this.value; render();"><option value="ALL">All Months</option>' + monthOptions + '</select></div><div style="flex:1; overflow-y:auto; background:var(--bg-root); padding:16px 24px;" class="custom-scrollbar">' + (timeline || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No records found for this selection.</div>') + '</div></div>';
+                  rightPane = '<div class="aether-card" style="height:calc(100vh - 160px); min-height:600px; display:flex; flex-direction:column; padding:0; overflow:hidden;"><div style="padding:32px; border-bottom:1px solid var(--glass-border); background:rgba(0,0,0,0.015); text-align:left;"><div style="margin-bottom:20px;"><button class="btn btn-glass" style="height:32px; font-size:0.8rem;" onclick="state.selectedAbsenceAgent=null; render();"><i data-lucide="arrow-left" width="14"></i> Back to Dashboard</button></div><div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;"><div><div style="font-size:0.75rem; font-weight:800; color:var(--status-alert); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:8px; display:flex; align-items:center; gap:6px;"><i data-lucide="user-x" width="14"></i> Absence Tracker</div><div style="font-weight:800; font-size:2.2rem; color:var(--text-main); line-height:1.1; margin-bottom:8px; letter-spacing:-0.5px;">' + escapeHTML(p.name) + '</div><div style="font-size:0.95rem; color:var(--text-muted); font-weight:600;">Supervisor: <span style="color:var(--text-main);">' + escapeHTML(p.supervisor) + '</span></div></div><div style="text-align:right;"><div style="font-size:3.5rem; font-weight:800; color:var(--status-alert); line-height:1; letter-spacing:-2px;">' + displayTotalAbsences + '</div><div style="font-size:0.8rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; margin-top:4px;">' + escapeHTML(totalLabel) + '</div>' + (p.lates ? '<div style="font-size:0.72rem; font-weight:800; color:var(--status-warn); margin-top:4px;">+ ' + p.lates + ' late' + (p.lates === 1 ? '' : 's') + ' (ALU)</div>' : '') + '</div></div>' + flagBanner + '<div style="display:flex; gap:16px; flex-wrap:wrap;">' + badges + '</div></div><div style="padding:16px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); position:sticky; top:0; z-index:10;"><span style="font-weight:800; color:var(--text-main); font-size:1.1rem; display:flex; align-items:center; gap:12px;">Absence Timeline ' + monthTotalHtml + '</span><select class="input-aether" style="width:160px; height:34px; font-size:0.85rem; font-weight:700;" onchange="state.absenceMonthFilter=this.value; render();"><option value="ALL">All Months</option>' + monthOptions + '</select></div><div style="flex:1; overflow-y:auto; background:var(--bg-root); padding:16px 24px;" class="custom-scrollbar">' + (timeline || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No records found for this selection.</div>') + '</div></div>';
               }
           }
 
@@ -1710,7 +1720,7 @@
       var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px;">' +
           kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents') +
           kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') +
-          kpi('Absences', String(cur.absences || 0), delta(cur.absences, prev.absences, false), 'agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : ''), (cur.absences || 0) > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
+          kpi('Absences', String(cur.absences || 0), delta(cur.absences, prev.absences, false), 'agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), (cur.absences || 0) > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
           kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) +
           '</div>';
 
@@ -1735,7 +1745,7 @@
           chartCard('Off-Phone Hours', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower · Coaching · ACSU') +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Service Level vs Absences', 'mgmt-chart-sl', 'avg SL (line) against agent-days absent (bars)') +
+          chartCard('Service Level vs Absences & Lates', 'mgmt-chart-sl', 'avg SL (line) · absences (red) · ALU lates (amber)') +
           chartCard('Absence Mix by Type', 'mgmt-chart-abs', 'agent-day-type counts per ' + word) +
           '</div>' +
           '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:18px; padding-bottom:40px;">' +
@@ -1792,7 +1802,8 @@
           opts.scales.y1 = { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } };
           charts.mgmtSl = new Chart(elSl.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
               { type: 'line', label: 'Avg SL %', data: weeks.map(function(w) { return w.slAvg; }), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#38bdf8', yAxisID: 'y', spanGaps: true },
-              { label: 'Absences', data: weeks.map(function(w) { return w.absences; }), backgroundColor: 'rgba(248,113,113,0.55)', borderRadius: 6, maxBarThickness: 30, yAxisID: 'y1' }
+              { label: 'Absences', data: weeks.map(function(w) { return w.absences; }), backgroundColor: 'rgba(248,113,113,0.55)', borderRadius: 6, maxBarThickness: 30, yAxisID: 'y1' },
+              { label: 'Lates (ALU)', data: weeks.map(function(w) { return w.lates || 0; }), backgroundColor: 'rgba(251,191,36,0.55)', borderRadius: 6, maxBarThickness: 30, yAxisID: 'y1' }
           ] }, options: opts });
       }
       var elAbs = document.getElementById('mgmt-chart-abs');

@@ -76,7 +76,7 @@ var ManagementView = {
       ot: 0, otX1: 0, otX15: 0,
       safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
       coachSessions: 0,
-      absences: 0, absOn: 0, absOff: 0, absTypes: {},
+      absences: 0, absOn: 0, absOff: 0, absTypes: {}, lates: 0, approvedLeave: 0,
       slAvg: null, ackAvg: null
     };
   },
@@ -216,10 +216,20 @@ var ManagementView = {
     // Absences — distinct AGENT-DAYS for the headline (an agent absent that
     // day = 1 no matter how many segments/codes), plus by-type and by-region
     // breakdowns. Counts appear as soon as the day has started.
+    //
+    // Taxonomy (per product owner):
+    //   real absence — SICK/UNAB/COMP/COMPU/TI AWOL/LOA → headline + mix chart
+    //   late         — ALU (showed up late, not fully absent) → own series
+    //   approved     — ASCLU/SLU/Furlough/ACSU voluntary leave → excluded
+    // A day holding several categories counts once, by priority
+    // real > late > approved.
     try {
       var dbAbs = WT._getDB('WF_ABSENCES');
       if (dbAbs && dbAbs.getLastRow() > 1) {
-        var seenDay = {}, seenType = {};
+        var apprRgx = (typeof APPROVED_LEAVE_RGX !== 'undefined') ? APPROVED_LEAVE_RGX : /\b(asclu|slu|furlough|acsu)\b/i;
+        var lateRgx = (typeof LATE_RGX !== 'undefined') ? LATE_RGX : /\balu\b/i;
+        var dayInfo = {}; // agent|date → { wi, region, real, late, appr }
+        var seenType = {};
         dbAbs.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
           var dStr = WT._formatDate(row[1]);
           var dayMs = self._dayStartEpoch(dStr);
@@ -228,18 +238,33 @@ var ManagementView = {
           if (wi === -1) return;
           var agent = String(row[0]).trim();
           var type = String(row[2]).trim() || 'OTHER';
+          var isAppr = apprRgx.test(type);
+          var isLate = !isAppr && lateRgx.test(type);
           var region = String(row[5] || '').indexOf('Offshore') !== -1 ? 'Offshore' : 'Onshore';
 
           var dayKey = agent + '|' + dStr;
-          if (!seenDay[dayKey]) {
-            seenDay[dayKey] = true;
-            buckets[wi].absences += 1;
-            if (region === 'Offshore') buckets[wi].absOff += 1; else buckets[wi].absOn += 1;
+          if (!dayInfo[dayKey]) dayInfo[dayKey] = { wi: wi, region: region, real: false, late: false, appr: false };
+          if (isAppr) dayInfo[dayKey].appr = true;
+          else if (isLate) dayInfo[dayKey].late = true;
+          else dayInfo[dayKey].real = true;
+
+          if (!isAppr && !isLate) {
+            var typeKey = agent + '|' + dStr + '|' + type;
+            if (!seenType[typeKey]) {
+              seenType[typeKey] = true;
+              buckets[wi].absTypes[type] = (buckets[wi].absTypes[type] || 0) + 1;
+            }
           }
-          var typeKey = agent + '|' + dStr + '|' + type;
-          if (!seenType[typeKey]) {
-            seenType[typeKey] = true;
-            buckets[wi].absTypes[type] = (buckets[wi].absTypes[type] || 0) + 1;
+        });
+        Object.keys(dayInfo).forEach(function(k) {
+          var di = dayInfo[k];
+          if (di.real) {
+            buckets[di.wi].absences += 1;
+            if (di.region === 'Offshore') buckets[di.wi].absOff += 1; else buckets[di.wi].absOn += 1;
+          } else if (di.late) {
+            buckets[di.wi].lates += 1;
+          } else if (di.appr) {
+            buckets[di.wi].approvedLeave += 1;
           }
         });
       }

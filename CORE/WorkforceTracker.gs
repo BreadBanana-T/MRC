@@ -40,6 +40,17 @@ function _titleCaseName(s) {
     .trim();
 }
 
+// Absence taxonomy (per product owner):
+//   APPROVED  — ASCLU / SLU / Furlough / ACSU: company-approved voluntary
+//               early outs on low demand. NOT absenteeism; never counted in
+//               absence totals, monthly flags, Bradford or Mgmt graphs.
+//   LATE      — ALU: the agent showed up late / missed part of the day.
+//               Not a full absence; tracked as its own "Lates" series.
+//   ABSENT    — SICK / UNAB / COMP / COMPU / TI AWOL / LOA (incl. TI LOA):
+//               real absenteeism.
+var APPROVED_LEAVE_RGX = /\b(asclu|slu|furlough|acsu)\b/i;
+var LATE_RGX = /\balu\b/i;
+
 var WorkforceTracker = {
 
   _getDB: function(sheetName) {
@@ -77,7 +88,7 @@ var WorkforceTracker = {
       const segmentRegex = /([a-zA-ZÀ-ÿ0-9\/\(\)\s\-\.&']+?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*$/i;
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
       const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
-      const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
+      const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary', 'asclu', 'slu', 'furlough'];
       // Word-aware role matcher. Bare substring checks turned words like
       // "vehicle"/"article" (icl) and "feuille" (feu) into role hours.
       // Leading-only boundaries on icl/ulc keep variants like "ICL2" matching.
@@ -128,6 +139,7 @@ var WorkforceTracker = {
               // silently inflating absence counts.
               else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
               else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
+              else if (/\bloa\b/.test(actLower)) { isAbsence = true; absType = 'LOA'; }
               else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
 
               let roleType = "";
@@ -185,6 +197,7 @@ var WorkforceTracker = {
               // silently inflating absence counts.
               else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
               else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
+              else if (/\bloa\b/.test(actLower)) { isAbsence = true; absType = 'LOA'; }
               else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
               
               let roleType = "";
@@ -400,7 +413,7 @@ var WorkforceTracker = {
                   supervisor: r[2] || "Unassigned",
                   region: isOffshore ? "Offshore" : "Onshore",
                   records: [],
-                  totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
+                  totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0, 'LOA': 0 },
                   monthlyCounts: {},
                   totalAbsences: 0,
                   flags: 0,
@@ -435,7 +448,7 @@ var WorkforceTracker = {
                   }
                   agents[key] = {
                       name: aName, supervisor: "Unknown", region: reg,
-                      records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 },
+                      records: [], totals: { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0, 'LOA': 0 },
                       monthlyCounts: {}, totalAbsences: 0, flags: 0, flaggedMonths: []
                   };
               }
@@ -471,12 +484,20 @@ var WorkforceTracker = {
               merged.push({ date: segs[0].date, type: segs[0].type, start: earliest.start, end: latest.end });
           });
           ag.records = merged;
-          ag.totals = { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0 };
+          ag.totals = { SICK: 0, UNAB: 0, COMP: 0, COMPU: 0, ALU: 0, 'TI AWOL': 0, 'LOA': 0 };
           ag.monthlyCounts = {};
           ag.totalAbsences = 0;
+          ag.approvedLeave = 0;
+          ag.lates = 0;
+          const isApproved = (t) => APPROVED_LEAVE_RGX.test(String(t));
+          const isLate = (t) => LATE_RGX.test(String(t));
           merged.forEach(r => {
               if (ag.totals[r.type] !== undefined) ag.totals[r.type]++;
               else ag.totals[r.type] = 1;
+              // Approved voluntary leave: visible (badge + timeline), never
+              // absenteeism. ALU lates: own counter, not a full absence.
+              if (isApproved(r.type)) { ag.approvedLeave++; return; }
+              if (isLate(r.type)) { ag.lates++; return; }
               ag.totalAbsences++;
               let m = r.date.substring(0, 7);
               ag.monthlyCounts[m] = (ag.monthlyCounts[m] || 0) + 1;
@@ -488,7 +509,7 @@ var WorkforceTracker = {
           // adjacency is used (a Fri + Mon pair counts as two spells) since
           // per-agent working patterns aren't known here.
           let daySet = {};
-          merged.forEach(r => { daySet[r.date] = true; });
+          merged.forEach(r => { if (!isApproved(r.type) && !isLate(r.type)) daySet[r.date] = true; });
           let sortedDays = Object.keys(daySet).sort();
           let spells = 0, prevEpoch = null;
           sortedDays.forEach(ds => {
@@ -503,7 +524,7 @@ var WorkforceTracker = {
       
       let profiles = [];
       Object.values(agents).forEach(ag => {
-          if (ag.totalAbsences > 0) {
+          if (ag.totalAbsences > 0 || ag.lates > 0 || ag.approvedLeave > 0) {
               // FLAG Logic: Any month where count >= 4
               Object.keys(ag.monthlyCounts).forEach(month => {
                   if (ag.monthlyCounts[month] >= 4) {
