@@ -78,7 +78,10 @@ var WorkforceTracker = {
       const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/;
       const COACHING_CODES = ['ce séance', 'huddle', 'echo', 'mentor', 'hsc', 'health and safety', 'meet', 'roadshow', 'one on one', 'individuelle', 'pulsecheck', 'qual session', 'quality', 'sbys', 'survey', 'sondage en ligne', 'team'];
       const ACSU_CODES = ['acsu', 'solicited', 'libération', 'voluntary'];
-      const ROLE_CODES = ['safe onqueue', 'safe en ligne', 'icl', 'incident', 'ulc', 'fire', 'feu', 'wofqt', 'woqft', 'tower'];
+      // Word-aware role matcher. Bare substring checks turned words like
+      // "vehicle"/"article" (icl) and "feuille" (feu) into role hours.
+      // Leading-only boundaries on icl/ulc keep variants like "ICL2" matching.
+      const ROLE_RGX = /safe onqueue|safe en ligne|\bicl|\bincident|\bulc|\bfire\b|\bfeu\b|wofqt|woqft|\btower\b/;
       
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
@@ -113,7 +116,7 @@ var WorkforceTracker = {
               
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
-              let isRole = ROLE_CODES.some(c => actLower.includes(c));
+              let isRole = ROLE_RGX.test(actLower);
               
               let isAbsence = false;
               let absType = "";
@@ -130,8 +133,8 @@ var WorkforceTracker = {
               let roleType = "";
               if (isRole) {
                   if (actLower.includes('safe')) roleType = "SAFE";
-                  else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
-                  else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
+                  else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
+                  else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
               }
               
@@ -170,7 +173,7 @@ var WorkforceTracker = {
               
               let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
-              let isRole = ROLE_CODES.some(c => actLower.includes(c));
+              let isRole = ROLE_RGX.test(actLower);
 
               let isAbsence = false;
               let absType = "";
@@ -187,8 +190,8 @@ var WorkforceTracker = {
               let roleType = "";
               if (isRole) {
                   if (actLower.includes('safe')) roleType = "SAFE";
-                  else if (actLower.includes('icl') || actLower.includes('incident')) roleType = "ICL";
-                  else if (actLower.includes('ulc') || actLower.includes('fire') || actLower.includes('feu')) roleType = "ULC FIRE";
+                  else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
+                  else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
               }
 
