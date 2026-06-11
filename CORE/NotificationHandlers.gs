@@ -67,5 +67,5 @@ const NotificationHandler = {
 // --- GLOBAL EXPORTS ---
 function addSystemNotification(agentName, action) { return NotificationHandler.add(agentName, action); }
 function addGlobalNotification(msg) { return NotificationHandler.add("SYSTEM", msg, true); }
-function getSystemNotifications() { return NotificationHandler.getPending(); }
+// Router export getSystemNotifications() lives in Code.gs.
 function dismissSystemNotification(id) { return NotificationHandler.dismiss(id); }

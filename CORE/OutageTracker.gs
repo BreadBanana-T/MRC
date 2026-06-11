@@ -287,7 +287,7 @@ var OutageTracker = {
   }
 };
 
-function getPowerOutages() { return OutageTracker.fetchAll(); }
+// Router export getPowerOutages() lives in Code.gs.
 
 /**
  * Configure a utility's outage URL at runtime. Called from the Apps Script

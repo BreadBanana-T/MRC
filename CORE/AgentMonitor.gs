@@ -14,10 +14,9 @@ var AgentMonitor = {
   syncFromRaw: function() { return "Synced"; }
 };
 
-function getFloorStatus() { return compileFloorData(); }
-function updateAgentStatus(name, type, value) { return AgentMonitor.setStatus(name, type, value); }
-function updateAgentBreaks(name, jsonBreaks) { return AgentMonitor.updateAgentBreaks(name, jsonBreaks); }
-function submitOvertime(name, start, end, bStart, bEnd) { return AgentMonitor.logOvertime(name, start, end, bStart, bEnd); }
+// Router exports (getFloorStatus, updateAgentStatus, updateAgentBreaks,
+// submitOvertime) live in Code.gs — do not redeclare here: duplicate
+// top-level names across .gs files shadow each other by load order.
 
 function compileFloorData() {
   const localSS = SpreadsheetApp.getActiveSpreadsheet();

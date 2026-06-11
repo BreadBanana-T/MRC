@@ -2,9 +2,7 @@
  * MODULE: CALCULATOR (LOCAL HOST ONLY)
  */
 
-function runCalculator(inText, outText) {
-  return calculateMetrics(inText, outText);
-}
+// Router export runCalculator() lives in Code.gs.
 
 function calculateMetrics(inText, outText) {
   let stats = {

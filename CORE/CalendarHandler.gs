@@ -91,5 +91,4 @@ const CalendarHandler = {
   }
 };
 
-// Global Export
-function getDailyCalendarEvents() { return CalendarHandler.getEvents(); }
+// Router export getDailyCalendarEvents() lives in Code.gs.

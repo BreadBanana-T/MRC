@@ -81,9 +81,10 @@ function updateAgentStatus(n, t, v) { if(typeof AgentMonitor!=='undefined') retu
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
-function fetchScripts() { if(typeof getTeamScripts!=='undefined') return getTeamScripts(); return "[]"; }
-function saveTeamScript(i, t, b, c) { if(typeof saveTeamScript!=='undefined') return ScriptHandler.save(i, t, b, c); }
-function deleteTeamScript(i) { if(typeof deleteTeamScript!=='undefined') return ScriptHandler.delete(i); }
+function fetchScripts() { return (typeof ScriptHandler!=='undefined') ? JSON.stringify(ScriptHandler.getAll()) : "[]"; }
+// saveTeamScript / deleteTeamScript / getTeamScripts live in CORE/ScriptHandler.gs.
+// Do NOT redeclare them here: duplicate top-level names across .gs files
+// shadow each other based on file load order.
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
 function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }

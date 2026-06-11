@@ -221,12 +221,7 @@ function safeParseDateStr(ds, defY, defM, defD) {
     return { y, m, d, str: `${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}` };
 }
 
-function parseTime(tStr) {
-   if(!tStr) return null; const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i); if(!match) return null;
-   let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
-   if (amp === "PM" && h < 12) h += 12;
-   if (amp === "AM" && h === 12) h = 0; return { h, m };
-}
+// parseTime() is shared from CORE/AgentMonitor.gs (one global scope in GAS).
 function compareTimeStrings(t1, t2) {
     if (!t1 || !t2) return false;
     const n1 = t1.replace(/\s+/g, '').replace(/^0/, ''), n2 = t2.replace(/\s+/g, '').replace(/^0/, '');
