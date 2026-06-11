@@ -90,6 +90,8 @@ const StatsTracker = {
     history.forEach(h => {
         h.label = Utilities.formatDate(h.time, tz, "HH:mm");
     });
-    return JSON.stringify(history.map(h => ({ name: h.label, val: h.val, ack: h.ack })));
+    // "t" (epoch ms) lets the dashboard align other time series (e.g. the
+    // power-outage band) against these points.
+    return JSON.stringify(history.map(h => ({ name: h.label, val: h.val, ack: h.ack, t: h.time.getTime() })));
   }
 };

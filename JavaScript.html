@@ -86,7 +86,7 @@
   }
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live'
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live'
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -140,6 +140,12 @@
               if (state.view === 'overview') render();
           } catch (e) {}
       }).withFailureHandler(function() {}).getOutageAgentCorrelation(5000, 2);
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.outageHistory = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getOutageHistory();
   }
 
   window.openRegionManager = function() {
@@ -1073,6 +1079,15 @@
       return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); border-left:4px solid var(--accent-primary); padding:16px; margin-bottom:24px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown and deep-dive Avaya GEM metrics.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'icl\'; render();" class="sort-btn ' + (state.insightSort==='icl'?'active-icl':'') + '">ICL</button><button onclick="state.insightSort=\'ulc\'; render();" class="sort-btn ' + (state.insightSort==='ulc'?'active-ulc':'') + '">ULC</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
   }
 
+  // Standard Bradford Factor bands (S² × D): <50 low, 50–124 monitor,
+  // 125–449 high, 450+ critical.
+  function bradfordBand(score) {
+      if (score >= 450) return { label: 'Critical', color: 'var(--status-alert)', bg: 'rgba(220,38,38,0.10)' };
+      if (score >= 125) return { label: 'High', color: 'var(--status-ulc)', bg: 'rgba(249,115,22,0.10)' };
+      if (score >= 50)  return { label: 'Monitor', color: 'var(--status-warn)', bg: 'rgba(217,119,6,0.10)' };
+      return { label: 'Low', color: 'var(--status-active)', bg: 'rgba(5,150,105,0.10)' };
+  }
+
   function renderTracker() {
       var isCoach = state.trackerMode === 'coaching';
       var isAbsences = state.trackerMode === 'absences';
@@ -1134,10 +1149,11 @@
           var leftPane = filteredProfiles.map(function(p, i) {
               var isSel = state.selectedAbsenceAgent === p.name;
               var flagIcon = p.flags > 0 ? '<i data-lucide="flag" width="14" style="color:var(--status-alert);"></i>' : '';
+              var bfBand = bradfordBand(p.bradford || 0);
               return '<div class="hover-bg" style="padding:14px 16px; margin-bottom:8px; border-radius:12px; background:var(--card-bg); cursor:pointer; display:flex; flex-direction:row; justify-content:space-between; align-items:center; border:2px solid ' + (isSel ? 'var(--accent-primary)' : 'transparent') + '; box-shadow:0 2px 8px rgba(0,0,0,0.02); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
                   '<div style="display:flex; flex-direction:column; justify-content:center; overflow:hidden;">' +
                       '<div style="font-weight:800; font-size:0.95rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(p.name) + '</div>' +
-                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Total Absences: <span style="color:var(--text-main);">' + p.totalAbsences + '</span></div>' +
+                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Total: <span style="color:var(--text-main);">' + p.totalAbsences + '</span> &nbsp;·&nbsp; BF <span style="color:' + bfBand.color + '; font-weight:800;" title="Bradford Factor ' + (p.bradford || 0) + ' (' + bfBand.label + ')">' + (p.bradford || 0) + '</span></div>' +
                   '</div>' +
                   '<div style="display:flex; gap:8px; align-items:center; flex-shrink:0;">' + 
                       flagIcon + 
@@ -1146,20 +1162,33 @@
               '</div>';
           }).join('');
           
-          var flaggedAgents = filteredProfiles.filter(function(p){ return p.flags > 0; });
+          // Flag on either signal: 4+ absences in a month, or a Bradford
+          // Factor at/above the "High" band (125).
+          var flaggedAgents = filteredProfiles.filter(function(p){ return p.flags > 0 || (p.bradford || 0) >= 125; });
           var flaggedHtml = flaggedAgents.map(function(p) {
-              return '<div class="hover-bg" style="padding:20px 24px; display:flex; flex-direction:row; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:16px; border-radius:16px; background:var(--card-bg); border:1px solid var(--glass-border); border-left: 4px solid var(--status-alert); box-shadow:0 4px 15px rgba(0,0,0,0.03); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
+              var bfBand = bradfordBand(p.bradford || 0);
+              var reason = p.flags > 0
+                  ? p.flags + ' Monthly Flags Triggered'
+                  : 'Bradford Factor ' + bfBand.label.toLowerCase() + ' (frequent short absences)';
+              var monthsLine = p.flags > 0 ? '<div style="font-size:0.8rem; color:var(--text-muted);">Months: <span style="color:var(--text-main); font-weight:600;">' + p.flaggedMonths.join(', ') + '</span></div>' : '<div style="font-size:0.8rem; color:var(--text-muted);">' + (p.bradfordSpells || 0) + ' spells &times; ' + (p.bradfordDays || 0) + ' days</div>';
+              return '<div class="hover-bg" style="padding:20px 24px; display:flex; flex-direction:row; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:16px; border-radius:16px; background:var(--card-bg); border:1px solid var(--glass-border); border-left: 4px solid ' + (p.flags > 0 ? 'var(--status-alert)' : bfBand.color) + '; box-shadow:0 4px 15px rgba(0,0,0,0.03); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
                   '<div style="display:flex; align-items:center; gap:20px;">' +
                       '<div style="width:48px; height:48px; border-radius:24px; background:rgba(220,38,38,0.1); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><i data-lucide="alert-circle" width="24" style="color:var(--status-alert);"></i></div>' +
                       '<div>' +
                           '<div style="font-weight:800; font-size:1.15rem; color:var(--text-main); margin-bottom:4px;">' + escapeHTML(p.name) + '</div>' +
-                          '<div style="font-size:0.85rem; color:var(--status-alert); font-weight:700; margin-bottom:4px;">' + p.flags + ' Monthly Flags Triggered</div>' +
-                          '<div style="font-size:0.8rem; color:var(--text-muted);">Months: <span style="color:var(--text-main); font-weight:600;">' + p.flaggedMonths.join(', ') + '</span></div>' +
+                          '<div style="font-size:0.85rem; color:var(--status-alert); font-weight:700; margin-bottom:4px;">' + reason + '</div>' +
+                          monthsLine +
                       '</div>' +
                   '</div>' +
-                  '<div style="text-align:right; padding-left:20px; border-left:1px solid var(--glass-border);">' +
-                      '<div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + p.totalAbsences + '</div>' +
-                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:4px;">YTD Absences</div>' +
+                  '<div style="display:flex; gap:20px; align-items:center;">' +
+                      '<div style="text-align:right;">' +
+                          '<div style="font-size:2rem; font-weight:800; color:' + bfBand.color + '; line-height:1;" title="Bradford Factor = spells² × days (' + (p.bradfordSpells || 0) + '² × ' + (p.bradfordDays || 0) + ')">' + (p.bradford || 0) + '</div>' +
+                          '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:4px;">Bradford · ' + bfBand.label + '</div>' +
+                      '</div>' +
+                      '<div style="text-align:right; padding-left:20px; border-left:1px solid var(--glass-border);">' +
+                          '<div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + p.totalAbsences + '</div>' +
+                          '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:4px;">YTD Absences</div>' +
+                      '</div>' +
                   '</div>' +
               '</div>';
           }).join('');
@@ -1199,6 +1228,10 @@
                   var timeline = filteredRecs.map(function(r) { return '<div style="display:flex; justify-content:space-between; padding:16px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><div style="display:flex; align-items:center; gap:16px;"><div style="width:44px; height:44px; border-radius:12px; background:rgba(220,38,38,0.1); color:var(--status-alert); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.75rem;">' + escapeHTML(r.type.substring(0,4)) + '</div><div style="text-align:left;"><div style="font-weight:800; color:var(--text-main); font-size:1.05rem; margin-bottom:4px;">' + escapeHTML(r.type) + '</div><div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i data-lucide="calendar" width="14" style="vertical-align:middle; margin-right:4px;"></i>' + escapeHTML(r.date) + ' &bull; ' + escapeHTML(r.start) + ' - ' + escapeHTML(r.end) + '</div></div></div></div>'; }).join('');
 
                   var badges = Object.keys(displayTotals).filter(function(k) { return displayTotals[k] > 0; }).map(function(k) { return '<div style="background:var(--card-bg); border:1px solid var(--glass-border); padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 100px; box-shadow:0 2px 8px rgba(0,0,0,0.02);"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">' + escapeHTML(k) + '</span><span style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + displayTotals[k] + '</span></div>'; }).join('');
+                  // Bradford card is always YTD (the score is a yearly measure;
+                  // month filtering doesn't apply to it).
+                  var bfBandSel = bradfordBand(p.bradford || 0);
+                  badges = '<div style="background:' + bfBandSel.bg + '; border:1px solid ' + bfBandSel.color + '; padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 140px;" title="Bradford Factor = spells² × days. Frequent short absences score far higher than one long absence. ' + (p.bradfordSpells || 0) + ' spells² × ' + (p.bradfordDays || 0) + ' days = ' + (p.bradford || 0) + '"><span style="font-size:0.75rem; font-weight:800; color:' + bfBandSel.color + '; text-transform:uppercase;">Bradford Factor · YTD</span><span style="font-size:1.5rem; font-weight:800; color:' + bfBandSel.color + ';">' + (p.bradford || 0) + ' <span style="font-size:0.8rem; font-weight:800;">' + bfBandSel.label + '</span></span><span style="font-size:0.7rem; font-weight:600; color:var(--text-muted);">' + (p.bradfordSpells || 0) + ' spells &times; ' + (p.bradfordDays || 0) + ' days</span></div>' + badges;
                   
                   var flagBanner = p.flags > 0 ? '<div style="background:linear-gradient(90deg, rgba(239,68,68,0.1), transparent); border-left:4px solid var(--status-alert); padding:20px; border-radius:12px; margin-bottom:24px; display:flex; gap:16px; align-items:center; text-align:left;"><i data-lucide="flag" width="32" style="color:var(--status-alert);"></i><div><div style="font-weight:800; color:var(--status-alert); font-size:1.05rem; margin-bottom:4px;">Repetitive Absenteeism Flag</div><div style="font-size:0.9rem; color:var(--text-main); font-weight:600;">This agent triggered <b style="color:var(--status-alert);">' + p.flags + '</b> monthly flags (4+ absences in a single month).</div><div style="font-size:0.85rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Flagged Months: <span style="color:var(--text-main);">' + p.flaggedMonths.join(', ') + '</span></div></div></div>' : '';
 
@@ -1806,7 +1839,8 @@
       var textColor = isDark ? 'rgba(255,255,255,0.45)' : '#64748b';
 
       // Per-dataset glow: SL gets a strong cyan bloom (hero), ACK gets a
-      // gentler amber halo so it's visible without competing.
+      // gentler amber halo so it's visible without competing. The outage
+      // band (index 2) stays flat — it's background context, not a hero.
       var neonGlow = {
           id: 'auroraNeon',
           beforeDatasetDraw: function(chart, args) {
@@ -1815,7 +1849,7 @@
               if (args.index === 0) {
                   c.shadowColor = 'rgba(56, 189, 248, 0.75)';
                   c.shadowBlur = 22;
-              } else {
+              } else if (args.index === 1) {
                   c.shadowColor = 'rgba(251, 191, 36, 0.55)';
                   c.shadowBlur = 10;
               }
@@ -1825,6 +1859,29 @@
           afterDatasetDraw: function(chart) { chart.ctx.restore(); }
       };
 
+      // Outage band: align each SL point with the nearest outage-history
+      // snapshot (≤45 min apart). Skipped entirely when there's no history
+      // or every snapshot is zero, so quiet days stay clean.
+      var outSeries = null;
+      var outHist = state.outageHistory || [];
+      if (outHist.length && state.slHistory.length && state.slHistory[0].t) {
+          outSeries = state.slHistory.map(function(pt) {
+              var best = null, bestD = 45 * 60000;
+              for (var i = 0; i < outHist.length; i++) {
+                  var dd = Math.abs(outHist[i].t - pt.t);
+                  if (dd < bestD) { bestD = dd; best = outHist[i]; }
+              }
+              return best ? best.customers : null;
+          });
+          var hasSignal = outSeries.some(function(v) { return v !== null && v > 0; });
+          if (!hasSignal) outSeries = null;
+      }
+      var outMax = 0;
+      if (outSeries) outSeries.forEach(function(v) { if (v) outMax = Math.max(outMax, v); });
+      var gradientOut = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
+      gradientOut.addColorStop(0, 'rgba(248, 113, 113, 0.20)');
+      gradientOut.addColorStop(1, 'rgba(248, 113, 113, 0)');
+
       charts.overview = new Chart(ctx, {
           type: 'line',
           plugins: [neonGlow],
@@ -1833,7 +1890,11 @@
               datasets: [
                   { label: 'Service Level', data: slData, borderColor: SL_HEX, backgroundColor: gradientSL, borderWidth: 3, fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: SL_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, pointHoverBorderWidth: 2, yAxisID: 'y' },
                   { label: 'Response Time', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: ACK_HEX, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [3, 6], fill: false, tension: 0.45, pointRadius: 0, pointHoverRadius: 6, pointBackgroundColor: ACK_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' }
-              ]
+              ].concat(outSeries ? [
+                  // Drawn last = rendered underneath; a faint red context band
+                  // so SL dips explain themselves when the grid is dark.
+                  { label: 'Power Outages', data: outSeries, borderColor: 'rgba(248, 113, 113, 0.45)', backgroundColor: gradientOut, borderWidth: 1, fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 0, spanGaps: true, yAxisID: 'y2' }
+              ] : [])
           },
           options: {
               responsive: true,
@@ -1851,13 +1912,16 @@
                       titleFont: { family: "'Outfit', sans-serif", size: 13, weight: '800' },
                       bodyFont: { family: "'Outfit', sans-serif", size: 12, weight: '600' },
                       padding: 12, cornerRadius: 14, boxPadding: 6, usePointStyle: true,
-                      callbacks: { label: function(ctx2) { var l = ctx2.dataset.label || ''; if (l) l += ': '; if (ctx2.datasetIndex === 0) l += ctx2.raw + '%'; else l += rawAck[ctx2.dataIndex] + 's'; return l; } }
+                      callbacks: { label: function(ctx2) { var l = ctx2.dataset.label || ''; if (l) l += ': '; if (ctx2.datasetIndex === 0) l += ctx2.raw + '%'; else if (ctx2.datasetIndex === 1) l += rawAck[ctx2.dataIndex] + 's'; else l += (ctx2.raw == null ? '—' : Number(ctx2.raw).toLocaleString() + ' customers out'); return l; } }
                   }
               },
               scales: {
                   x: { grid: { display: false, drawBorder: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
                   y:  { type: 'linear', display: true, position: 'left',  min: 0, max: 100, grid: { color: gridColor, drawBorder: false, borderDash: [4, 6] }, ticks: { callback: function(v){return v + '%';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } },
-                  y1: { type: 'linear', display: true, position: 'right', min: 0, suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, grid: { display: false, drawBorder: false }, ticks: { callback: function(v){return v + 's';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } }
+                  y1: { type: 'linear', display: true, position: 'right', min: 0, suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, grid: { display: false, drawBorder: false }, ticks: { callback: function(v){return v + 's';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } },
+                  // Hidden axis for the outage band; 2.4× headroom keeps the
+                  // band in the lower third so it never crowds the SL line.
+                  y2: { type: 'linear', display: false, min: 0, suggestedMax: Math.max(outMax, 1) * 2.4 }
               },
               animation: { duration: 450, easing: 'easeOutCubic' }
           }

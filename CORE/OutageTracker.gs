@@ -82,7 +82,62 @@ var OutageTracker = {
 
     var payload = JSON.stringify(result);
     try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
+
+    // Log the national total so the dashboard can draw outage history as a
+    // band behind the Service Level chart. Only runs on cache misses, and
+    // _logHistory itself throttles to one row per 10 minutes.
+    try {
+      var total = 0;
+      for (var prov in result.byProvince) total += (result.byProvince[prov].customers || 0);
+      this._logHistory(total);
+    } catch (e) {}
+
     return payload;
+  },
+
+  // ── Outage history (for the SL-chart overlay) ──────────────────────────
+  HISTORY_SHEET: 'Outage History',
+  HISTORY_MIN_GAP_MS: 10 * 60 * 1000,
+  HISTORY_MAX_ROWS: 600, // ≈4 days at one row / 10 min
+
+  _logHistory: function(totalCustomers) {
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(this.HISTORY_SHEET);
+      if (!sheet) {
+        sheet = ss.insertSheet(this.HISTORY_SHEET);
+        sheet.appendRow(['Timestamp', 'Total Customers']);
+        sheet.getRange(1, 1, 1, 2).setFontWeight('bold');
+        try { sheet.hideSheet(); } catch (e) {}
+      }
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        var lastTs = sheet.getRange(lastRow, 1).getValue();
+        if (lastTs && (Date.now() - new Date(lastTs).getTime()) < this.HISTORY_MIN_GAP_MS) return;
+      }
+      sheet.appendRow([new Date(), totalCustomers]);
+      var rows = sheet.getLastRow() - 1;
+      if (rows > this.HISTORY_MAX_ROWS) sheet.deleteRows(2, rows - this.HISTORY_MAX_ROWS);
+    } catch (e) {}
+  },
+
+  getHistorySeries: function(hoursBack) {
+    hoursBack = hoursBack || 26;
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName(this.HISTORY_SHEET);
+      if (!sheet || sheet.getLastRow() < 2) return '[]';
+      var cutoff = Date.now() - hoursBack * 3600 * 1000;
+      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+      var out = [];
+      for (var i = 0; i < data.length; i++) {
+        var t = new Date(data[i][0]).getTime();
+        if (isNaN(t) || t < cutoff) continue;
+        out.push({ t: t, customers: parseInt(data[i][1], 10) || 0 });
+      }
+      out.sort(function(a, b) { return a.t - b.t; });
+      return JSON.stringify(out);
+    } catch (e) { return '[]'; }
   },
 
   _safeInt: function(v) {

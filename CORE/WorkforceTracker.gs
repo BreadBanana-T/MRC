@@ -472,6 +472,24 @@ var WorkforceTracker = {
               let m = r.date.substring(0, 7);
               ag.monthlyCounts[m] = (ag.monthlyCounts[m] || 0) + 1;
           });
+
+          // Bradford Factor: S² × D, where S = spells (runs of consecutive
+          // calendar days) and D = distinct absence days. Weights frequent
+          // short absences far heavier than one long one. Calendar-day
+          // adjacency is used (a Fri + Mon pair counts as two spells) since
+          // per-agent working patterns aren't known here.
+          let daySet = {};
+          merged.forEach(r => { daySet[r.date] = true; });
+          let sortedDays = Object.keys(daySet).sort();
+          let spells = 0, prevEpoch = null;
+          sortedDays.forEach(ds => {
+              let e = new Date(ds + 'T12:00:00').getTime();
+              if (prevEpoch === null || (e - prevEpoch) > 86400000 * 1.5) spells++;
+              prevEpoch = e;
+          });
+          ag.bradfordSpells = spells;
+          ag.bradfordDays = sortedDays.length;
+          ag.bradford = spells * spells * sortedDays.length;
       });
       
       let profiles = [];

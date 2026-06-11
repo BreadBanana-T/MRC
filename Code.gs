@@ -160,6 +160,9 @@ function getArchivedReport(period, cycleFilter) {
 function getPowerOutages() {
   return (typeof OutageTracker !== 'undefined') ? OutageTracker.fetchAll() : "{}";
 }
+function getOutageHistory() {
+  return (typeof OutageTracker !== 'undefined') ? OutageTracker.getHistorySeries(26) : "[]";
+}
 
 // --- STAFFING BALANCE (current 15-min IDP bucket) ---
 function getStaffingBalance() {
