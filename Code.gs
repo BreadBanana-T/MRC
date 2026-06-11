@@ -169,6 +169,11 @@ function getStaffingBalance() {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getStaffingBalance() : "{}";
 }
 
+// --- MANAGEMENT VIEW (weekly aggregates, Wed-Wed or Sun-Sat) ---
+function getManagementDashboard(anchor, weeksBack) {
+  return (typeof ManagementView !== 'undefined') ? ManagementView.getDashboard(anchor, weeksBack) : "{}";
+}
+
 // getOutageAgentCorrelation() defined in CORE/OutageTracker.gs
 // getCoachingCadenceFlags() defined in CORE/AssignmentAnalyzer.gs
 

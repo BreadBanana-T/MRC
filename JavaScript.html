@@ -86,7 +86,7 @@
   }
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live'
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtAnchor: 'wed', mgmtLoading: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -365,7 +365,7 @@
       document.body.removeChild(textArea);
   }
 
-  window.setView = function(v) { state.view = v; if(v==='scripts') fetchScripts(); if(v==='insights') fetchInsightData(); if(v==='tracker') fetchTrackerData(); if(v==='analyzer') getAnalyzerHistory(null); render(); };
+  window.setView = function(v) { state.view = v; if(v==='scripts') fetchScripts(); if(v==='insights') fetchInsightData(); if(v==='tracker') fetchTrackerData(); if(v==='analyzer') getAnalyzerHistory(null); if(v==='mgmt' && !state.mgmtData) fetchMgmtData(); render(); };
   window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
   window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
@@ -645,6 +645,7 @@
           else if (state.view === 'insights') h = renderInsights();
           else if (state.view === 'tracker') h = renderTracker();
           else if (state.view === 'analyzer') h = renderAnalyzer();
+          else if (state.view === 'mgmt') h = renderMgmt();
           
           c.innerHTML = h; 
           refreshIcons();
@@ -656,6 +657,8 @@
           
           if (state.view === 'overview') initOverviewChart();
           if (state.view === 'tracker' && state.trackerMode !== 'absences' && state.trackerMode !== 'training') initTrackerChart();
+          if (state.view === 'mgmt') initMgmtCharts();
+          if (state.view === 'calc') updatePonr();
       } catch(err) {
           console.error("Critical Render Error:", err);
           var c = document.getElementById('content');
@@ -1587,8 +1590,215 @@
       }).deleteTraining(id);
   };
 
+  // ───────────────────────────── MANAGEMENT VIEW ─────────────────────────────
+  window.setMgmtAnchor = function(a) { state.mgmtAnchor = a; fetchMgmtData(); render(); };
+
+  function fetchMgmtData() {
+      state.mgmtLoading = true;
+      if (typeof google === 'undefined') { state.mgmtLoading = false; return; }
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.mgmtData = JSON.parse(res); } catch(e) { state.mgmtData = { error: 'Could not parse management data.' }; }
+          state.mgmtLoading = false;
+          if (state.view === 'mgmt') render();
+      }).withFailureHandler(function(err) {
+          state.mgmtData = { error: (err && err.message) || 'Backend error.' };
+          state.mgmtLoading = false;
+          if (state.view === 'mgmt') render();
+      }).getManagementDashboard(state.mgmtAnchor, 8);
+  }
+
+  function renderMgmt() {
+      var anchorBtn = function(label, val) {
+          var active = state.mgmtAnchor === val;
+          return '<button onclick="setMgmtAnchor(\'' + val + '\')" class="sort-btn ' + (active ? 'active' : '') + '" style="text-transform:none; letter-spacing:0;">' + label + '</button>';
+      };
+      var headerHtml = '<div class="sticky-header" style="justify-content:space-between;">' +
+          '<div><h2 style="margin:0; font-size:1.3rem;">Management View</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">Full-week aggregates · week-to-date for the current week · no Week A/B cycles</div></div>' +
+          '<div style="display:flex; gap:8px; align-items:center;">' +
+          anchorBtn('Ops Week · Wed–Tue', 'wed') + anchorBtn('Corporate · Sun–Sat', 'sun') +
+          '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
+          '</div></div>';
+
+      if (state.mgmtLoading || !state.mgmtData) {
+          return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; min-height:400px; display:flex; flex-direction:column; align-items:center; justify-content:center;"><div style="width: 44px; height: 44px; border: 4px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="margin:0 0 8px 0;">Compiling weekly aggregates…</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Scanning OT, roles, absences and SL history across 8 weeks.</p></div>';
+      }
+      var d = state.mgmtData;
+      if (d.error) {
+          return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center;"><i data-lucide="alert-triangle" width="40" style="color:var(--status-alert);"></i><h3>Management data unavailable</h3><p style="color:var(--text-muted);">' + escapeHTML(d.error) + '</p></div>';
+      }
+
+      var weeks = d.weeks || [];
+      var cur = weeks[weeks.length - 1] || {};
+      var prev = weeks[weeks.length - 2] || {};
+
+      // Delta chip vs last week. goodWhenUp=false flips the colors (e.g. absences).
+      var delta = function(curV, prevV, goodWhenUp, suffix) {
+          if (curV == null || prevV == null) return '';
+          var diff = Math.round((curV - prevV) * 10) / 10;
+          if (diff === 0) return '<span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); margin-left:8px;">= last wk</span>';
+          var up = diff > 0;
+          var good = (up && goodWhenUp) || (!up && !goodWhenUp);
+          var color = good ? 'var(--status-active)' : 'var(--status-alert)';
+          return '<span style="font-size:0.7rem; font-weight:800; color:' + color + '; margin-left:8px;">' + (up ? '▲' : '▼') + ' ' + Math.abs(diff) + (suffix || '') + ' vs last wk</span>';
+      };
+      var kpi = function(label, value, deltaHtml, sub, color) {
+          return '<div class="aether-card" style="padding:20px 22px;">' +
+                 '<div class="aurora-label" style="margin-bottom:8px;">' + label + '</div>' +
+                 '<div style="display:flex; align-items:baseline;"><span style="font-size:2rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; line-height:1; font-variant-numeric:tabular-nums;">' + value + '</span>' + (deltaHtml || '') + '</div>' +
+                 (sub ? '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + sub + '</div>' : '') +
+                 '</div>';
+      };
+
+      var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:18px; margin-bottom:24px;">' +
+          kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + ((d.current || {}).otAgents || 0) + ' agents') +
+          kpi('SAFE Hours', (cur.safe || 0) + 'h', delta(cur.safe, prev.safe, true, 'h'), 'week of ' + escapeHTML(cur.label || ''), 'var(--status-active)') +
+          kpi('Tower Hours', (cur.tower || 0) + 'h', delta(cur.tower, prev.tower, true, 'h'), 'ICL ' + (cur.icl || 0) + 'h · ULC ' + (cur.ulc || 0) + 'h', 'var(--accent-primary)') +
+          kpi('Absences', String(cur.absences || 0), delta(cur.absences, prev.absences, false), 'agent-days this week', (cur.absences || 0) > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
+          kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings yet') +
+          '</div>';
+
+      var chartCard = function(title, canvasId, sub) {
+          return '<div class="aether-card" style="padding:24px;"><div class="section-header">' + title + (sub ? '<span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + sub + '</span>' : '') + '</div><div style="position:relative; height:240px;"><canvas id="' + canvasId + '" style="display:block;"></canvas></div></div>';
+      };
+
+      var topTable = function(title, list, color, unit) {
+          var rows = (list || []).map(function(a, i) {
+              return '<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--glass-border);">' +
+                     '<div style="display:flex; align-items:center; gap:10px; min-width:0;"><span style="width:22px; height:22px; border-radius:50%; background:' + (i === 0 ? color : 'rgba(0,0,0,0.05)') + '; color:' + (i === 0 ? '#fff' : 'var(--text-muted)') + '; font-size:0.7rem; font-weight:800; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">' + (i + 1) + '</span><span style="font-weight:700; font-size:0.88rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + '</span></div>' +
+                     '<span style="font-weight:800; font-size:0.9rem; color:' + color + '; font-variant-numeric:tabular-nums; flex-shrink:0;">' + a.hours + (unit || 'h') + '</span></div>';
+          }).join('') || '<div style="padding:24px 0; text-align:center; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No hours logged this week.</div>';
+          return '<div class="aether-card" style="padding:22px;"><div class="section-header" style="color:' + color + ';">' + title + '</div>' + rows + '</div>';
+      };
+
+      return headerHtml + kpisHtml +
+          '<div class="grid-split" style="margin-bottom:24px;">' +
+          chartCard('Overtime Hours by Week', 'mgmt-chart-ot', 'straight &times;1 vs premium &times;1.5') +
+          chartCard('Role Hours by Week', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower') +
+          '</div>' +
+          '<div style="margin-bottom:24px;">' + chartCard('Service Level vs Absences', 'mgmt-chart-sl', 'weekly avg SL (line) against absence count (bars)') + '</div>' +
+          '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px; padding-bottom:40px;">' +
+          topTable('Top Overtime — ' + escapeHTML((d.current || {}).label || ''), (d.current || {}).topOt, 'var(--accent-primary)') +
+          topTable('Top SAFE', (d.current || {}).topSafe, 'var(--status-active)') +
+          topTable('Top Tower', (d.current || {}).topTower, 'var(--status-role)') +
+          '</div>';
+  }
+
+  function initMgmtCharts() {
+      if (typeof Chart === 'undefined' || !state.mgmtData || !state.mgmtData.weeks) return;
+      var weeks = state.mgmtData.weeks;
+      var labels = weeks.map(function(w) { return w.label + (w.isCurrent ? ' •' : ''); });
+      var isDark = document.body.classList.contains('dark');
+      var textColor = isDark ? '#94a3b8' : '#64748b';
+      var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)';
+      var baseOpts = function(stacked) {
+          return {
+              responsive: true, maintainAspectRatio: false, resizeDelay: 200,
+              plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, boxHeight: 8, font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor } } },
+              scales: {
+                  x: { stacked: !!stacked, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 9 }, color: textColor, maxRotation: 0 } },
+                  y: { stacked: !!stacked, beginAtZero: true, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } }
+              },
+              animation: { duration: 400, easing: 'easeOutCubic' }
+          };
+      };
+
+      ['mgmtOt', 'mgmtRoles', 'mgmtSl'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
+
+      var elOt = document.getElementById('mgmt-chart-ot');
+      if (elOt) {
+          charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
+              { label: '×1 Straight', data: weeks.map(function(w) { return w.otX1; }), backgroundColor: '#818cf8', borderRadius: 6, maxBarThickness: 34 },
+              { label: '×1.5 Premium', data: weeks.map(function(w) { return w.otX15; }), backgroundColor: '#f472b6', borderRadius: 6, maxBarThickness: 34 }
+          ] }, options: baseOpts(true) });
+      }
+      var elRoles = document.getElementById('mgmt-chart-roles');
+      if (elRoles) {
+          charts.mgmtRoles = new Chart(elRoles.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
+              { label: 'SAFE', data: weeks.map(function(w) { return w.safe; }), backgroundColor: '#34d399', borderRadius: 6, maxBarThickness: 34 },
+              { label: 'ICL', data: weeks.map(function(w) { return w.icl; }), backgroundColor: '#c084fc', borderRadius: 6, maxBarThickness: 34 },
+              { label: 'ULC', data: weeks.map(function(w) { return w.ulc; }), backgroundColor: '#fb923c', borderRadius: 6, maxBarThickness: 34 },
+              { label: 'Tower', data: weeks.map(function(w) { return w.tower; }), backgroundColor: '#38bdf8', borderRadius: 6, maxBarThickness: 34 }
+          ] }, options: baseOpts(true) });
+      }
+      var elSl = document.getElementById('mgmt-chart-sl');
+      if (elSl) {
+          var opts = baseOpts(false);
+          opts.scales.y = { position: 'left', min: 0, max: 100, grid: { color: gridColor }, ticks: { callback: function(v) { return v + '%'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } };
+          opts.scales.y1 = { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } };
+          charts.mgmtSl = new Chart(elSl.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
+              { type: 'line', label: 'Avg SL %', data: weeks.map(function(w) { return w.slAvg; }), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#38bdf8', yAxisID: 'y', spanGaps: true },
+              { label: 'Absences', data: weeks.map(function(w) { return w.absences; }), backgroundColor: 'rgba(248,113,113,0.55)', borderRadius: 6, maxBarThickness: 30, yAxisID: 'y1' }
+          ] }, options: opts });
+      }
+  }
+
+  // ──────────────────── ACK POINT OF NO RETURN (calculator) ────────────────────
+  // Math (validated against the "Point of no return" sheet):
+  //   remaining  = (alarms ÷ hoursElapsed) × (24 − hoursElapsed)   ← same pace
+  //   required   = (target×(alarms+remaining) − currentACK×alarms) ÷ remaining
+  //   required < 0  →  even instant 0s ACKs can't pull the daily avg to target.
+  window.updatePonr = function() {
+      var box = document.getElementById('ponr-result');
+      if (!box) return;
+      var num = function(id) { var el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
+      var ack = num('ponr-ack'), alarms = num('ponr-alarms'), t = num('ponr-time'), target = num('ponr-target');
+      if (target > 0) { try { localStorage.setItem('ponr_target', String(target)); } catch(e) {} }
+      if (!(ack >= 0) || !(alarms > 0) || !(t > 0) || t >= 24 || !(target > 0)) {
+          box.innerHTML = '<div style="padding:16px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">Enter current ACK, BURG alarms received, and the time (e.g. 16.25 = 4:15 PM) to project the rest of the day.</div>';
+          return;
+      }
+      var remaining = (alarms / t) * (24 - t);
+      var required = (target * (alarms + remaining) - ack * alarms) / remaining;
+      // Best day-end average even if every remaining alarm is ACKed instantly.
+      var floor = (ack * alarms) / (alarms + remaining);
+      var stat = function(label, value, color) {
+          return '<div style="flex:1; min-width:140px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 16px;"><div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + label + '</div><div style="font-size:1.5rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; font-variant-numeric:tabular-nums; margin-top:4px;">' + value + '</div></div>';
+      };
+      var banner;
+      if (required < 0) {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(220,38,38,0.10); border:1px solid var(--status-alert); color:var(--status-alert); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-octagon" width="20"></i> POINT OF NO RETURN — even instant ACKs land the day at ' + floor.toFixed(1) + 's (target ' + target + 's).</div>';
+      } else if (required < target * 0.5) {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); color:var(--status-warn); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-triangle" width="20"></i> Tight — the rest of the day must average ≤ ' + required.toFixed(1) + 's to finish at ' + target + 's.</div>';
+      } else {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(5,150,105,0.10); border:1px solid var(--status-active); color:var(--status-active); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="check-circle" width="20"></i> Recoverable — averaging ≤ ' + required.toFixed(1) + 's for the rest of the day hits the ' + target + 's target.</div>';
+      }
+      box.innerHTML = '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">' +
+          stat('Remaining Alarms (proj.)', Math.round(remaining * 100) / 100) +
+          stat('Required ACK / interval', required.toFixed(1) + 's', required < 0 ? 'var(--status-alert)' : (required < target * 0.5 ? 'var(--status-warn)' : 'var(--status-active)')) +
+          stat('Best possible day-end', floor.toFixed(1) + 's', floor > target ? 'var(--status-alert)' : 'var(--text-main)') +
+          '</div>' + banner;
+      refreshIcons();
+  };
+  window.ponrSetNow = function() {
+      var el = document.getElementById('ponr-time');
+      if (!el) return;
+      var n = new Date();
+      el.value = (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
+      updatePonr();
+  };
+
+  function renderPonrCard() {
+      var savedTarget = 30;
+      try { savedTarget = parseFloat(localStorage.getItem('ponr_target')) || 30; } catch(e) {}
+      var ackPrefill = String(state.currentACK || '').replace(/[^\d.]/g, '');
+      var n = new Date();
+      var timePrefill = (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
+      var input = function(id, label, value, placeholder, extra) {
+          return '<div style="flex:1; min-width:150px;"><label style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</label><div style="display:flex; gap:6px; margin-top:6px;">' +
+                 '<input id="' + id + '" type="number" step="any" class="input-aether" style="height:38px; font-weight:700; font-variant-numeric:tabular-nums;" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</div></div>';
+      };
+      return '<div class="aether-card tile-aurora" style="margin-bottom:24px; padding:24px;">' +
+          '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> ACK — Point of No Return</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">paste BURG count from the Intraday report · time 16.25 = 4:15 PM</span></div>' +
+          '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">' +
+          input('ponr-ack', 'Current ACK (s)', ackPrefill, 'e.g. 50') +
+          input('ponr-alarms', 'BURG Alarms Received', '', 'e.g. 540') +
+          input('ponr-time', 'Time Now (decimal)', timePrefill, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
+          input('ponr-target', 'Target ACK (s)', savedTarget, '30') +
+          '</div><div id="ponr-result"></div></div>';
+  }
+
   function renderCalc() {
-     return '<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether custom-scrollbar" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether custom-scrollbar" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';
+     return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether custom-scrollbar" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether custom-scrollbar" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';
   }
   
   window.runCalculation = function() {
