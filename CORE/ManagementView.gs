@@ -266,29 +266,29 @@ var ManagementView = {
     // ACSU hours
     try { walkHours('WF_FURLOUGH', function(iv) { distribute(iv, function(t, h) { t.acsu += h; }, function(b, h) { b.acsu += h; }); }); } catch (e) {}
 
-    // Open OT slots — WF_OT_OPEN: [Date, Start, End, Slots, WindowHours,
-    // OpenHours, Rate, Bucket, Skill, SkillValues, Visible, OID].
-    // Hidden postings excluded; hours = window overlap × slot count, so the
-    // same interval-exactness as everything else, at every grain. To-date
-    // capped like the rest of the view (the OT tracker holds the
-    // forward-looking posting list).
+    // Open OT slots — WF_OT_OPEN (human layout): [Date, Start Time, End Time,
+    // Slots, Activity, Min Length, ADG, ADV, Type, Rate, Skill, WindowHours,
+    // OpenHours, Visible, OID]. Only Type=OT rows count (ACSU released-time
+    // is NOT overtime); hidden postings excluded; hours = window overlap ×
+    // slot count, to-date capped like the rest of the view.
     try {
       var dbOpen = WT._getDB('WF_OT_OPEN');
       if (dbOpen && dbOpen.getLastRow() > 1) {
         var seenOp = {};
         dbOpen.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
-          if (String(row[10]) === 'N') return;
+          if (String(row[8]) !== 'OT') return;
+          if (String(row[13]) === 'N') return;
           var dStr = WT._formatDate(row[0]);
           var dayMs = self._dayStartEpoch(dStr);
           if (dayMs < 0) return;
           if (dayMs + 86400000 * 2 < pb.prevStart || dayMs >= pb.selEnd) return;
-          var oid = String(row[11] || (dStr + '|' + row[1] + '|' + row[2] + '|' + row[8]));
+          var oid = String(row[14] || (dStr + '|' + row[1] + '|' + row[2] + '|' + row[10]));
           if (seenOp[oid]) return; seenOp[oid] = true;
           var slots = parseInt(row[3], 10) || 0;
           if (!slots) return;
           var iv = self._segInterval(WT, dayMs, row[1], row[2]);
           if (!iv) return;
-          var skill = String(row[8]) || 'GEN';
+          var skill = String(row[10]) || 'GEN';
           var selH = distribute(iv,
             function(t, h) { t.openOt += h * slots; },
             function(b, h) { b.openOt += h * slots; });
