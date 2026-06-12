@@ -20,6 +20,34 @@
   }
 
   var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
+
+  // ── GSAP view entrances ──────────────────────────────────────────────────
+  // One-shot, GPU-friendly (y + opacity only — no scale, so Chart.js canvases
+  // never blur or resize). Animates ONLY on view switches and on the
+  // loading→content transition, never on periodic re-renders, and degrades
+  // to nothing when GSAP is blocked or the user prefers reduced motion.
+  var __lastAnimKey = null;
+  function animateViewEntrance() {
+      if (typeof gsap === 'undefined') return;
+      if (document.body.classList.contains('popout-mode')) return;
+      try { if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch(e) {}
+      var targets = Array.prototype.slice.call(
+          document.querySelectorAll('#content .sticky-header, #content .aether-card')
+      ).slice(0, 18);
+      if (!targets.length) return;
+      // 'load' (spinner/empty) vs 'full' content distinguishes the
+      // loading→data transition so freshly fetched views still glide in.
+      var key = state.view + ':' + (targets.length > 2 ? 'full' : 'load');
+      if (__lastAnimKey === key) return;
+      __lastAnimKey = key;
+      gsap.from(targets, {
+          y: 18, autoAlpha: 0,
+          duration: 0.5, ease: 'power3.out',
+          stagger: 0.045,
+          clearProps: 'transform,opacity,visibility',
+          overwrite: 'auto'
+      });
+  }
   
   document.addEventListener('click', function(e) {
       var panel = document.getElementById('notif-panel');
@@ -89,7 +117,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.12-OT4 · accepts WFM OT JSON + flattened table';
+  var APP_BUILD = 'build 2026.06.12-OT5 · GSAP motion';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr()
@@ -387,7 +415,18 @@
   window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
   window.openPopout = function(mode) { var baseUrl = state.appUrl || window.location.href.split('?')[0]; var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); };
 
-  function showToast(m) { var t=document.getElementById('toast'); if(!t) return; t.querySelector('#toast-msg').innerText=m; t.style.opacity='1'; t.style.transform='translateY(0)'; setTimeout(function(){t.style.opacity='0'; t.style.transform='translateY(20px)';},3000); }
+  function showToast(m) {
+      var t = document.getElementById('toast'); if(!t) return;
+      t.querySelector('#toast-msg').innerText = m;
+      if (typeof gsap !== 'undefined') {
+          gsap.killTweensOf(t);
+          gsap.fromTo(t, { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'back.out(1.6)' });
+          gsap.to(t, { y: 20, opacity: 0, duration: 0.35, ease: 'power2.in', delay: 3 });
+      } else {
+          t.style.opacity='1'; t.style.transform='translateY(0)';
+          setTimeout(function(){t.style.opacity='0'; t.style.transform='translateY(20px)';},3000);
+      }
+  }
   function updateClock() { var el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
   var searchTimeout;
@@ -658,6 +697,7 @@
           
           c.innerHTML = h; 
           refreshIcons();
+          animateViewEntrance();
 
           var newAbsencesLeft = document.getElementById('absences-left-pane');
           if (newAbsencesLeft) newAbsencesLeft.scrollTop = leftScroll;
