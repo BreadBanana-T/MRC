@@ -288,7 +288,7 @@ var ManagementView = {
           if (!slots) return;
           var iv = self._segInterval(WT, dayMs, row[1], row[2]);
           if (!iv) return;
-          var skill = String(row[10]) || 'GEN';
+          var skill = String(row[10]) || 'Any agent';
           var selH = distribute(iv,
             function(t, h) { t.openOt += h * slots; },
             function(b, h) { b.openOt += h * slots; });

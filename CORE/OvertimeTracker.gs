@@ -262,14 +262,18 @@ var OvertimeTracker = {
   OPEN_SHEET: 'WF_OT_OPEN',
   OPEN_HEADERS: ['Date', 'Start Time', 'End Time', 'Slots', 'Activity', 'Min Length',
                  'Agent Data Group', 'Agent Data Values',
-                 'Type', 'Rate', 'Skill', 'Window Hours', 'Open Hours', 'Visible', 'OID'],
+                 'Type', 'Rate', 'Req Group', 'Window Hours', 'Open Hours', 'Visible', 'OID'],
 
+  // Requirement group display name. These are WFM "Agent Data Groups"
+  // (who may take the slot), NOT skills: e.g. "ADT Monit Knowledge Level"
+  // with values Junior/Senior/Regular/Expert, "ADT SAFE: Yes",
+  // "Language: French Only". Empty group = any agent may take it.
   _skillName: function(adgName) {
     var n = String(adgName || '').trim();
-    if (!n) return 'GEN';
+    if (!n) return 'Any agent';
     if (/safe/i.test(n)) return 'SAFE';
-    if (/knowledge/i.test(n)) return 'KL';
-    if (/language/i.test(n)) return 'LANG';
+    if (/knowledge/i.test(n)) return 'Knowledge Level';
+    if (/language/i.test(n)) return 'Language';
     return n.replace(/^ADT\s+/i, '');
   },
 
@@ -401,7 +405,7 @@ var OvertimeTracker = {
       sheet.appendRow(this.OPEN_HEADERS);
       sheet.getRange(1, 1, 1, W).setFontWeight('bold');
       try { sheet.setFrozenRows(1); } catch (e) {}
-    } else if (String(sheet.getRange(1, 9).getValue()) !== 'Type') {
+    } else if (String(sheet.getRange(1, 9).getValue()) !== 'Type' || String(sheet.getRange(1, 11).getValue()) !== 'Req Group') {
       // Old schema — wipe and rebuild (data is re-pastable by design).
       sheet.clear();
       sheet.appendRow(this.OPEN_HEADERS);
@@ -454,7 +458,7 @@ var OvertimeTracker = {
       } else if (type === 'OT') {
         open.hours += oh;
         open.slots += slots;
-        var skill = String(r[10]) || 'GEN';
+        var skill = String(r[10]) || 'Any agent';
         open.skills[skill] = Math.round(((open.skills[skill] || 0) + oh) * 100) / 100;
         if (!byDay[d]) byDay[d] = { open: 0, slots: 0 };
         byDay[d].open += oh;
@@ -462,7 +466,7 @@ var OvertimeTracker = {
       }
       if (open.windows.length < 100) {
         open.windows.push({ date: d, start: String(r[1]), end: String(r[2]), slots: slots, hours: oh,
-                            skill: String(r[10]) || 'GEN', values: String(r[7] || ''), type: type });
+                            group: String(r[10]) || 'Any agent', values: String(r[7] || ''), type: type });
       }
     });
     if (!any) return null;
