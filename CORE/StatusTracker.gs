@@ -30,14 +30,22 @@ const StatusTracker = {
     const now = new Date();
 
     // Role session logging (local log used by Insights graphs).
+    // SAFE is NEVER logged as session hours (per product owner): a manual
+    // "Assign SAFE" is floor status only. Additive combos like "ICL SAFE"
+    // keep their non-SAFE part so ICL/ULC hours still log.
     if (foundRow > -1 && oldData && type === 'role') {
       const oldRole = oldData[2];
       const oldTime = oldData[0];
       if (oldRole && oldRole !== '' && oldRole !== value) {
-        const startEpoch = new Date(oldTime).getTime();
-        const endEpoch = now.getTime();
-        if (typeof LogSync !== 'undefined') {
-          LogSync.logSession(name, oldRole, startEpoch, endEpoch);
+        const logRole = String(oldRole).split(/\s+/)
+          .filter(t => t && t.toUpperCase().indexOf('SAFE') === -1)
+          .join(' ');
+        if (logRole) {
+          const startEpoch = new Date(oldTime).getTime();
+          const endEpoch = now.getTime();
+          if (typeof LogSync !== 'undefined') {
+            LogSync.logSession(name, logRole, startEpoch, endEpoch);
+          }
         }
       }
     }

@@ -3,22 +3,23 @@
  *
  * Forensic, per-agent view of SAFE hours with SOURCE ATTRIBUTION — built to
  * answer "where exactly do this agent's 90h come from", because SAFE hours
- * can enter the system through THREE doors:
+ * enter through TWO doors:
  *
  *   SCHED — WF_ROLES: SAFE blocks coded in the pasted WFM schedule
  *   OT    — WF_OVERTIME: overtime decoded into the SAFE bucket
  *           ("OTST … SAFE OnQueue" overtime). NOTE: such an activity ALSO
  *           matches the role classifier, so the same time block can exist
  *           in BOTH sheets — any report that sums them counts it twice.
- *   FLOOR — DB_Sessions: manual "Assign SAFE" sessions from the Floor menu
+ *
+ * Manual "Assign SAFE" from the Floor menu is deliberately NOT a source:
+ * per product owner it is floor status only and must never count as hours
+ * (StatusTracker also no longer logs SAFE sessions at write time).
  *
  * Flags (length alone is NOT flagged — long SAFE segments are normal):
  *   DOUBLE  — a SCHED and an OT segment for the same agent overlap in time:
  *             the same hours exist in two sheets (the classic inflation).
  *   OVERLAP — two segments of the SAME source overlap on the same day
  *             (double-pasted schedules).
- *   RUNAWAY — a FLOOR session longer than 12h (someone assigned SAFE on the
- *             dashboard and never set the agent back to Active).
  *
  * Hours split Morning/Evening/Night with the same _getShiftSplits as the
  * Furlough tracker. Only agents with SAFE hours in the window appear.
@@ -112,35 +113,6 @@ var SafeTracker = {
       });
     }
 
-    // 3) FLOOR — DB_Sessions manual "Assign SAFE" sessions
-    //    [Timestamp, Agent, Role, Start, End, Mins, Hours]
-    var dbSess = WT._getDB('DB_Sessions');
-    if (dbSess && dbSess.getLastRow() > 1) {
-      dbSess.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
-        if (String(row[2]).toUpperCase().indexOf('SAFE') === -1) return;
-        var agent = String(row[1]).trim();
-        if (!agent) return;
-        var st = new Date(row[3]);
-        if (isNaN(st.getTime())) return;
-        var dStr = Utilities.formatDate(st, 'America/Toronto', 'yyyy-MM-dd');
-        if (dStr < sStr || dStr > eStr) return;
-        var sMins = st.getHours() * 60 + st.getMinutes();
-        var en = new Date(row[4]);
-        var eMins;
-        if (!isNaN(en.getTime())) {
-          eMins = en.getHours() * 60 + en.getMinutes();
-          // multi-day runaway: cap representation at +24h so the math stays sane
-          var spanH = (en.getTime() - st.getTime()) / 3600000;
-          if (spanH > 24) eMins = sMins; // wraps to exactly 24h below
-        } else {
-          var hrs = Number(row[6]) || 0;
-          if (hrs <= 0) return;
-          eMins = sMins + Math.round(hrs * 60);
-        }
-        addSegment(agent, dStr, sMins, eMins, regionOf(agent, ''), 'FLOOR');
-      });
-    }
-
     // Flag pass: same-source overlaps + cross-source (SCHED×OT etc.) doubles.
     var overlapDays = {}, doubleDays = {};
     Object.keys(rawByAgentDay).forEach(function (k) {
@@ -162,29 +134,28 @@ var SafeTracker = {
       var h = self._r2(g.hours);
       if (!agents[g.agent]) {
         agents[g.agent] = { name: g.agent, region: g.region, total: 0, morning: 0, evening: 0, night: 0,
-                            srcSched: 0, srcOt: 0, srcFloor: 0, days: {}, segs: 0 };
+                            srcSched: 0, srcOt: 0, days: {}, segs: 0 };
       }
       var a = agents[g.agent];
       a.total += h; a.segs++;
       if (g.shift === 'Morning') a.morning += h;
       else if (g.shift === 'Evening') a.evening += h;
       else a.night += h;
-      if (g.src === 'SCHED') a.srcSched += h; else if (g.src === 'OT') a.srcOt += h; else a.srcFloor += h;
+      if (g.src === 'SCHED') a.srcSched += h; else a.srcOt += h;
       a.days[g.date] = self._r2((a.days[g.date] || 0) + h);
       var dayKey = g.agent + '|' + g.rawDay;
       var flags = [];
       if (doubleDays[dayKey]) flags.push('DOUBLE');
       if (overlapDays[dayKey]) flags.push('OVERLAP');
-      if (g.src === 'FLOOR' && h > 12) flags.push('RUNAWAY');
       return { date: g.date, agent: g.agent, shift: g.shift, src: g.src, hours: h,
                time: g.timeStart + ' - ' + g.timeEnd, flags: flags };
     });
 
-    var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, floor: 0, count: events.length };
+    var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, count: events.length };
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
-      totals.sched += a.srcSched; totals.ot += a.srcOt; totals.floor += a.srcFloor;
+      totals.sched += a.srcSched; totals.ot += a.srcOt;
       var dayKeys = Object.keys(a.days);
       var maxDay = null;
       dayKeys.forEach(function (d) { if (!maxDay || a.days[d] > a.days[maxDay]) maxDay = d; });
@@ -194,7 +165,7 @@ var SafeTracker = {
       return {
         name: n, region: a.region,
         total: self._r2(a.total), morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
-        srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt), srcFloor: self._r2(a.srcFloor),
+        srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
         days: dayKeys.length, segs: a.segs,
         avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
@@ -202,7 +173,7 @@ var SafeTracker = {
       };
     }).sort(function (x, y) { return y.total - x.total; });
 
-    ['all', 'morning', 'evening', 'night', 'sched', 'ot', 'floor'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
+    ['all', 'morning', 'evening', 'night', 'sched', 'ot'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
     events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent) || a.src.localeCompare(b.src); });
 
     return JSON.stringify({
@@ -211,8 +182,7 @@ var SafeTracker = {
       audit: {
         agents: perAgent.length,
         doubleAgentDays: Object.keys(doubleDays).length,
-        overlapAgentDays: Object.keys(overlapDays).length,
-        runaways: events.filter(function (e) { return e.flags.indexOf('RUNAWAY') !== -1; }).length
+        overlapAgentDays: Object.keys(overlapDays).length
       }
     });
   }
