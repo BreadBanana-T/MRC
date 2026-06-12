@@ -171,10 +171,10 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.12-UI7 · polish pass';
+  var APP_BUILD = 'build 2026.06.12-SAFE1 · SAFE tracker';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr()
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -668,6 +668,8 @@
       });
       if (state.trackerMode === 'overtime') {
           runner.getOvertimeAnalytics(state.trackerRange, state.trackerDate, state.trackerRegion, state.trackerCycleFilter);
+      } else if (state.trackerMode === 'safe') {
+          runner.getSafeAnalytics(state.trackerRange, state.trackerDate, state.trackerRegion, state.trackerCycleFilter);
       } else {
           runner.getWorkforceAnalytics(state.trackerRange, state.trackerDate, state.trackerMode, state.trackerRegion, state.trackerCycleFilter);
       }
@@ -1274,6 +1276,7 @@
       var isAbsences = state.trackerMode === 'absences';
       var isTraining = state.trackerMode === 'training';
       var isOvertime = state.trackerMode === 'overtime';
+      var isSafe = state.trackerMode === 'safe';
       var d = state.trackerData || {};
 
       var schedText = "Loading..."; var idpText = "Awaiting Sync..."; var muText = "";
@@ -1298,11 +1301,11 @@
           headerHtml += '<div style="flex:1;"></div>';
       }
 
-      if (isCoach || isAbsences) {
+      if (isCoach || isAbsences || isSafe) {
           headerHtml += '<div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border); margin-right:12px;"><button class="nav-btn ' + (state.trackerRegion==='All'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'All\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">All</button><button class="nav-btn ' + (state.trackerRegion==='Onshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Onshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Onshore</button><button class="nav-btn ' + (state.trackerRegion==='Offshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Offshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Offshore</button></div>';
       }
 
-      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\'||this.value===\'overtime\') state.trackerRegion=\'Onshore\'; fetchTrackerData();"><option value="furlough" ' + (state.trackerMode==='furlough'?'selected':'') + '>Furlough Tracker</option><option value="coaching" ' + (state.trackerMode==='coaching'?'selected':'') + '>Coaching Tracker</option><option value="overtime" ' + (state.trackerMode==='overtime'?'selected':'') + '>Overtime Tracker</option><option value="absences" ' + (state.trackerMode==='absences'?'selected':'') + '>Absence Tracker</option><option value="training" ' + (state.trackerMode==='training'?'selected':'') + '>Training Tracker</option></select>';
+      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\'||this.value===\'overtime\') state.trackerRegion=\'Onshore\'; if(this.value===\'safe\'){state.trackerRegion=\'All\'; state.safeSelectedAgent=null;} fetchTrackerData();"><option value="furlough" ' + (state.trackerMode==='furlough'?'selected':'') + '>Furlough Tracker</option><option value="coaching" ' + (state.trackerMode==='coaching'?'selected':'') + '>Coaching Tracker</option><option value="overtime" ' + (state.trackerMode==='overtime'?'selected':'') + '>Overtime Tracker</option><option value="safe" ' + (state.trackerMode==='safe'?'selected':'') + '>SAFE Tracker</option><option value="absences" ' + (state.trackerMode==='absences'?'selected':'') + '>Absence Tracker</option><option value="training" ' + (state.trackerMode==='training'?'selected':'') + '>Training Tracker</option></select>';
 
       if (isAbsences) {
           headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerDate=this.value+\'-01-01\'; state.selectedAbsenceAgent=null; state.absenceMonthFilter=\'ALL\'; fetchTrackerData();"><option value="2026" ' + (state.trackerDate.substring(0,4)==='2026'?'selected':'') + '>Year: 2026</option><option value="2025" ' + (state.trackerDate.substring(0,4)==='2025'?'selected':'') + '>Year: 2025</option></select>';
@@ -1458,6 +1461,92 @@
           var dayAvgCls = dayAvg >= 2 ? 'status-surplus' : (dayAvg < 0 ? 'status-risk' : 'status-neutral');
           var dayAvgHtml = '<div class="heatmap-cell idp-static ' + dayAvgCls + '" style="margin-top:14px; padding:14px 24px; border-radius:12px; flex-direction:row; gap:16px; justify-content:center; border:2px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.08);"><span style="font-size:0.75rem; font-weight:800; letter-spacing:2px; opacity:0.9;">DAY AVERAGE IDP</span><span style="font-size:1.6rem; font-weight:800; font-family:monospace;">' + (dayAvg>0?'+'+dayAvg:dayAvg) + '</span></div>';
           gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muText ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muText + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpText + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
+      }
+
+      // ───────── SAFE MODE: forensic per-agent audit ─────────
+      if (isSafe) {
+          var pa = d.perAgent || [];
+          var q = (state.trackerSearch || '').toLowerCase();
+          var list = q ? pa.filter(function(x) { return x.name.toLowerCase().indexOf(q) !== -1; }) : pa;
+          var selA = null;
+          for (var si = 0; si < pa.length; si++) if (pa[si].name === state.safeSelectedAgent) { selA = pa[si]; break; }
+          var SHC = { Morning: '#f59e0b', Evening: '#ea580c', Night: '#6366f1' };
+
+          var kpiS = function(label, value, sub, color) {
+              return '<div class="aether-card" style="padding:18px 20px;"><div class="aurora-label" style="margin-bottom:8px;">' + label + '</div><div class="cnum" style="font-size:1.8rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; line-height:1; font-variant-numeric:tabular-nums;">' + value + '</div>' + (sub ? '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + sub + '</div>' : '') + '</div>';
+          };
+          var t2 = d.totals || { all: 0, morning: 0, evening: 0, night: 0 };
+          var audit = d.audit || {};
+          var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:16px; margin:20px 0;">' +
+              kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agent' + ((audit.agents || 0) === 1 ? '' : 's') + ' · ' + (t2.count || 0) + ' segments', 'var(--status-active)') +
+              kpiS('Morning', (t2.morning || 0).toFixed(1) + 'h', '', SHC.Morning) +
+              kpiS('Evening', (t2.evening || 0).toFixed(1) + 'h', '', SHC.Evening) +
+              kpiS('Night', (t2.night || 0).toFixed(1) + 'h', '', SHC.Night) +
+              ((audit.overlapAgentDays || 0) > 0 ? kpiS('⚠ Overlap Days', String(audit.overlapAgentDays), 'same-day overlapping segments — likely double counts', 'var(--status-alert)') : '') +
+              '</div>';
+
+          var meter = function(a) {
+              var t = a.total || 1;
+              return '<div style="display:flex; height:5px; border-radius:99px; overflow:hidden; background:rgba(0,0,0,0.06); margin-top:8px;">' +
+                  '<div style="width:' + (a.morning / t * 100) + '%; background:' + SHC.Morning + ';"></div>' +
+                  '<div style="width:' + (a.evening / t * 100) + '%; background:' + SHC.Evening + ';"></div>' +
+                  '<div style="width:' + (a.night / t * 100) + '%; background:' + SHC.Night + ';"></div></div>';
+          };
+          var listHtml = list.map(function(a) {
+              var isSel = a.name === state.safeSelectedAgent;
+              var warn = (a.overlapDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">' + a.overlapDays + 'd overlap</span>' : '') +
+                         (a.heavyDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">&gt;10h ×' + a.heavyDays + '</span>' : '');
+              return '<div class="hover-bg" style="padding:13px 16px; margin-bottom:8px; border-radius:13px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + ';" onclick="state.safeSelectedAgent=\'' + escapeHTML(a.name).replace(/'/g, "\\'") + '\'; render();">' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
+                  '<span style="font-weight:800; font-size:0.92rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + (a.region === 'Offshore' ? ' <span style="font-size:0.58rem; background:var(--region-off); color:#fff; padding:1px 6px; border-radius:4px; vertical-align:middle;">OFF</span>' : '') + '</span>' +
+                  '<span style="font-weight:800; font-size:0.95rem; color:var(--status-active); font-variant-numeric:tabular-nums; flex-shrink:0;">' + a.total + 'h</span></div>' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:5px;"><span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + a.days + ' day' + (a.days === 1 ? '' : 's') + ' · avg ' + a.avgPerDay + 'h/day</span><span style="display:flex; gap:4px;">' + warn + '</span></div>' +
+                  meter(a) + '</div>';
+          }).join('') || '<div style="padding:32px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.85rem;">No SAFE hours in this window.</div>';
+
+          var leftCol = '<div class="aether-card" style="padding:16px; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
+              '<div style="margin-bottom:12px;">' + searchBox('tracker-search', 'Search SAFE agents...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:100%;') + '</div>' +
+              '<div style="overflow-y:auto; flex:1; padding-right:4px;" class="custom-scrollbar">' + listHtml + '</div></div>';
+
+          var rightCol;
+          if (selA) {
+              var segs = (d.events || []).filter(function(e) { return e.agent === selA.name; });
+              var segRows = segs.map(function(e) {
+                  var fl = (e.flags || []).map(function(f) {
+                      return f === 'OVERLAP'
+                          ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">OVERLAP</span>'
+                          : '<span style="font-size:0.6rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">' + f + '</span>';
+                  }).join(' ');
+                  var flagged = (e.flags || []).length > 0;
+                  return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);' + (flagged ? ' background:rgba(220,38,38,0.04);' : '') + '">' +
+                      '<td style="padding:9px 14px; font-weight:700; font-size:0.82rem; white-space:nowrap;">' + escapeHTML(e.date) + '</td>' +
+                      '<td style="padding:9px 14px;"><span style="font-size:0.66rem; font-weight:800; color:#fff; background:' + (SHC[e.shift] || '#94a3b8') + '; padding:2px 9px; border-radius:99px;">' + escapeHTML(e.shift) + '</span></td>' +
+                      '<td style="padding:9px 14px; font-family:monospace; font-size:0.8rem; white-space:nowrap;">' + escapeHTML(e.time) + '</td>' +
+                      '<td style="padding:9px 14px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + e.hours + 'h</td>' +
+                      '<td style="padding:9px 14px;">' + fl + '</td></tr>';
+              }).join('');
+              var shiftChip = function(lbl, v) { return '<div style="flex:1; min-width:110px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:10px 14px;"><div style="font-size:0.62rem; font-weight:800; color:' + SHC[lbl] + '; text-transform:uppercase; letter-spacing:0.8px;">' + lbl + '</div><div style="font-size:1.3rem; font-weight:800; font-variant-numeric:tabular-nums;">' + v + 'h</div></div>'; };
+              var warnBanner = (selA.overlapDays > 0)
+                  ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2); font-size:0.82rem; font-weight:700; color:var(--status-alert); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-octagon" width="16"></i> ' + selA.overlapDays + ' day' + (selA.overlapDays === 1 ? '' : 's') + ' with overlapping SAFE segments — these inflate the total. Flagged rows below.</div>'
+                  : (selA.heavyDays > 0 ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(217,119,6,0.08); border:1px solid rgba(217,119,6,0.2); font-size:0.82rem; font-weight:700; color:var(--status-warn); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-triangle" width="16"></i> ' + selA.heavyDays + ' day' + (selA.heavyDays === 1 ? '' : 's') + ' over 10h of SAFE — verify against the raw schedule.</div>' : '');
+              rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
+                  '<div style="padding:20px 24px; border-bottom:1px solid var(--glass-border);">' +
+                  '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
+                  '<div><button class="btn btn-glass" style="height:28px; font-size:0.72rem; margin-bottom:10px;" onclick="state.safeSelectedAgent=null; render();"><i data-lucide="arrow-left" width="13"></i> All agents</button>' +
+                  '<div style="font-weight:800; font-size:1.5rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</div>' +
+                  '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE day' + (selA.days === 1 ? '' : 's') + ' · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>/day' + (selA.maxDay ? ' · heaviest <b style="color:var(--text-main);">' + escapeHTML(selA.maxDay.date) + '</b> (' + selA.maxDay.hours + 'h)' : '') + '</div></div>' +
+                  '<div style="text-align:right;"><div class="cnum" style="font-size:2.6rem; font-weight:800; color:var(--status-active); line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.62rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;">total in window</div></div></div>' +
+                  '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">' + shiftChip('Morning', selA.morning) + shiftChip('Evening', selA.evening) + shiftChip('Night', selA.night) + '</div>' +
+                  warnBanner + '</div>' +
+                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:9px 14px;">Date</th><th style="padding:9px 14px;">Shift</th><th style="padding:9px 14px;">Window</th><th style="padding:9px 14px; text-align:right;">Hours</th><th style="padding:9px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
+          } else {
+              rightCol = '<div class="aether-card" style="padding:24px; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
+                  '<div class="section-header">Shift Distribution<span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">select an agent on the left for the line-by-line audit</span></div>' +
+                  '<div class="chart-3d-container" style="height:240px; width:100%; margin:10px 0;"><canvas id="tracker-chart" style="display:block;"></canvas></div>' +
+                  '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; line-height:1.7; border-top:1px solid var(--glass-border); padding-top:14px;">Every SAFE segment from the pasted WFM schedules is attributed to Morning / Evening / Night exactly like the Furlough tracker. Agents are listed only if they have SAFE hours in this window. ' + ((audit.overlapAgentDays || 0) > 0 ? '<b style="color:var(--status-alert);">' + audit.overlapAgentDays + ' agent-day(s) have overlapping segments — start with the red-flagged agents.</b>' : 'No overlapping segments detected in this window.') + '</div></div>';
+          }
+
+          return headerHtml + kpis + '<div class="grid-split" style="grid-template-columns: 360px 1fr; gap:20px; align-items:start; padding-bottom:30px;">' + leftCol + rightCol + '</div>';
       }
 
       // ───────── OVERTIME MODE: dedicated layout (open vs given) ─────────

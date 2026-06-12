@@ -89,6 +89,13 @@ function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return Log
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
 function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
 
+// --- SAFE TRACKER (forensic per-agent SAFE hours) ---
+function getSafeAnalytics(mode, refDate, region, cycle) {
+  return (typeof SafeTracker !== 'undefined')
+    ? SafeTracker.getAnalytics(mode, refDate, region, cycle)
+    : JSON.stringify({ error: 'SafeTracker not loaded.' });
+}
+
 // --- OT OPEN SLOTS (WFM JSON export) ---
 function importOtOpenSlots(t) {
   return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(t) : 'Error';
