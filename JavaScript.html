@@ -171,7 +171,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.12-SAFE1 · SAFE tracker';
+  var APP_BUILD = 'build 2026.06.12-SAFE2 · SAFE source attribution';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null
@@ -1475,14 +1475,16 @@
           var kpiS = function(label, value, sub, color) {
               return '<div class="aether-card" style="padding:18px 20px;"><div class="aurora-label" style="margin-bottom:8px;">' + label + '</div><div class="cnum" style="font-size:1.8rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; line-height:1; font-variant-numeric:tabular-nums;">' + value + '</div>' + (sub ? '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + sub + '</div>' : '') + '</div>';
           };
-          var t2 = d.totals || { all: 0, morning: 0, evening: 0, night: 0 };
+          var t2 = d.totals || { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, floor: 0 };
           var audit = d.audit || {};
-          var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:16px; margin:20px 0;">' +
-              kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agent' + ((audit.agents || 0) === 1 ? '' : 's') + ' · ' + (t2.count || 0) + ' segments', 'var(--status-active)') +
-              kpiS('Morning', (t2.morning || 0).toFixed(1) + 'h', '', SHC.Morning) +
-              kpiS('Evening', (t2.evening || 0).toFixed(1) + 'h', '', SHC.Evening) +
-              kpiS('Night', (t2.night || 0).toFixed(1) + 'h', '', SHC.Night) +
-              ((audit.overlapAgentDays || 0) > 0 ? kpiS('⚠ Overlap Days', String(audit.overlapAgentDays), 'same-day overlapping segments — likely double counts', 'var(--status-alert)') : '') +
+          var SRC = { SCHED: { c: '#6366f1', lbl: 'WFM Sched' }, OT: { c: '#f472b6', lbl: 'OT SAFE' }, FLOOR: { c: '#94a3b8', lbl: 'Floor' } };
+          var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px; margin:20px 0;">' +
+              kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agent' + ((audit.agents || 0) === 1 ? '' : 's') + ' · M ' + (t2.morning || 0).toFixed(1) + ' / E ' + (t2.evening || 0).toFixed(1) + ' / N ' + (t2.night || 0).toFixed(1), 'var(--status-active)') +
+              kpiS('From WFM Schedule', (t2.sched || 0).toFixed(1) + 'h', 'SAFE blocks in pasted schedules', SRC.SCHED.c) +
+              kpiS('From Overtime', (t2.ot || 0).toFixed(1) + 'h', 'SAFE-bucket OT (OTST … SAFE)', SRC.OT.c) +
+              kpiS('From Floor Assigns', (t2.floor || 0).toFixed(1) + 'h', 'manual "Assign SAFE" sessions', SRC.FLOOR.c) +
+              ((audit.doubleAgentDays || 0) > 0 ? kpiS('⚠ Double-Counted', String(audit.doubleAgentDays) + ' days', 'same hours in TWO sources — combined reports sum them twice', 'var(--status-alert)') : '') +
+              ((audit.overlapAgentDays || 0) > 0 ? kpiS('⚠ Overlaps', String(audit.overlapAgentDays) + ' days', 'same-source overlapping segments', 'var(--status-warn)') : '') +
               '</div>';
 
           var meter = function(a) {
@@ -1494,13 +1496,17 @@
           };
           var listHtml = list.map(function(a) {
               var isSel = a.name === state.safeSelectedAgent;
-              var warn = (a.overlapDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">' + a.overlapDays + 'd overlap</span>' : '') +
-                         (a.heavyDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">&gt;10h ×' + a.heavyDays + '</span>' : '');
+              var warn = (a.doubleDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">' + a.doubleDays + 'd double</span>' : '') +
+                         (a.overlapDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">' + a.overlapDays + 'd overlap</span>' : '');
+              var srcLine = [];
+              if (a.srcSched > 0) srcLine.push('<span style="color:#6366f1; font-weight:800;">S ' + a.srcSched + 'h</span>');
+              if (a.srcOt > 0) srcLine.push('<span style="color:#f472b6; font-weight:800;">OT ' + a.srcOt + 'h</span>');
+              if (a.srcFloor > 0) srcLine.push('<span style="color:#94a3b8; font-weight:800;">FL ' + a.srcFloor + 'h</span>');
               return '<div class="hover-bg" style="padding:13px 16px; margin-bottom:8px; border-radius:13px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + ';" onclick="state.safeSelectedAgent=\'' + escapeHTML(a.name).replace(/'/g, "\\'") + '\'; render();">' +
                   '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
                   '<span style="font-weight:800; font-size:0.92rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + (a.region === 'Offshore' ? ' <span style="font-size:0.58rem; background:var(--region-off); color:#fff; padding:1px 6px; border-radius:4px; vertical-align:middle;">OFF</span>' : '') + '</span>' +
                   '<span style="font-weight:800; font-size:0.95rem; color:var(--status-active); font-variant-numeric:tabular-nums; flex-shrink:0;">' + a.total + 'h</span></div>' +
-                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:5px;"><span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + a.days + ' day' + (a.days === 1 ? '' : 's') + ' · avg ' + a.avgPerDay + 'h/day</span><span style="display:flex; gap:4px;">' + warn + '</span></div>' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:5px;"><span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + a.days + 'd · avg ' + a.avgPerDay + 'h · ' + srcLine.join(' ') + '</span><span style="display:flex; gap:4px;">' + warn + '</span></div>' +
                   meter(a) + '</div>';
           }).join('') || '<div style="padding:32px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.85rem;">No SAFE hours in this window.</div>';
 
@@ -1513,22 +1519,25 @@
               var segs = (d.events || []).filter(function(e) { return e.agent === selA.name; });
               var segRows = segs.map(function(e) {
                   var fl = (e.flags || []).map(function(f) {
-                      return f === 'OVERLAP'
-                          ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">OVERLAP</span>'
+                      return f === 'DOUBLE'
+                          ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;" title="This time block exists in two sources (e.g. schedule AND OT) — combined reports count it twice">DOUBLE</span>'
                           : '<span style="font-size:0.6rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">' + f + '</span>';
                   }).join(' ');
-                  var flagged = (e.flags || []).length > 0;
+                  var srcM = SRC[e.src] || SRC.SCHED;
+                  var srcChip = '<span style="font-size:0.62rem; font-weight:800; color:#fff; background:' + srcM.c + '; padding:2px 8px; border-radius:99px;">' + srcM.lbl + '</span>';
+                  var flagged = (e.flags || []).indexOf('DOUBLE') !== -1;
                   return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);' + (flagged ? ' background:rgba(220,38,38,0.04);' : '') + '">' +
                       '<td style="padding:9px 14px; font-weight:700; font-size:0.82rem; white-space:nowrap;">' + escapeHTML(e.date) + '</td>' +
+                      '<td style="padding:9px 14px; white-space:nowrap;">' + srcChip + '</td>' +
                       '<td style="padding:9px 14px;"><span style="font-size:0.66rem; font-weight:800; color:#fff; background:' + (SHC[e.shift] || '#94a3b8') + '; padding:2px 9px; border-radius:99px;">' + escapeHTML(e.shift) + '</span></td>' +
                       '<td style="padding:9px 14px; font-family:monospace; font-size:0.8rem; white-space:nowrap;">' + escapeHTML(e.time) + '</td>' +
                       '<td style="padding:9px 14px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + e.hours + 'h</td>' +
                       '<td style="padding:9px 14px;">' + fl + '</td></tr>';
               }).join('');
               var shiftChip = function(lbl, v) { return '<div style="flex:1; min-width:110px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:10px 14px;"><div style="font-size:0.62rem; font-weight:800; color:' + SHC[lbl] + '; text-transform:uppercase; letter-spacing:0.8px;">' + lbl + '</div><div style="font-size:1.3rem; font-weight:800; font-variant-numeric:tabular-nums;">' + v + 'h</div></div>'; };
-              var warnBanner = (selA.overlapDays > 0)
-                  ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2); font-size:0.82rem; font-weight:700; color:var(--status-alert); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-octagon" width="16"></i> ' + selA.overlapDays + ' day' + (selA.overlapDays === 1 ? '' : 's') + ' with overlapping SAFE segments — these inflate the total. Flagged rows below.</div>'
-                  : (selA.heavyDays > 0 ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(217,119,6,0.08); border:1px solid rgba(217,119,6,0.2); font-size:0.82rem; font-weight:700; color:var(--status-warn); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-triangle" width="16"></i> ' + selA.heavyDays + ' day' + (selA.heavyDays === 1 ? '' : 's') + ' over 10h of SAFE — verify against the raw schedule.</div>' : '');
+              var warnBanner = (selA.doubleDays > 0)
+                  ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2); font-size:0.82rem; font-weight:700; color:var(--status-alert); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-octagon" width="16"></i> ' + selA.doubleDays + ' day' + (selA.doubleDays === 1 ? '' : 's') + ' where the SAME time block appears in two sources (schedule + OT / floor) — combined reports count those hours twice. DOUBLE rows below.</div>'
+                  : (selA.overlapDays > 0 ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(217,119,6,0.08); border:1px solid rgba(217,119,6,0.2); font-size:0.82rem; font-weight:700; color:var(--status-warn); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-triangle" width="16"></i> ' + selA.overlapDays + ' day' + (selA.overlapDays === 1 ? '' : 's') + ' with same-source overlapping segments.</div>' : '');
               rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
                   '<div style="padding:20px 24px; border-bottom:1px solid var(--glass-border);">' +
                   '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
@@ -1536,14 +1545,16 @@
                   '<div style="font-weight:800; font-size:1.5rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</div>' +
                   '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE day' + (selA.days === 1 ? '' : 's') + ' · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>/day' + (selA.maxDay ? ' · heaviest <b style="color:var(--text-main);">' + escapeHTML(selA.maxDay.date) + '</b> (' + selA.maxDay.hours + 'h)' : '') + '</div></div>' +
                   '<div style="text-align:right;"><div class="cnum" style="font-size:2.6rem; font-weight:800; color:var(--status-active); line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.62rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;">total in window</div></div></div>' +
-                  '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">' + shiftChip('Morning', selA.morning) + shiftChip('Evening', selA.evening) + shiftChip('Night', selA.night) + '</div>' +
+                  '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">' + shiftChip('Morning', selA.morning) + shiftChip('Evening', selA.evening) + shiftChip('Night', selA.night) +
+                  '<div style="flex:1.4; min-width:170px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:10px 14px;"><div style="font-size:0.62rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px;">By Source</div><div style="font-size:0.82rem; font-weight:800; margin-top:4px;"><span style="color:#6366f1;">Sched ' + selA.srcSched + 'h</span> · <span style="color:#f472b6;">OT ' + selA.srcOt + 'h</span> · <span style="color:#94a3b8;">Floor ' + selA.srcFloor + 'h</span></div></div>' +
+                  '</div>' +
                   warnBanner + '</div>' +
-                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:9px 14px;">Date</th><th style="padding:9px 14px;">Shift</th><th style="padding:9px 14px;">Window</th><th style="padding:9px 14px; text-align:right;">Hours</th><th style="padding:9px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
+                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:9px 14px;">Date</th><th style="padding:9px 14px;">Source</th><th style="padding:9px 14px;">Shift</th><th style="padding:9px 14px;">Window</th><th style="padding:9px 14px; text-align:right;">Hours</th><th style="padding:9px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
           } else {
               rightCol = '<div class="aether-card" style="padding:24px; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
                   '<div class="section-header">Shift Distribution<span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">select an agent on the left for the line-by-line audit</span></div>' +
                   '<div class="chart-3d-container" style="height:240px; width:100%; margin:10px 0;"><canvas id="tracker-chart" style="display:block;"></canvas></div>' +
-                  '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; line-height:1.7; border-top:1px solid var(--glass-border); padding-top:14px;">Every SAFE segment from the pasted WFM schedules is attributed to Morning / Evening / Night exactly like the Furlough tracker. Agents are listed only if they have SAFE hours in this window. ' + ((audit.overlapAgentDays || 0) > 0 ? '<b style="color:var(--status-alert);">' + audit.overlapAgentDays + ' agent-day(s) have overlapping segments — start with the red-flagged agents.</b>' : 'No overlapping segments detected in this window.') + '</div></div>';
+                  '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; line-height:1.7; border-top:1px solid var(--glass-border); padding-top:14px;">SAFE hours enter through three doors — <b style="color:#6366f1;">WFM schedule</b>, <b style="color:#f472b6;">SAFE-coded overtime</b>, and <b style="color:#94a3b8;">manual floor assignments</b> — and this view shows all three per agent, attributed Morning / Evening / Night like the Furlough tracker. ' + ((audit.doubleAgentDays || 0) > 0 ? '<b style="color:var(--status-alert);">' + audit.doubleAgentDays + ' agent-day(s) have the same hours in two sources — start with the agents wearing the red double chip.</b>' : 'No cross-source double counts detected in this window.') + '</div></div>';
           }
 
           return headerHtml + kpis + '<div class="grid-split" style="grid-template-columns: 360px 1fr; gap:20px; align-items:start; padding-bottom:30px;">' + leftCol + rightCol + '</div>';

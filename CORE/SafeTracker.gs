@@ -1,23 +1,27 @@
 /**
  * MODULE: SAFE TRACKER
  *
- * Forensic, per-agent view of SAFE hours, reading the same WF_ROLES rows the
- * other dashboards use. Built to answer one question with receipts:
- * "this agent supposedly did 90h of SAFE this month — where exactly is it
- * coming from?"
+ * Forensic, per-agent view of SAFE hours with SOURCE ATTRIBUTION — built to
+ * answer "where exactly do this agent's 90h come from", because SAFE hours
+ * can enter the system through THREE doors:
  *
- * - Hours split Morning / Evening / Night with the same _getShiftSplits
- *   attribution as the Furlough tracker, so the shift columns reconcile.
- * - Only agents with SAFE hours in the window appear (not everyone is a
- *   SAFE agent).
- * - Every segment is listed (date, time window, shift, hours) so a month
- *   total is auditable line by line.
- * - Suspicious patterns are flagged automatically — the usual sources of
- *   inflated totals:
- *     OVERLAP — two SAFE segments on the same day overlapping in time
- *               (double-pasted / double-coded schedules)
- *     LONG    — a single segment of 9h or more
- *     heavy   — a single day totalling more than 10h of SAFE
+ *   SCHED — WF_ROLES: SAFE blocks coded in the pasted WFM schedule
+ *   OT    — WF_OVERTIME: overtime decoded into the SAFE bucket
+ *           ("OTST … SAFE OnQueue" overtime). NOTE: such an activity ALSO
+ *           matches the role classifier, so the same time block can exist
+ *           in BOTH sheets — any report that sums them counts it twice.
+ *   FLOOR — DB_Sessions: manual "Assign SAFE" sessions from the Floor menu
+ *
+ * Flags (length alone is NOT flagged — long SAFE segments are normal):
+ *   DOUBLE  — a SCHED and an OT segment for the same agent overlap in time:
+ *             the same hours exist in two sheets (the classic inflation).
+ *   OVERLAP — two segments of the SAME source overlap on the same day
+ *             (double-pasted schedules).
+ *   RUNAWAY — a FLOOR session longer than 12h (someone assigned SAFE on the
+ *             dashboard and never set the agent back to Active).
+ *
+ * Hours split Morning/Evening/Night with the same _getShiftSplits as the
+ * Furlough tracker. Only agents with SAFE hours in the window appear.
  */
 
 var SafeTracker = {
@@ -30,45 +34,39 @@ var SafeTracker = {
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     if (!WT) return JSON.stringify({ error: 'Engine unavailable.' });
 
-    var db = WT._getDB('WF_ROLES');
-    if (!db || db.getLastRow() < 2) {
-      return JSON.stringify({ error: 'No role data yet. Paste a WFM schedule first.' });
-    }
-
     var self = this;
     var bounds = WT._calculateEpochBoundaries(mode, refDate);
     var searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
     var sStr = Utilities.formatDate(searchStart, 'America/Toronto', 'yyyy-MM-dd');
     var eStr = Utilities.formatDate(new Date(bounds.end), 'America/Toronto', 'yyyy-MM-dd');
 
-    var rows = db.getDataRange().getDisplayValues().slice(1);
     var seen = {};
     var grouped = {};
-    var rawByAgentDay = {}; // agent|date → [{s,e}] raw segments, for overlap detection
+    var rawByAgentDay = {}; // agent|date → [{s,e,src}] for overlap/double detection
 
-    rows.forEach(function (row) {
-      // WF_ROLES holds SAFE / ICL / ULC FIRE / TOWER — SAFE only here.
-      if (String(row[2]).toUpperCase().indexOf('SAFE') === -1) return;
-      var agent = String(row[0]).trim();
-      if (!agent) return;
-      var dStr = WT._formatDate(row[1]);
-      if (!dStr || dStr < sStr || dStr > eStr) return;
-      var region = row[5] ? String(row[5]).trim() : 'Onshore';
+    var regionOf = function (name, rowRegion) {
+      var reg = rowRegion ? String(rowRegion).trim() : '';
+      if (typeof RegionRegistry !== 'undefined') {
+        var rg = RegionRegistry.getRegion(name);
+        if (rg) reg = rg;
+      }
+      return reg || 'Onshore';
+    };
+
+    // Shared segment ingestion: splits by shift, honors bounds + cycle,
+    // groups for the event log, and records the raw window for flagging.
+    var addSegment = function (agent, dStr, sMins, eRaw, region, src) {
+      if (sMins < 0 || eRaw < 0) return;
       if (regionFilter !== 'All' && region !== regionFilter) return;
+      var dedup = src + '|' + agent + '|' + dStr + '|' + sMins + '|' + eRaw;
+      if (seen[dedup]) return; seen[dedup] = true;
+      var eMins = eRaw <= sMins ? eRaw + 1440 : eRaw;
       var p = dStr.split('-').map(Number);
       if (p.length < 3 || isNaN(p[0]) || isNaN(p[1]) || isNaN(p[2])) return;
-      var sMins = WT._timeToMins(row[3]);
-      var eRaw = WT._timeToMins(row[4]);
-      if (sMins < 0 || eRaw < 0) return;
 
-      var dedup = agent + '|' + dStr + '|' + sMins + '|' + eRaw;
-      if (seen[dedup]) return; seen[dedup] = true;
-      var eMins = eRaw < sMins ? eRaw + 1440 : eRaw;
-
-      // Raw segment (pre-split) for overlap detection.
       var odKey = agent + '|' + dStr;
       if (!rawByAgentDay[odKey]) rawByAgentDay[odKey] = [];
-      rawByAgentDay[odKey].push({ s: sMins, e: eMins });
+      rawByAgentDay[odKey].push({ s: sMins, e: eMins, src: src });
 
       WT._getShiftSplits(sMins, eMins).forEach(function (split) {
         var epoch = new Date(p[0], p[1] - 1, p[2], Math.floor(split.startMins / 60), split.startMins % 60, 0, 0).getTime();
@@ -77,23 +75,84 @@ var SafeTracker = {
           if (WT._getCycleForEpoch(epoch) !== cycleFilter) return;
         }
         var effDate = Utilities.formatDate(new Date(epoch), 'America/Toronto', 'yyyy-MM-dd');
-        var key = agent + '|' + effDate + '|' + split.shift + '|' + sMins;
+        var key = src + '|' + agent + '|' + effDate + '|' + split.shift + '|' + sMins;
         if (!grouped[key]) {
-          grouped[key] = { date: effDate, agent: agent, region: region, shift: split.shift, hours: split.hours,
-                           timeStart: WT._minsToTime(split.startMins), timeEnd: WT._minsToTime(split.endMins) };
+          grouped[key] = { date: effDate, agent: agent, region: region, shift: split.shift, src: src, hours: split.hours,
+                           timeStart: WT._minsToTime(split.startMins), timeEnd: WT._minsToTime(split.endMins), rawDay: dStr };
         } else {
           grouped[key].hours += split.hours;
           grouped[key].timeEnd = WT._minsToTime(split.endMins);
         }
       });
-    });
+    };
 
-    // Overlapping raw segments per agent-day — the classic double-count.
-    var overlapDays = {};
+    // 1) SCHED — WF_ROLES rows whose role is SAFE
+    var dbRoles = WT._getDB('WF_ROLES');
+    if (dbRoles && dbRoles.getLastRow() > 1) {
+      dbRoles.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        if (String(row[2]).toUpperCase().indexOf('SAFE') === -1) return;
+        var agent = String(row[0]).trim();
+        if (!agent) return;
+        var dStr = WT._formatDate(row[1]);
+        if (!dStr || dStr < sStr || dStr > eStr) return;
+        addSegment(agent, dStr, WT._timeToMins(row[3]), WT._timeToMins(row[4]), regionOf(agent, row[5]), 'SCHED');
+      });
+    }
+
+    // 2) OT — WF_OVERTIME rows in the SAFE bucket
+    var dbOt = WT._getDB('WF_OVERTIME');
+    if (dbOt && dbOt.getLastRow() > 1) {
+      dbOt.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        if (String(row[4]).trim().toUpperCase() !== 'SAFE') return;
+        var agent = String(row[0]).trim();
+        if (!agent) return;
+        var dStr = WT._formatDate(row[1]);
+        if (!dStr || dStr < sStr || dStr > eStr) return;
+        addSegment(agent, dStr, WT._timeToMins(row[6]), WT._timeToMins(row[7]), regionOf(agent, row[8]), 'OT');
+      });
+    }
+
+    // 3) FLOOR — DB_Sessions manual "Assign SAFE" sessions
+    //    [Timestamp, Agent, Role, Start, End, Mins, Hours]
+    var dbSess = WT._getDB('DB_Sessions');
+    if (dbSess && dbSess.getLastRow() > 1) {
+      dbSess.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        if (String(row[2]).toUpperCase().indexOf('SAFE') === -1) return;
+        var agent = String(row[1]).trim();
+        if (!agent) return;
+        var st = new Date(row[3]);
+        if (isNaN(st.getTime())) return;
+        var dStr = Utilities.formatDate(st, 'America/Toronto', 'yyyy-MM-dd');
+        if (dStr < sStr || dStr > eStr) return;
+        var sMins = st.getHours() * 60 + st.getMinutes();
+        var en = new Date(row[4]);
+        var eMins;
+        if (!isNaN(en.getTime())) {
+          eMins = en.getHours() * 60 + en.getMinutes();
+          // multi-day runaway: cap representation at +24h so the math stays sane
+          var spanH = (en.getTime() - st.getTime()) / 3600000;
+          if (spanH > 24) eMins = sMins; // wraps to exactly 24h below
+        } else {
+          var hrs = Number(row[6]) || 0;
+          if (hrs <= 0) return;
+          eMins = sMins + Math.round(hrs * 60);
+        }
+        addSegment(agent, dStr, sMins, eMins, regionOf(agent, ''), 'FLOOR');
+      });
+    }
+
+    // Flag pass: same-source overlaps + cross-source (SCHED×OT etc.) doubles.
+    var overlapDays = {}, doubleDays = {};
     Object.keys(rawByAgentDay).forEach(function (k) {
-      var list = rawByAgentDay[k].slice().sort(function (a, b) { return a.s - b.s; });
-      for (var i = 1; i < list.length; i++) {
-        if (list[i].s < list[i - 1].e) { overlapDays[k] = true; break; }
+      var list = rawByAgentDay[k];
+      for (var i = 0; i < list.length; i++) {
+        for (var j = i + 1; j < list.length; j++) {
+          var a = list[i], b = list[j];
+          if (a.s < b.e && b.s < a.e) {
+            if (a.src === b.src) overlapDays[k] = true;
+            else doubleDays[k] = true;
+          }
+        }
       }
     });
 
@@ -102,48 +161,58 @@ var SafeTracker = {
       var g = grouped[k];
       var h = self._r2(g.hours);
       if (!agents[g.agent]) {
-        agents[g.agent] = { name: g.agent, region: g.region, total: 0, morning: 0, evening: 0, night: 0, days: {}, segs: 0 };
+        agents[g.agent] = { name: g.agent, region: g.region, total: 0, morning: 0, evening: 0, night: 0,
+                            srcSched: 0, srcOt: 0, srcFloor: 0, days: {}, segs: 0 };
       }
       var a = agents[g.agent];
       a.total += h; a.segs++;
       if (g.shift === 'Morning') a.morning += h;
       else if (g.shift === 'Evening') a.evening += h;
       else a.night += h;
+      if (g.src === 'SCHED') a.srcSched += h; else if (g.src === 'OT') a.srcOt += h; else a.srcFloor += h;
       a.days[g.date] = self._r2((a.days[g.date] || 0) + h);
+      var dayKey = g.agent + '|' + g.rawDay;
       var flags = [];
-      if (h >= 9) flags.push('LONG');
-      if (overlapDays[g.agent + '|' + g.date]) flags.push('OVERLAP');
-      return { date: g.date, agent: g.agent, shift: g.shift, hours: h, time: g.timeStart + ' - ' + g.timeEnd, flags: flags };
+      if (doubleDays[dayKey]) flags.push('DOUBLE');
+      if (overlapDays[dayKey]) flags.push('OVERLAP');
+      if (g.src === 'FLOOR' && h > 12) flags.push('RUNAWAY');
+      return { date: g.date, agent: g.agent, shift: g.shift, src: g.src, hours: h,
+               time: g.timeStart + ' - ' + g.timeEnd, flags: flags };
     });
 
-    var totals = { all: 0, morning: 0, evening: 0, night: 0, count: events.length };
+    var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, floor: 0, count: events.length };
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
+      totals.sched += a.srcSched; totals.ot += a.srcOt; totals.floor += a.srcFloor;
       var dayKeys = Object.keys(a.days);
       var maxDay = null;
       dayKeys.forEach(function (d) { if (!maxDay || a.days[d] > a.days[maxDay]) maxDay = d; });
+      var nDouble = 0, nOverlap = 0;
+      Object.keys(doubleDays).forEach(function (k) { if (k.indexOf(n + '|') === 0) nDouble++; });
+      Object.keys(overlapDays).forEach(function (k) { if (k.indexOf(n + '|') === 0) nOverlap++; });
       return {
         name: n, region: a.region,
         total: self._r2(a.total), morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
+        srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt), srcFloor: self._r2(a.srcFloor),
         days: dayKeys.length, segs: a.segs,
         avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
-        heavyDays: dayKeys.filter(function (d) { return a.days[d] > 10; }).length,
-        overlapDays: dayKeys.filter(function (d) { return overlapDays[n + '|' + d]; }).length
+        doubleDays: nDouble, overlapDays: nOverlap
       };
     }).sort(function (x, y) { return y.total - x.total; });
 
-    ['all', 'morning', 'evening', 'night'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
-    events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent); });
+    ['all', 'morning', 'evening', 'night', 'sched', 'ot', 'floor'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
+    events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent) || a.src.localeCompare(b.src); });
 
     return JSON.stringify({
       mode: mode, trackerType: 'safe', label: bounds.label, cycle: bounds.cycle,
       grid: [], events: events, totals: totals, perAgent: perAgent,
       audit: {
         agents: perAgent.length,
+        doubleAgentDays: Object.keys(doubleDays).length,
         overlapAgentDays: Object.keys(overlapDays).length,
-        longSegs: events.filter(function (e) { return e.flags.indexOf('LONG') !== -1; }).length
+        runaways: events.filter(function (e) { return e.flags.indexOf('RUNAWAY') !== -1; }).length
       }
     });
   }
