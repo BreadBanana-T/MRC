@@ -1809,12 +1809,15 @@
       var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px;">' +
           kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents') +
           (function() {
-              var fill = (cur.openOt > 0) ? Math.round((cur.ot / cur.openOt) * 1000) / 10 : null;
+              // Fill rate compares to-date vs to-date; the posting itself is
+              // shown for the FULL period (it's plan data, already decided).
+              var fill = (cur.openOtToDate > 0) ? Math.round((cur.ot / cur.openOtToDate) * 1000) / 10 : null;
               var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
               var skills = Object.keys(cur.openSkills || {}).sort().map(function(k) { return escapeHTML(k) + ' ' + cur.openSkills[k] + 'h'; }).join(' · ');
-              return kpi('OT Coverage', fill != null ? fill + '%' : '—', delta(cur.openOt, prev.openOt, true, 'h'), 'opened <b style="color:var(--text-main);">' + (cur.openOt || 0) + 'h</b> · ' + (cur.openSlots || 0) + ' slots' + (skills ? '<br>' + skills : ''), fillColor);
+              var headline = fill != null ? fill + '%' : ((cur.openOt || 0) > 0 ? (cur.openOt || 0) + 'h' : '—');
+              return kpi('OT Coverage', headline, delta(cur.openOt, prev.openOt, true, 'h'), 'posted <b style="color:var(--text-main);">' + (cur.openOt || 0) + 'h</b> / ' + (cur.openSlots || 0) + ' slots for the period' + (cur.openOtToDate ? ' · ' + cur.openOtToDate + 'h elapsed' : '') + (skills ? '<br>' + skills : ''), fillColor);
           })() +
-          kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') +
+          kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short, incl. forecast' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') +
           kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') +
           kpi('Absences', String(cur.absences || 0), delta(cur.absences, prev.absences, false), 'agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), (cur.absences || 0) > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
           kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) +
@@ -1839,7 +1842,7 @@
 
       return headerHtml + kpisHtml +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short') +
+          chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)') +
           chartCard('Off-Phone Hours', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower · Coaching · ACSU') +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +

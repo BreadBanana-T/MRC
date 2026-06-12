@@ -143,7 +143,7 @@ var ManagementView = {
       return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
-               openOt: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
+               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
@@ -161,16 +161,22 @@ var ManagementView = {
 
     // Distribute one segment's hours into sub-buckets + sel/prev totals.
     // addFn(target, hours) writes into whichever totals object.
-    var distribute = function(iv, addFn, bucketFn) {
-      var selH = self._overlapH(iv, pb.selStart, selCap);
+    // uncapped=true is for PLAN data (posted OT slots, IDP forecast): a
+    // posting/forecast for the back half of the period is already known, so
+    // it shows for the whole period. Actuals (worked hours, absences) stay
+    // to-date capped.
+    var distribute = function(iv, addFn, bucketFn, uncapped) {
+      var capSel = uncapped ? pb.selEnd : selCap;
+      var capPrev = uncapped ? pb.prevEnd : prevCap;
+      var selH = self._overlapH(iv, pb.selStart, capSel);
       if (selH > 0) {
         addFn(selT, selH);
         for (var i = 0; i < wins.length; i++) {
-          var h = self._overlapH(iv, wins[i].start, Math.min(wins[i].end, selCap));
+          var h = self._overlapH(iv, wins[i].start, Math.min(wins[i].end, capSel));
           if (h > 0 && bucketFn) bucketFn(buckets[i], h);
         }
       }
-      var prevH = self._overlapH(iv, pb.prevStart, prevCap);
+      var prevH = self._overlapH(iv, pb.prevStart, capPrev);
       if (prevH > 0) addFn(prevT, prevH);
       return selH;
     };
@@ -291,14 +297,19 @@ var ManagementView = {
           var skill = String(row[10]) || 'Any agent';
           var selH = distribute(iv,
             function(t, h) { t.openOt += h * slots; },
-            function(b, h) { b.openOt += h * slots; });
+            function(b, h) { b.openOt += h * slots; },
+            true); // postings are plan data — show the full period
           if (selH > 0) selT.openSkills[skill] = Math.round(((selT.openSkills[skill] || 0) + selH * slots) * 10) / 10;
-          if (iv.s >= pb.selStart && iv.s < selCap) {
+          // To-date portion so the fill rate compares like-for-like with
+          // worked (to-date) OT hours.
+          var tdH = self._overlapH(iv, pb.selStart, selCap);
+          if (tdH > 0) selT.openOtToDate += tdH * slots;
+          if (iv.s >= pb.selStart && iv.s < pb.selEnd) {
             selT.openSlots += slots;
             var wi2 = self._windowIndex(wins, iv.s);
             if (wi2 !== -1) buckets[wi2].openSlots += slots;
           }
-          if (iv.s >= pb.prevStart && iv.s < prevCap) prevT.openSlots += slots;
+          if (iv.s >= pb.prevStart && iv.s < pb.prevEnd) prevT.openSlots += slots;
         });
       }
     } catch (e) {}
@@ -324,11 +335,13 @@ var ManagementView = {
           var seats = parseFloat(String(row[3]).replace(',', '.')) || 0;
           var net = seats - req;
           var defH = net < 0 ? -net * 0.25 : 0;
-          if (epoch >= pb.selStart && epoch < selCap) {
+          // IDP is a forecast grid — the deficit for the rest of the period
+          // is already known, so no to-date cap here.
+          if (epoch >= pb.selStart && epoch < pb.selEnd) {
             selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++;
             var wi3 = self._windowIndex(wins, epoch);
             if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; }
-          } else if (epoch >= pb.prevStart && epoch < prevCap) {
+          } else if (epoch >= pb.prevStart && epoch < pb.prevEnd) {
             prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++;
           }
         });
@@ -430,7 +443,7 @@ var ManagementView = {
     } catch (e) {}
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'idpDeficit'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit'];
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
       delete o._idpSum; delete o._idpN;
