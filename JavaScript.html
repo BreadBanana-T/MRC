@@ -2121,7 +2121,7 @@
       // shape ({"slots":[... or bare [{..."slotCount"...).
       var lower = t.toLowerCase();
       var trimmed = t.trim();
-      var isOtOpen = /^[\[{]/.test(trimmed) && (trimmed.indexOf('"slotCount"') !== -1 || trimmed.indexOf('"slots"') !== -1);
+      var isOtOpen = trimmed.indexOf('"slotCount"') !== -1 || (/^[\[{]/.test(trimmed) && trimmed.indexOf('"slots"') !== -1);
       var isIdp = !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
       var kind = isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched');
 
@@ -2150,7 +2150,7 @@
           fetchData(); fetchMetadata();
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
-          var notifMsg = isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.';
+          var notifMsg = isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.');
           google.script.run.addGlobalNotification(notifMsg);
       };
       var onFailure = function(err) {
@@ -2161,9 +2161,18 @@
       };
 
       if (t.length > DIRECT_LIMIT) {
-          console.log('[sync] paste is ' + Math.round(t.length / 1024) + ' KB — using chunked upload');
+          console.log('[sync] paste is ' + Math.round(t.length / 1024) + ' KB — using chunked upload (' + kind + ')');
           showToast('Large paste (' + Math.round(t.length / 1024) + ' KB) — chunking…');
           _chunkUpload(t, kind, onSuccess, onFailure);
+      } else if (kind === 'otopen') {
+          // Direct path must honor the kind too — previously only the chunked
+          // path knew about 'otopen', so small JSON pastes were silently fed
+          // to the schedule importer and vanished without a trace.
+          showToast('OT slots JSON detected — ingesting…');
+          google.script.run
+              .withSuccessHandler(onSuccess)
+              .withFailureHandler(onFailure)
+              .importOtOpenSlots(t);
       } else {
           showToast('Syncing Database...');
           if (kind === 'sched') google.script.run.runImport(t); // raw-schedule writer (small only)
