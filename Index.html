@@ -93,7 +93,7 @@
 
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
-          <h2 style="margin-top:0;">Import Data</h2>
+          <h2 style="margin-top:0;">Import Data <span id="import-build" style="font-size:0.62rem; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.05); padding:3px 10px; border-radius:99px; vertical-align:middle; margin-left:8px;">stale build — redeploy needed</span></h2>
           <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 24px;" placeholder="Paste WFM schedule text here... (Also accepts IDP paste, and the WFM open-OT slots JSON for the Overtime tracker)"></textarea>
           <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>

@@ -506,6 +506,27 @@ var OvertimeTracker = {
   }
 };
 
+/**
+ * Editor self-test: ingests two synthetic slot windows and reports.
+ * Proves the server half (parser + WF_OT_OPEN sheet write) independently
+ * of the web UI. Run from the Apps Script editor's function dropdown;
+ * inspect the WF_OT_OPEN tab afterwards. The test rows use date
+ * 2000-01-01 so they never pollute real reporting windows.
+ */
+function otOpenSelfTest() {
+  var sample = JSON.stringify({ slots: [
+    { date: { value: '2000-01-01' }, startTime: { value: '06:00:00.000' }, endTime: { value: '12:00:00.000' },
+      slotCount: 2, activity: { name: 'OTST File Heures supp x1 / OT x1 On Queue' }, visible: true,
+      adg: { name: 'ADT Monit Knowledge Level' }, advs: [{ value: 'Junior' }], oid: 'selftest-1' },
+    { date: { value: '2000-01-01' }, startTime: { value: '16:00:00.000' }, endTime: { value: '00:00:00.000' },
+      slotCount: 1, activity: { name: 'OTST File Heures supp x1 / OT x1 On Queue' }, visible: true,
+      adg: { name: 'ADT SAFE' }, advs: [{ value: 'Yes' }], oid: 'selftest-2' }
+  ] });
+  var res = OvertimeTracker.importOpenSlots(sample);
+  Logger.log(res);
+  return res + ' — check the WF_OT_OPEN tab for two 2000-01-01 rows.';
+}
+
 // Router exports (called from Code.gs / google.script.run)
 function importOvertimeData(schedRaw) {
   return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importFromSchedule(schedRaw) : 'Error';
