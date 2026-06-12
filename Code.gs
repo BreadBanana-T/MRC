@@ -89,6 +89,11 @@ function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return Log
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
 function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
 
+// --- OT OPEN SLOTS (WFM JSON export) ---
+function importOtOpenSlots(t) {
+  return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(t) : 'Error';
+}
+
 // --- WORKFORCE TRACKER EXPORTS ---
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 
@@ -129,6 +134,8 @@ function processChunkedImport(token, total, kind) {
   var result;
   if (kind === 'idp') {
     result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
+  } else if (kind === 'otopen') {
+    result = (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(fullText) : 'Error';
   } else {
     if (typeof ImportHandler !== 'undefined') {
       Logger.log('[chunkedImport] running ImportHandler...');

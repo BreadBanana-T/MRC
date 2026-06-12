@@ -244,6 +244,157 @@ var OvertimeTracker = {
     return 'Overtime: none found.';
   },
 
+  // ───────────────────── OPEN OT SLOTS (WFM JSON export) ─────────────────────
+  // "Open" = what WFM posted (slots offered, when, which skills).
+  // "Given" = what landed in agents' schedules (WF_OVERTIME).
+  // Comparing the two yields the fill rate per day.
+
+  OPEN_SHEET: 'WF_OT_OPEN',
+  OPEN_HEADERS: ['Date', 'Start', 'End', 'Slots', 'WindowHours', 'OpenHours', 'Rate', 'Bucket', 'Skill', 'SkillValues', 'Visible', 'OID'],
+
+  _skillName: function(adgName) {
+    var n = String(adgName || '');
+    if (/safe/i.test(n)) return 'SAFE';
+    if (/knowledge/i.test(n)) return 'KL';
+    return n ? n.replace(/^ADT\s+/i, '') : 'GEN';
+  },
+
+  // Pastes are routinely truncated mid-array (the export is huge). Salvage
+  // everything up to the last complete slot object instead of failing.
+  _tolerantParse: function(raw) {
+    var txt = String(raw).trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
+    var tryParse = function(t) { try { return JSON.parse(t); } catch (e) { return null; } };
+    var obj = tryParse(txt);
+    if (!obj) {
+      var idx = txt.lastIndexOf('},{"date"');
+      if (idx > -1) obj = tryParse(txt.substring(0, idx + 1) + ']}');
+    }
+    if (!obj) {
+      var arrIdx = txt.indexOf('[');
+      if (arrIdx > -1) {
+        var t2 = txt.substring(arrIdx);
+        var o2 = tryParse(t2);
+        if (!o2) {
+          var idx2 = t2.lastIndexOf('},{"date"');
+          if (idx2 > -1) o2 = tryParse(t2.substring(0, idx2 + 1) + ']');
+        }
+        if (o2) obj = { slots: o2 };
+      }
+    }
+    if (!obj) return null;
+    if (Array.isArray(obj)) return obj;
+    if (obj.slots && Array.isArray(obj.slots)) return obj.slots;
+    return null;
+  },
+
+  importOpenSlots: function(raw) {
+    if (!raw || !String(raw).trim()) return 'OT Open: empty paste.';
+    var slots = this._tolerantParse(raw);
+    if (!slots || !slots.length) return 'OT Open: no slot objects found — paste the WFM slots JSON.';
+    var self = this;
+    var rows = [], dates = {}, seen = {};
+    slots.forEach(function(sl) {
+      try {
+        var d = sl.date && sl.date.value;
+        var st = String((sl.startTime && sl.startTime.value) || '').substring(0, 5);
+        var en = String((sl.endTime && sl.endTime.value) || '').substring(0, 5);
+        if (!d || st.length < 5 || en.length < 5) return;
+        var oid = sl.oid || (d + '|' + st + '|' + en + '|' + rows.length);
+        if (seen[oid]) return; seen[oid] = true;
+        var sMin = parseInt(st.substring(0, 2), 10) * 60 + parseInt(st.substring(3, 5), 10);
+        var eMin = parseInt(en.substring(0, 2), 10) * 60 + parseInt(en.substring(3, 5), 10);
+        if (isNaN(sMin) || isNaN(eMin)) return;
+        if (eMin <= sMin) eMin += 1440; // 16:00 → 00:00 wraps midnight
+        var winH = Math.round(((eMin - sMin) / 60) * 100) / 100;
+        var n = parseInt(sl.slotCount, 10) || 0;
+        var ot = self.decode((sl.activity && sl.activity.name) || '') || { rate: 1.0, bucket: 'OnQueue' };
+        rows.push([
+          d, st, en, n, winH, Math.round(winH * n * 100) / 100,
+          ot.rate, ot.bucket,
+          self._skillName(sl.adg && sl.adg.name),
+          (sl.advs || []).map(function(a) { return a && a.value; }).filter(Boolean).join(', '),
+          sl.visible === false ? 'N' : 'Y',
+          oid
+        ]);
+        dates[d] = true;
+      } catch (e) {}
+    });
+    if (!rows.length) return 'OT Open: slots found but none were usable.';
+
+    // Replace-by-date: a re-export is the current truth for those days
+    // (slots get edited or pulled), so stale rows for the same dates go.
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(this.OPEN_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(this.OPEN_SHEET);
+      sheet.appendRow(this.OPEN_HEADERS);
+      sheet.getRange(1, 1, 1, this.OPEN_HEADERS.length).setFontWeight('bold');
+    }
+    var keep = [];
+    if (sheet.getLastRow() > 1) {
+      var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
+      keep = sheet.getRange(2, 1, sheet.getLastRow() - 1, this.OPEN_HEADERS.length).getDisplayValues()
+        .filter(function(r) {
+          var dd = WT ? WT._formatDate(r[0]) : String(r[0]);
+          return !dates[dd];
+        });
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, this.OPEN_HEADERS.length).clearContent();
+    }
+    var all = keep.concat(rows);
+    if (all.length) sheet.getRange(2, 1, all.length, this.OPEN_HEADERS.length).setValues(all);
+    return 'OT Open: ' + rows.length + ' slot window(s) across ' + Object.keys(dates).length + ' day(s) ingested.';
+  },
+
+  // Open-slot aggregation for the analytics window. givenByDay comes from
+  // the already-computed events so fill rate compares like-for-like.
+  _openBlock: function(WT, bounds, mode, cycleFilter, givenByDay) {
+    var open = { hours: 0, slots: 0, hidden: 0, skills: {}, days: [], windows: [] };
+    var db = WT._getDB(this.OPEN_SHEET);
+    if (!db || db.getLastRow() < 2) return null;
+    var sStr = Utilities.formatDate(new Date(bounds.start), 'America/Toronto', 'yyyy-MM-dd');
+    var eStr = Utilities.formatDate(new Date(bounds.end), 'America/Toronto', 'yyyy-MM-dd');
+    var byDay = {};
+    db.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+      var d = WT._formatDate(r[0]);
+      if (!d || d < sStr || d > eStr) return;
+      // Honor the trackers' Week A/B filter so fill rate compares
+      // like-for-like with the filtered "given" hours.
+      if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
+        var p = d.split('-');
+        var epoch = new Date(parseInt(p[0],10), parseInt(p[1],10)-1, parseInt(p[2],10), 12, 0, 0).getTime();
+        if (WT._getCycleForEpoch(epoch) !== cycleFilter) return;
+      }
+      var slots = parseInt(r[3], 10) || 0;
+      var oh = parseFloat(r[5]) || 0;
+      if (String(r[10]) === 'N') { open.hidden += slots; return; }
+      open.hours += oh;
+      open.slots += slots;
+      var skill = String(r[8]) || 'GEN';
+      open.skills[skill] = Math.round(((open.skills[skill] || 0) + oh) * 100) / 100;
+      if (!byDay[d]) byDay[d] = { open: 0, slots: 0 };
+      byDay[d].open += oh;
+      byDay[d].slots += slots;
+      if (open.windows.length < 80) {
+        open.windows.push({ date: d, start: String(r[1]), end: String(r[2]), slots: slots, hours: oh, skill: skill, values: String(r[9] || '') });
+      }
+    });
+    if (!open.slots && !open.hidden) return null;
+    var allDays = {};
+    Object.keys(byDay).forEach(function(d) { allDays[d] = true; });
+    Object.keys(givenByDay).forEach(function(d) { allDays[d] = true; });
+    open.days = Object.keys(allDays).sort().map(function(d) {
+      return {
+        date: d,
+        open: byDay[d] ? Math.round(byDay[d].open * 100) / 100 : 0,
+        slots: byDay[d] ? byDay[d].slots : 0,
+        given: Math.round((givenByDay[d] || 0) * 100) / 100
+      };
+    });
+    open.hours = Math.round(open.hours * 100) / 100;
+    open.windows.sort(function(a, b) { return a.date.localeCompare(b.date) || a.start.localeCompare(b.start); });
+    return open;
+  },
+
   /**
    * Analytics engine for the Overtime tracker UI. Shaped to match
    * WorkforceTracker.getAnalytics so the existing renderTracker can reuse it,
@@ -343,9 +494,14 @@ var OvertimeTracker = {
 
     events.sort(function (a, b) { return (a.date.localeCompare(b.date)) || (b.hours - a.hours); });
 
+    var givenByDay = {};
+    events.forEach(function (e) { givenByDay[e.date] = (givenByDay[e.date] || 0) + e.hours; });
+    var open = null;
+    try { open = this._openBlock(WT, bounds, mode, cycleFilter, givenByDay); } catch (e) {}
+
     return JSON.stringify({
       mode: mode, trackerType: 'overtime', label: bounds.label, cycle: bounds.cycle,
-      grid: [], events: events, totals: totals, otTotals: otTotals
+      grid: [], events: events, totals: totals, otTotals: otTotals, open: open
     });
   }
 };
