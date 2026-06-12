@@ -29,6 +29,30 @@
   var __lastAnimKey = null;
   function __sliceQ(sel, n) { return Array.prototype.slice.call(document.querySelectorAll(sel), 0, n); }
 
+  // One consistent search field (pill + embedded icon) for every view.
+  function searchBox(id, placeholder, value, handler, wrapStyle, inputStyle) {
+      return '<span class="search-wrap" style="' + (wrapStyle || '') + '"><i data-lucide="search" width="15"></i><input id="' + id + '" type="text" class="input-search" style="' + (inputStyle || '') + '" placeholder="' + placeholder + '" oninput="' + handler + '" value="' + value + '"></span>';
+  }
+
+  // Split-flap status flip — modern take on the train-departure board.
+  // The status cell and dot flip in around the X axis with a back-out
+  // settle, and the row washes indigo for a second so the change is
+  // findable even in a long list.
+  function flipAgentRow(name) {
+      if (typeof gsap === 'undefined') return;
+      var row = document.querySelector('.agent-row[data-agent="' + encodeURIComponent(name || '') + '"]');
+      if (!row) return;
+      var parts = [row.querySelector('.row-status'), row.querySelector('.status-dot')].filter(Boolean);
+      if (parts.length) {
+          gsap.fromTo(parts,
+              { rotationX: -90, autoAlpha: 0, transformPerspective: 500, transformOrigin: '50% 50%' },
+              { rotationX: 0, autoAlpha: 1, duration: 0.55, ease: 'back.out(1.8)', stagger: 0.06, clearProps: 'transform,opacity,visibility' });
+      }
+      gsap.fromTo(row,
+          { backgroundColor: 'rgba(99,102,241,0.14)' },
+          { backgroundColor: 'rgba(99,102,241,0)', duration: 1.1, ease: 'power2.out', clearProps: 'backgroundColor' });
+  }
+
   // Count-up for KPI numbers marked .cnum. Only fires on pure values like
   // "470h", "89%", "+3", "1,689" — anything with nested markup or multiple
   // numbers is left untouched (the regex won't match its textContent).
@@ -71,6 +95,8 @@
       if (cards.length) tl.from(cards, { y: 18, autoAlpha: 0, duration: 0.5, stagger: 0.05, clearProps: 'transform,opacity,visibility' }, 0.05);
       var rows = __sliceQ('#content .agent-row', 36);
       if (rows.length) tl.from(rows, { x: -14, autoAlpha: 0, duration: 0.3, stagger: 0.014, clearProps: 'transform,opacity,visibility' }, 0.18);
+      var chips = __sliceQ('#content .soon-chip', 24);
+      if (chips.length) tl.from(chips, { y: 10, autoAlpha: 0, duration: 0.3, stagger: 0.022, clearProps: 'transform,opacity,visibility' }, 0.12);
       var groups = __sliceQ('#content .group-header', 8);
       if (groups.length) tl.from(groups, { autoAlpha: 0, x: -8, duration: 0.35, stagger: 0.05, clearProps: 'transform,opacity,visibility' }, 0.12);
       var heat = __sliceQ('#content .heatmap-cell', 0); // heatmap cells animate via CSS only — too many nodes
@@ -145,7 +171,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.12-UI6 · hybrid theme + micro-motion';
+  var APP_BUILD = 'build 2026.06.12-UI7 · polish pass';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr()
@@ -174,7 +200,7 @@
     render(); 
     setInterval(updateClock, 1000); 
     setInterval(fetchData, 60000); 
-    setInterval(fetchNotifications, 10000);
+    setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
@@ -440,7 +466,7 @@
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
   window.closeMenu = function() { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   
-  window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') render(); showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
+  window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') { render(); flipAgentRow(name); } showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
   window.openPopout = function(mode) { var baseUrl = state.appUrl || window.location.href.split('?')[0]; var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); };
 
   function showToast(m) {
@@ -723,6 +749,14 @@
           else if (state.view === 'analyzer') h = renderAnalyzer();
           else if (state.view === 'mgmt') h = renderMgmt();
           
+          // Skip identical re-renders entirely: periodic fetches usually
+          // produce byte-identical HTML — no innerHTML teardown, no icon
+          // scan, no chart rebuild. Theme is part of the key since chart
+          // colors depend on it.
+          var hkey = (document.body.classList.contains('dark') ? 'D|' : 'L|') + h;
+          if (c.__lastHtml === hkey) return;
+          c.__lastHtml = hkey;
+
           c.innerHTML = h; 
           refreshIcons();
           animateViewEntrance();
@@ -769,7 +803,7 @@
       for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
       
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
-                 '<input id="agent-search" class="input-aether" style="width:240px; height:34px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleSearch(this.value)" value="' + escapeHTML(state.searchTerm || '') + '">' +
+                 '' + searchBox('agent-search', 'Search agents...', escapeHTML(state.searchTerm || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
                  '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
                  '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
@@ -782,7 +816,13 @@
   function renderFloorLayout(upMap) {
      var startingHtml = '';
      if (state.agents.startingSoon && state.agents.startingSoon.length > 0) { 
-         startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Starting Soon (Next 30m)</div><div class="agent-list-view">' + renderGroup(state.agents.startingSoon, upMap) + '</div></div>'; 
+         // Compact chips instead of full rows — a busy shift start was
+         // swallowing the whole screen.
+         var soonChips = state.agents.startingSoon.map(function(a) {
+             var dotCls = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
+             return '<div class="soon-chip" title="' + escapeHTML(a.name || '') + ' — ' + escapeHTML(a.shift || '') + '"><span class="status-dot ' + dotCls + '"></span><span class="soon-name">' + escapeHTML(a.name || '') + '</span><span class="soon-when">' + escapeHTML(a.subStatus || '') + '</span></div>';
+         }).join('');
+         startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Starting Soon (Next 30m)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + '</span></div><div class="soon-grid custom-scrollbar">' + soonChips + '</div></div>'; 
      }
      var offHtml = '';
      if (state.searchTerm && state.searchTerm.trim() !== '') { 
@@ -848,7 +888,7 @@
      if (a.skills) hoverCardHtml += '<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">' + escapeHTML(String(a.skills).replace(/;#[0-9]+/g, '').replace(/;/g, ', ')) + '</div>';
      hoverCardHtml += '</div>';
 
-     var html = '<div class="agent-row" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
+     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
                 '<div class="status-dot ' + stripClass + '"></div>' +
                 '<div class="row-name">' + escapeHTML(a.name || '') + hoverCardHtml + '</div>' +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
@@ -1006,11 +1046,24 @@
          var prov = provs[i]; var cities = state.weather[prov]; if (!cities || !Array.isArray(cities)) continue;
          cities.forEach(function(c) {
              var icon = getWeatherIcon(c.condition);
+             var th = weatherTheme(c.condition);
              var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) { var dayName = f.day ? escapeHTML(String(f.day).substring(0,3)) : "---"; return '<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">' + dayName + '</span><div style="color:var(--text-main);">' + getWeatherIcon(f.cond, true) + '</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">' + escapeHTML(f.temp || '') + '</span></div>'; }).join('');
-             html += '<div class="aether-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;"><span style="font-weight:800; font-size:1.1rem;">' + escapeHTML(c.name || '') + '</span><span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">' + escapeHTML(prov) + '</span></div><div style="display:flex; justify-content:space-between; align-items:flex-end;"><div style="display:flex; flex-direction:column; gap:4px;"><div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">' + escapeHTML(c.temp || '') + '°</div><div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary); font-weight:600; font-size:0.9rem;">' + icon + ' ' + escapeHTML(c.condition || '') + '</div></div><div style="text-align:right; display:flex; flex-direction:column; gap:4px;"><div style="font-size:1.4rem; font-weight:700;">' + escapeHTML(c.wind || '') + '</div><div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div></div></div><div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">' + (forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>') + '</div></div>';
+             html += '<div class="aether-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="cursor:pointer; transition:0.2s; background:' + th.bg + ', var(--card-bg);"><i data-lucide="' + th.ico + '" class="wx-big ' + th.anim + '" width="84"></i><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;"><span style="font-weight:800; font-size:1.1rem;">' + escapeHTML(c.name || '') + '</span><span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">' + escapeHTML(prov) + '</span></div><div style="display:flex; justify-content:space-between; align-items:flex-end;"><div style="display:flex; flex-direction:column; gap:4px;"><div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">' + escapeHTML(c.temp || '') + '°</div><div style="display:flex; align-items:center; gap:6px; color:' + th.chip + '; font-weight:700; font-size:0.9rem;">' + icon + ' ' + escapeHTML(c.condition || '') + '</div></div><div style="text-align:right; display:flex; flex-direction:column; gap:4px;"><div style="font-size:1.4rem; font-weight:700;">' + escapeHTML(c.wind || '') + '</div><div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div></div></div><div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">' + (forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>') + '</div></div>';
          });
       }
       html += '</div>'; return html;
+  }
+
+  // Condition theme: tinted gradient + animated watermark, Weather-Network
+  // style but in our palette.
+  function weatherTheme(cond) {
+      var c = (cond || '').toLowerCase();
+      if (c.indexOf('storm') !== -1 || c.indexOf('thunder') !== -1) return { ico: 'cloud-lightning', anim: 'wx-flash', chip: '#818cf8', bg: 'linear-gradient(150deg, rgba(129,140,248,0.22), rgba(244,114,182,0.07) 55%, transparent 75%)' };
+      if (c.indexOf('snow') !== -1 || c.indexOf('flurr') !== -1) return { ico: 'snowflake', anim: 'wx-spin', chip: '#38bdf8', bg: 'linear-gradient(150deg, rgba(186,230,253,0.30), rgba(148,163,184,0.08) 55%, transparent 75%)' };
+      if (c.indexOf('rain') !== -1 || c.indexOf('shower') !== -1 || c.indexOf('drizzle') !== -1) return { ico: 'cloud-rain', anim: 'wx-bob', chip: '#0ea5e9', bg: 'linear-gradient(150deg, rgba(56,189,248,0.20), rgba(99,102,241,0.06) 55%, transparent 75%)' };
+      if (c.indexOf('sun') !== -1 || c.indexOf('clear') !== -1) return { ico: 'sun', anim: 'wx-spin-slow', chip: '#f59e0b', bg: 'linear-gradient(150deg, rgba(251,191,36,0.25), rgba(251,146,60,0.07) 55%, transparent 75%)' };
+      if (c.indexOf('fog') !== -1 || c.indexOf('mist') !== -1) return { ico: 'cloud-fog', anim: 'wx-bob', chip: '#94a3b8', bg: 'linear-gradient(150deg, rgba(148,163,184,0.22), transparent 65%)' };
+      return { ico: 'cloud', anim: 'wx-bob', chip: '#64748b', bg: 'linear-gradient(150deg, rgba(148,163,184,0.16), transparent 65%)' };
   }
 
   function getWeatherIcon(cond, isSmall) {
@@ -1037,7 +1090,7 @@
              activeScriptHTML = '<div class="aether-card" style="height:100%; display:flex; flex-direction:column; padding:0; overflow:hidden;"><div style="padding:24px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; background:rgba(0,0,0,0.02);"><div><div style="font-size:0.75rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">' + catSafe + '</div><div style="font-weight:800; font-size:1.8rem; color:var(--text-main); line-height:1.2;">' + titleSafe + '</div></div><div style="display:flex; gap:10px;"><button class="btn btn-primary" onclick="copyScript(' + activeScript.index + ')"><i data-lucide="copy" width="16"></i> Copy</button><button class="btn btn-glass" onclick="editScript(' + activeScript.index + ')"><i data-lucide="edit-2" width="16"></i> Edit</button><button class="btn btn-glass" style="color:var(--status-alert); border-color:var(--status-alert);" onclick="delScript(' + activeScript.index + ')"><i data-lucide="trash-2" width="16"></i></button></div></div><div style="padding:32px; flex:1; overflow-y:auto; background:var(--bg-root);"><pre style="margin:0; font-family:monospace; font-size:1rem; color:var(--text-secondary); white-space:pre-wrap; line-height:1.7; word-wrap:break-word;">' + bodySafe + '</pre></div></div>';
          }
      }
-     return '<div style="display:flex; height:calc(100vh - 140px); gap:24px; align-items:stretch;"><div style="width:260px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;"><div class="aether-card script-col" style="padding:20px 16px; flex:1; overflow-y:auto; overflow-x:hidden;"><div class="section-header" style="margin-bottom:16px;">Library</div><div style="display:flex; flex-direction:column;">' + catList + '</div></div><button class="btn btn-primary" style="height:52px; font-size:1rem; border-radius:16px;" onclick="openComposeMode()"><i data-lucide="plus" width="20"></i> New Script</button></div><div style="width:380px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;"><input id="script-search" class="input-aether" style="flex-shrink:0; height:48px;" placeholder="Search scripts..." oninput="handleScriptSearch(this.value)" value="' + escapeHTML(state.searchTerm) + '"><div class="script-col" style="flex:1; overflow-y:auto; overflow-x:hidden; padding-right:12px; padding-bottom:20px;">' + scriptListHTML + '</div></div><div style="flex:1; display:flex; flex-direction:column; min-width:0;">' + activeScriptHTML + '</div></div>';
+     return '<div style="display:flex; height:calc(100vh - 140px); gap:24px; align-items:stretch;"><div style="width:260px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;"><div class="aether-card script-col" style="padding:20px 16px; flex:1; overflow-y:auto; overflow-x:hidden;"><div class="section-header" style="margin-bottom:16px;">Library</div><div style="display:flex; flex-direction:column;">' + catList + '</div></div><button class="btn btn-primary" style="height:52px; font-size:1rem; border-radius:16px;" onclick="openComposeMode()"><i data-lucide="plus" width="20"></i> New Script</button></div><div style="width:380px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;">' + searchBox('script-search', 'Search scripts...', escapeHTML(state.searchTerm), 'handleScriptSearch(this.value)', 'flex-shrink:0;', 'height:48px;') + '<div class="script-col" style="flex:1; overflow-y:auto; overflow-x:hidden; padding-right:12px; padding-bottom:20px;">' + scriptListHTML + '</div></div><div style="flex:1; display:flex; flex-direction:column; min-width:0;">' + activeScriptHTML + '</div></div>';
   }
 
   window.toggleNewCategoryInput = function() { var sel = document.getElementById('new-script-cat-select'); var inp = document.getElementById('new-script-cat-input'); if(!sel || !inp) return; if(sel.value === '__NEW__') { inp.style.display = 'block'; inp.focus(); } else { inp.style.display = 'none'; inp.value = ""; } };
@@ -1114,7 +1167,7 @@
       };
       var cycleToggleHtml = '<div style="display:flex; gap:8px; flex-shrink:0;">' + cycleBtn('WEEK A', 'WEEK A') + cycleBtn('WEEK B', 'WEEK B') + (curCycle !== 'ALL' ? '<button onclick="toggleInsightCycle(\'' + curCycle + '\');" style="background:transparent; color:var(--text-muted); border:none; padding:4px 8px; font-size:0.7rem; cursor:pointer; text-decoration:underline;">Clear</button>' : '') + '</div>';
 
-      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;"><i data-lucide="calendar-check" width="10" style="vertical-align:middle;"></i> ' + schedText + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;"><input id="insight-search" type="text" class="input-aether" style="width:180px; height:32px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleInsightSearch(this.value)" value="' + escapeHTML(state.insightSearch) + '"></div></div>';
+      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;"><i data-lucide="calendar-check" width="10" style="vertical-align:middle;"></i> ' + schedText + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;">' + searchBox('insight-search', 'Search agent...', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:180px;', 'height:32px; font-size:0.8rem;') + '</div></div>';
 
       if (!u.data) {
           return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;"><div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Schedule and deep GEM metrics.</p></div>';
@@ -1358,7 +1411,7 @@
               }
           }
 
-          return headerHtml + '<div style="display:flex; height:100%; gap:24px; align-items:start; padding-bottom: 24px;"><div style="width:360px; display:flex; flex-direction:column; height:calc(100vh - 160px); min-height:600px; overflow-y:auto; padding-right:8px;" class="custom-scrollbar" id="absences-left-pane"><div style="margin-bottom:16px; position:sticky; top:0; z-index:10; background:var(--bg-root); padding-bottom:8px;"><input id="tracker-search" type="text" class="input-aether" style="width:100%; height:40px; font-size:0.85rem;" placeholder="Search agents..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div>' + (leftPane || '<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:600; border:2px dashed var(--glass-border); border-radius:16px;">No absences recorded for this year.</div>') + '</div><div style="flex:1; min-width:0;">' + rightPane + '</div></div>';
+          return headerHtml + '<div style="display:flex; height:100%; gap:24px; align-items:start; padding-bottom: 24px;"><div style="width:360px; display:flex; flex-direction:column; height:calc(100vh - 160px); min-height:600px; overflow-y:auto; padding-right:8px;" class="custom-scrollbar" id="absences-left-pane"><div style="margin-bottom:16px; position:sticky; top:0; z-index:10; background:var(--bg-root); padding-bottom:8px;">' + searchBox('tracker-search', 'Search agents...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:100%;', 'height:40px; font-size:0.85rem;') + '</div>' + (leftPane || '<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:600; border:2px dashed var(--glass-border); border-radius:16px;">No absences recorded for this year.</div>') + '</div><div style="flex:1; min-width:0;">' + rightPane + '</div></div>';
       }
 
       if (!d.events || d.error) {
@@ -1471,7 +1524,7 @@
 
           var pieCard = '<div class="aether-card" style="padding:20px;"><div style="text-align:center; margin-bottom:14px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Given by Activity</div><div style="font-size:2.4rem; font-weight:800; color:var(--text-main); line-height:1;">' + given.toFixed(2) + 'h</div></div><div class="chart-3d-container" style="height:210px; width:100%;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div>';
 
-          var logCard = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; min-height:420px; max-height:620px;"><div class="section-header" style="padding:16px 20px; margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Given — Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.72rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span><input id="tracker-search" type="text" class="input-aether" style="width:190px; height:30px; font-size:0.8rem;" placeholder="Search agent..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div>';
+          var logCard = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; min-height:420px; max-height:620px;"><div class="section-header" style="padding:16px 20px; margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Given — Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.72rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span>' + searchBox('tracker-search', 'Search agent...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:190px;', 'height:30px; font-size:0.8rem;') + '</div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div>';
 
           return headerHtml + kpis + chartHtml +
               '<div class="grid-split" style="grid-template-columns: 340px 1fr; gap:20px; align-items:start; padding-bottom:30px;">' +
@@ -1494,7 +1547,7 @@
           '</div>';
       }
 
-      return headerHtml + gridHtml + '<div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;"><div style="display:flex; flex-direction:column; gap:24px;"><div class="aether-card" style="padding:24px;"><div style="text-align:center; margin-bottom:20px;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + (d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0) + '</div></div><div class="chart-3d-container" style="height:260px; width:100%; padding: 10px;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div><div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;"><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0) + 'h</div></div></div>' + otSummaryHtml + '</div><div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;"><div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span><input id="tracker-search" type="text" class="input-aether" style="width:200px; height:30px; font-size:0.8rem;" placeholder="Search agent or type..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div></div>';
+      return headerHtml + gridHtml + '<div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;"><div style="display:flex; flex-direction:column; gap:24px;"><div class="aether-card" style="padding:24px;"><div style="text-align:center; margin-bottom:20px;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + (d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0) + '</div></div><div class="chart-3d-container" style="height:260px; width:100%; padding: 10px;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div><div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;"><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0) + 'h</div></div></div>' + otSummaryHtml + '</div><div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;"><div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span>' + searchBox('tracker-search', 'Search agent or type...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:200px;', 'height:30px; font-size:0.8rem;') + '</div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div></div>';
   }
 
   var TRAINING_EMP_OPTS = ['Active', 'Long Term Disability', 'Maternity/Paternity Leave', 'Short Term Disability', 'Personal Leave'];
@@ -1585,7 +1638,7 @@
               return '<button onclick="setTrackerBucket(\'' + key + '\')" class="btn" style="height:32px; font-size:0.8rem; font-weight:800; border-radius:10px; display:inline-flex; align-items:center; gap:6px; ' + (on ? 'background:' + color + '; color:#fff; border:1px solid ' + color + ';' : 'background:transparent; color:var(--text-muted); border:1px solid var(--glass-border);') + '">' + (icon ? '<i data-lucide="' + icon + '" width="13"></i> ' : '') + label + ' <span style="opacity:0.85;">' + n + '</span></button>';
           };
           var bucketTabs = '<div style="display:flex; gap:8px; flex-wrap:wrap;">' + tabBtn('live', 'Live (working now)', liveCount, 'var(--status-alert)', 'radio') + tabBtn('outstanding', 'Outstanding', outCount, 'var(--status-warn)', 'clock') + tabBtn('completed', 'Completed', doneCount, 'var(--status-active, #10b981)', 'check') + '</div>';
-          var gridHeader = '<div style="padding:14px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; background:var(--card-bg);">' + bucketTabs + '<input id="tracker-search" type="text" class="input-aether" style="width:220px; height:32px; font-size:0.8rem;" placeholder="Search employee..." oninput="handleTrackerSearch(this.value)" value="' + escapeHTML(state.trackerSearch) + '"></div>';
+          var gridHeader = '<div style="padding:14px 28px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; background:var(--card-bg);">' + bucketTabs + '' + searchBox('tracker-search', 'Search employee...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:220px;', 'height:32px; font-size:0.8rem;') + '</div>';
 
           rightPane = '<div class="aether-card" style="flex:1; min-width:0; padding:0; display:flex; flex-direction:column; height:calc(100vh - 200px); min-height:600px; overflow:hidden;">' + head + copyPanel + gridHeader + grid + '</div>';
       }
@@ -1943,7 +1996,9 @@
                   x: { stacked: !!stacked, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 9 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: manyBars ? 16 : 31 } },
                   y: { stacked: !!stacked, beginAtZero: true, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } }
               },
-              animation: { duration: 400, easing: 'easeOutCubic' }
+              // Slow, visible reveal: bars cascade left→right, starting after
+              // the card entrance has landed.
+              animation: { duration: 900, easing: 'easeOutQuart', delay: function(c2) { return (c2.type === 'data' && c2.mode === 'default') ? 180 + (c2.dataIndex || 0) * 24 : 0; } }
           };
       };
       var bw = manyBars ? 14 : 30;
@@ -1955,17 +2010,21 @@
           var hasOpen = buckets.some(function(b) { return (b.openOt || 0) > 0; });
           var hasIdp = buckets.some(function(b) { return b.idpNet != null; });
           var otSets = [];
-          if (hasOpen) otSets.push({ label: 'Open OT (posted)', data: buckets.map(function(b) { return b.openOt || 0; }), backgroundColor: 'rgba(129,140,248,0.15)', borderColor: '#818cf8', borderWidth: 2, borderRadius: 4, maxBarThickness: bw, stack: 'open' });
+          if (hasOpen) otSets.push({ label: 'Open OT (posted)', data: buckets.map(function(b) { return b.openOt || 0; }), backgroundColor: 'rgba(129,140,248,0.14)', borderColor: '#818cf8', borderWidth: 1.5, borderRadius: 6, maxBarThickness: bw, stack: 'open' });
           otSets.push({ label: '×1 Straight', data: buckets.map(function(b) { return b.otX1; }), backgroundColor: '#818cf8', borderRadius: 4, maxBarThickness: bw, stack: 'given' });
           otSets.push({ label: '×1.5 Premium', data: buckets.map(function(b) { return b.otX15; }), backgroundColor: '#f472b6', borderRadius: 4, maxBarThickness: bw, stack: 'given' });
-          if (hasIdp) otSets.push({ type: 'line', label: 'IDP deficit (h short)', data: buckets.map(function(b) { return b.idpDeficit || 0; }), borderColor: '#f87171', borderWidth: 2, borderDash: [5, 4], pointRadius: 2, pointBackgroundColor: '#f87171', tension: 0.3, yAxisID: 'y1', spanGaps: true });
+          // Same hours axis as the bars: posted, scheduled and deficit are
+          // all hours, so one scale = honest visual comparison.
+          if (hasIdp) otSets.push({ type: 'line', label: 'IDP deficit (h short)', data: buckets.map(function(b) { return b.idpDeficit || 0; }), borderColor: '#f87171', borderWidth: 2, borderDash: [6, 5], pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: '#f87171', tension: 0.35, spanGaps: true, order: 10 });
           var otOpts = baseOpts(true);
-          if (hasIdp) otOpts.scales.y1 = { position: 'right', beginAtZero: true, stacked: false, grid: { display: false }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } };
-          otOpts.plugins.tooltip = { callbacks: { footer: function(items) {
-              var i = items[0].dataIndex; var b2 = buckets[i];
-              if (!b2.openOt) return '';
-              return 'Fill rate: ' + Math.round(((b2.ot || 0) / b2.openOt) * 100) + '%' + (b2.openSlots ? ' · ' + b2.openSlots + ' slots' : '');
-          } } };
+          otOpts.scales.y.ticks.callback = function(v) { return v + 'h'; };
+          otOpts.plugins.tooltip = { callbacks: {
+              label: function(c2) { return ' ' + c2.dataset.label + ': ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h'; },
+              footer: function(items) {
+                  var i = items[0].dataIndex; var b2 = buckets[i];
+                  if (!b2.openOt) return '';
+                  return 'Fill rate: ' + Math.round(((b2.ot || 0) / b2.openOt) * 100) + '%' + (b2.openSlots ? ' · ' + b2.openSlots + ' slots' : '');
+              } } };
           charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: otSets }, options: otOpts });
       }
       var elRoles = document.getElementById('mgmt-chart-roles');
@@ -2132,7 +2191,12 @@
   }
 
   function renderCalc() {
-     return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">DATA STREAM</div><textarea id="in-text" class="input-aether custom-scrollbar" rows="8" placeholder="Inbound Data" style="margin-bottom:20px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><textarea id="out-text" class="input-aether custom-scrollbar" rows="8" placeholder="Outbound Data" style="margin-bottom:24px; font-family:monospace; font-size:0.9rem; height:auto; align-items:start; padding-top:12px;"></textarea><button class="btn btn-primary" style="width:100%;" onclick="runCalculation()">Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';
+     return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-paste" width="17" style="color:var(--accent-primary);"></i> MAS Report Paste</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">copy each MAS page, drop it below, run</span></div>' +
+        '<label class="paste-label"><i data-lucide="phone-incoming" width="13"></i> Inbound — Stats / InCust SVC</label>' +
+        '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the INBOUND page here…"></textarea>' +
+        '<label class="paste-label" style="margin-top:16px;"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
+        '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…"></textarea>' +
+        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';
   }
   
   window.runCalculation = function() {
@@ -2369,11 +2433,11 @@
           var g1 = ctx.createLinearGradient(0,0,0,300); g1.addColorStop(0, '#fde68a'); g1.addColorStop(1, '#d97706'); 
           var g2 = ctx.createLinearGradient(0,0,0,300); g2.addColorStop(0, '#fdba74'); g2.addColorStop(1, '#c2410c'); 
           var g3 = ctx.createLinearGradient(0,0,0,300); g3.addColorStop(0, '#a5b4fc'); g3.addColorStop(1, '#4338ca'); 
-          charts.tracker = new Chart(ctx, { type: 'pie', plugins: [shadowPlugin, insideLabelsPlugin], data: { labels: ['Morning', 'Evening', 'Night'], datasets: [{ data: [d.totals.morning || 0, d.totals.evening || 0, d.totals.night || 0], backgroundColor: [g1, g2, g3], borderColor: isDark ? '#1e293b' : '#ffffff', borderWidth: 2, hoverOffset: 0 }] }, options: { responsive: true, maintainAspectRatio: false, resizeDelay: 200, layout: { padding: 25 }, events: [], plugins: { legend: { display: false }, tooltip: { enabled: false } }, animation: { animateScale: true, animateRotate: true, duration: 450, easing: 'easeOutQuart' } } });
+          charts.tracker = new Chart(ctx, { type: 'pie', plugins: [shadowPlugin, insideLabelsPlugin], data: { labels: ['Morning', 'Evening', 'Night'], datasets: [{ data: [d.totals.morning || 0, d.totals.evening || 0, d.totals.night || 0], backgroundColor: [g1, g2, g3], borderColor: isDark ? '#1e293b' : '#ffffff', borderWidth: 2, hoverOffset: 0 }] }, options: { responsive: true, maintainAspectRatio: false, resizeDelay: 200, layout: { padding: 25 }, events: [], plugins: { legend: { display: false }, tooltip: { enabled: false } }, animation: { animateScale: true, animateRotate: true, duration: 1000, easing: 'easeOutQuart', delay: 200 } } });
       } else {
           var gBar = ctx.createLinearGradient(0,0,300,0); gBar.addColorStop(0, '#818cf8'); gBar.addColorStop(1, '#4f46e5');
           var activityCount = {}; (d.events || []).forEach(function(e) { var name = e.activityName || 'Unknown'; activityCount[name] = (activityCount[name] || 0) + (e.hours || 0); }); var sortedNames = Object.keys(activityCount).sort(function(a,b){return activityCount[b] - activityCount[a];}).slice(0, 5); var sortedData = sortedNames.map(function(n){return activityCount[n];});
-          charts.tracker = new Chart(ctx, { type: 'bar', plugins: [shadowPlugin], data: { labels: sortedNames.map(function(n){return n.length > 15 ? n.substring(0,15)+'...' : n;}), datasets: [{ data: sortedData, backgroundColor: gBar, borderRadius: 8, borderWidth: 0, barThickness: 'flex', maxBarThickness: 30 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, resizeDelay: 200, layout: { padding: { right: 20 } }, plugins: { legend: { display: false }, tooltip: { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)', titleColor: isDark ? '#fff' : '#0f172a', bodyColor: isDark ? '#cbd5e1' : '#475569', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', borderWidth: 1, titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' }, bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' }, padding: 12, cornerRadius: 12 } }, scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: 'bold'}, color: textColor } } }, animation: { duration: 450, easing: 'easeOutBounce' } } });
+          charts.tracker = new Chart(ctx, { type: 'bar', plugins: [shadowPlugin], data: { labels: sortedNames.map(function(n){return n.length > 15 ? n.substring(0,15)+'...' : n;}), datasets: [{ data: sortedData, backgroundColor: gBar, borderRadius: 8, borderWidth: 0, barThickness: 'flex', maxBarThickness: 30 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, resizeDelay: 200, layout: { padding: { right: 20 } }, plugins: { legend: { display: false }, tooltip: { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)', titleColor: isDark ? '#fff' : '#0f172a', bodyColor: isDark ? '#cbd5e1' : '#475569', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', borderWidth: 1, titleFont: { family: "'Outfit', sans-serif", size: 14, weight: '800' }, bodyFont: { family: "'Outfit', sans-serif", size: 13, weight: '600' }, padding: 12, cornerRadius: 12 } }, scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: 'bold'}, color: textColor } } }, animation: { duration: 850, easing: 'easeOutQuart', delay: function(c2) { return (c2.type === 'data' && c2.mode === 'default') ? 180 + (c2.dataIndex || 0) * 60 : 0; } } } });
       }
   }
 
@@ -2403,7 +2467,7 @@
                   x: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 9 }, color: textColor, maxRotation: 0, autoSkip: true } },
                   y: { beginAtZero: true, grid: { color: gridColor }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } }
               },
-              animation: { duration: 400, easing: 'easeOutCubic' }
+              animation: { duration: 900, easing: 'easeOutQuart', delay: function(c2) { return (c2.type === 'data' && c2.mode === 'default') ? 180 + (c2.dataIndex || 0) * 24 : 0; } }
           }
       });
   }
@@ -2522,7 +2586,7 @@
               },
               // Animate only when the data genuinely changed (load / calculator
               // run / theme flip) — periodic re-renders redraw instantly.
-              animation: { duration: fpChanged ? 450 : 0, easing: 'easeOutCubic' }
+              animation: { duration: fpChanged ? 1100 : 0, easing: 'easeOutQuart', delay: fpChanged ? 150 : 0 }
           }
       });
   }
