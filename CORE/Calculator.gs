@@ -6,32 +6,23 @@
 
 function calculateMetrics(inText, outText) {
   let stats = {
-    svl: "0%", ack: "0s", 
+    svl: "0%", ack: "0s", safe: "N/A",
     trendData: { labels: [], actual: [], trend: [] }, 
     trendIn: "0%", trendOut: "0%",
     asa: "0s", inSVL: "0%",
+    burgActual: 0, burgAckSec: 0, updateHour: null,
     report: ""
   };
 
-  // SVL = tableau's "Service Level" — narrow list, matches tableau output.
+  // SVL OUT = Actual-weighted SL over ALL priority 1-4 service types.
+  // Reverse-engineered against paired MAS pastes + reported stats:
+  // including 4-COMM makes the samples match exactly (the old list
+  // omitted it and consistently under-reported by 1-2 points).
   const LIST_SVL = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED",
       "2-CCM", "2-FARM",
       "3-LWK", "3-VID",
-      "4-BURG", "4-TAMP"
-  ];
-
-  // ACK = tableau's "Response Time" — broader list. Excludes 5-SUPF
-  // (auto-resolved supervision fire, which dilutes ACK artificially).
-  // Single-alarm outlier queues (vol <= 1) are also filtered during calc.
-  const LIST_ACK = [
-      "1-FIRE", "1-GAS", "1-H/U", "1-MED",
-      "2-CCM", "2-FARM",
-      "3-LWK", "3-VID",
-      "4-BURG", "4-COMM", "4-TAMP",
-      "5-SUPV",
-      "6-O/C",
-      "7-TRB"
+      "4-BURG", "4-COMM", "4-TAMP"
   ];
 
   // Trend % uses only the "priority" queues the tableau tracks for trending.
@@ -46,6 +37,19 @@ function calculateMetrics(inText, outText) {
   ];
 
   if (inText) {
+    // SAFE = MON_SAFE Intraday SL20. With zero offered calls MAS reports
+    // 100 — that IS the figure the team reports (not "N/A").
+    const intraIdx = inText.indexOf("Stats - Intraday");
+    if (intraIdx !== -1) {
+      const detailIdx = inText.indexOf("Details -", intraIdx);
+      const intraIn = inText.substring(intraIdx, detailIdx === -1 ? undefined : detailIdx);
+      const safeLine = intraIn.split(/\r?\n/).find(l => l.trim().indexOf("MON_SAFE") === 0);
+      if (safeLine) {
+        const sp = safeLine.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
+        if (sp[5] && sp[5].match(/^\d+$/)) stats.safe = sp[5] + "%";
+      }
+    }
+
     const lines = inText.split(/\r?\n/);
     for (const line of lines) {
       const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
@@ -64,9 +68,12 @@ function calculateMetrics(inText, outText) {
   }
 
   if (outText) {
+    // Time of the snapshot, for the automated Point-of-No-Return check.
+    const updMatch = outText.match(/Last update:\s*\d{1,2}-\d{1,2}-\d{4}\s+(\d{1,2}):(\d{2})/);
+    if (updMatch) stats.updateHour = Math.round((parseInt(updMatch[1]) + parseInt(updMatch[2]) / 60) * 100) / 100;
+
     const intraSection = extractSection(outText, "Alarm Resp Time - Intraday");
-    let svlVol = 0, svlW = 0; 
-    let ackVol = 0, ackW = 0;
+    let svlVol = 0, svlW = 0;
 
     if (intraSection) {
       const lines = intraSection.split(/\r?\n/);
@@ -82,14 +89,18 @@ function calculateMetrics(inText, outText) {
                 const timeSec = dur(parts[timeIdx]);
                 const slVal = parseFloat(parts[timeIdx + 1]) || 0;
 
-                // SVL uses the narrow list.
                 if (vol > 0 && checkList(code, LIST_SVL)) {
                      svlVol += vol; svlW += (vol * slVal);
                 }
-                // ACK uses the broad list AND filters single-alarm outliers (vol < 2)
-                // to match the tableau's behavior on edge-case queues.
-                if (vol >= 2 && checkList(code, LIST_ACK)) {
-                     ackVol += vol; ackW += (vol * timeSec);
+                // ACK = the 4-BURG Intraday response time, full stop. The old
+                // weighted average let high-volume slow queues (5-SUPV, 7-TRB)
+                // poison the number (81s reported vs 24s real). This matches
+                // both the reported stats and the Point-of-No-Return playbook
+                // ("Take the ACK" → the BURG row).
+                if (code === "4-BURG") {
+                     stats.ack = timeSec + "s";
+                     stats.burgActual = vol;
+                     stats.burgAckSec = timeSec;
                 }
             }
          }
@@ -97,7 +108,6 @@ function calculateMetrics(inText, outText) {
     }
 
     stats.svl = svlVol > 0 ? Math.round(svlW / svlVol) + "%" : "0%";
-    stats.ack = ackVol > 0 ? Math.round(ackW / ackVol) + "s" : "0s";
 
     const trend60 = extractSection(outText, "Alarm Resp Time - Last 60 min");
     let trendDiff = 0, trendRef = 0;
@@ -142,7 +152,7 @@ function calculateMetrics(inText, outText) {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: ${stats.safe}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
   return JSON.stringify(stats);
 }
 

@@ -1115,13 +1115,29 @@
   function isLateType(t) { return /\balu\b/i.test(String(t || '')); }
   function isApprovedLeaveType(t) { return /\b(asclu|slu|furlough|acsu)\b/i.test(String(t || '')); }
 
-  // Standard Bradford Factor bands (S² × D): <50 low, 50–124 monitor,
-  // 125–449 high, 450+ critical.
-  function bradfordBand(score) {
-      if (score >= 450) return { label: 'Critical', color: 'var(--status-alert)', bg: 'rgba(220,38,38,0.10)' };
-      if (score >= 125) return { label: 'High', color: 'var(--status-ulc)', bg: 'rgba(249,115,22,0.10)' };
-      if (score >= 50)  return { label: 'Monitor', color: 'var(--status-warn)', bg: 'rgba(217,119,6,0.10)' };
-      return { label: 'Low', color: 'var(--status-active)', bg: 'rgba(5,150,105,0.10)' };
+  // Absence-type metadata: color + an honest label, because "SICK" and a
+  // long-term LOA are very different things and the UI should say so.
+  var ABS_TYPE_META = {
+      'SICK':    { color: '#f87171', label: 'SICK' },
+      'UNAB':    { color: '#fb923c', label: 'UNAB' },
+      'COMP':    { color: '#fbbf24', label: 'COMP' },
+      'COMPU':   { color: '#c084fc', label: 'COMPU' },
+      'LOA':     { color: '#38bdf8', label: 'LOA · LONG TERM' },
+      'TI AWOL': { color: '#dc2626', label: 'AWOL' },
+      'ALU':     { color: '#d97706', label: 'ALU · LATE' }
+  };
+  function absTypeMeta(t) {
+      var k = String(t || '').toUpperCase().trim();
+      if (ABS_TYPE_META[k]) return ABS_TYPE_META[k];
+      if (isLateType(k)) return { color: 'var(--status-warn)', label: k + ' · LATE' };
+      if (isApprovedLeaveType(k)) return { color: '#34d399', label: k + ' · APPROVED' };
+      if (k.indexOf('LOA') !== -1) return { color: '#38bdf8', label: k + ' · LONG TERM' };
+      return { color: '#94a3b8', label: k };
+  }
+  // Small colored type pill used in lists and cards.
+  function absTypePill(t, count) {
+      var m = absTypeMeta(t);
+      return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:0.66rem; font-weight:800; color:var(--text-secondary); background:rgba(0,0,0,0.04); padding:2px 8px; border-radius:99px; white-space:nowrap;"><span style="width:7px; height:7px; border-radius:50%; background:' + m.color + ';"></span>' + escapeHTML(m.label) + (count != null ? ' <b style="color:var(--text-main);">' + count + '</b>' : '') + '</span>';
   }
 
   function renderTracker() {
@@ -1184,48 +1200,39 @@
 
           var leftPane = filteredProfiles.map(function(p, i) {
               var isSel = state.selectedAbsenceAgent === p.name;
-              var flagIcon = p.flags > 0 ? '<i data-lucide="flag" width="14" style="color:var(--status-alert);"></i>' : '';
-              var bfBand = bradfordBand(p.bradford || 0);
-              return '<div class="hover-bg" style="padding:14px 16px; margin-bottom:8px; border-radius:12px; background:var(--card-bg); cursor:pointer; display:flex; flex-direction:row; justify-content:space-between; align-items:center; border:2px solid ' + (isSel ? 'var(--accent-primary)' : 'transparent') + '; box-shadow:0 2px 8px rgba(0,0,0,0.02); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
-                  '<div style="display:flex; flex-direction:column; justify-content:center; overflow:hidden;">' +
+              var pills = Object.keys(p.totals || {}).filter(function(k) { return p.totals[k] > 0; })
+                  .sort(function(a, b) { return p.totals[b] - p.totals[a]; })
+                  .map(function(k) { return absTypePill(k, p.totals[k]); }).join(' ');
+              return '<div class="hover-bg" style="padding:14px 16px; margin-bottom:8px; border-radius:14px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + '; box-shadow:' + (isSel ? '0 4px 14px rgba(99,102,241,0.15)' : '0 2px 8px rgba(0,0,0,0.02)') + '; text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
                       '<div style="font-weight:800; font-size:0.95rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(p.name) + '</div>' +
-                      '<div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Total: <span style="color:var(--text-main);">' + p.totalAbsences + '</span>' + (p.lates ? ' &nbsp;·&nbsp; <span style="color:var(--status-warn); font-weight:800;" title="ALU — showed up late, not a full absence">Late ' + p.lates + '</span>' : '') + ' &nbsp;·&nbsp; BF <span style="color:' + bfBand.color + '; font-weight:800;" title="Bradford Factor ' + (p.bradford || 0) + ' (' + bfBand.label + ')">' + (p.bradford || 0) + '</span></div>' +
+                      '<div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">' +
+                          (p.flags > 0 ? '<i data-lucide="flag" width="13" style="color:var(--status-alert);"></i>' : '') +
+                          '<span style="font-size:0.95rem; font-weight:800; color:' + (p.totalAbsences > 0 ? 'var(--text-main)' : 'var(--text-muted)') + '; font-variant-numeric:tabular-nums;">' + p.totalAbsences + '</span>' +
+                      '</div>' +
                   '</div>' +
-                  '<div style="display:flex; gap:8px; align-items:center; flex-shrink:0;">' + 
-                      flagIcon + 
-                      '<div style="background:rgba(0,0,0,0.04); padding:4px 10px; border-radius:8px; font-size:0.85rem; font-weight:800; color:var(--text-main);">' + p.totalAbsences + '</div>' +
-                  '</div>' +
+                  (pills ? '<div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:8px;">' + pills + '</div>' : '') +
               '</div>';
           }).join('');
-          
-          // Flag on either signal: 4+ absences in a month, or a Bradford
-          // Factor at/above the "High" band (125).
-          var flaggedAgents = filteredProfiles.filter(function(p){ return p.flags > 0 || (p.bradford || 0) >= 125; });
+
+          var flaggedAgents = filteredProfiles.filter(function(p){ return p.flags > 0; });
           var flaggedHtml = flaggedAgents.map(function(p) {
-              var bfBand = bradfordBand(p.bradford || 0);
-              var reason = p.flags > 0
-                  ? p.flags + ' Monthly Flags Triggered'
-                  : 'Bradford Factor ' + bfBand.label.toLowerCase() + ' (frequent short absences)';
-              var monthsLine = p.flags > 0 ? '<div style="font-size:0.8rem; color:var(--text-muted);">Months: <span style="color:var(--text-main); font-weight:600;">' + p.flaggedMonths.join(', ') + '</span></div>' : '<div style="font-size:0.8rem; color:var(--text-muted);">' + (p.bradfordSpells || 0) + ' spells &times; ' + (p.bradfordDays || 0) + ' days</div>';
-              return '<div class="hover-bg" style="padding:20px 24px; display:flex; flex-direction:row; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:16px; border-radius:16px; background:var(--card-bg); border:1px solid var(--glass-border); border-left: 4px solid ' + (p.flags > 0 ? 'var(--status-alert)' : bfBand.color) + '; box-shadow:0 4px 15px rgba(0,0,0,0.03); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
-                  '<div style="display:flex; align-items:center; gap:20px;">' +
-                      '<div style="width:48px; height:48px; border-radius:24px; background:rgba(220,38,38,0.1); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><i data-lucide="alert-circle" width="24" style="color:var(--status-alert);"></i></div>' +
-                      '<div>' +
-                          '<div style="font-weight:800; font-size:1.15rem; color:var(--text-main); margin-bottom:4px;">' + escapeHTML(p.name) + '</div>' +
-                          '<div style="font-size:0.85rem; color:var(--status-alert); font-weight:700; margin-bottom:4px;">' + reason + '</div>' +
-                          monthsLine +
+              var months = (p.flaggedMonths || []).map(function(m) { return '<span style="font-size:0.68rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.08); padding:2px 10px; border-radius:99px;">' + escapeHTML(m) + '</span>'; }).join(' ');
+              var pills = Object.keys(p.totals || {}).filter(function(k) { return p.totals[k] > 0; })
+                  .sort(function(a, b) { return p.totals[b] - p.totals[a]; })
+                  .map(function(k) { return absTypePill(k, p.totals[k]); }).join(' ');
+              return '<div class="hover-bg" style="padding:20px 24px; cursor:pointer; margin-bottom:14px; border-radius:16px; background:var(--card-bg); border:1px solid var(--glass-border); box-shadow:0 4px 15px rgba(0,0,0,0.03); text-align:left; transition:0.2s;" onclick="state.selectedAbsenceAgent=\'' + escapeHTML(p.name.replace(/'/g, "\\'")) + '\'; render();">' +
+                  '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
+                      '<div style="min-width:0;">' +
+                          '<div style="font-weight:800; font-size:1.1rem; color:var(--text-main); margin-bottom:4px;">' + escapeHTML(p.name) + '</div>' +
+                          '<div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;">' + p.flags + ' month' + (p.flags === 1 ? '' : 's') + ' with 4+ absences &nbsp;' + months + '</div>' +
+                      '</div>' +
+                      '<div style="text-align:right; flex-shrink:0;">' +
+                          '<div style="font-size:1.9rem; font-weight:800; color:var(--text-main); line-height:1; font-variant-numeric:tabular-nums;">' + p.totalAbsences + '</div>' +
+                          '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:3px;">YTD Absences</div>' +
                       '</div>' +
                   '</div>' +
-                  '<div style="display:flex; gap:20px; align-items:center;">' +
-                      '<div style="text-align:right;">' +
-                          '<div style="font-size:2rem; font-weight:800; color:' + bfBand.color + '; line-height:1;" title="Bradford Factor = spells² × days (' + (p.bradfordSpells || 0) + '² × ' + (p.bradfordDays || 0) + ')">' + (p.bradford || 0) + '</div>' +
-                          '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:4px;">Bradford · ' + bfBand.label + '</div>' +
-                      '</div>' +
-                      '<div style="text-align:right; padding-left:20px; border-left:1px solid var(--glass-border);">' +
-                          '<div style="font-size:2rem; font-weight:800; color:var(--text-main); line-height:1;">' + p.totalAbsences + '</div>' +
-                          '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-top:4px;">YTD Absences</div>' +
-                      '</div>' +
-                  '</div>' +
+                  (pills ? '<div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--glass-border);">' + pills + '</div>' : '') +
               '</div>';
           }).join('');
 
@@ -1263,15 +1270,11 @@
                   }
                   var monthTotalHtml = isMonthFiltered ? '<div style="font-size:0.85rem; font-weight:700; color:var(--text-main); background:rgba(0,0,0,0.05); padding:4px 12px; border-radius:12px;">Month Total: ' + realRecs.length + (lateRecsCount ? ' <span style="color:var(--status-warn);">· Late ' + lateRecsCount + '</span>' : '') + '</div>' : '';
 
-                  var timeline = filteredRecs.map(function(r) { return '<div style="display:flex; justify-content:space-between; padding:16px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><div style="display:flex; align-items:center; gap:16px;"><div style="width:44px; height:44px; border-radius:12px; background:rgba(220,38,38,0.1); color:var(--status-alert); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.75rem;">' + escapeHTML(r.type.substring(0,4)) + '</div><div style="text-align:left;"><div style="font-weight:800; color:var(--text-main); font-size:1.05rem; margin-bottom:4px;">' + escapeHTML(r.type) + '</div><div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i data-lucide="calendar" width="14" style="vertical-align:middle; margin-right:4px;"></i>' + escapeHTML(r.date) + ' &bull; ' + escapeHTML(r.start) + ' - ' + escapeHTML(r.end) + '</div></div></div></div>'; }).join('');
+                  var timeline = filteredRecs.map(function(r) { var m = absTypeMeta(r.type); return '<div style="display:flex; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><div style="display:flex; align-items:center; gap:16px;"><div style="width:44px; height:44px; border-radius:12px; background:' + m.color + '1f; color:' + m.color + '; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.72rem;">' + escapeHTML(String(r.type).substring(0,4)) + '</div><div style="text-align:left;"><div style="font-weight:800; color:var(--text-main); font-size:1rem; margin-bottom:4px;">' + escapeHTML(m.label) + '</div><div style="font-size:0.8rem; color:var(--text-muted); font-weight:600;"><i data-lucide="calendar" width="14" style="vertical-align:middle; margin-right:4px;"></i>' + escapeHTML(r.date) + ' &bull; ' + escapeHTML(r.start) + ' - ' + escapeHTML(r.end) + '</div></div></div></div>'; }).join('');
 
-                  var badges = Object.keys(displayTotals).filter(function(k) { return displayTotals[k] > 0; }).map(function(k) { var tagLabel = escapeHTML(k) + (isLateType(k) ? ' · LATE' : (isApprovedLeaveType(k) ? ' · APPROVED' : ''));
-                  var tagColor = isLateType(k) ? 'var(--status-warn)' : (isApprovedLeaveType(k) ? 'var(--status-active)' : 'var(--text-muted)');
-                  return '<div style="background:var(--card-bg); border:1px solid var(--glass-border); padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 100px; box-shadow:0 2px 8px rgba(0,0,0,0.02);"><span style="font-size:0.75rem; font-weight:800; color:' + tagColor + '; text-transform:uppercase;">' + tagLabel + '</span><span style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + displayTotals[k] + '</span></div>'; }).join('');
-                  // Bradford card is always YTD (the score is a yearly measure;
-                  // month filtering doesn't apply to it).
-                  var bfBandSel = bradfordBand(p.bradford || 0);
-                  badges = '<div style="background:' + bfBandSel.bg + '; border:1px solid ' + bfBandSel.color + '; padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 140px;" title="Bradford Factor = spells² × days. Frequent short absences score far higher than one long absence. ' + (p.bradfordSpells || 0) + ' spells² × ' + (p.bradfordDays || 0) + ' days = ' + (p.bradford || 0) + '"><span style="font-size:0.75rem; font-weight:800; color:' + bfBandSel.color + '; text-transform:uppercase;">Bradford Factor · YTD</span><span style="font-size:1.5rem; font-weight:800; color:' + bfBandSel.color + ';">' + (p.bradford || 0) + ' <span style="font-size:0.8rem; font-weight:800;">' + bfBandSel.label + '</span></span><span style="font-size:0.7rem; font-weight:600; color:var(--text-muted);">' + (p.bradfordSpells || 0) + ' spells &times; ' + (p.bradfordDays || 0) + ' days</span></div>' + badges;
+                  var badges = Object.keys(displayTotals).filter(function(k) { return displayTotals[k] > 0; }).map(function(k) { var meta = absTypeMeta(k);
+                  return '<div style="background:var(--card-bg); border:1px solid var(--glass-border); padding:12px 20px; border-radius:16px; display:flex; flex-direction:column; gap:4px; flex: 1 1 auto; min-width: 110px; box-shadow:0 2px 8px rgba(0,0,0,0.02);"><span style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:50%; background:' + meta.color + '; flex-shrink:0;"></span>' + escapeHTML(meta.label) + '</span><span style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + displayTotals[k] + '</span></div>'; }).join('');
+// (Bradford card removed per product direction.)
                   
                   var flagBanner = p.flags > 0 ? '<div style="background:linear-gradient(90deg, rgba(239,68,68,0.1), transparent); border-left:4px solid var(--status-alert); padding:20px; border-radius:12px; margin-bottom:24px; display:flex; gap:16px; align-items:center; text-align:left;"><i data-lucide="flag" width="32" style="color:var(--status-alert);"></i><div><div style="font-weight:800; color:var(--status-alert); font-size:1.05rem; margin-bottom:4px;">Repetitive Absenteeism Flag</div><div style="font-size:0.9rem; color:var(--text-main); font-weight:600;">This agent triggered <b style="color:var(--status-alert);">' + p.flags + '</b> monthly flags (4+ absences in a single month).</div><div style="font-size:0.85rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Flagged Months: <span style="color:var(--text-main);">' + p.flaggedMonths.join(', ') + '</span></div></div></div>' : '';
 
@@ -1888,18 +1891,23 @@
   function renderPonrCard() {
       var savedTarget = 30;
       try { savedTarget = parseFloat(localStorage.getItem('ponr_target')) || 30; } catch(e) {}
-      var ackPrefill = String(state.currentACK || '').replace(/[^\d.]/g, '');
+      // Automated: after a calculator run, ACK / BURG count / snapshot time
+      // all come straight from the paste — the verdict shows with zero typing.
+      var lc = state.lastCalc || {};
+      var auto = (lc.burgActual > 0 && lc.burgAckSec != null);
+      var ackPrefill = auto ? String(lc.burgAckSec) : String(state.currentACK || '').replace(/[^\d.]/g, '');
+      var alarmsPrefill = auto ? String(lc.burgActual) : '';
       var n = new Date();
-      var timePrefill = (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
+      var timePrefill = (auto && lc.updateHour != null) ? lc.updateHour.toFixed(2) : (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
       var input = function(id, label, value, placeholder, extra) {
           return '<div style="flex:1; min-width:150px;"><label style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</label><div style="display:flex; gap:6px; margin-top:6px;">' +
                  '<input id="' + id + '" type="number" step="any" class="input-aether" style="height:38px; font-weight:700; font-variant-numeric:tabular-nums;" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</div></div>';
       };
       return '<div class="aether-card tile-aurora" style="margin-bottom:24px; padding:24px;">' +
-          '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> ACK — Point of No Return</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">paste BURG count from the Intraday report · time 16.25 = 4:15 PM</span></div>' +
+          '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> ACK — Point of No Return</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (auto ? '<span style="color:var(--status-active); font-weight:800;">✓ auto-filled from your last calculation</span> · edit any field to explore' : 'runs automatically after a calculation · time 16.25 = 4:15 PM') + '</span></div>' +
           '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">' +
           input('ponr-ack', 'Current ACK (s)', ackPrefill, 'e.g. 50') +
-          input('ponr-alarms', 'BURG Alarms Received', '', 'e.g. 540') +
+          input('ponr-alarms', 'BURG Alarms Received', alarmsPrefill, 'e.g. 540') +
           input('ponr-time', 'Time Now (decimal)', timePrefill, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
           input('ponr-target', 'Target ACK (s)', savedTarget, '30') +
           '</div><div id="ponr-result"></div></div>';
@@ -1911,7 +1919,7 @@
   
   window.runCalculation = function() {
      var i = document.getElementById('in-text').value; var o = document.getElementById('out-text').value;
-     if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; fetchStats(); render(); }).runCalculator(i, o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
+     if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; state.lastCalc = d; fetchStats(); render(); }).runCalculator(i, o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
   };
 
   window.copyReport = function() { var text = document.getElementById('report-content').innerText; fallbackCopyTextToClipboard(text, "Report Copied"); };
