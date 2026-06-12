@@ -50,6 +50,10 @@ function _titleCaseName(s) {
 //               real absenteeism.
 var APPROVED_LEAVE_RGX = /\b(asclu|slu|furlough|acsu)\b/i;
 var LATE_RGX = /\balu\b/i;
+// "TI Mentor" is offshore mentoring, NOT a coaching session (per product
+// owner) — it must never land in WF_COACHING even though it contains the
+// 'mentor' coaching code.
+var COACH_EXCLUDE_RGX = /ti[\s_\-]*mentor/i;
 
 var WorkforceTracker = {
 
@@ -125,7 +129,7 @@ var WorkforceTracker = {
               let actLower = obj.act.toLowerCase();
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
               
-              let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
+              let isCoach = !isTeamLead && !COACH_EXCLUDE_RGX.test(actLower) && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_RGX.test(actLower);
               
@@ -183,7 +187,7 @@ var WorkforceTracker = {
               let actLower = this._cleanActivity(csvParts[2]).toLowerCase();
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
               
-              let isCoach = !isTeamLead && COACHING_CODES.some(c => actLower.includes(c));
+              let isCoach = !isTeamLead && !COACH_EXCLUDE_RGX.test(actLower) && COACHING_CODES.some(c => actLower.includes(c));
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_RGX.test(actLower);
 
@@ -1211,6 +1215,24 @@ var WorkforceTracker = {
   _indexToTime: function(i) { let h=Math.floor(i/4), m=(i%4)*15; return `${h<10?'0'+h:h}:${m===0?'00':m}`;
   }
 };
+
+/**
+ * One-time maintenance: purge mis-classified "TI Mentor" rows from
+ * WF_COACHING (they were ingested before the exclusion existed).
+ * Run once from the Apps Script editor; future imports exclude them
+ * automatically. Safe to run repeatedly.
+ */
+function cleanupTiMentorCoaching() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('WF_COACHING');
+  if (!sheet || sheet.getLastRow() < 2) return 'WF_COACHING empty — nothing to clean.';
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getDisplayValues();
+  const keep = data.filter(r => !COACH_EXCLUDE_RGX.test(String(r[2] || '')));
+  const removed = data.length - keep.length;
+  if (!removed) return 'No TI Mentor rows found in WF_COACHING.';
+  sheet.getRange(2, 1, data.length, sheet.getLastColumn()).clearContent();
+  if (keep.length) sheet.getRange(2, 1, keep.length, keep[0].length).setValues(keep);
+  return removed + ' TI Mentor row(s) removed from WF_COACHING (' + keep.length + ' kept).';
+}
 
 function fetchSyncMetadata() {
   try {
