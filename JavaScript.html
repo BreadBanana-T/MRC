@@ -1844,40 +1844,45 @@
   }
 
   // ──────────────────── ACK POINT OF NO RETURN (calculator) ────────────────────
+  // Fully automatic: after a calculation, the BURG count / BURG ACK /
+  // snapshot time parsed from the paste produce the verdict with zero
+  // typing — shown as a slim banner, not a form. A "What-if" toggle
+  // exposes the manual fields for scenario testing only.
   // Math (validated against the "Point of no return" sheet):
-  //   remaining  = (alarms ÷ hoursElapsed) × (24 − hoursElapsed)   ← same pace
+  //   remaining  = (alarms ÷ hoursElapsed) × (24 − hoursElapsed)
   //   required   = (target×(alarms+remaining) − currentACK×alarms) ÷ remaining
-  //   required < 0  →  even instant 0s ACKs can't pull the daily avg to target.
+  //   floor      = best achievable day-end ACK if the rest are instant
+  function computePonr(ack, alarms, t, target) {
+      if (!(ack >= 0) || !(alarms > 0) || !(t > 0) || t >= 24 || !(target > 0)) return null;
+      var remaining = (alarms / t) * (24 - t);
+      var required = (target * (alarms + remaining) - ack * alarms) / remaining;
+      var floor = (ack * alarms) / (alarms + remaining);
+      return { remaining: remaining, required: required, floor: floor };
+  }
+  function ponrTarget() {
+      var v = 30;
+      try { v = parseFloat(localStorage.getItem('ponr_target')) || 30; } catch(e) {}
+      return v;
+  }
+  window.setPonrTarget = function(v) {
+      v = parseFloat(v);
+      if (v > 0) { try { localStorage.setItem('ponr_target', String(v)); } catch(e) {} }
+      render();
+  };
+  window.togglePonrWhatIf = function() { state.ponrWhatIf = !state.ponrWhatIf; render(); };
+
   window.updatePonr = function() {
       var box = document.getElementById('ponr-result');
       if (!box) return;
       var num = function(id) { var el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
-      var ack = num('ponr-ack'), alarms = num('ponr-alarms'), t = num('ponr-time'), target = num('ponr-target');
+      var target = num('ponr-target');
       if (target > 0) { try { localStorage.setItem('ponr_target', String(target)); } catch(e) {} }
-      if (!(ack >= 0) || !(alarms > 0) || !(t > 0) || t >= 24 || !(target > 0)) {
+      var r = computePonr(num('ponr-ack'), num('ponr-alarms'), num('ponr-time'), target);
+      if (!r) {
           box.innerHTML = '<div style="padding:16px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">Enter current ACK, BURG alarms received, and the time (e.g. 16.25 = 4:15 PM) to project the rest of the day.</div>';
           return;
       }
-      var remaining = (alarms / t) * (24 - t);
-      var required = (target * (alarms + remaining) - ack * alarms) / remaining;
-      // Best day-end average even if every remaining alarm is ACKed instantly.
-      var floor = (ack * alarms) / (alarms + remaining);
-      var stat = function(label, value, color) {
-          return '<div style="flex:1; min-width:140px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 16px;"><div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + label + '</div><div style="font-size:1.5rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; font-variant-numeric:tabular-nums; margin-top:4px;">' + value + '</div></div>';
-      };
-      var banner;
-      if (required < 0) {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(220,38,38,0.10); border:1px solid var(--status-alert); color:var(--status-alert); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-octagon" width="20"></i> POINT OF NO RETURN — even instant ACKs land the day at ' + floor.toFixed(1) + 's (target ' + target + 's).</div>';
-      } else if (required < target * 0.5) {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); color:var(--status-warn); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-triangle" width="20"></i> Tight — the rest of the day must average ≤ ' + required.toFixed(1) + 's to finish at ' + target + 's.</div>';
-      } else {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(5,150,105,0.10); border:1px solid var(--status-active); color:var(--status-active); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="check-circle" width="20"></i> Recoverable — averaging ≤ ' + required.toFixed(1) + 's for the rest of the day hits the ' + target + 's target.</div>';
-      }
-      box.innerHTML = '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">' +
-          stat('Remaining Alarms (proj.)', Math.round(remaining * 100) / 100) +
-          stat('Required ACK / interval', required.toFixed(1) + 's', required < 0 ? 'var(--status-alert)' : (required < target * 0.5 ? 'var(--status-warn)' : 'var(--status-active)')) +
-          stat('Best possible day-end', floor.toFixed(1) + 's', floor > target ? 'var(--status-alert)' : 'var(--text-main)') +
-          '</div>' + banner;
+      box.innerHTML = ponrVerdictHtml(r, target, true);
       refreshIcons();
   };
   window.ponrSetNow = function() {
@@ -1888,29 +1893,72 @@
       updatePonr();
   };
 
-  function renderPonrCard() {
-      var savedTarget = 30;
-      try { savedTarget = parseFloat(localStorage.getItem('ponr_target')) || 30; } catch(e) {}
-      // Automated: after a calculator run, ACK / BURG count / snapshot time
-      // all come straight from the paste — the verdict shows with zero typing.
-      var lc = state.lastCalc || {};
-      var auto = (lc.burgActual > 0 && lc.burgAckSec != null);
-      var ackPrefill = auto ? String(lc.burgAckSec) : String(state.currentACK || '').replace(/[^\d.]/g, '');
-      var alarmsPrefill = auto ? String(lc.burgActual) : '';
-      var n = new Date();
-      var timePrefill = (auto && lc.updateHour != null) ? lc.updateHour.toFixed(2) : (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
-      var input = function(id, label, value, placeholder, extra) {
-          return '<div style="flex:1; min-width:150px;"><label style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</label><div style="display:flex; gap:6px; margin-top:6px;">' +
-                 '<input id="' + id + '" type="number" step="any" class="input-aether" style="height:38px; font-weight:700; font-variant-numeric:tabular-nums;" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</div></div>';
+  function ponrVerdictHtml(r, target, withStats) {
+      var stat = function(label, value, color) {
+          return '<div style="flex:1; min-width:140px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 16px;"><div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + label + '</div><div style="font-size:1.5rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; font-variant-numeric:tabular-nums; margin-top:4px;">' + value + '</div></div>';
       };
-      return '<div class="aether-card tile-aurora" style="margin-bottom:24px; padding:24px;">' +
-          '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> ACK — Point of No Return</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (auto ? '<span style="color:var(--status-active); font-weight:800;">✓ auto-filled from your last calculation</span> · edit any field to explore' : 'runs automatically after a calculation · time 16.25 = 4:15 PM') + '</span></div>' +
-          '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">' +
-          input('ponr-ack', 'Current ACK (s)', ackPrefill, 'e.g. 50') +
-          input('ponr-alarms', 'BURG Alarms Received', alarmsPrefill, 'e.g. 540') +
-          input('ponr-time', 'Time Now (decimal)', timePrefill, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
-          input('ponr-target', 'Target ACK (s)', savedTarget, '30') +
-          '</div><div id="ponr-result"></div></div>';
+      var banner;
+      if (r.required < 0) {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(220,38,38,0.10); border:1px solid var(--status-alert); color:var(--status-alert); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-octagon" width="20"></i> POINT OF NO RETURN — even instant ACKs land the day at ' + r.floor.toFixed(1) + 's (target ' + target + 's).</div>';
+      } else if (r.required < target * 0.5) {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); color:var(--status-warn); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-triangle" width="20"></i> Tight — the rest of the day must average ≤ ' + r.required.toFixed(1) + 's to finish at ' + target + 's.</div>';
+      } else {
+          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(5,150,105,0.10); border:1px solid var(--status-active); color:var(--status-active); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="check-circle" width="20"></i> Recoverable — averaging ≤ ' + r.required.toFixed(1) + 's for the rest of the day hits the ' + target + 's target.</div>';
+      }
+      if (!withStats) return banner;
+      return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">' +
+          stat('Remaining Alarms (proj.)', Math.round(r.remaining * 100) / 100) +
+          stat('Required ACK / interval', r.required.toFixed(1) + 's', r.required < 0 ? 'var(--status-alert)' : (r.required < target * 0.5 ? 'var(--status-warn)' : 'var(--status-active)')) +
+          stat('Best possible day-end', r.floor.toFixed(1) + 's', r.floor > target ? 'var(--status-alert)' : 'var(--text-main)') +
+          '</div>' + banner;
+  }
+
+  function renderPonrCard() {
+      var lc = state.lastCalc || {};
+      var auto = (lc.burgActual > 0 && lc.burgAckSec != null && lc.updateHour != null);
+      var target = ponrTarget();
+
+      // What-if mode: the manual form, prefilled from the last calculation.
+      if (state.ponrWhatIf) {
+          var ackPre = auto ? String(lc.burgAckSec) : String(state.currentACK || '').replace(/[^\d.]/g, '');
+          var alarmsPre = auto ? String(lc.burgActual) : '';
+          var n = new Date();
+          var timePre = auto ? lc.updateHour.toFixed(2) : (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
+          var input = function(id, label, value, placeholder, extra) {
+              return '<div style="flex:1; min-width:150px;"><label style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</label><div style="display:flex; gap:6px; margin-top:6px;">' +
+                     '<input id="' + id + '" type="number" step="any" class="input-aether" style="height:38px; font-weight:700; font-variant-numeric:tabular-nums;" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</div></div>';
+          };
+          return '<div class="aether-card" style="margin-bottom:24px; padding:24px;">' +
+              '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> Point of No Return — What-if</span><button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="togglePonrWhatIf()">Back to automatic</button></div>' +
+              '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">' +
+              input('ponr-ack', 'Current ACK (s)', ackPre, 'e.g. 50') +
+              input('ponr-alarms', 'BURG Alarms Received', alarmsPre, 'e.g. 540') +
+              input('ponr-time', 'Time (decimal)', timePre, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
+              input('ponr-target', 'Target ACK (s)', target, '30') +
+              '</div><div id="ponr-result"></div></div>';
+      }
+
+      // Automatic mode: nothing to fill in. Before the first calculation,
+      // just a one-line hint; after, the verdict banner.
+      var headRight = '<span style="display:flex; align-items:center; gap:10px;">' +
+          '<label style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Target</label>' +
+          '<input type="number" step="any" class="input-aether" style="width:70px; height:28px; font-size:0.8rem; font-weight:800; text-align:center;" value="' + target + '" onchange="setPonrTarget(this.value)">' +
+          '<button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="togglePonrWhatIf()">What-if</button></span>';
+
+      if (!auto) {
+          return '<div class="aether-card" style="margin-bottom:24px; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
+              '<span style="display:flex; align-items:center; gap:10px; font-weight:700; font-size:0.88rem; color:var(--text-muted);"><i data-lucide="timer" width="17"></i> Point of No Return — checked automatically when you run a calculation.</span>' +
+              headRight + '</div>';
+      }
+
+      var r = computePonr(lc.burgAckSec, lc.burgActual, lc.updateHour, target);
+      var detail = '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:10px;">From your paste: <b style="color:var(--text-main);">' + Number(lc.burgActual).toLocaleString() + '</b> BURG alarms · ACK <b style="color:var(--text-main);">' + lc.burgAckSec + 's</b> · snapshot at <b style="color:var(--text-main);">' + lc.updateHour.toFixed(2) + 'h</b>' + (r ? ' · projected remaining <b style="color:var(--text-main);">' + Math.round(r.remaining) + '</b>' + (r.required >= 0 ? ' · need ≤ <b style="color:var(--text-main);">' + r.required.toFixed(1) + 's</b> rest of day' : '') : '') + '</div>';
+      return '<div class="aether-card" style="margin-bottom:24px; padding:18px 24px;">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
+          '<span style="display:flex; align-items:center; gap:10px; font-weight:800; font-size:0.95rem;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> Point of No Return <span style="font-size:0.62rem; font-weight:800; color:var(--status-active); background:rgba(5,150,105,0.1); padding:2px 8px; border-radius:99px; letter-spacing:1px;">AUTO</span></span>' +
+          headRight + '</div>' +
+          (r ? ponrVerdictHtml(r, target, false) : '<div style="margin-top:12px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">Not enough data in the paste to project (needs BURG volume and a valid snapshot time).</div>') +
+          detail + '</div>';
   }
 
   function renderCalc() {
