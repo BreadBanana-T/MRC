@@ -142,12 +142,14 @@ var ManagementView = {
     var newTotals = function() {
       return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
-               absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null };
+               absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
+               openOt: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
       return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
-               coach: 0, acsu: 0, coachSessions: 0, slAvg: null, ackAvg: null };
+               coach: 0, acsu: 0, coachSessions: 0, slAvg: null, ackAvg: null,
+               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
     });
     // Absence series: aligned with buckets for week/month/quarter; a single
     // whole-period entry for day grain (hourly absence bars are meaningless).
@@ -264,6 +266,75 @@ var ManagementView = {
     // ACSU hours
     try { walkHours('WF_FURLOUGH', function(iv) { distribute(iv, function(t, h) { t.acsu += h; }, function(b, h) { b.acsu += h; }); }); } catch (e) {}
 
+    // Open OT slots — WF_OT_OPEN: [Date, Start, End, Slots, WindowHours,
+    // OpenHours, Rate, Bucket, Skill, SkillValues, Visible, OID].
+    // Hidden postings excluded; hours = window overlap × slot count, so the
+    // same interval-exactness as everything else, at every grain. To-date
+    // capped like the rest of the view (the OT tracker holds the
+    // forward-looking posting list).
+    try {
+      var dbOpen = WT._getDB('WF_OT_OPEN');
+      if (dbOpen && dbOpen.getLastRow() > 1) {
+        var seenOp = {};
+        dbOpen.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+          if (String(row[10]) === 'N') return;
+          var dStr = WT._formatDate(row[0]);
+          var dayMs = self._dayStartEpoch(dStr);
+          if (dayMs < 0) return;
+          if (dayMs + 86400000 * 2 < pb.prevStart || dayMs >= pb.selEnd) return;
+          var oid = String(row[11] || (dStr + '|' + row[1] + '|' + row[2] + '|' + row[8]));
+          if (seenOp[oid]) return; seenOp[oid] = true;
+          var slots = parseInt(row[3], 10) || 0;
+          if (!slots) return;
+          var iv = self._segInterval(WT, dayMs, row[1], row[2]);
+          if (!iv) return;
+          var skill = String(row[8]) || 'GEN';
+          var selH = distribute(iv,
+            function(t, h) { t.openOt += h * slots; },
+            function(b, h) { b.openOt += h * slots; });
+          if (selH > 0) selT.openSkills[skill] = Math.round(((selT.openSkills[skill] || 0) + selH * slots) * 10) / 10;
+          if (iv.s >= pb.selStart && iv.s < selCap) {
+            selT.openSlots += slots;
+            var wi2 = self._windowIndex(wins, iv.s);
+            if (wi2 !== -1) buckets[wi2].openSlots += slots;
+          }
+          if (iv.s >= pb.prevStart && iv.s < prevCap) prevT.openSlots += slots;
+        });
+      }
+    } catch (e) {}
+
+    // IDP — WF_IDP: [Day, Interval, Required, Open] per 15-min bucket.
+    // idpDeficit = Σ max(0, required − open) × 0.25 = agent-hours short.
+    // idpNet = average net seats over the bucket's intervals.
+    try {
+      var dbIdp = WT._getDB('WF_IDP');
+      if (dbIdp && dbIdp.getLastRow() > 1) {
+        var seenIdp = {};
+        dbIdp.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+          var dStr = WT._formatDate(row[0]);
+          var dayMs = self._dayStartEpoch(dStr);
+          if (dayMs < 0) return;
+          if (dayMs + 86400000 < pb.prevStart || dayMs >= pb.selEnd) return;
+          var tMin = WT._timeToMins(WT._formatTimeStr(String(row[1])));
+          if (tMin < 0) return;
+          var key = dStr + '|' + tMin;
+          if (seenIdp[key]) return; seenIdp[key] = true;
+          var epoch = dayMs + tMin * 60000;
+          var req = parseFloat(String(row[2]).replace(',', '.')) || 0;
+          var seats = parseFloat(String(row[3]).replace(',', '.')) || 0;
+          var net = seats - req;
+          var defH = net < 0 ? -net * 0.25 : 0;
+          if (epoch >= pb.selStart && epoch < selCap) {
+            selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++;
+            var wi3 = self._windowIndex(wins, epoch);
+            if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; }
+          } else if (epoch >= pb.prevStart && epoch < prevCap) {
+            prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++;
+          }
+        });
+      }
+    } catch (e) {}
+
     // Absences — distinct AGENT-DAYS. real > late > approved priority per day.
     // Every type tracks an offshore count so e.g. "UNAB 12 (9 Off)" is direct.
     try {
@@ -359,9 +430,13 @@ var ManagementView = {
     } catch (e) {}
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu'];
-    buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); });
-    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); });
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'idpDeficit'];
+    var finIdp = function(o) {
+      o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
+      delete o._idpSum; delete o._idpN;
+    };
+    buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
+    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); finIdp(t); });
 
     var topList = function(map) {
       return Object.keys(map)

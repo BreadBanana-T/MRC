@@ -1783,6 +1783,13 @@
 
       var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px;">' +
           kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents') +
+          (function() {
+              var fill = (cur.openOt > 0) ? Math.round((cur.ot / cur.openOt) * 1000) / 10 : null;
+              var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
+              var skills = Object.keys(cur.openSkills || {}).sort().map(function(k) { return escapeHTML(k) + ' ' + cur.openSkills[k] + 'h'; }).join(' · ');
+              return kpi('OT Coverage', fill != null ? fill + '%' : '—', delta(cur.openOt, prev.openOt, true, 'h'), 'opened <b style="color:var(--text-main);">' + (cur.openOt || 0) + 'h</b> · ' + (cur.openSlots || 0) + ' slots' + (skills ? '<br>' + skills : ''), fillColor);
+          })() +
+          kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') +
           kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') +
           kpi('Absences', String(cur.absences || 0), delta(cur.absences, prev.absences, false), 'agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), (cur.absences || 0) > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
           kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) +
@@ -1807,7 +1814,7 @@
 
       return headerHtml + kpisHtml +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Overtime Hours — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'straight &times;1 vs premium &times;1.5') +
+          chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short') +
           chartCard('Off-Phone Hours', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower · Coaching · ACSU') +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
@@ -1849,10 +1856,21 @@
 
       var elOt = document.getElementById('mgmt-chart-ot');
       if (elOt) {
-          charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
-              { label: '×1 Straight', data: buckets.map(function(b) { return b.otX1; }), backgroundColor: '#818cf8', borderRadius: 4, maxBarThickness: bw },
-              { label: '×1.5 Premium', data: buckets.map(function(b) { return b.otX15; }), backgroundColor: '#f472b6', borderRadius: 4, maxBarThickness: bw }
-          ] }, options: baseOpts(true) });
+          var hasOpen = buckets.some(function(b) { return (b.openOt || 0) > 0; });
+          var hasIdp = buckets.some(function(b) { return b.idpNet != null; });
+          var otSets = [];
+          if (hasOpen) otSets.push({ label: 'Open OT (posted)', data: buckets.map(function(b) { return b.openOt || 0; }), backgroundColor: 'rgba(129,140,248,0.15)', borderColor: '#818cf8', borderWidth: 2, borderRadius: 4, maxBarThickness: bw, stack: 'open' });
+          otSets.push({ label: '×1 Straight', data: buckets.map(function(b) { return b.otX1; }), backgroundColor: '#818cf8', borderRadius: 4, maxBarThickness: bw, stack: 'given' });
+          otSets.push({ label: '×1.5 Premium', data: buckets.map(function(b) { return b.otX15; }), backgroundColor: '#f472b6', borderRadius: 4, maxBarThickness: bw, stack: 'given' });
+          if (hasIdp) otSets.push({ type: 'line', label: 'IDP deficit (h short)', data: buckets.map(function(b) { return b.idpDeficit || 0; }), borderColor: '#f87171', borderWidth: 2, borderDash: [5, 4], pointRadius: 2, pointBackgroundColor: '#f87171', tension: 0.3, yAxisID: 'y1', spanGaps: true });
+          var otOpts = baseOpts(true);
+          if (hasIdp) otOpts.scales.y1 = { position: 'right', beginAtZero: true, stacked: false, grid: { display: false }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } };
+          otOpts.plugins.tooltip = { callbacks: { footer: function(items) {
+              var i = items[0].dataIndex; var b2 = buckets[i];
+              if (!b2.openOt) return '';
+              return 'Fill rate: ' + Math.round(((b2.ot || 0) / b2.openOt) * 100) + '%' + (b2.openSlots ? ' · ' + b2.openSlots + ' slots' : '');
+          } } };
+          charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: otSets }, options: otOpts });
       }
       var elRoles = document.getElementById('mgmt-chart-roles');
       if (elRoles) {
