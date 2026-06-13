@@ -38,6 +38,10 @@ var SafeTracker = {
     return 'EN';
   },
 
+  // SAFE capability lives in the MasterList Skills text as the skill
+  // "Smart wear" (the SAFE program's skill name). Tolerant of spacing/hyphen.
+  _canSafe: function (skills) { return /smart\s*-?\s*wear/i.test(String(skills || '')); },
+
   getAnalytics: function (mode, refDate, regionFilter, cycleFilter) {
     regionFilter = regionFilter || 'All';
     cycleFilter = cycleFilter || 'ALL';
@@ -84,13 +88,13 @@ var SafeTracker = {
         var nm = String(r[0]).trim();
         if (!nm) return;
         var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(nm) : nm.toLowerCase();
-        mlByKey[key] = { level: parseInt(r[1], 10) || 2, sup: String(r[2] || '').trim(),
-                         skills: String(r[3] || '').trim(), lang: self._inferLang(r[3]) };
+        mlByKey[key] = { name: nm, level: parseInt(r[1], 10) || 2, sup: String(r[2] || '').trim(),
+                         skills: String(r[3] || '').trim(), lang: self._inferLang(r[3]), canSafe: self._canSafe(r[3]) };
       });
     }
     var profileOf = function (agent) {
       var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(agent) : String(agent).toLowerCase();
-      return mlByKey[key] || { level: 2, sup: '', skills: '', lang: 'EN' };
+      return mlByKey[key] || { name: agent, level: 2, sup: '', skills: '', lang: 'EN', canSafe: false };
     };
 
     var seen = {};
@@ -211,17 +215,15 @@ var SafeTracker = {
     var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, count: events.length,
                    bRed: 0, bWarn: 0, bNormal: 0, bLow: 0 };
 
-    // ── Scheduled-time + hour-of-day staffing profile (data-analyst lens) ──
-    // Read the schedule archive (Schedule_History ∪ Raw Schedule) across the
-    // window so SAFE can be normalised against time actually SCHEDULED, and so
-    // we can show WHEN (clock hour) SAFE load sits relative to total staffing.
+    // ── Capability + hour-of-day COVERAGE (the management proof) ──────────
+    // Capability is real data: an agent CAN do SAFE iff their MasterList skill
+    // text contains "Smart wear". Offshore never does SAFE, so it's excluded.
+    // We prove that high-SAFE agents work the hours when few capable agents are
+    // staffed, by comparing SAFE demand to capable supply per clock hour.
     var winStartStr = Utilities.formatDate(new Date(bounds.start), 'America/Toronto', 'yyyy-MM-dd');
     var winEndStr = eStr;
-    var schedByAgent = {};                 // normKey -> scheduled minutes in window
-    var schedDaysByAgent = {};             // normKey -> count of scheduled days
-    var schedHourly = [], safeHourly = []; // [24] clock-hour minute load
-    for (var hh = 0; hh < 24; hh++) { schedHourly.push(0); safeHourly.push(0); }
     var nk = function (n) { return self._normKey(n); };
+    var mk24 = function () { var a = []; for (var i = 0; i < 24; i++) a.push(0); return a; };
     var addHourly = function (arr, sMin, eMin) {
       var t = sMin;
       while (t < eMin) {
@@ -231,33 +233,83 @@ var SafeTracker = {
         t = chunkEnd;
       }
     };
-    var schedSeen = {};
+
+    // SAFE-capable, onshore roster (the only people who CAN carry SAFE).
+    var capable = {};                       // normKey -> {name, level, lang, region}
+    Object.keys(mlByKey).forEach(function (k) {
+      var m = mlByKey[k]; if (!m.canSafe) return;
+      if (regionOf(m.name) === 'Offshore') return;
+      capable[k] = { name: m.name, level: m.level, lang: m.lang };
+    });
+
+    // DEMAND + distinct providers + per-agent hour profile (activity — reliable).
+    var safeHourly = mk24();
+    var providerSets = []; for (var ps = 0; ps < 24; ps++) providerSets.push({});
+    var byHourByAgent = {};                 // display name -> [24] minutes of SAFE
+    var deliverBands = {};                  // delivering normKey -> {Morning,Evening,Night}
+    events.forEach(function (e) {
+      var sMin = e.startMin, eMin = e.startMin + (e.dur || 0) * 60;
+      addHourly(safeHourly, sMin, eMin);
+      var ek = nk(e.agent);
+      var t = sMin;
+      while (t < eMin) { providerSets[Math.floor((t % 1440) / 60)][ek] = true; t = (Math.floor(t / 60) + 1) * 60; }
+      if (!byHourByAgent[e.agent]) byHourByAgent[e.agent] = mk24();
+      addHourly(byHourByAgent[e.agent], sMin, eMin);
+      (deliverBands[ek] = deliverBands[ek] || {})[e.shift] = true;
+    });
+    var providersHourly = providerSets.map(function (s) { return Object.keys(s).length; });
+
+    // SUPPLY: capable agents on shift per clock hour (schedule — secondary overlay).
+    var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {};
     var readSched = function (sheet) {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
       db.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
         var nm = String(row[0]).trim(); if (!nm) return;
+        var k = nk(nm); if (!capable[k]) return;           // only SAFE-capable agents
         var dStr = WT._formatDate(row[2]); if (!dStr || dStr < winStartStr || dStr > winEndStr) return;
         var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
-        if (!ssRaw || !seRaw) return;                      // Off / absent — no scheduled time
-        if (regionFilter !== 'All' && regionOf(nm, row[6]) !== regionFilter) return;
-        var dk = nk(nm) + '|' + dStr;
-        if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins; dedup agent-day
+        if (!ssRaw || !seRaw) return;
+        var dk = k + '|' + dStr; if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins
         var ss = WT._timeToMins(ssRaw), se = WT._timeToMins(seRaw);
         if (se <= ss) se += 1440;
-        schedByAgent[nk(nm)] = (schedByAgent[nk(nm)] || 0) + (se - ss);
-        schedDaysByAgent[nk(nm)] = (schedDaysByAgent[nk(nm)] || 0) + 1;
-        addHourly(schedHourly, ss, se);
+        schedDaySet[dStr] = true;
+        addHourly(capHourMin, ss, se);
+        var sb = shiftBands[k] = shiftBands[k] || {};
+        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; });
       });
     };
     readSched('Schedule_History');
     readSched('Raw Schedule');
-    // SAFE load by clock hour, from the same segments the UI shows.
-    events.forEach(function (e) { addHourly(safeHourly, e.startMin, e.startMin + (e.dur || 0) * 60); });
+    var numSchedDays = Object.keys(schedDaySet).length;
+    var hasSchedule = numSchedDays > 0;
+    // avg concurrent capable headcount per clock hour = agent-minutes / 60 / days.
+    var capableOnShiftHourly = capHourMin.map(function (m) { return hasSchedule ? self._r2(m / 60 / numSchedDays) : 0; });
 
-    // Peer-comparison collectors: SAFE-as-%-of-scheduled, grouped by Level /
-    // Region / Language. Filled inside the perAgent map below, reduced after.
-    var shareByLevel = {}, shareByRegion = {}, shareByLang = {};
+    // coverage basis = scheduled capable headcount if we have it, else distinct providers.
+    var coverageBasis = hasSchedule ? capableOnShiftHourly : providersHourly.slice();
+    var median = function (arr) {
+      if (!arr || !arr.length) return null;
+      var s = arr.slice().sort(function (p, q) { return p - q; });
+      var m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    var demandCov = [];
+    for (var dc = 0; dc < 24; dc++) if (safeHourly[dc] > 0) demandCov.push(coverageBasis[dc]);
+    var medCov = median(demandCov);
+    var thinThreshold = medCov != null ? self._r2(0.5 * medCov) : 0;
+    var thinHours = [], thinSet = {};
+    for (var th = 0; th < 24; th++) if (safeHourly[th] > 0 && coverageBasis[th] <= thinThreshold) { thinHours.push(th); thinSet[th] = true; }
+
+    // capable roster by shift band ever worked (schedule, else delivery as proxy).
+    var bandsSource = hasSchedule ? shiftBands : deliverBands;
+    var byShift = { morning: 0, evening: 0, night: 0 };
+    Object.keys(bandsSource).forEach(function (k) {
+      var b = bandsSource[k];
+      if (b.Morning) byShift.morning++;
+      if (b.Evening) byShift.evening++;
+      if (b.Night) byShift.night++;
+    });
 
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
@@ -281,24 +333,21 @@ var SafeTracker = {
       var trend = trendMonths.map(function (m) { return { key: m.key, label: m.label, year: m.year, hours: self._r2(tb[m.key] || 0) }; });
       var peak = trend.reduce(function (mx, x) { return x.hours > mx.hours ? x : mx; }, { hours: 0, key: '' });
 
-      // Equity lens: SAFE as a % of time actually scheduled in the window.
-      var schedH = self._r2((schedByAgent[nk(n)] || 0) / 60);
-      var schedDays = schedDaysByAgent[nk(n)] || 0;
-      var safeShare = schedH > 0 ? self._r2(totalH / schedH * 100) : null;
-      if (safeShare != null) {
-        (shareByLevel[pf.level] = shareByLevel[pf.level] || []).push(safeShare);
-        (shareByRegion[a.region] = shareByRegion[a.region] || []).push(safeShare);
-        (shareByLang[pf.lang] = shareByLang[pf.lang] || []).push(safeShare);
-      }
+      // Hour-of-day SAFE for this agent + how much falls in thin-coverage hours.
+      var bh = byHourByAgent[n] || mk24();
+      var byHour = bh.map(function (m) { return self._r2(m / 60); });
+      var thinMin = 0, allMin = 0;
+      for (var hx = 0; hx < 24; hx++) { allMin += bh[hx]; if (thinSet[hx]) thinMin += bh[hx]; }
+      var thinShare = allMin > 0 ? Math.round(thinMin / allMin * 100) : 0;
 
       return {
         name: n, region: a.region,
-        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup,
+        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, canSafe: !!pf.canSafe,
         band: band, monthEq: monthEq,
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
         days: dayKeys.length, segs: a.segs,
-        schedH: schedH, schedDays: schedDays, safeShare: safeShare,
+        byHour: byHour, thinShare: thinShare,
         avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
         dayMap: a.days,
@@ -307,38 +356,22 @@ var SafeTracker = {
       };
     }).sort(function (x, y) { return y.total - x.total; });
 
-    // ── Reduce peer groups to medians, then attach over-index per agent ──
-    var median = function (arr) {
-      if (!arr || !arr.length) return null;
-      var s = arr.slice().sort(function (p, q) { return p - q; });
-      var m = Math.floor(s.length / 2);
-      return s.length % 2 ? s[m] : self._r2((s[m - 1] + s[m]) / 2);
-    };
-    var medLevel = {}, medRegion = {}, medLang = {};
-    Object.keys(shareByLevel).forEach(function (k) { medLevel[k] = median(shareByLevel[k]); });
-    Object.keys(shareByRegion).forEach(function (k) { medRegion[k] = median(shareByRegion[k]); });
-    Object.keys(shareByLang).forEach(function (k) { medLang[k] = median(shareByLang[k]); });
-    var allShares = [];
-    perAgent.forEach(function (a) { if (a.safeShare != null) allShares.push(a.safeShare); });
-    var medAll = median(allShares);
-    perAgent.forEach(function (a) {
-      var pm = medLevel[a.level];
-      a.peerMed = (pm != null) ? pm : medAll;          // level-peer median SAFE %
-      a.overIndex = (a.safeShare != null && a.peerMed) ? self._r2(a.safeShare / a.peerMed) : null;
-    });
-
-    // ── Concentration (Pareto): what share of total SAFE the top agents absorb ──
-    var sortedH = perAgent.map(function (a) { return a.total; }).filter(function (h) { return h > 0; });
-    var grandSafe = sortedH.reduce(function (s, h) { return s + h; }, 0);
-    var cumTopShare = function (n2) {
-      var c = 0; for (var i = 0; i < Math.min(n2, sortedH.length); i++) c += sortedH[i];
-      return grandSafe > 0 ? self._r2(c / grandSafe * 100) : 0;
-    };
-    var concentration = { agents: sortedH.length, top3: cumTopShare(3), top5: cumTopShare(5), top10: cumTopShare(10),
-                          medianShare: medAll, peerMedians: { level: medLevel, region: medRegion, lang: medLang } };
-
     ['all', 'morning', 'evening', 'night', 'sched', 'ot'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
     events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent) || a.src.localeCompare(b.src); });
+
+    // Headline proof: % of SAFE delivered in thin-coverage hours + scarcest hour.
+    var totalSafeH = safeHourly.reduce(function (s, m) { return s + m; }, 0) / 60;
+    var thinSafeH = thinHours.reduce(function (s, h) { return s + safeHourly[h]; }, 0) / 60;
+    var thinPct = totalSafeH > 0 ? Math.round(thinSafeH / totalSafeH * 100) : 0;
+    var minCovHour = null, minCov = Infinity;
+    for (var mh = 0; mh < 24; mh++) if (safeHourly[mh] > 0 && coverageBasis[mh] < minCov) { minCov = coverageBasis[mh]; minCovHour = mh; }
+
+    // Data-health: SAFE delivered by agents not flagged capable / not in MasterList.
+    var dnc = {}, unm = {};
+    events.forEach(function (e) {
+      var k = nk(e.agent);
+      if (!mlByKey[k]) unm[e.agent] = true; else if (!capable[k]) dnc[e.agent] = true;
+    });
 
     return JSON.stringify({
       mode: mode, trackerType: 'safe', label: bounds.label, cycle: bounds.cycle,
@@ -346,9 +379,16 @@ var SafeTracker = {
       trendMonths: trendMonths.map(function (m) { return m.label + (m.label === 'Jan' ? " '" + String(m.year).slice(-2) : ''); }),
       hasMasterList: Object.keys(mlByKey).length > 0,
       winDays: winDays,
-      hourly: { safe: safeHourly.map(function (m) { return self._r2(m / 60); }),
-                sched: schedHourly.map(function (m) { return self._r2(m / 60); }) },
-      concentration: concentration,
+      coverage: {
+        hasSchedule: hasSchedule, schedDays: numSchedDays,
+        safeHourly: safeHourly.map(function (m) { return self._r2(m / 60); }),
+        providersHourly: providersHourly, capableOnShiftHourly: capableOnShiftHourly,
+        thinHours: thinHours, thinThreshold: thinThreshold,
+        capable: { total: Object.keys(capable).length, byShift: byShift },
+        headline: { thinPct: thinPct, thinSafeH: self._r2(thinSafeH), totalSafeH: self._r2(totalSafeH),
+                    thinHourCount: thinHours.length, minCovHour: minCovHour }
+      },
+      dataHealth: { deliveredNotCapable: Object.keys(dnc).slice(0, 25), unmatchedMasterList: Object.keys(unm).slice(0, 25) },
       audit: { agents: perAgent.length, doubleAgentDays: Object.keys(doubleDays).length,
                overlapAgentDays: Object.keys(overlapDays).length }
     });

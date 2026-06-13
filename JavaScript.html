@@ -171,10 +171,10 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE9 · forensic board: roll-call + heatmap + equity/hourly';
+  var APP_BUILD = 'build 2026.06.13-SAFE10 · coverage proof: capability + by-hour + 3 views';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeBoardDate: null, safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false, safeBoardMode: 'rollcall', boardFilterLevel: 0, boardFilterLang: 'ALL', boardDrillDate: null, safeEquitySort: 'total', _boardDispNames: []
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false, boardDrillDate: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -783,8 +783,8 @@
           if (state.view === 'overview') initOverviewChart();
           if (state.view === 'tracker' && state.trackerMode !== 'absences' && state.trackerMode !== 'training') initTrackerChart();
           if (state.view === 'tracker' && state.trackerMode === 'overtime') initOtOpenChart();
-          if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeSelectedAgent) initSafeTrendChart();
-          if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeView === 'board') initSafeHourlyChart();
+          if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeView === 'agents' && state.safeSelectedAgent) { initSafeTrendChart(); initSafeAgentHourChart(); }
+          if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeView === 'coverage') initSafeCoverageChart();
           if (state.view === 'mgmt') initMgmtCharts();
           if (state.view === 'calc') updatePonr();
       } catch(err) {
@@ -1316,7 +1316,8 @@
           headerHtml += '<div style="flex:1;"></div>';
       }
 
-      if (isCoach || isAbsences || isSafe) {
+      if (isCoach || isAbsences) {
+          // SAFE is a whole-site, onshore program — no region filter (offshore never does SAFE).
           headerHtml += '<div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border); margin-right:12px;"><button class="nav-btn ' + (state.trackerRegion==='All'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'All\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">All</button><button class="nav-btn ' + (state.trackerRegion==='Onshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Onshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Onshore</button><button class="nav-btn ' + (state.trackerRegion==='Offshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Offshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Offshore</button></div>';
       }
 
@@ -1524,7 +1525,7 @@
           // ── header sub-toggle + threshold legend ──
           var viewBtn = function(v, label) { return '<button onclick="setSafeView(\'' + v + '\')" class="sort-btn ' + (state.safeView === v ? 'active' : '') + '" style="text-transform:none; letter-spacing:0;">' + label + '</button>'; };
           var subHead = '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:18px 0 4px;">' +
-              '<div style="display:flex; gap:8px;">' + viewBtn('agents', 'Agents') + viewBtn('board', 'Day Board') + '</div>' +
+              '<div style="display:flex; gap:8px;">' + viewBtn('agents', 'Agents') + viewBtn('coverage', 'Coverage') + viewBtn('compare', 'Compare') + '</div>' +
               '<div style="display:flex; gap:10px; align-items:center; font-size:0.66rem; font-weight:700; color:var(--text-muted); flex-wrap:wrap;">' +
               '<span style="display:flex; align-items:center; gap:5px;"><span style="width:9px;height:9px;border-radius:50%;background:' + SHC.Morning + ';"></span>Morning</span>' +
               '<span style="display:flex; align-items:center; gap:5px;"><span style="width:9px;height:9px;border-radius:50%;background:' + SHC.Evening + ';"></span>Evening</span>' +
@@ -1543,8 +1544,73 @@
               '</div>';
           if (!d.hasMasterList) kpis += '<div style="margin-top:10px; font-size:0.72rem; font-weight:700; color:var(--status-warn);"><i data-lucide="alert-triangle" width="13" style="vertical-align:-2px;"></i> No Master Roster — Level/Language shown as default EN·L2. Sync via Red Flags → Sync Roster.</div>';
 
-          // ════════════ DAY BOARD — schedule tableau ════════════
-          if (state.safeView === 'board') {
+          // ════════════ COVERAGE — the management proof ════════════
+          if (state.safeView === 'coverage') {
+              var cov = d.coverage || { safeHourly: [], providersHourly: [], capableOnShiftHourly: [], thinHours: [], capable: { byShift: {} }, headline: {} };
+              var hl = cov.headline || {};
+              var hourLbl = function(h) { return (h < 10 ? '0' + h : h) + ':00'; };
+              var hourRange = function(h) { return hourLbl(h) + '–' + hourLbl((h + 1) % 24); };
+
+              var schedNote = cov.hasSchedule
+                  ? 'Capable staffing is read from the archived schedule (' + cov.schedDays + ' days). The line is the average number of Smart-wear agents on the clock each hour.'
+                  : 'No schedule is archived for this window yet, so the line counts the DISTINCT capable agents who actually delivered SAFE each hour. Archive a schedule (next WFM import) to compare against who was staffed.';
+              var headline = '<div class="aether-card" style="padding:22px 24px; margin:16px 0 18px; border-left:4px solid var(--status-alert);">' +
+                  '<div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px;">The coverage argument</div>' +
+                  '<div style="font-size:1.02rem; font-weight:700; color:var(--text-main); margin-top:6px; line-height:1.5;"><b style="font-size:1.7rem; color:var(--status-alert); font-variant-numeric:tabular-nums;">' + (hl.thinPct || 0) + '%</b> of all SAFE this ' + escapeHTML(d.label || 'period') + ' (' + (hl.thinSafeH || 0) + 'h of ' + (hl.totalSafeH || 0) + 'h) is delivered in the <b>' + (hl.thinHourCount || 0) + ' hours</b> when the fewest SAFE-capable agents are available' + (hl.minCovHour != null ? ', thinnest around <b>' + hourLbl(hl.minCovHour) + '</b>' : '') + '.</div>' +
+                  '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-top:8px;">' + schedNote + '</div></div>';
+
+              var chartCard = '<div class="aether-card" style="padding:18px 20px; margin-bottom:18px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;"><i data-lucide="bar-chart-3" width="13" style="vertical-align:-2px;"></i> SAFE demand (bars) vs capable supply (line), by hour of day</div><div style="position:relative; height:280px;"><canvas id="safe-coverage-chart" style="display:block;"></canvas></div></div>';
+
+              var cap = cov.capable || { total: 0, byShift: {} }; var bs = cap.byShift || {};
+              var rosterCard = '<div class="aether-card" style="padding:18px 20px;">' +
+                  '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:12px;">SAFE-capable roster <span style="text-transform:none; color:var(--text-muted);">(Smart wear · onshore)</span></div>' +
+                  '<div style="display:flex; gap:24px; flex-wrap:wrap;">' +
+                  [['Capable agents', cap.total, 'var(--text-main)'], ['Work mornings', bs.morning || 0, SHC.Morning], ['Work evenings', bs.evening || 0, SHC.Evening], ['Work nights', bs.night || 0, SHC.Night]].map(function(x) {
+                      return '<div><div style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">' + x[0] + '</div><div style="font-size:1.9rem; font-weight:800; color:' + x[2] + '; line-height:1; font-variant-numeric:tabular-nums;">' + x[1] + '</div></div>';
+                  }).join('') + '</div>' +
+                  '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:12px;">Thin evening/night capability is the structural cause: fewer capable agents are on the clock, so the same names must carry SAFE.</div></div>';
+
+              var thinRows = (cov.thinHours || []).slice().sort(function(a, b) { return (cov.safeHourly[b] || 0) - (cov.safeHourly[a] || 0); }).map(function(h) {
+                  var top = pa.filter(function(x) { return (x.byHour || [])[h] > 0; }).sort(function(x, y) { return y.byHour[h] - x.byHour[h]; }).slice(0, 3).map(function(x) { return escapeHTML(x.name) + ' (' + x.byHour[h] + 'h)'; }).join(', ');
+                  return '<tr style="border-bottom:1px solid var(--glass-border);"><td style="padding:7px 12px; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap;">' + hourRange(h) + '</td>' +
+                      '<td style="padding:7px 12px; text-align:right; font-variant-numeric:tabular-nums;">' + (cov.hasSchedule ? (cov.capableOnShiftHourly[h] || 0) : (cov.providersHourly[h] || 0)) + '</td>' +
+                      '<td style="padding:7px 12px; text-align:right; font-variant-numeric:tabular-nums;">' + (cov.providersHourly[h] || 0) + '</td>' +
+                      '<td style="padding:7px 12px; text-align:right; font-weight:800; color:var(--status-active); font-variant-numeric:tabular-nums;">' + (cov.safeHourly[h] || 0) + 'h</td>' +
+                      '<td style="padding:7px 12px; font-size:0.74rem; color:var(--text-secondary);">' + (top || '—') + '</td></tr>';
+              }).join('') || '<tr><td colspan="5" style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No thin-coverage hours detected — SAFE is spread across well-staffed hours this window.</td></tr>';
+              var thinCard = '<div class="aether-card" style="padding:0; overflow:hidden;"><div style="padding:16px 20px 8px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">Thinnest-coverage hours</div></div>' +
+                  '<div style="overflow-x:auto;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead><tr style="font-size:0.54rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:right;"><th style="padding:6px 12px; text-align:left;">Hour</th><th style="padding:6px 12px;">' + (cov.hasSchedule ? 'On shift' : 'Providers') + '</th><th style="padding:6px 12px;">Providers</th><th style="padding:6px 12px;">SAFE</th><th style="padding:6px 12px; text-align:left;">Top carriers</th></tr></thead><tbody>' + thinRows + '</tbody></table></div></div>';
+
+              var carriers = pa.map(function(x) {
+                  var inThin = 0; (cov.thinHours || []).forEach(function(h) { inThin += (x.byHour || [])[h] || 0; });
+                  return { name: x.name, level: x.level, lang: x.lang, band: x.band, thinShare: x.thinShare, inThin: Math.round(inThin * 10) / 10 };
+              }).filter(function(x) { return x.inThin > 0; }).sort(function(a, b) { return b.inThin - a.inThin; }).slice(0, 12);
+              var carrierRows = carriers.map(function(x) {
+                  var bm = BAND[x.band] || BAND.NORMAL;
+                  return '<div class="hover-bg" style="display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--glass-border); cursor:pointer;" onclick="state.safeView=\'agents\'; state.safeSelectedAgent=\'' + escapeHTML(x.name).replace(/'/g, "\\'") + '\'; render();">' +
+                      '<span style="font-weight:700; font-size:0.8rem; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHTML(x.name) + ' ' + lvlChip(x.level) + ' ' + langChip(x.lang) + '</span>' +
+                      '<span style="font-size:0.64rem; font-weight:800; color:var(--text-muted); flex-shrink:0;">' + x.thinShare + '% thin</span>' +
+                      '<span style="font-weight:800; color:' + bm.c + '; font-variant-numeric:tabular-nums; width:54px; text-align:right; flex-shrink:0;">' + x.inThin + 'h</span></div>';
+              }).join('') || '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600;">No SAFE delivered in thin hours.</div>';
+              var carrierCard = '<div class="aether-card" style="padding:0; overflow:hidden;"><div style="padding:16px 20px 8px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">Who carries the thin hours</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:2px;">SAFE delivered during thin-coverage hours — high % = forced by scarcity, not choice.</div></div>' + carrierRows + '</div>';
+
+              var dh = d.dataHealth || {}; var dataHealthNote = '';
+              if (d.hasMasterList && ((dh.deliveredNotCapable || []).length || (dh.unmatchedMasterList || []).length)) {
+                  dataHealthNote = '<div class="aether-card" style="padding:12px 16px; margin-top:16px; border:1px solid var(--status-warn);">' +
+                      '<div style="font-size:0.64rem; font-weight:800; color:var(--status-warn); text-transform:uppercase; letter-spacing:0.5px;"><i data-lucide="alert-triangle" width="12" style="vertical-align:-2px;"></i> Data health</div>' +
+                      ((dh.deliveredNotCapable || []).length ? '<div style="font-size:0.72rem; color:var(--text-secondary); font-weight:600; margin-top:5px;">Delivered SAFE but not flagged <b>Smart wear</b>-capable (' + dh.deliveredNotCapable.length + '): ' + dh.deliveredNotCapable.map(escapeHTML).join(', ') + '. Their MasterList skills likely need the Smart wear tag — fix it so the capable count is right.</div>' : '') +
+                      ((dh.unmatchedMasterList || []).length ? '<div style="font-size:0.72rem; color:var(--text-secondary); font-weight:600; margin-top:5px;">SAFE name with no MasterList match (' + dh.unmatchedMasterList.length + '): ' + dh.unmatchedMasterList.map(escapeHTML).join(', ') + ' — name variant or missing from roster.</div>' : '') +
+                      '</div>';
+              }
+
+              return headerHtml + kpis + subHead + headline + chartCard +
+                  '<div class="grid-split" style="grid-template-columns: 1fr 1fr; gap:18px; align-items:start;">' + thinCard + carrierCard + '</div>' +
+                  '<div style="margin-top:18px;">' + rosterCard + '</div>' + dataHealthNote +
+                  '<div style="padding-bottom:30px;"></div>';
+          }
+
+          // ════════════ COMPARE — full daily schedule tableau ════════════
+          if (state.safeView === 'compare') {
               var bd = state.boardData || { agents: [] };
               // Distinct, high-contrast palette (SAFE pops; breaks/lunch are
               // subordinate). White block text stays legible on every hue.
@@ -1626,156 +1692,38 @@
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC.LUNCH + '; opacity:0.6;"></span>Break/Lunch</span>' +
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:14px;height:9px;border-radius:2px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.4);"></span>Shift window</span></div>';
 
-              // ── agent population per mode ──
-              var isCompare = state.safeBoardMode === 'compare';
-              var fLevel = state.boardFilterLevel || 0, fLang = state.boardFilterLang || 'ALL';
-              var bq = (state.trackerSearch || '').toLowerCase();
-              var dispAgents;
-              if (isCompare) {
-                  var paByName = {}; pa.forEach(function(a) { paByName[a.name] = a; });
-                  dispAgents = state.boardAgents.map(function(n) { return paByName[n] || { name: n, level: 2, lang: 'EN', total: 0, dayMap: {}, safeShare: null, peerMed: null, overIndex: null, band: 'LOW', schedH: 0, days: 0, srcSched: 0, srcOt: 0, noSafe: true }; });
-              } else {
-                  dispAgents = pa.filter(function(a) { return (!fLevel || a.level >= fLevel) && (fLang === 'ALL' || a.lang === fLang) && (!bq || a.name.toLowerCase().indexOf(bq) !== -1); });
-              }
-              state._boardDispNames = dispAgents.map(function(a) { return a.name; });
+              // ── day nav + smart-pin + add controls ──
+              var drillDate = state.boardDrillDate || state.trackerDate;
+              var ddObj = new Date(drillDate + 'T12:00:00');
+              var ddNice = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][ddObj.getDay()] + ', ' + escapeHTML(drillDate);
+              var controls = '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><button class="btn btn-glass" style="height:34px; width:36px; padding:0;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
+                  '<input type="date" class="input-aether" style="width:auto; height:34px; font-weight:700; font-size:0.85rem;" value="' + escapeHTML(drillDate) + '" onchange="setSafeBoardDate(this.value)">' +
+                  '<button class="btn btn-glass" style="height:34px; width:36px; padding:0;" onclick="safeBoardShift(1)"><i data-lucide="chevron-right" width="16"></i></button>' +
+                  '<span style="font-weight:800; font-size:0.95rem; margin-left:4px;">' + ddNice + '</span></div>' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin every SAFE-capable agent who logged SAFE this window"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin every Level 4+ agent with SAFE this window">L4+</button>' +
+                  '<span class="search-wrap" style="width:180px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add any agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
+                  '<button class="btn btn-primary" style="height:34px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button>' +
+                  (state.boardAgents.length ? '<button class="btn btn-glass" style="height:34px; font-size:0.74rem;" onclick="clearBoardAgents()">clear</button>' : '') +
+                  '</div></div>';
 
-              // ── mode bar + controls ──
-              var modeBtn = function(m, label, ic) { return '<button onclick="setSafeBoardMode(\'' + m + '\')" class="sort-btn ' + (state.safeBoardMode === m ? 'active' : '') + '" style="text-transform:none; letter-spacing:0;"><i data-lucide="' + ic + '" width="13" style="vertical-align:-2px; margin-right:4px;"></i>' + label + '</button>'; };
-              var sel = function(handler, cur, opts) { return '<select class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.78rem;" onchange="' + handler + '(this.value)">' + opts.map(function(o) { return '<option value="' + o[0] + '" ' + (String(cur) === String(o[0]) ? 'selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>'; };
-              var controlsRight = isCompare
-                  ? '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
-                      '<button class="btn btn-glass" style="height:32px; font-size:0.76rem;" onclick="smartPinSafe(4,\'ALL\')" title="Pin every Level 4+ agent with SAFE this window"><i data-lucide="sparkles" width="14"></i> Pin L4+ on SAFE</button>' +
-                      '<button class="btn btn-glass" style="height:32px; font-size:0.76rem;" onclick="smartPinSafe(3,\'ALL\')"><i data-lucide="sparkles" width="14"></i> L3+</button>' +
-                      '<span class="search-wrap" style="width:190px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add any agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
-                      '<button class="btn btn-primary" style="height:32px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button>' +
-                      (state.boardAgents.length ? '<button class="btn btn-glass" style="height:32px; font-size:0.74rem;" onclick="clearBoardAgents()">clear</button>' : '') +
-                    '</div>'
-                  : '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
-                      sel('setBoardFilterLevel', fLevel, [[0,'Any level'],[2,'L2+'],[3,'L3+'],[4,'L4+']]) +
-                      sel('setBoardFilterLang', fLang, [['ALL','All langs'],['EN','EN'],['FR','FR'],['BL','BL']]) +
-                      searchBox('tracker-search', 'Filter agents…', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:180px;') +
-                    '</div>';
-              var modeBar = '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
-                  '<div style="display:flex; gap:8px; align-items:center;">' + modeBtn('rollcall', 'SAFE Roll-call', 'users') + modeBtn('compare', 'Compare', 'git-compare') +
-                  '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:4px;">' + dispAgents.length + ' agent' + (dispAgents.length === 1 ? '' : 's') + ' · ' + escapeHTML(d.label || '') + '</span></div>' +
-                  controlsRight + '</div>';
-
-              // ── forensic strip: concentration / equity headline ──
-              var conc = d.concentration || {};
-              var fcell = function(label, val, sub, color) { return '<div style="flex:1; min-width:120px; padding:10px 14px; border-radius:10px; background:var(--bg-root); border:1px solid var(--glass-border);"><div style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</div><div style="font-size:1.3rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; line-height:1.1; font-variant-numeric:tabular-nums;">' + val + '</div>' + (sub ? '<div style="font-size:0.6rem; color:var(--text-muted); font-weight:600; margin-top:2px;">' + sub + '</div>' : '') + '</div>'; };
-              var medShare = conc.medianShare != null ? conc.medianShare + '%' : '—';
-              var forensicStrip = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">' +
-                  fcell('SAFE this window', (d.totals.all || 0).toFixed(1) + 'h', (conc.agents || 0) + ' agents on SAFE', 'var(--status-active)') +
-                  fcell('Top 5 absorb', (conc.top5 || 0) + '%', 'top 3 = ' + (conc.top3 || 0) + '% · concentration', (conc.top5 || 0) >= 60 ? 'var(--status-alert)' : 'var(--text-main)') +
-                  fcell('Median SAFE share', medShare, 'SAFE ÷ scheduled, median agent', 'var(--accent-primary)') +
-                  fcell('Schedule archived?', d.hourly && (d.hourly.sched || []).some(function(x) { return x > 0; }) ? 'Yes' : 'Partial', 'normalisation needs archive', 'var(--text-muted)') +
-                  '</div>';
-
-              // ── by-hour staffing chart ──
-              var hourlyCard = '<div style="padding:14px 16px; border-radius:12px; background:var(--bg-root); border:1px solid var(--glass-border); margin-bottom:16px;">' +
-                  '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;"><i data-lucide="bar-chart-3" width="13" style="vertical-align:-2px;"></i> SAFE load vs staffing by hour</div>' + (function() {
-                      var hr = d.hourly || { safe: [], sched: [] }; var ps = 0, pv = -1, pd = 0, pdv = -1;
-                      (hr.safe || []).forEach(function(v, i) { if (v > pv) { pv = v; ps = i; } });
-                      (hr.sched || []).forEach(function(v, i) { if (v > pdv) { pdv = v; pd = i; } });
-                      return '<div style="font-size:0.66rem; font-weight:700; color:var(--text-muted);">SAFE peaks <b style="color:var(--status-active);">' + (ps < 10 ? '0' + ps : ps) + ':00</b> · staffing peaks <b style="color:var(--accent-primary);">' + (pd < 10 ? '0' + pd : pd) + ':00</b></div>';
-                  })() + '</div>' +
-                  '<div style="position:relative; height:170px;"><canvas id="safe-hourly-chart" style="display:block;"></canvas></div></div>';
-
-              // ── equity table (peer comparison) ──
-              var equityRows = dispAgents.slice().sort(function(x, y) {
-                  if (state.safeEquitySort === 'share') return (y.safeShare || 0) - (x.safeShare || 0);
-                  if (state.safeEquitySort === 'over') return (y.overIndex || 0) - (x.overIndex || 0);
-                  return (y.total || 0) - (x.total || 0);
-              }).map(function(a) {
-                  var oi = a.overIndex;
-                  var oiColor = oi == null ? 'var(--text-muted)' : (oi >= 1.5 ? 'var(--status-alert)' : (oi >= 1.15 ? 'var(--status-warn)' : (oi <= 0.6 ? 'var(--accent-primary)' : 'var(--status-active)')));
-                  var oiW = oi == null ? 0 : Math.min(100, oi * 50);
-                  var shareTxt = a.safeShare == null ? '<span style="color:var(--text-muted);">no sched</span>' : a.safeShare + '%';
-                  var jsN = escapeHTML(a.name).replace(/'/g, "\\'");
-                  return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border); cursor:pointer;" onclick="state.safeView=\'agents\'; state.safeSelectedAgent=\'' + jsN + '\'; render();">' +
-                      '<td style="padding:7px 12px; font-weight:700; font-size:0.78rem; white-space:nowrap;">' + escapeHTML(a.name) + ' ' + lvlChip(a.level) + ' ' + langChip(a.lang) + '</td>' +
-                      '<td style="padding:7px 12px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + (a.total || 0) + 'h</td>' +
-                      '<td style="padding:7px 12px; text-align:right; color:var(--text-muted); font-variant-numeric:tabular-nums;">' + (a.schedH || 0) + 'h</td>' +
-                      '<td style="padding:7px 12px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + shareTxt + '</td>' +
-                      '<td style="padding:7px 12px; text-align:right; color:var(--text-muted); font-variant-numeric:tabular-nums;">' + (a.peerMed != null ? a.peerMed + '%' : '—') + '</td>' +
-                      '<td style="padding:7px 12px; min-width:120px;"><div style="display:flex; align-items:center; gap:6px;"><div style="flex:1; height:7px; border-radius:99px; background:rgba(0,0,0,0.06); overflow:hidden;"><div style="width:' + oiW + '%; height:100%; background:' + oiColor + ';"></div></div><span style="font-size:0.72rem; font-weight:800; color:' + oiColor + '; width:34px; text-align:right;">' + (oi == null ? '—' : oi + '×') + '</span></div></td>' +
-                      '</tr>';
-              }).join('');
-              var sortBtn = function(v, lbl) { return '<button onclick="setSafeEquitySort(\'' + v + '\')" class="sort-btn ' + (state.safeEquitySort === v ? 'active' : '') + '" style="text-transform:none; letter-spacing:0; height:26px; font-size:0.7rem;">' + lbl + '</button>'; };
-              var equitySection = dispAgents.length
-                  ? '<div style="margin-top:18px;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;"><i data-lucide="scale" width="13" style="vertical-align:-2px;"></i> Equity vs Level-peers — who is over-parked on SAFE</div><div style="display:flex; gap:6px;">' + sortBtn('total', 'Hours') + sortBtn('share', '% of sched') + sortBtn('over', 'Over-index') + '</div></div>' +
-                      '<div style="overflow-x:auto;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead><tr style="font-size:0.56rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:right;"><th style="padding:6px 12px; text-align:left;">Agent</th><th style="padding:6px 12px;">SAFE</th><th style="padding:6px 12px;">Sched</th><th style="padding:6px 12px;">% sched</th><th style="padding:6px 12px;">Peer med</th><th style="padding:6px 12px; text-align:left;">Over-index (vs level peers)</th></tr></thead><tbody>' + equityRows + '</tbody></table></div>' +
-                      '<div style="font-size:0.62rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Over-index = this agent\'s SAFE-share-of-scheduled ÷ the median for their Level. <b style="color:var(--status-alert);">≥1.5×</b> = disproportionately on SAFE vs comparable peers; <b style="color:var(--accent-primary);">≤0.6×</b> = under. Click a row to open the forensic agent view.</div></div>'
-                  : '';
-
-              // ── main: day timeline (single day) or heatmap (multi-day) ──
-              var isDayRange = (d.mode === 'day');
-              var TLG = (typeof tlGrid !== 'undefined') ? tlGrid : '';
-              var boardTimelineRow = function(a) {
-                  var ev = (d.events || []).filter(function(e) { return e.agent === a.name; });
-                  var jsN = escapeHTML(a.name).replace(/'/g, "\\'");
-                  var oi = a.overIndex; var oiTxt = oi != null ? ' · <span style="color:' + (oi >= 1.5 ? 'var(--status-alert)' : 'var(--text-muted)') + '; font-weight:800;">' + oi + '× peers</span>' : '';
-                  return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:7px;">' +
-                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a.name) + lvlChip(a.level) + langChip(a.lang) + '</div><div style="font-size:0.6rem; color:var(--text-muted); font-weight:600;">' + (a.safeShare != null ? a.safeShare + '% of sched' : 'no sched') + oiTxt + '</div></div>' +
-                      '<div style="position:relative; flex:1; height:30px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border); overflow:hidden;">' + TLG + ev.map(tlSeg).join('') + '</div>' +
-                      '<div style="width:50px; flex-shrink:0; text-align:right; font-weight:800; font-size:0.76rem; font-variant-numeric:tabular-nums;">' + (a.total || 0) + 'h</div></div>';
-              };
-              var heatmap = function() {
-                  var dateSet = {}; dispAgents.forEach(function(a) { Object.keys(a.dayMap || {}).forEach(function(k) { dateSet[k] = true; }); });
-                  var dates = Object.keys(dateSet).sort();
-                  if (!dates.length) return '<div style="padding:30px; text-align:center; color:var(--text-muted); font-weight:600;">No SAFE in this window for the selected agents.</div>';
-                  var maxH = 1; dispAgents.forEach(function(a) { dates.forEach(function(dt) { var h = (a.dayMap || {})[dt] || 0; if (h > maxH) maxH = h; }); });
-                  var DN2 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-                  var cellW = dates.length > 31 ? 22 : (dates.length > 14 ? 30 : 40);
-                  var hdr = '<div style="display:flex; gap:3px; align-items:flex-end; margin-bottom:4px;"><div style="width:170px; flex-shrink:0;"></div>' + dates.map(function(dt) { var p = dt.split('-'); var dd = new Date(+p[0], +p[1]-1, +p[2], 12); return '<div style="width:' + cellW + 'px; flex-shrink:0; text-align:center; font-size:0.5rem; font-weight:800; color:var(--text-muted);">' + DN2[dd.getDay()] + '<br>' + (+p[2]) + '</div>'; }).join('') + '</div>';
-                  var rows = dispAgents.map(function(a) {
-                      var cells = dates.map(function(dt) {
-                          var h = (a.dayMap || {})[dt] || 0; var inten = h > 0 ? (0.16 + 0.74 * (h / maxH)) : 0;
-                          var drilled = state.boardDrillDate === dt;
-                          return '<div onclick="boardDrill(\'' + dt + '\')" title="' + escapeHTML(a.name) + ' · ' + dt + ' · ' + h + 'h SAFE — click for full schedule" style="width:' + cellW + 'px; flex-shrink:0; height:24px; border-radius:4px; background:' + (h > 0 ? 'rgba(16,185,129,' + inten.toFixed(2) + ')' : 'rgba(0,0,0,0.03)') + '; border:1px solid ' + (drilled ? 'var(--accent-primary)' : 'var(--glass-border)') + '; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:0.56rem; font-weight:800; color:' + (inten > 0.5 ? '#fff' : 'var(--text-muted)') + ';">' + (h > 0 ? (h % 1 === 0 ? h : h.toFixed(1)) : '') + '</div>';
-                      }).join('');
-                      return '<div style="display:flex; gap:3px; align-items:center; margin-bottom:3px;"><div style="width:170px; flex-shrink:0; min-width:0; font-weight:700; font-size:0.74rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;">' + escapeHTML(a.name) + lvlChip(a.level) + '<span style="margin-left:auto; font-weight:800; color:var(--status-active); font-variant-numeric:tabular-nums;">' + (a.total || 0) + 'h</span></div>' + cells + '</div>';
-                  }).join('');
-                  return '<div style="overflow-x:auto; padding-bottom:6px;" class="custom-scrollbar">' + hdr + rows + '</div>';
-              };
-              var mainSection;
-              if (!dispAgents.length) {
-                  mainSection = '<div style="padding:36px; text-align:center; color:var(--text-muted); font-weight:600;">' + (isCompare ? 'Pin agents (search, or “Pin L4+ on SAFE”) to compare their schedules.' : 'No agents match the current filter / no SAFE in this window.') + '</div>';
-              } else if (isDayRange) {
-                  mainSection = '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">SAFE timeline — ' + escapeHTML(d.label || state.trackerDate) + '</div>' + tlAxis + dispAgents.map(boardTimelineRow).join('') +
-                      '<div style="margin-top:10px;"><button class="btn btn-glass" style="height:30px; font-size:0.74rem;" onclick="boardDrill(\'' + escapeHTML(state.trackerDate) + '\')"><i data-lucide="layers" width="13"></i> ' + (state.boardDrillDate === state.trackerDate ? 'Hide' : 'Show') + ' full schedule (shift + breaks)</button></div>';
-              } else {
-                  mainSection = '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;"><i data-lucide="calendar-days" width="13" style="vertical-align:-2px;"></i> SAFE-hours heatmap — click any day for the full schedule tableau</div>' + heatmap();
-              }
-
-              // ── drill panel: full shift+breaks tableau for the picked day ──
-              var drillPanel = '';
-              if (state.boardDrillDate) {
-                  var ddate = state.boardDrillDate;
-                  var ddObj = new Date(ddate + 'T12:00:00');
-                  var ddNice = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][ddObj.getDay()] + ', ' + escapeHTML(ddate);
-                  var dbody;
-                  if (state.boardLoading) dbody = '<div style="padding:30px; text-align:center;"><div style="width:32px;height:32px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
-                  else if (bd && bd.error) dbody = '<div style="padding:24px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
-                  else {
-                      var dBanner = (bd && bd.archived === false) ? '<div style="display:flex; align-items:flex-start; gap:8px; padding:9px 12px; margin-bottom:10px; border-radius:9px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.7rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="14" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule archived for this date' + (bd.hasArchive ? '' : ' yet — fills from your next WFM import') + '; rows show activity logs only.</span></div>' : '';
-                      dbody = dBanner + axis + ((bd && bd.agents) || []).map(rowFor).join('');
-                  }
-                  drillPanel = '<div style="margin-top:16px; padding:14px 16px; border-radius:12px; background:var(--bg-root); border:1px solid var(--accent-primary);">' +
-                      '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;"><button class="btn btn-glass" style="height:30px; width:32px; padding:0;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="15"></i></button>' +
-                      '<input type="date" class="input-aether" style="width:auto; height:30px; font-weight:700; font-size:0.82rem;" value="' + escapeHTML(ddate) + '" onchange="setSafeBoardDate(this.value)">' +
-                      '<button class="btn btn-glass" style="height:30px; width:32px; padding:0;" onclick="safeBoardShift(1)"><i data-lucide="chevron-right" width="15"></i></button>' +
-                      '<span style="font-weight:800; font-size:0.88rem; margin-left:4px;">' + ddNice + '</span>' +
-                      '<button class="btn btn-glass" style="height:30px; font-size:0.72rem; margin-left:auto;" onclick="boardDrill(\'' + escapeHTML(ddate) + '\')">close</button></div>' +
-                      '<div style="margin-bottom:10px;">' + legend + '</div>' + dbody + '</div>';
+              var body;
+              if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Pin agents to compare their <b>full daily schedule</b> side by side — shift window, breaks/lunch, and every activity (SAFE highlighted). Use “Pin capable”, “L4+”, the search box, or pin from the Agents tab.</div>';
+              else if (state.boardLoading) body = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
+              else if (bd.error) body = '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
+              else {
+                  var banner = (bd.archived === false) ? '<div style="display:flex; align-items:flex-start; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule archived for this date' + (bd.hasArchive ? '' : ' yet — the archive fills from your next WFM import') + '. Rows show logged activity only, without the base shift or breaks.</span></div>' : '';
+                  body = banner + axis + (bd.agents || []).map(rowFor).join('');
               }
 
               return headerHtml + kpis + subHead +
                   '<div class="aether-card" style="padding:20px 24px; margin-bottom:30px;">' +
-                  modeBar +
-                  (isCompare && chips ? '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chips + '</div>' : '') +
-                  forensicStrip + hourlyCard + mainSection + drillPanel + equitySection +
-                  '</div>';
+                  controls +
+                  (chips ? '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chips + '</div>' : '') +
+                  '<div style="margin-bottom:12px;">' + legend + '</div>' +
+                  body + '</div>';
           }
 
           // ════════════ AGENTS ════════════
@@ -1798,7 +1746,7 @@
                   '<span style="display:flex; align-items:center; gap:6px; min-width:0;"><button title="Pin to Day Board" onclick="toggleSafePin(event, \'' + jsName + '\')" style="appearance:none; border:none; background:transparent; cursor:pointer; padding:0; color:' + (pinned ? 'var(--accent-primary)' : 'var(--text-muted)') + '; flex-shrink:0;"><i data-lucide="' + (pinned ? 'pin' : 'pin') + '" width="13" style="' + (pinned ? '' : 'opacity:0.4;') + '"></i></button>' +
                   '<span style="font-weight:800; font-size:0.9rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a2.name) + '</span>' + lvlChip(a2.level) + langChip(a2.lang) + '</span>' +
                   '<span style="display:flex; align-items:center; gap:6px; flex-shrink:0;">' + bandChip(a2.band) + '<span style="font-weight:800; font-size:0.92rem; color:' + bm.c + '; font-variant-numeric:tabular-nums;">' + a2.total + 'h</span></span></div>' +
-                  '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:5px;">' + a2.days + 'd · avg ' + a2.avgPerDay + 'h · <span style="color:#6366f1;">Sch ' + a2.srcSched + '</span> <span style="color:#f472b6;">OT ' + a2.srcOt + '</span>' + (a2.doubleDays > 0 ? ' · <span style="color:var(--status-alert); font-weight:800;">' + a2.doubleDays + 'd dbl</span>' : '') + (d.mode !== 'month' ? ' · ≈' + a2.monthEq + 'h/mo' : '') + '</div>' +
+                  '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:5px;">' + a2.days + 'd · avg ' + a2.avgPerDay + 'h' + (d.mode !== 'month' ? ' · ≈' + a2.monthEq + 'h/mo' : '') + (a2.thinShare > 0 ? ' · <span style="color:var(--accent-primary); font-weight:800;">' + a2.thinShare + '% thin-hr</span>' : '') + (d.hasMasterList && a2.canSafe === false ? ' · <span style="color:var(--status-warn); font-weight:800;" title="No Smart wear skill in MasterList">⚠ not coded</span>' : '') + (a2.doubleDays > 0 ? ' · <span style="color:var(--status-alert); font-weight:800;">' + a2.doubleDays + 'd dbl</span>' : '') + '</div>' +
                   meter(a2) + '</div>';
           }).join('') || '<div style="padding:32px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.85rem;">No SAFE hours in this window.</div>';
 
@@ -1843,7 +1791,19 @@
                   var flagged = (e.flags || []).indexOf('DOUBLE') !== -1;
                   return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);' + (flagged ? ' background:rgba(220,38,38,0.04);' : '') + '"><td style="padding:7px 14px; font-weight:700; font-size:0.78rem; white-space:nowrap;">' + escapeHTML(e.date) + '</td><td style="padding:7px 14px;"><span style="font-size:0.6rem; font-weight:800; color:#fff; background:' + SRC[e.src].c + '; padding:2px 7px; border-radius:99px;">' + SRC[e.src].lbl + '</span></td><td style="padding:7px 14px;"><span style="font-size:0.62rem; font-weight:800; color:#fff; background:' + (SHC[e.shift]||'#94a3b8') + '; padding:2px 7px; border-radius:99px;">' + escapeHTML(e.shift) + '</span></td><td style="padding:7px 14px; font-family:monospace; font-size:0.76rem; white-space:nowrap;">' + escapeHTML(e.time) + '</td><td style="padding:7px 14px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + e.hours + 'h</td><td style="padding:7px 14px;">' + fl + '</td></tr>';
               }).join('');
-              var skillsLine = selA.skills ? '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Skills: <span style="color:var(--text-secondary);">' + escapeHTML(selA.skills) + '</span></div>' : '';
+              var skillsLine = selA.skills ? '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Skills: <span style="color:var(--text-secondary);">' + escapeHTML(selA.skills) + '</span>' + (selA.canSafe === false ? ' <span style="color:var(--status-warn); font-weight:800;">· ⚠ no “Smart wear” coded</span>' : '') + '</div>' : '';
+              // "When they do SAFE" vs capable coverage + plain-English verdict.
+              var covA = d.coverage || {}; var hLbl = function(h) { return (h < 10 ? '0' + h : h) + ':00'; };
+              var thinList = covA.thinHours || [];
+              var firstName = escapeHTML(String(selA.name).split(/[ ,]/)[0]);
+              var verdictColor = selA.thinShare >= 60 ? 'var(--status-alert)' : (selA.thinShare >= 35 ? 'var(--status-warn)' : 'var(--status-active)');
+              var verdict = thinList.length
+                  ? '<b style="color:' + verdictColor + '; font-size:1.05rem;">' + (selA.thinShare || 0) + '%</b> of ' + firstName + '’s SAFE lands in the window’s thin-coverage hours (' + thinList.slice(0, 5).map(hLbl).join(', ') + (thinList.length > 5 ? '…' : '') + ') — when the fewest SAFE-capable agents are available. ' + (selA.thinShare >= 50 ? 'This is structural, not a choice.' : '')
+                  : 'No thin-coverage hours this window — SAFE was spread across well-staffed hours.';
+              var hourChartCard = '<div style="padding:16px 24px; border-bottom:1px solid var(--glass-border);">' +
+                  '<div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;"><i data-lucide="clock" width="13" style="vertical-align:-2px;"></i> When they do SAFE vs capable coverage</div>' +
+                  '<div style="position:relative; height:150px;"><canvas id="safe-agent-hour-chart" style="display:block;"></canvas></div>' +
+                  '<div style="font-size:0.72rem; color:var(--text-secondary); font-weight:600; margin-top:8px; line-height:1.45;">' + verdict + '</div></div>';
               rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:440px;">' +
                   '<div style="padding:20px 24px; border-bottom:1px solid var(--glass-border);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
                   '<div style="min-width:0;"><button class="btn btn-glass" style="height:28px; font-size:0.72rem; margin-bottom:10px;" onclick="state.safeSelectedAgent=null; render();"><i data-lucide="arrow-left" width="13"></i> All agents</button>' +
@@ -1851,6 +1811,7 @@
                   '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE days · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>' + (selA.sup ? ' · Sup: ' + escapeHTML(selA.sup) : '') + (d.mode !== 'month' ? ' · ≈<b style="color:var(--text-main);">' + selA.monthEq + 'h</b>/mo' : '') + '</div>' + skillsLine + '</div>' +
                   '<div style="text-align:right; flex-shrink:0;"><div class="cnum" style="font-size:2.3rem; font-weight:800; color:' + bm.c + '; line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.6rem; font-weight:700; color:var(--text-muted); margin-top:6px;"><span style="color:#6366f1;">Sch ' + selA.srcSched + 'h</span> · <span style="color:#f472b6;">OT ' + selA.srcOt + 'h</span></div></div></div></div>' +
                   '<div style="padding:16px 24px; border-bottom:1px solid var(--glass-border);"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;"><i data-lucide="trending-up" width="13" style="vertical-align:-2px;"></i> 14-Month SAFE Trend</div><div style="position:relative; height:160px;"><canvas id="safe-trend-chart" style="display:block;"></canvas></div></div>' +
+                  hourChartCard +
                   calHtml +
                   '<div style="flex:1; overflow-y:auto; min-height:110px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.56rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:7px 14px;">Date</th><th style="padding:7px 14px;">Src</th><th style="padding:7px 14px;">Shift</th><th style="padding:7px 14px;">Window</th><th style="padding:7px 14px; text-align:right;">Hrs</th><th style="padding:7px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
           } else {
@@ -2246,16 +2207,14 @@
   var boardFetchToken = 0;
   function fetchScheduleRoster() {
       if (typeof google === 'undefined') return;
-      google.script.run.withSuccessHandler(function(r) { try { state.boardRoster = JSON.parse(r); } catch(e) { state.boardRoster = []; } if (state.view === 'tracker' && state.safeView === 'board') render(); }).getSafeScheduleRoster();
+      google.script.run.withSuccessHandler(function(r) { try { state.boardRoster = JSON.parse(r); } catch(e) { state.boardRoster = []; } if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleRoster();
   }
   function fetchScheduleBoard() {
       if (typeof google === 'undefined') return;
-      var date = state.boardDrillDate || state.safeBoardDate || state.trackerDate;
-      // Drill into the full shift+breaks tableau for the displayed agents.
-      var names = (state.safeBoardMode === 'compare') ? state.boardAgents : (state._boardDispNames || []);
+      var date = state.boardDrillDate || state.trackerDate;
+      var names = state.boardAgents || [];
       if (!names.length) { state.boardData = { date: date, agents: [] }; state.boardLoading = false; if (state.view === 'tracker') render(); return; }
-      // The board pipe can be large in roll-call; cap to keep the request sane.
-      names = names.slice(0, 60);
+      names = names.slice(0, 60);                          // keep the request sane
       state.boardLoading = true;
       var token = ++boardFetchToken;
       setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; state.boardData = { date: date, agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (state.view === 'tracker') render(); } }, 25000);
@@ -2263,44 +2222,33 @@
           .withFailureHandler(function(err) { if (token !== boardFetchToken) return; state.boardLoading = false; state.boardData = { agents: [], error: (err && err.message) || 'Board error.' }; if (state.view === 'tracker') render(); })
           .getSafeScheduleBoard(date, names.join('|'));
   }
-  window.setSafeBoardMode = function(m) { state.safeBoardMode = m; state.boardDrillDate = null; state.boardData = null; render(); };
-  window.setBoardFilterLevel = function(v) { state.boardFilterLevel = parseInt(v, 10) || 0; render(); };
-  window.setBoardFilterLang = function(v) { state.boardFilterLang = v || 'ALL'; render(); };
-  window.setSafeEquitySort = function(v) { state.safeEquitySort = v; render(); };
-  window.boardDrill = function(date) {
-      if (!date) return;
-      state.boardDrillDate = (state.boardDrillDate === date) ? null : date;
-      if (state.boardDrillDate) fetchScheduleBoard(); else { state.boardData = null; render(); }
-      render();
-  };
-  // Bulk-pin every SAFE agent matching MasterList criteria (e.g. Level 4+).
-  window.smartPinSafe = function(minLevel, lang) {
+  // Bulk-pin SAFE agents matching criteria — capableOnly uses the Smart-wear flag.
+  window.smartPinSafe = function(minLevel, capableOnly) {
       minLevel = parseInt(minLevel, 10) || 0;
       var pa = (state.trackerData && state.trackerData.perAgent) || [];
       var added = 0;
       pa.forEach(function(a) {
           if (minLevel && a.level < minLevel) return;
-          if (lang && lang !== 'ALL' && a.lang !== lang) return;
+          if (capableOnly && a.canSafe === false) return;
           if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); added++; }
       });
-      state.safeBoardMode = 'compare';
-      if (added) { showToast('Pinned ' + added + ' agent' + (added === 1 ? '' : 's')); if (state.boardDrillDate) fetchScheduleBoard(); }
-      else showToast('No new matching SAFE agents');
+      if (added) { showToast('Pinned ' + added + ' agent' + (added === 1 ? '' : 's')); fetchScheduleBoard(); }
+      else showToast('No new matching agents');
       render();
   };
-  window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; state.boardDrillDate = null; render(); };
+  window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; render(); };
   window.setSafeView = function(v) {
       state.safeView = v;
-      if (v === 'board') {
+      if (v === 'compare') {
           if (!state.boardRoster) fetchScheduleRoster();
           if (state.boardAgents.length === 0) { state.safePins.forEach(function(n) { if (state.boardAgents.indexOf(n) === -1) state.boardAgents.push(n); }); if (state.safeSelectedAgent && state.boardAgents.indexOf(state.safeSelectedAgent) === -1) state.boardAgents.push(state.safeSelectedAgent); }
-          // Roll-call/heatmap render from the already-loaded analytics window;
-          // the full shift+breaks tableau is fetched on demand when a day is drilled.
+          if (!state.boardDrillDate) state.boardDrillDate = state.trackerDate;
+          if (state.boardAgents.length) fetchScheduleBoard();
       }
       render();
   };
-  window.addBoardAgent = function(name) { name = (name || '').trim(); if (!name) { render(); return; } state.safeBoardMode = 'compare'; if (state.boardAgents.indexOf(name) === -1) { state.boardAgents.push(name); if (state.boardDrillDate) fetchScheduleBoard(); } var el = document.getElementById('board-search'); if (el) el.value = ''; render(); };
-  window.removeBoardAgent = function(name) { var i = state.boardAgents.indexOf(name); if (i > -1) { state.boardAgents.splice(i, 1); if (state.boardDrillDate) fetchScheduleBoard(); } render(); };
+  window.addBoardAgent = function(name) { name = (name || '').trim(); if (!name) { render(); return; } if (state.boardAgents.indexOf(name) === -1) { state.boardAgents.push(name); fetchScheduleBoard(); } var el = document.getElementById('board-search'); if (el) el.value = ''; render(); };
+  window.removeBoardAgent = function(name) { var i = state.boardAgents.indexOf(name); if (i > -1) { state.boardAgents.splice(i, 1); fetchScheduleBoard(); } render(); };
   window.safeBoardShift = function(delta) { var base = state.boardDrillDate || state.trackerDate; var dt = new Date(base + 'T12:00:00'); dt.setDate(dt.getDate() + delta); state.boardDrillDate = localDateStr(dt); fetchScheduleBoard(); render(); };
   window.setSafeBoardDate = function(v) { if (v) { state.boardDrillDate = v; fetchScheduleBoard(); render(); } };
   window.toggleSafePin = function(ev, name) { ev.stopPropagation(); if (state.safePins.has(name)) state.safePins.delete(name); else state.safePins.add(name); render(); };
@@ -2969,34 +2917,77 @@
 
   // By-hour staffing lens: total SAFE hours vs total scheduled hours per clock
   // hour across the window — shows WHEN SAFE concentrates relative to staffing.
-  function initSafeHourlyChart() {
-      if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.hourly) return;
-      var el = document.getElementById('safe-hourly-chart'); if (!el) return;
-      if (charts.safeHourly) { charts.safeHourly.destroy(); charts.safeHourly = null; }
-      var hr = state.trackerData.hourly;
-      var labels = []; for (var h = 0; h < 24; h++) labels.push((h < 10 ? '0' + h : h));
+  // Coverage proof: SAFE delivered (bars) vs capable agents available (line) by
+  // clock hour. Thin-coverage hours get a red bar so the scarcity is obvious.
+  function initSafeCoverageChart() {
+      if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.coverage) return;
+      var el = document.getElementById('safe-coverage-chart'); if (!el) return;
+      if (charts.safeCoverage) { charts.safeCoverage.destroy(); charts.safeCoverage = null; }
+      var cov = state.trackerData.coverage;
+      var thin = {}; (cov.thinHours || []).forEach(function(h) { thin[h] = true; });
+      var labels = [], barColors = []; for (var h = 0; h < 24; h++) { labels.push((h < 10 ? '0' + h : h)); barColors.push(thin[h] ? 'rgba(220,38,38,0.92)' : 'rgba(16,185,129,0.88)'); }
+      var supply = cov.hasSchedule ? (cov.capableOnShiftHourly || []) : (cov.providersHourly || []);
+      var supplyLbl = cov.hasSchedule ? 'Capable on shift' : 'Capable providers';
       var isDark = document.body.classList.contains('dark');
       var textColor = isDark ? '#94a3b8' : '#64748b';
       var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)';
-      charts.safeHourly = new Chart(el.getContext('2d'), {
+      charts.safeCoverage = new Chart(el.getContext('2d'), {
           data: {
               labels: labels,
               datasets: [
-                  { type: 'line', label: 'Scheduled', data: hr.sched || [], yAxisID: 'y1', borderColor: 'rgba(99,102,241,0.85)', backgroundColor: 'rgba(99,102,241,0.10)', borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0 },
-                  { type: 'bar', label: 'SAFE', data: hr.safe || [], yAxisID: 'y', backgroundColor: 'rgba(16,185,129,0.9)', borderRadius: 4, maxBarThickness: 16 }
+                  { type: 'line', label: supplyLbl, data: supply, yAxisID: 'y1', borderColor: 'rgba(99,102,241,0.9)', backgroundColor: 'rgba(99,102,241,0.10)', borderWidth: 2.5, fill: true, tension: 0.35, pointRadius: 0 },
+                  { type: 'bar', label: 'SAFE delivered', data: cov.safeHourly || [], yAxisID: 'y', backgroundColor: barColors, borderRadius: 4, maxBarThickness: 18 }
               ]
           },
           options: {
               responsive: true, maintainAspectRatio: false, resizeDelay: 200,
               interaction: { mode: 'index', intersect: false },
               plugins: { legend: { display: true, labels: { font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor, boxWidth: 12 } },
-                         tooltip: { callbacks: { label: function(c2) { return ' ' + c2.dataset.label + ': ' + (Math.round(c2.parsed.y * 10) / 10) + 'h'; } } } },
+                         tooltip: { callbacks: { label: function(c2) { return c2.dataset.type === 'bar' ? ' SAFE: ' + (Math.round(c2.parsed.y * 10) / 10) + 'h' + (thin[c2.dataIndex] ? ' · THIN coverage' : '') : ' ' + supplyLbl + ': ' + (Math.round(c2.parsed.y * 10) / 10); } } } },
               scales: {
                   x: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '700', size: 9 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
-                  y: { beginAtZero: true, position: 'left', grid: { color: gridColor }, title: { display: true, text: 'SAFE h', color: textColor, font: { size: 9, weight: '700' } }, ticks: { font: { size: 9 }, color: textColor } },
-                  y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'Scheduled h', color: textColor, font: { size: 9, weight: '700' } }, ticks: { font: { size: 9 }, color: textColor } }
+                  y: { beginAtZero: true, position: 'left', grid: { color: gridColor }, title: { display: true, text: 'SAFE hours', color: textColor, font: { size: 9, weight: '700' } }, ticks: { font: { size: 9 }, color: textColor } },
+                  y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: supplyLbl, color: textColor, font: { size: 9, weight: '700' } }, ticks: { font: { size: 9 }, color: textColor, precision: 0 } }
               },
               animation: { duration: 800, easing: 'easeOutQuart' }
+          }
+      });
+  }
+
+  // Per-agent: when THIS agent does SAFE (bars) vs capable coverage (line).
+  function initSafeAgentHourChart() {
+      if (typeof Chart === 'undefined' || !state.trackerData) return;
+      var el = document.getElementById('safe-agent-hour-chart'); if (!el) return;
+      if (charts.safeAgentHour) { charts.safeAgentHour.destroy(); charts.safeAgentHour = null; }
+      var pa = state.trackerData.perAgent || [], a = null;
+      for (var i = 0; i < pa.length; i++) if (pa[i].name === state.safeSelectedAgent) { a = pa[i]; break; }
+      if (!a || !a.byHour) return;
+      var cov = state.trackerData.coverage || {};
+      var thin = {}; (cov.thinHours || []).forEach(function(h) { thin[h] = true; });
+      var labels = [], barColors = []; for (var h = 0; h < 24; h++) { labels.push((h < 10 ? '0' + h : h)); barColors.push(thin[h] ? 'rgba(220,38,38,0.92)' : 'rgba(16,185,129,0.85)'); }
+      var supply = cov.hasSchedule ? (cov.capableOnShiftHourly || []) : (cov.providersHourly || []);
+      var isDark = document.body.classList.contains('dark');
+      var textColor = isDark ? '#94a3b8' : '#64748b';
+      var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)';
+      charts.safeAgentHour = new Chart(el.getContext('2d'), {
+          data: {
+              labels: labels,
+              datasets: [
+                  { type: 'line', label: 'Capable coverage', data: supply, yAxisID: 'y1', borderColor: 'rgba(99,102,241,0.85)', backgroundColor: 'rgba(99,102,241,0.08)', borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0 },
+                  { type: 'bar', label: 'Their SAFE', data: a.byHour, yAxisID: 'y', backgroundColor: barColors, borderRadius: 3, maxBarThickness: 14 }
+              ]
+          },
+          options: {
+              responsive: true, maintainAspectRatio: false, resizeDelay: 200,
+              interaction: { mode: 'index', intersect: false },
+              plugins: { legend: { display: true, labels: { font: { family: "'Outfit', sans-serif", weight: '700', size: 9 }, color: textColor, boxWidth: 10 } },
+                         tooltip: { callbacks: { label: function(c2) { return c2.dataset.type === 'bar' ? ' ' + (Math.round(c2.parsed.y * 10) / 10) + 'h SAFE' + (thin[c2.dataIndex] ? ' · thin hour' : '') : ' coverage: ' + (Math.round(c2.parsed.y * 10) / 10); } } } },
+              scales: {
+                  x: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '700', size: 8 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+                  y: { display: false, beginAtZero: true },
+                  y1: { display: false, beginAtZero: true }
+              },
+              animation: { duration: 700, easing: 'easeOutQuart' }
           }
       });
   }
