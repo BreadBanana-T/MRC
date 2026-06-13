@@ -171,10 +171,10 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE6 · forensic scheduler';
+  var APP_BUILD = 'build 2026.06.13-SAFE7 · schedule tableau';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeBoardDate: null, safeOpenDay: null, safePins: new Set()
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeBoardDate: null, safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -1531,38 +1531,70 @@
               '</div>';
           if (!d.hasMasterList) kpis += '<div style="margin-top:10px; font-size:0.72rem; font-weight:700; color:var(--status-warn);"><i data-lucide="alert-triangle" width="13" style="vertical-align:-2px;"></i> No Master Roster — Level/Language shown as default EN·L2. Sync via Red Flags → Sync Roster.</div>';
 
-          // ════════════ DAY BOARD ════════════
+          // ════════════ DAY BOARD — schedule tableau ════════════
           if (state.safeView === 'board') {
               var boardDate = state.safeBoardDate || state.trackerDate;
-              var pins = state.safePins;
-              var dayEv = (d.events || []).filter(function(e) { return e.date === boardDate && (pins.size === 0 || pins.has(e.agent)); });
-              var byAg = {};
-              dayEv.forEach(function(e) { (byAg[e.agent] = byAg[e.agent] || []).push(e); });
-              var agNames = Object.keys(byAg).sort(function(x, y) {
-                  var mx = Math.min.apply(null, byAg[x].map(function(s2){return s2.startMin;}));
-                  var my = Math.min.apply(null, byAg[y].map(function(s2){return s2.startMin;}));
-                  return mx - my;
-              });
-              var rows = agNames.map(function(nm) {
-                  var segs = byAg[nm];
-                  var h = segs.reduce(function(a2, s2){ return a2 + s2.hours; }, 0);
-                  return tlRow(nm, segs, (Math.round(h*10)/10) + 'h');
-              }).join('');
-              var dayObj = new Date(boardDate + 'T12:00:00');
-              var nice = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayObj.getDay()] + ', ' + escapeHTML(boardDate);
-              var pinNote = pins.size > 0 ? '<span style="font-size:0.7rem; font-weight:700; color:var(--accent-primary);">' + pins.size + ' pinned</span>' : '<span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">all agents on SAFE this day — pin agents in the Agents tab to focus</span>';
-              var boardBody = agNames.length
-                  ? tlAxis + rows
-                  : '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No SAFE segments on ' + escapeHTML(boardDate) + (pins.size ? ' for the pinned agents.' : '.') + '</div>';
+              var bd = state.boardData || { agents: [] };
+              var TYPEC = { SAFE: '#34d399', ICL: '#c084fc', ULC: '#fb923c', TOWER: '#38bdf8', COACH: '#fbbf24', ACSU: '#94a3b8', OT: '#f472b6', BREAK: '#cbd5e1', LUNCH: '#9ca3af', ABS: '#f87171', OTHER: '#64748b' };
+              var dobj = new Date(boardDate + 'T12:00:00');
+              var niceDate = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dobj.getDay()] + ', ' + escapeHTML(boardDate);
+
+              // hour axis 0..24
+              var axis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 10px;"><div style="width:170px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:700; color:var(--text-muted);">';
+              for (var hax = 0; hax <= 24; hax += 2) axis += '<span>' + (hax < 10 ? '0' + hax : hax) + '</span>';
+              axis += '</div><div style="width:30px; flex-shrink:0;"></div></div>';
+
+              var blk = function(seg) {
+                  var left = seg.startMin / 1440 * 100, w = Math.max(1.1, (seg.endMin - seg.startMin) / 1440 * 100);
+                  if (left + w > 100) w = 100 - left;
+                  var c = TYPEC[seg.type] || TYPEC.OTHER;
+                  var faint = (seg.type === 'BREAK' || seg.type === 'LUNCH');
+                  return '<div title="' + escapeHTML(seg.label) + ' · ' + escapeHTML(seg.time) + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:3px; bottom:3px; background:' + c + '; ' + (faint ? 'opacity:0.5; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.5) 0 2px,transparent 2px 5px);' : '') + ' border-radius:3px; display:flex; align-items:center; justify-content:center; overflow:hidden;">' + (w > 7 ? '<span style="font-size:0.52rem; font-weight:800; color:#fff; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.3);">' + escapeHTML(seg.type) + '</span>' : '') + '</div>';
+              };
+              var rowFor = function(a3) {
+                  var env = '';
+                  if (a3.shiftStart != null && a3.shiftEnd != null) {
+                      var el = a3.shiftStart / 1440 * 100, ew = (a3.shiftEnd - a3.shiftStart) / 1440 * 100; if (el + ew > 100) ew = 100 - el;
+                      env = '<div style="position:absolute; left:' + el + '%; width:' + ew + '%; top:0; bottom:0; background:rgba(99,102,241,0.06); border-left:2px solid rgba(99,102,241,0.35); border-right:2px solid rgba(99,102,241,0.35); border-radius:4px;"></div>';
+                  }
+                  var blocks = (a3.segments || []).map(blk).join('');
+                  var shiftTxt = a3.shiftStartStr ? a3.shiftStartStr + '–' + a3.shiftEndStr + (a3.hasFull ? '' : ' · activities only') : (a3.segments && a3.segments.length ? 'no shift envelope' : '<span style="color:var(--status-warn);">nothing scheduled</span>');
+                  var jsN = escapeHTML(a3.name).replace(/'/g, "\\'");
+                  return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">' +
+                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a3.name) + lvlChip(a3.level) + langChip(a3.lang) + '</div><div style="font-size:0.6rem; color:var(--text-muted); font-weight:600;">' + shiftTxt + (a3.absent ? ' · <span style="color:var(--status-alert);">' + escapeHTML(a3.absent) + '</span>' : '') + '</div></div>' +
+                      '<div style="position:relative; flex:1; height:30px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border);">' + env + blocks + '</div>' +
+                      '<button title="Remove" onclick="removeBoardAgent(\'' + jsN + '\')" style="width:30px; flex-shrink:0; appearance:none; border:none; background:transparent; color:var(--text-muted); cursor:pointer;"><i data-lucide="x" width="15"></i></button></div>';
+              };
+
+              // chips of selected agents
+              var chips = state.boardAgents.map(function(n) {
+                  return '<span style="display:inline-flex; align-items:center; gap:5px; background:rgba(99,102,241,0.10); border:1px solid var(--accent-primary); border-radius:99px; padding:3px 6px 3px 11px; font-size:0.76rem; font-weight:700;">' + escapeHTML(n) + '<button onclick="removeBoardAgent(\'' + escapeHTML(n).replace(/'/g, "\\'") + '\')" style="appearance:none; border:none; background:transparent; cursor:pointer; color:var(--text-muted); display:flex;"><i data-lucide="x" width="13"></i></button></span>';
+              }).join(' ');
+              var datalist = '<datalist id="board-roster">' + (state.boardRoster || []).map(function(r) { return '<option value="' + escapeHTML(r.name) + '">L' + r.level + ' ' + r.lang + '</option>'; }).join('') + '</datalist>';
+
+              var legend = '<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:0.62rem; font-weight:700; color:var(--text-muted);">' +
+                  ['SAFE','ICL','ULC','TOWER','COACH','ACSU','OT'].map(function(t) { return '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC[t] + ';"></span>' + t + '</span>'; }).join('') +
+                  '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC.LUNCH + '; opacity:0.6;"></span>Break/Lunch</span>' +
+                  '<span style="display:flex; align-items:center; gap:4px;"><span style="width:14px;height:9px;border-radius:2px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.4);"></span>Shift window</span></div>';
+
+              var body;
+              if (state.boardLoading) body = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
+              else if (bd.error) body = '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
+              else if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Search and add agents above to build the schedule tableau. Tip: pin agents in the Agents tab and they appear here automatically.</div>';
+              else body = axis + (bd.agents || []).map(rowFor).join('');
+
               return headerHtml + kpis + subHead +
                   '<div class="aether-card" style="padding:20px 24px; margin-bottom:30px;">' +
-                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px;">' +
-                  '<div style="display:flex; align-items:center; gap:10px;"><button class="btn btn-glass" style="height:32px; width:34px; padding:0;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><button class="btn btn-glass" style="height:32px; width:34px; padding:0;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
                   '<input type="date" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem;" value="' + escapeHTML(boardDate) + '" onchange="setSafeBoardDate(this.value)">' +
                   '<button class="btn btn-glass" style="height:32px; width:34px; padding:0;" onclick="safeBoardShift(1)"><i data-lucide="chevron-right" width="16"></i></button>' +
-                  '<span style="font-weight:800; font-size:1rem;">' + nice + '</span></div>' +
-                  '<div style="display:flex; align-items:center; gap:12px;"><span style="font-weight:800; font-size:0.85rem; color:var(--status-active);">' + agNames.length + ' agent' + (agNames.length===1?'':'s') + '</span>' + pinNote + (pins.size > 0 ? ' <button class="btn btn-glass" style="height:26px; font-size:0.7rem;" onclick="state.safePins.clear(); render();">clear pins</button>' : '') + '</div></div>' +
-                  boardBody + '</div>';
+                  '<span style="font-weight:800; font-size:0.95rem; margin-left:4px;">' + niceDate + '</span></div>' +
+                  '<div style="display:flex; align-items:center; gap:8px;">' + '<span class="search-wrap" style="width:210px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add any agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
+                  '<button class="btn btn-primary" style="height:38px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button></div></div>' +
+                  (chips ? '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chips + '</div>' : '') +
+                  '<div style="margin-bottom:12px;">' + legend + '</div>' +
+                  body + '</div>';
           }
 
           // ════════════ AGENTS ════════════
@@ -2030,9 +2062,36 @@
   // quarter→its weeks); KPI deltas compare vs the previous period. Loads
   // once per request — NO auto refresh.
   window.setMgmtGrain = function(g) { state.mgmtGrain = g; fetchMgmtData(); render(); };
-  window.setSafeView = function(v) { state.safeView = v; render(); };
-  window.safeBoardShift = function(delta) { var base = state.safeBoardDate || state.trackerDate; var dt = new Date(base + 'T12:00:00'); dt.setDate(dt.getDate() + delta); state.safeBoardDate = localDateStr(dt); render(); };
-  window.setSafeBoardDate = function(v) { if (v) { state.safeBoardDate = v; render(); } };
+  var boardFetchToken = 0;
+  function fetchScheduleRoster() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(r) { try { state.boardRoster = JSON.parse(r); } catch(e) { state.boardRoster = []; } if (state.view === 'tracker' && state.safeView === 'board') render(); }).getSafeScheduleRoster();
+  }
+  function fetchScheduleBoard() {
+      if (typeof google === 'undefined') return;
+      var date = state.safeBoardDate || state.trackerDate;
+      if (!state.boardAgents.length) { state.boardData = { date: date, agents: [] }; state.boardLoading = false; if (state.view === 'tracker') render(); return; }
+      state.boardLoading = true;
+      var token = ++boardFetchToken;
+      setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; state.boardData = { date: date, agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (state.view === 'tracker') render(); } }, 25000);
+      google.script.run.withSuccessHandler(function(r) { if (token !== boardFetchToken) return; try { state.boardData = JSON.parse(r); } catch(e) { state.boardData = { agents: [] }; } state.boardLoading = false; if (state.view === 'tracker') render(); })
+          .withFailureHandler(function(err) { if (token !== boardFetchToken) return; state.boardLoading = false; state.boardData = { agents: [], error: (err && err.message) || 'Board error.' }; if (state.view === 'tracker') render(); })
+          .getSafeScheduleBoard(date, state.boardAgents.join('|'));
+  }
+  window.setSafeView = function(v) {
+      state.safeView = v;
+      if (v === 'board') {
+          if (!state.boardRoster) fetchScheduleRoster();
+          if (!state.safeBoardDate) state.safeBoardDate = state.trackerDate;
+          if (state.boardAgents.length === 0) { state.safePins.forEach(function(n) { if (state.boardAgents.indexOf(n) === -1) state.boardAgents.push(n); }); if (state.safeSelectedAgent && state.boardAgents.indexOf(state.safeSelectedAgent) === -1) state.boardAgents.push(state.safeSelectedAgent); }
+          fetchScheduleBoard();
+      }
+      render();
+  };
+  window.addBoardAgent = function(name) { name = (name || '').trim(); if (!name) { render(); return; } if (state.boardAgents.indexOf(name) === -1) { state.boardAgents.push(name); fetchScheduleBoard(); } var el = document.getElementById('board-search'); if (el) el.value = ''; render(); };
+  window.removeBoardAgent = function(name) { var i = state.boardAgents.indexOf(name); if (i > -1) { state.boardAgents.splice(i, 1); fetchScheduleBoard(); } render(); };
+  window.safeBoardShift = function(delta) { var base = state.safeBoardDate || state.trackerDate; var dt = new Date(base + 'T12:00:00'); dt.setDate(dt.getDate() + delta); state.safeBoardDate = localDateStr(dt); fetchScheduleBoard(); render(); };
+  window.setSafeBoardDate = function(v) { if (v) { state.safeBoardDate = v; fetchScheduleBoard(); render(); } };
   window.toggleSafePin = function(ev, name) { ev.stopPropagation(); if (state.safePins.has(name)) state.safePins.delete(name); else state.safePins.add(name); render(); };
   window.toggleSafeDay = function(date) { state.safeOpenDay = (state.safeOpenDay === date ? null : date); render(); };
   window.setMgmtDate = function(v) { if (!v) return; state.mgmtDate = v; fetchMgmtData(); render(); };

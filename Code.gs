@@ -95,6 +95,14 @@ function getSafeAnalytics(mode, refDate, region, cycle) {
     ? SafeTracker.getAnalytics(mode, refDate, region, cycle)
     : JSON.stringify({ error: 'SafeTracker not loaded.' });
 }
+function getSafeScheduleRoster() {
+  return (typeof SafeTracker !== 'undefined') ? SafeTracker.getScheduleRoster() : '[]';
+}
+function getSafeScheduleBoard(dateStr, agentsPipe) {
+  return (typeof SafeTracker !== 'undefined')
+    ? SafeTracker.getScheduleBoard(dateStr, agentsPipe)
+    : JSON.stringify({ error: 'SafeTracker not loaded.' });
+}
 
 // --- OT OPEN SLOTS (WFM JSON export) ---
 function importOtOpenSlots(t) {
