@@ -171,7 +171,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE4 · tracker watchdog';
+  var APP_BUILD = 'build 2026.06.13-SAFE5 · deployment view';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null
@@ -783,6 +783,7 @@
           if (state.view === 'overview') initOverviewChart();
           if (state.view === 'tracker' && state.trackerMode !== 'absences' && state.trackerMode !== 'training') initTrackerChart();
           if (state.view === 'tracker' && state.trackerMode === 'overtime') initOtOpenChart();
+          if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeSelectedAgent) initSafeTrendChart();
           if (state.view === 'mgmt') initMgmtCharts();
           if (state.view === 'calc') updatePonr();
       } catch(err) {
@@ -1475,7 +1476,7 @@
           gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muText ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muText + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpText + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
       }
 
-      // ───────── SAFE MODE: forensic per-agent audit ─────────
+      // ───────── SAFE MODE: deployment-argument view ─────────
       if (isSafe) {
           var pa = d.perAgent || [];
           var q = (state.trackerSearch || '').toLowerCase();
@@ -1483,91 +1484,150 @@
           var selA = null;
           for (var si = 0; si < pa.length; si++) if (pa[si].name === state.safeSelectedAgent) { selA = pa[si]; break; }
           var SHC = { Morning: '#f59e0b', Evening: '#ea580c', Night: '#6366f1' };
+          var SRC = { SCHED: { c: '#6366f1', lbl: 'WFM Sched' }, OT: { c: '#f472b6', lbl: 'OT SAFE' } };
+          var FIT = { ideal: { c: 'var(--status-active)', lbl: 'Ideal fit', bg: 'rgba(5,150,105,0.10)' },
+                      review: { c: 'var(--text-muted)', lbl: 'Review', bg: 'rgba(0,0,0,0.05)' },
+                      over: { c: 'var(--status-warn)', lbl: 'Overqualified', bg: 'rgba(217,119,6,0.12)' } };
+          var langChip = function(lang) {
+              var c = lang === 'BL' ? '#7c3aed' : (lang === 'FR' ? '#0ea5e9' : '#64748b');
+              return '<span style="font-size:0.58rem; font-weight:800; color:#fff; background:' + c + '; padding:1px 7px; border-radius:99px;">' + lang + '</span>';
+          };
+          var lvlChip = function(lv) {
+              var hi = lv >= 4;
+              return '<span style="font-size:0.58rem; font-weight:800; color:' + (hi ? '#fff' : 'var(--text-secondary)') + '; background:' + (hi ? '#7c3aed' : 'rgba(0,0,0,0.06)') + '; padding:1px 7px; border-radius:99px;">L' + lv + '</span>';
+          };
 
           var kpiS = function(label, value, sub, color) {
               return '<div class="aether-card" style="padding:18px 20px;"><div class="aurora-label" style="margin-bottom:8px;">' + label + '</div><div class="cnum" style="font-size:1.8rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; line-height:1; font-variant-numeric:tabular-nums;">' + value + '</div>' + (sub ? '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + sub + '</div>' : '') + '</div>';
           };
-          var t2 = d.totals || { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, floor: 0 };
+          var t2 = d.totals || {};
           var audit = d.audit || {};
-          var SRC = { SCHED: { c: '#6366f1', lbl: 'WFM Sched' }, OT: { c: '#f472b6', lbl: 'OT SAFE' } };
           var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px; margin:20px 0;">' +
-              kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agent' + ((audit.agents || 0) === 1 ? '' : 's') + ' · M ' + (t2.morning || 0).toFixed(1) + ' / E ' + (t2.evening || 0).toFixed(1) + ' / N ' + (t2.night || 0).toFixed(1), 'var(--status-active)') +
-              kpiS('From WFM Schedule', (t2.sched || 0).toFixed(1) + 'h', 'SAFE blocks in pasted schedules', SRC.SCHED.c) +
-              kpiS('From Overtime', (t2.ot || 0).toFixed(1) + 'h', 'SAFE-bucket OT (OTST … SAFE) — manual floor assigns are status only, never hours', SRC.OT.c) +
-              ((audit.doubleAgentDays || 0) > 0 ? kpiS('⚠ Double-Counted', String(audit.doubleAgentDays) + ' days', 'same hours in TWO sources — combined reports sum them twice', 'var(--status-alert)') : '') +
-              ((audit.overlapAgentDays || 0) > 0 ? kpiS('⚠ Overlaps', String(audit.overlapAgentDays) + ' days', 'same-source overlapping segments', 'var(--status-warn)') : '') +
+              kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agents · M ' + (t2.morning || 0).toFixed(0) + ' / E ' + (t2.evening || 0).toFixed(0) + ' / N ' + (t2.night || 0).toFixed(0), 'var(--status-active)') +
+              kpiS('From Schedule', (t2.sched || 0).toFixed(1) + 'h', 'SAFE blocks in pasted schedules', SRC.SCHED.c) +
+              kpiS('From Overtime', (t2.ot || 0).toFixed(1) + 'h', 'SAFE-bucket OT', SRC.OT.c) +
+              kpiS('Redeployable', (t2.redeploy || 0).toFixed(1) + 'h', 'SAFE done by bilingual / L4+ agents — could move to higher-value work', (t2.redeploy || 0) > 0 ? 'var(--status-warn)' : 'var(--status-active)') +
+              ((audit.doubleAgentDays || 0) > 0 ? kpiS('⚠ Double-Counted', String(audit.doubleAgentDays) + ' days', 'same hours in schedule + OT', 'var(--status-alert)') : '') +
               '</div>';
+          if (!d.hasMasterList) {
+              kpis = '<div class="aether-card" style="margin:18px 0; padding:12px 18px; display:flex; align-items:center; gap:10px; font-size:0.8rem; font-weight:700; color:var(--status-warn);"><i data-lucide="alert-triangle" width="15"></i> No Master Roster loaded — Level / Language / fit are estimated as EN · L2. Sync the MasterList (Red Flags → Sync Roster) for accurate redeployment analysis.</div>' + kpis;
+          }
 
-          var meter = function(a) {
-              var t = a.total || 1;
+          var meter = function(a2) {
+              var t = a2.total || 1;
               return '<div style="display:flex; height:5px; border-radius:99px; overflow:hidden; background:rgba(0,0,0,0.06); margin-top:8px;">' +
-                  '<div style="width:' + (a.morning / t * 100) + '%; background:' + SHC.Morning + ';"></div>' +
-                  '<div style="width:' + (a.evening / t * 100) + '%; background:' + SHC.Evening + ';"></div>' +
-                  '<div style="width:' + (a.night / t * 100) + '%; background:' + SHC.Night + ';"></div></div>';
+                  '<div style="width:' + (a2.morning / t * 100) + '%; background:' + SHC.Morning + ';"></div>' +
+                  '<div style="width:' + (a2.evening / t * 100) + '%; background:' + SHC.Evening + ';"></div>' +
+                  '<div style="width:' + (a2.night / t * 100) + '%; background:' + SHC.Night + ';"></div></div>';
           };
-          var listHtml = list.map(function(a) {
-              var isSel = a.name === state.safeSelectedAgent;
-              var warn = (a.doubleDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;">' + a.doubleDays + 'd double</span>' : '') +
-                         (a.overlapDays > 0 ? '<span style="font-size:0.62rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">' + a.overlapDays + 'd overlap</span>' : '');
-              var srcLine = [];
-              if (a.srcSched > 0) srcLine.push('<span style="color:#6366f1; font-weight:800;">S ' + a.srcSched + 'h</span>');
-              if (a.srcOt > 0) srcLine.push('<span style="color:#f472b6; font-weight:800;">OT ' + a.srcOt + 'h</span>');
-              return '<div class="hover-bg" style="padding:13px 16px; margin-bottom:8px; border-radius:13px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + ';" onclick="state.safeSelectedAgent=\'' + escapeHTML(a.name).replace(/'/g, "\\'") + '\'; render();">' +
+          var listHtml = list.map(function(a2) {
+              var isSel = a2.name === state.safeSelectedAgent;
+              var fitm = FIT[a2.fit] || FIT.review;
+              var chips = (a2.surge ? '<span style="font-size:0.6rem; font-weight:800; color:#fff; background:var(--status-alert); padding:1px 7px; border-radius:99px;" title="SAFE usage surged ' + (a2.surgeMonth ? 'from ' + a2.surgeMonth : 'recently') + '">▲ SURGE</span> ' : '') +
+                          (a2.doubleDays > 0 ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:1px 7px; border-radius:99px;">' + a2.doubleDays + 'd dbl</span> ' : '') +
+                          '<span style="font-size:0.6rem; font-weight:800; color:' + fitm.c + '; background:' + fitm.bg + '; padding:1px 7px; border-radius:99px;">' + fitm.lbl + '</span>';
+              return '<div class="hover-bg" style="padding:13px 16px; margin-bottom:8px; border-radius:13px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + ';" onclick="state.safeSelectedAgent=\'' + escapeHTML(a2.name).replace(/\'/g, "\\\'") + '\'; render();">' +
                   '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">' +
-                  '<span style="font-weight:800; font-size:0.92rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + (a.region === 'Offshore' ? ' <span style="font-size:0.58rem; background:var(--region-off); color:#fff; padding:1px 6px; border-radius:4px; vertical-align:middle;">OFF</span>' : '') + '</span>' +
-                  '<span style="font-weight:800; font-size:0.95rem; color:var(--status-active); font-variant-numeric:tabular-nums; flex-shrink:0;">' + a.total + 'h</span></div>' +
-                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:5px;"><span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + a.days + 'd · avg ' + a.avgPerDay + 'h · ' + srcLine.join(' ') + '</span><span style="display:flex; gap:4px;">' + warn + '</span></div>' +
-                  meter(a) + '</div>';
+                  '<span style="display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-weight:800; font-size:0.92rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a2.name) + '</span>' + lvlChip(a2.level) + langChip(a2.lang) + '</span>' +
+                  '<span style="font-weight:800; font-size:0.95rem; color:var(--status-active); font-variant-numeric:tabular-nums; flex-shrink:0;">' + a2.total + 'h</span></div>' +
+                  '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:5px;"><span style="font-size:0.66rem; color:var(--text-muted); font-weight:600;">' + a2.days + 'd · avg ' + a2.avgPerDay + 'h</span><span style="display:flex; gap:4px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">' + chips + '</span></div>' +
+                  meter(a2) + '</div>';
           }).join('') || '<div style="padding:32px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.85rem;">No SAFE hours in this window.</div>';
 
-          var leftCol = '<div class="aether-card" style="padding:16px; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
+          var leftCol = '<div class="aether-card" style="padding:16px; display:flex; flex-direction:column; max-height:calc(100vh - 330px); min-height:440px;">' +
               '<div style="margin-bottom:12px;">' + searchBox('tracker-search', 'Search SAFE agents...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:100%;') + '</div>' +
               '<div style="overflow-y:auto; flex:1; padding-right:4px;" class="custom-scrollbar">' + listHtml + '</div></div>';
 
           var rightCol;
           if (selA) {
+              var fitm = FIT[selA.fit] || FIT.review;
               var segs = (d.events || []).filter(function(e) { return e.agent === selA.name; });
               var segRows = segs.map(function(e) {
                   var fl = (e.flags || []).map(function(f) {
                       return f === 'DOUBLE'
-                          ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;" title="This time block exists in two sources (e.g. schedule AND OT) — combined reports count it twice">DOUBLE</span>'
+                          ? '<span style="font-size:0.6rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.10); padding:2px 7px; border-radius:99px;" title="Same block in schedule AND OT — counted twice in combined reports">DOUBLE</span>'
                           : '<span style="font-size:0.6rem; font-weight:800; color:var(--status-warn); background:rgba(217,119,6,0.10); padding:2px 7px; border-radius:99px;">' + f + '</span>';
                   }).join(' ');
                   var srcM = SRC[e.src] || SRC.SCHED;
-                  var srcChip = '<span style="font-size:0.62rem; font-weight:800; color:#fff; background:' + srcM.c + '; padding:2px 8px; border-radius:99px;">' + srcM.lbl + '</span>';
                   var flagged = (e.flags || []).indexOf('DOUBLE') !== -1;
                   return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);' + (flagged ? ' background:rgba(220,38,38,0.04);' : '') + '">' +
-                      '<td style="padding:9px 14px; font-weight:700; font-size:0.82rem; white-space:nowrap;">' + escapeHTML(e.date) + '</td>' +
-                      '<td style="padding:9px 14px; white-space:nowrap;">' + srcChip + '</td>' +
-                      '<td style="padding:9px 14px;"><span style="font-size:0.66rem; font-weight:800; color:#fff; background:' + (SHC[e.shift] || '#94a3b8') + '; padding:2px 9px; border-radius:99px;">' + escapeHTML(e.shift) + '</span></td>' +
-                      '<td style="padding:9px 14px; font-family:monospace; font-size:0.8rem; white-space:nowrap;">' + escapeHTML(e.time) + '</td>' +
-                      '<td style="padding:9px 14px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + e.hours + 'h</td>' +
-                      '<td style="padding:9px 14px;">' + fl + '</td></tr>';
+                      '<td style="padding:8px 14px; font-weight:700; font-size:0.8rem; white-space:nowrap;">' + escapeHTML(e.date) + '</td>' +
+                      '<td style="padding:8px 14px; white-space:nowrap;"><span style="font-size:0.62rem; font-weight:800; color:#fff; background:' + srcM.c + '; padding:2px 8px; border-radius:99px;">' + srcM.lbl + '</span></td>' +
+                      '<td style="padding:8px 14px;"><span style="font-size:0.64rem; font-weight:800; color:#fff; background:' + (SHC[e.shift] || '#94a3b8') + '; padding:2px 8px; border-radius:99px;">' + escapeHTML(e.shift) + '</span></td>' +
+                      '<td style="padding:8px 14px; font-family:monospace; font-size:0.78rem; white-space:nowrap;">' + escapeHTML(e.time) + '</td>' +
+                      '<td style="padding:8px 14px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums;">' + e.hours + 'h</td>' +
+                      '<td style="padding:8px 14px;">' + fl + '</td></tr>';
               }).join('');
-              var shiftChip = function(lbl, v) { return '<div style="flex:1; min-width:110px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:10px 14px;"><div style="font-size:0.62rem; font-weight:800; color:' + SHC[lbl] + '; text-transform:uppercase; letter-spacing:0.8px;">' + lbl + '</div><div style="font-size:1.3rem; font-weight:800; font-variant-numeric:tabular-nums;">' + v + 'h</div></div>'; };
-              var warnBanner = (selA.doubleDays > 0)
-                  ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.2); font-size:0.82rem; font-weight:700; color:var(--status-alert); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-octagon" width="16"></i> ' + selA.doubleDays + ' day' + (selA.doubleDays === 1 ? '' : 's') + ' where the SAME time block appears in both the schedule and the OT sheet — combined reports count those hours twice. DOUBLE rows below.</div>'
-                  : (selA.overlapDays > 0 ? '<div style="margin:14px 0 0; padding:12px 16px; border-radius:12px; background:rgba(217,119,6,0.08); border:1px solid rgba(217,119,6,0.2); font-size:0.82rem; font-weight:700; color:var(--status-warn); display:flex; align-items:center; gap:8px;"><i data-lucide="alert-triangle" width="16"></i> ' + selA.overlapDays + ' day' + (selA.overlapDays === 1 ? '' : 's') + ' with same-source overlapping segments.</div>' : '');
-              rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
+
+              // Schedule heatmap: SAFE days in the window, intensity by hours.
+              var dm = selA.dayMap || {};
+              var dmKeys = Object.keys(dm).sort();
+              var maxDayH = dmKeys.reduce(function(m, k) { return Math.max(m, dm[k]); }, 1);
+              var DN2 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+              var calCells = dmKeys.map(function(k) {
+                  var h = dm[k]; var inten = 0.18 + 0.72 * (h / maxDayH);
+                  var parts = k.split('-'); var dt = new Date(+parts[0], +parts[1]-1, +parts[2], 12);
+                  return '<div style="background:rgba(52,211,153,' + inten.toFixed(2) + '); border:1px solid var(--glass-border); border-radius:9px; padding:7px 4px; text-align:center; min-width:46px;" title="' + escapeHTML(k) + ' — ' + h + 'h SAFE"><div style="font-size:0.55rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">' + DN2[dt.getDay()] + ' ' + (+parts[2]) + '</div><div style="font-size:0.82rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + h + 'h</div></div>';
+              }).join('');
+              var calHtml = dmKeys.length
+                  ? '<div style="padding:18px 24px; border-bottom:1px solid var(--glass-border);"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:10px;">SAFE schedule — ' + dmKeys.length + ' day' + (dmKeys.length===1?'':'s') + ' this ' + (d.mode || 'period') + '</div><div style="display:flex; flex-wrap:wrap; gap:6px;">' + calCells + '</div></div>'
+                  : '';
+
+              // Fit verdict — the redeployment argument.
+              var verdict, vColor, vBg, vIcon;
+              if (selA.fit === 'over') {
+                  vColor = 'var(--status-warn)'; vBg = 'rgba(217,119,6,0.10)'; vIcon = 'trending-up';
+                  verdict = '<b>' + selA.lang + ' · Level ' + selA.level + '</b> — overqualified for SAFE. These <b>' + selA.total + 'h</b> are redeployable: a ' + (selA.lang === 'BL' ? 'bilingual L' + selA.level : 'level-' + selA.level) + ' agent is scarce and worth more on ' + (selA.lang === 'BL' ? 'French / bilingual queues' : 'higher-tier work') + '. SAFE can be covered by an EN level-1/2 agent.';
+              } else if (selA.fit === 'ideal') {
+                  vColor = 'var(--status-active)'; vBg = 'rgba(5,150,105,0.10)'; vIcon = 'check-circle';
+                  verdict = '<b>' + selA.lang + ' · Level ' + selA.level + '</b> — ideal fit. SAFE is an appropriate use of this profile; no redeployment argument here. ' + (selA.surge ? 'The <b>surge</b> below is worth explaining operationally, but it is not a misallocation of a high-value agent.' : '');
+              } else {
+                  vColor = 'var(--text-secondary)'; vBg = 'rgba(0,0,0,0.04)'; vIcon = 'help-circle';
+                  verdict = '<b>' + selA.lang + ' · Level ' + selA.level + '</b> — borderline. Consider redeploying if ' + (selA.lang === 'FR' ? 'French coverage' : 'senior capacity') + ' is short elsewhere.';
+              }
+              var verdictBanner = '<div style="margin:0 0 4px; padding:14px 18px; border-radius:12px; background:' + vBg + '; border:1px solid ' + vColor + '; font-size:0.84rem; font-weight:600; color:var(--text-main); display:flex; align-items:flex-start; gap:10px; line-height:1.5;"><i data-lucide="' + vIcon + '" width="18" style="color:' + vColor + '; flex-shrink:0; margin-top:1px;"></i><div>' + verdict + '</div></div>';
+
+              var surgeBanner = selA.surge
+                  ? '<div style="margin-top:10px; padding:11px 16px; border-radius:12px; background:rgba(220,38,38,0.07); border:1px solid rgba(220,38,38,0.2); font-size:0.8rem; font-weight:700; color:var(--status-alert); display:flex; align-items:center; gap:8px;"><i data-lucide="activity" width="15"></i> SAFE usage surged' + (selA.surgeMonth ? ' starting <b>' + escapeHTML(selA.surgeMonth) + '</b>' : '') + ' — recent months run far above the prior baseline. Peak ' + selA.trendPeak.hours + 'h.</div>'
+                  : '';
+
+              var skillsLine = selA.skills ? '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:4px;">Skills: <span style="color:var(--text-secondary);">' + escapeHTML(selA.skills) + '</span></div>' : '';
+              var supLine = selA.sup ? ' · Sup: ' + escapeHTML(selA.sup) : '';
+
+              rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 330px); min-height:440px;">' +
                   '<div style="padding:20px 24px; border-bottom:1px solid var(--glass-border);">' +
                   '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
-                  '<div><button class="btn btn-glass" style="height:28px; font-size:0.72rem; margin-bottom:10px;" onclick="state.safeSelectedAgent=null; render();"><i data-lucide="arrow-left" width="13"></i> All agents</button>' +
-                  '<div style="font-weight:800; font-size:1.5rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</div>' +
-                  '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE day' + (selA.days === 1 ? '' : 's') + ' · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>/day' + (selA.maxDay ? ' · heaviest <b style="color:var(--text-main);">' + escapeHTML(selA.maxDay.date) + '</b> (' + selA.maxDay.hours + 'h)' : '') + '</div></div>' +
-                  '<div style="text-align:right;"><div class="cnum" style="font-size:2.6rem; font-weight:800; color:var(--status-active); line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.62rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;">total in window</div></div></div>' +
-                  '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">' + shiftChip('Morning', selA.morning) + shiftChip('Evening', selA.evening) + shiftChip('Night', selA.night) +
-                  '<div style="flex:1.4; min-width:170px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:10px 14px;"><div style="font-size:0.62rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px;">By Source</div><div style="font-size:0.82rem; font-weight:800; margin-top:4px;"><span style="color:#6366f1;">Sched ' + selA.srcSched + 'h</span> · <span style="color:#f472b6;">OT ' + selA.srcOt + 'h</span></div></div>' +
-                  '</div>' +
-                  warnBanner + '</div>' +
-                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:9px 14px;">Date</th><th style="padding:9px 14px;">Source</th><th style="padding:9px 14px;">Shift</th><th style="padding:9px 14px;">Window</th><th style="padding:9px 14px; text-align:right;">Hours</th><th style="padding:9px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
+                  '<div style="min-width:0;"><button class="btn btn-glass" style="height:28px; font-size:0.72rem; margin-bottom:10px;" onclick="state.safeSelectedAgent=null; render();"><i data-lucide="arrow-left" width="13"></i> All agents</button>' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><span style="font-weight:800; font-size:1.45rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</span>' + lvlChip(selA.level) + langChip(selA.lang) + '<span style="font-size:0.6rem; font-weight:800; color:' + fitm.c + '; background:' + fitm.bg + '; padding:2px 9px; border-radius:99px;">' + fitm.lbl + '</span></div>' +
+                  '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE days · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>' + supLine + '</div>' + skillsLine + '</div>' +
+                  '<div style="text-align:right; flex-shrink:0;"><div class="cnum" style="font-size:2.4rem; font-weight:800; color:var(--status-active); line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-top:4px;">this ' + (d.mode || 'period') + '</div><div style="font-size:0.66rem; font-weight:700; color:var(--text-muted); margin-top:6px;"><span style="color:#6366f1;">Sch ' + selA.srcSched + 'h</span> · <span style="color:#f472b6;">OT ' + selA.srcOt + 'h</span></div></div></div>' +
+                  '<div style="margin-top:14px;">' + verdictBanner + surgeBanner + '</div></div>' +
+                  '<div style="padding:18px 24px; border-bottom:1px solid var(--glass-border);"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px; display:flex; align-items:center; gap:6px;"><i data-lucide="trending-up" width="14"></i> 14-Month SAFE Trend <span style="font-weight:600; text-transform:none; color:var(--text-muted);">— peak month highlighted</span></div><div style="position:relative; height:170px;"><canvas id="safe-trend-chart" style="display:block;"></canvas></div></div>' +
+                  calHtml +
+                  '<div style="flex:1; overflow-y:auto; min-height:120px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse;"><thead style="position:sticky; top:0; background:var(--bg-root); z-index:5;"><tr style="font-size:0.58rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; text-align:left;"><th style="padding:8px 14px;">Date</th><th style="padding:8px 14px;">Source</th><th style="padding:8px 14px;">Shift</th><th style="padding:8px 14px;">Window</th><th style="padding:8px 14px; text-align:right;">Hours</th><th style="padding:8px 14px;">Flags</th></tr></thead><tbody>' + segRows + '</tbody></table></div></div>';
           } else {
-              rightCol = '<div class="aether-card" style="padding:24px; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:420px;">' +
-                  '<div class="section-header">Shift Distribution<span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">select an agent on the left for the line-by-line audit</span></div>' +
-                  '<div class="chart-3d-container" style="height:240px; width:100%; margin:10px 0;"><canvas id="tracker-chart" style="display:block;"></canvas></div>' +
-                  '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; line-height:1.7; border-top:1px solid var(--glass-border); padding-top:14px;">SAFE hours enter through two doors — <b style="color:#6366f1;">WFM schedule</b> and <b style="color:#f472b6;">SAFE-coded overtime</b> — and this view shows both per agent (manual floor assigns are floor status only and never count as hours), attributed Morning / Evening / Night like the Furlough tracker. ' + ((audit.doubleAgentDays || 0) > 0 ? '<b style="color:var(--status-alert);">' + audit.doubleAgentDays + ' agent-day(s) have the same hours in two sources — start with the agents wearing the red double chip.</b>' : 'No cross-source double counts detected in this window.') + '</div></div>';
+              var fitCard = function(key, label, hrs, color) {
+                  var pct = (t2.all > 0) ? Math.round(hrs / t2.all * 100) : 0;
+                  return '<div style="flex:1; min-width:130px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:14px; padding:14px 16px;"><div style="font-size:0.64rem; font-weight:800; color:' + color + '; text-transform:uppercase; letter-spacing:0.6px;">' + label + '</div><div class="cnum" style="font-size:1.5rem; font-weight:800; font-variant-numeric:tabular-nums; margin-top:3px;">' + hrs.toFixed(1) + 'h</div><div style="font-size:0.64rem; color:var(--text-muted); font-weight:600;">' + pct + '% of all SAFE</div></div>';
+              };
+              rightCol = '<div class="aether-card" style="padding:24px; display:flex; flex-direction:column; max-height:calc(100vh - 330px); min-height:440px;">' +
+                  '<div class="section-header">Skill-Fit Overview<span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">select an agent for trend, profile &amp; the redeployment argument</span></div>' +
+                  '<div style="display:flex; gap:12px; flex-wrap:wrap; margin:6px 0 18px;">' +
+                  fitCard('ideal', 'Ideal (EN · L≤2)', t2.fitIdeal || 0, 'var(--status-active)') +
+                  fitCard('review', 'Review', t2.fitReview || 0, 'var(--text-secondary)') +
+                  fitCard('over', 'Overqualified (BL / L4+)', t2.fitOver || 0, 'var(--status-warn)') +
+                  '</div>' +
+                  '<div style="font-size:0.82rem; color:var(--text-secondary); font-weight:600; line-height:1.7; background:' + ((t2.redeploy||0) > 0 ? 'rgba(217,119,6,0.07)' : 'rgba(5,150,105,0.06)') + '; border:1px solid var(--glass-border); border-radius:12px; padding:14px 16px; margin-bottom:18px;">' +
+                  ((t2.redeploy || 0) > 0
+                    ? '<b style="color:var(--status-warn);">' + (t2.redeploy || 0).toFixed(1) + 'h of SAFE</b> is being done by bilingual or level-4+ agents this ' + (d.mode || 'period') + '. SAFE can be covered by EN level-1/2 staff, so that capacity is the argument for redeploying scarce profiles to French / senior queues. Click those agents (amber “Overqualified” chip) to build the case.'
+                    : 'No overqualified profiles on SAFE this ' + (d.mode || 'period') + ' — SAFE is currently staffed by appropriately-matched agents. ') +
+                  (!d.hasMasterList ? ' <b style="color:var(--status-warn);">Sync the Master Roster for real Level/Language data.</b>' : '') +
+                  '</div>' +
+                  '<div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;">Shift distribution</div>' +
+                  '<div class="chart-3d-container" style="height:200px; width:100%;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div>';
           }
 
-          return headerHtml + kpis + '<div class="grid-split" style="grid-template-columns: 360px 1fr; gap:20px; align-items:start; padding-bottom:30px;">' + leftCol + rightCol + '</div>';
+          return headerHtml + kpis + '<div class="grid-split" style="grid-template-columns: 370px 1fr; gap:20px; align-items:start; padding-bottom:30px;">' + leftCol + rightCol + '</div>';
       }
 
       // ───────── OVERTIME MODE: dedicated layout (open vs given) ─────────
@@ -2578,6 +2638,34 @@
                   y: { beginAtZero: true, grid: { color: gridColor }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } }
               },
               animation: { duration: 900, easing: 'easeOutQuart', delay: function(c2) { return (c2.type === 'data' && c2.mode === 'default') ? 180 + (c2.dataIndex || 0) * 24 : 0; } }
+          }
+      });
+  }
+
+  function initSafeTrendChart() {
+      if (typeof Chart === 'undefined' || !state.trackerData || !state.trackerData.perAgent) return;
+      var el = document.getElementById('safe-trend-chart'); if (!el) return;
+      var a = null, pa = state.trackerData.perAgent;
+      for (var i = 0; i < pa.length; i++) if (pa[i].name === state.safeSelectedAgent) { a = pa[i]; break; }
+      if (!a || !a.trend) return;
+      if (charts.safeTrend) { charts.safeTrend.destroy(); charts.safeTrend = null; }
+      var labels = state.trackerData.trendMonths || a.trend.map(function(x) { return x.label; });
+      var data = a.trend.map(function(x) { return x.hours; });
+      var colors = a.trend.map(function(x) { return x.key === a.trendPeak.month ? '#f59e0b' : 'rgba(52,211,153,0.85)'; });
+      var isDark = document.body.classList.contains('dark');
+      var textColor = isDark ? '#94a3b8' : '#64748b';
+      var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)';
+      charts.safeTrend = new Chart(el.getContext('2d'), {
+          type: 'bar',
+          data: { labels: labels, datasets: [{ label: 'SAFE hours', data: data, backgroundColor: colors, borderRadius: 5, maxBarThickness: 30 }] },
+          options: {
+              responsive: true, maintainAspectRatio: false, resizeDelay: 200,
+              plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(c2) { return ' ' + (Math.round(c2.parsed.y * 10) / 10) + 'h SAFE'; } } } },
+              scales: {
+                  x: { grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '700', size: 9 }, color: textColor, maxRotation: 0, autoSkip: false } },
+                  y: { beginAtZero: true, grid: { color: gridColor }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor } }
+              },
+              animation: { duration: 950, easing: 'easeOutQuart', delay: function(c2) { return (c2.type === 'data' && c2.mode === 'default') ? 120 + (c2.dataIndex || 0) * 28 : 0; } }
           }
       });
   }
