@@ -33,6 +33,16 @@
   function searchBox(id, placeholder, value, handler, wrapStyle, inputStyle) {
       return '<span class="search-wrap" style="' + (wrapStyle || '') + '"><i data-lucide="search" width="15"></i><input id="' + id + '" type="text" class="input-search" style="' + (inputStyle || '') + '" placeholder="' + placeholder + '" oninput="' + handler + '" value="' + value + '"></span>';
   }
+  // MasterList Skills are a SharePoint multi-value cell ("Name;#Lvl;#Name;#Lvl…").
+  // Render the skill NAMES as a clean comma list (drop the level tokens).
+  function prettySkills(raw) {
+      var s = String(raw == null ? '' : raw).trim();
+      if (!s) return '';
+      if (s.indexOf(';#') !== -1) {
+          return s.split(';#').filter(function(t) { t = t.trim(); return t && !/^\d+$/.test(t); }).join(', ');
+      }
+      return s.split(/[;,]/).map(function(t) { return t.trim(); }).filter(Boolean).join(', ');
+  }
 
   // Split-flap status flip — modern take on the train-departure board.
   // The status cell and dot flip in around the X axis with a back-out
@@ -171,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE11 · SmartWear skills parse + capability chip';
+  var APP_BUILD = 'build 2026.06.13-SAFE12 · clean floor-view skills display';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false, boardDrillDate: null
@@ -901,7 +911,7 @@
      var hoverCardHtml = '<div class="agent-tooltip"><div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">' + escapeHTML(a.name || '') + '</div>';
      if (a.level) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ' + escapeHTML(a.level) + '</div>';
      if (a.manager) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">' + escapeHTML(a.manager) + '</span></div>';
-     if (a.skills) hoverCardHtml += '<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">' + escapeHTML(String(a.skills).replace(/;#[0-9]+/g, '').replace(/;/g, ', ')) + '</div>';
+     if (a.skills) hoverCardHtml += '<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">' + escapeHTML(prettySkills(a.skills)) + '</div>';
      hoverCardHtml += '</div>';
 
      var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
