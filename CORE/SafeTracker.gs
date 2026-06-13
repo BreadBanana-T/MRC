@@ -211,6 +211,54 @@ var SafeTracker = {
     var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, count: events.length,
                    bRed: 0, bWarn: 0, bNormal: 0, bLow: 0 };
 
+    // ── Scheduled-time + hour-of-day staffing profile (data-analyst lens) ──
+    // Read the schedule archive (Schedule_History ∪ Raw Schedule) across the
+    // window so SAFE can be normalised against time actually SCHEDULED, and so
+    // we can show WHEN (clock hour) SAFE load sits relative to total staffing.
+    var winStartStr = Utilities.formatDate(new Date(bounds.start), 'America/Toronto', 'yyyy-MM-dd');
+    var winEndStr = eStr;
+    var schedByAgent = {};                 // normKey -> scheduled minutes in window
+    var schedDaysByAgent = {};             // normKey -> count of scheduled days
+    var schedHourly = [], safeHourly = []; // [24] clock-hour minute load
+    for (var hh = 0; hh < 24; hh++) { schedHourly.push(0); safeHourly.push(0); }
+    var nk = function (n) { return self._normKey(n); };
+    var addHourly = function (arr, sMin, eMin) {
+      var t = sMin;
+      while (t < eMin) {
+        var hod = Math.floor((t % 1440) / 60);
+        var chunkEnd = Math.min(eMin, (Math.floor(t / 60) + 1) * 60);
+        arr[hod] += (chunkEnd - t);
+        t = chunkEnd;
+      }
+    };
+    var schedSeen = {};
+    var readSched = function (sheet) {
+      var db = WT._getDB(sheet);
+      if (!db || db.getLastRow() < 2) return;
+      db.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        var nm = String(row[0]).trim(); if (!nm) return;
+        var dStr = WT._formatDate(row[2]); if (!dStr || dStr < winStartStr || dStr > winEndStr) return;
+        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
+        if (!ssRaw || !seRaw) return;                      // Off / absent — no scheduled time
+        if (regionFilter !== 'All' && regionOf(nm, row[6]) !== regionFilter) return;
+        var dk = nk(nm) + '|' + dStr;
+        if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins; dedup agent-day
+        var ss = WT._timeToMins(ssRaw), se = WT._timeToMins(seRaw);
+        if (se <= ss) se += 1440;
+        schedByAgent[nk(nm)] = (schedByAgent[nk(nm)] || 0) + (se - ss);
+        schedDaysByAgent[nk(nm)] = (schedDaysByAgent[nk(nm)] || 0) + 1;
+        addHourly(schedHourly, ss, se);
+      });
+    };
+    readSched('Schedule_History');
+    readSched('Raw Schedule');
+    // SAFE load by clock hour, from the same segments the UI shows.
+    events.forEach(function (e) { addHourly(safeHourly, e.startMin, e.startMin + (e.dur || 0) * 60); });
+
+    // Peer-comparison collectors: SAFE-as-%-of-scheduled, grouped by Level /
+    // Region / Language. Filled inside the perAgent map below, reduced after.
+    var shareByLevel = {}, shareByRegion = {}, shareByLang = {};
+
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
@@ -233,6 +281,16 @@ var SafeTracker = {
       var trend = trendMonths.map(function (m) { return { key: m.key, label: m.label, year: m.year, hours: self._r2(tb[m.key] || 0) }; });
       var peak = trend.reduce(function (mx, x) { return x.hours > mx.hours ? x : mx; }, { hours: 0, key: '' });
 
+      // Equity lens: SAFE as a % of time actually scheduled in the window.
+      var schedH = self._r2((schedByAgent[nk(n)] || 0) / 60);
+      var schedDays = schedDaysByAgent[nk(n)] || 0;
+      var safeShare = schedH > 0 ? self._r2(totalH / schedH * 100) : null;
+      if (safeShare != null) {
+        (shareByLevel[pf.level] = shareByLevel[pf.level] || []).push(safeShare);
+        (shareByRegion[a.region] = shareByRegion[a.region] || []).push(safeShare);
+        (shareByLang[pf.lang] = shareByLang[pf.lang] || []).push(safeShare);
+      }
+
       return {
         name: n, region: a.region,
         level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup,
@@ -240,6 +298,7 @@ var SafeTracker = {
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
         days: dayKeys.length, segs: a.segs,
+        schedH: schedH, schedDays: schedDays, safeShare: safeShare,
         avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
         dayMap: a.days,
@@ -247,6 +306,36 @@ var SafeTracker = {
         trend: trend, trendPeak: { month: peak.key, hours: peak.hours }
       };
     }).sort(function (x, y) { return y.total - x.total; });
+
+    // ── Reduce peer groups to medians, then attach over-index per agent ──
+    var median = function (arr) {
+      if (!arr || !arr.length) return null;
+      var s = arr.slice().sort(function (p, q) { return p - q; });
+      var m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : self._r2((s[m - 1] + s[m]) / 2);
+    };
+    var medLevel = {}, medRegion = {}, medLang = {};
+    Object.keys(shareByLevel).forEach(function (k) { medLevel[k] = median(shareByLevel[k]); });
+    Object.keys(shareByRegion).forEach(function (k) { medRegion[k] = median(shareByRegion[k]); });
+    Object.keys(shareByLang).forEach(function (k) { medLang[k] = median(shareByLang[k]); });
+    var allShares = [];
+    perAgent.forEach(function (a) { if (a.safeShare != null) allShares.push(a.safeShare); });
+    var medAll = median(allShares);
+    perAgent.forEach(function (a) {
+      var pm = medLevel[a.level];
+      a.peerMed = (pm != null) ? pm : medAll;          // level-peer median SAFE %
+      a.overIndex = (a.safeShare != null && a.peerMed) ? self._r2(a.safeShare / a.peerMed) : null;
+    });
+
+    // ── Concentration (Pareto): what share of total SAFE the top agents absorb ──
+    var sortedH = perAgent.map(function (a) { return a.total; }).filter(function (h) { return h > 0; });
+    var grandSafe = sortedH.reduce(function (s, h) { return s + h; }, 0);
+    var cumTopShare = function (n2) {
+      var c = 0; for (var i = 0; i < Math.min(n2, sortedH.length); i++) c += sortedH[i];
+      return grandSafe > 0 ? self._r2(c / grandSafe * 100) : 0;
+    };
+    var concentration = { agents: sortedH.length, top3: cumTopShare(3), top5: cumTopShare(5), top10: cumTopShare(10),
+                          medianShare: medAll, peerMedians: { level: medLevel, region: medRegion, lang: medLang } };
 
     ['all', 'morning', 'evening', 'night', 'sched', 'ot'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
     events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent) || a.src.localeCompare(b.src); });
@@ -257,6 +346,9 @@ var SafeTracker = {
       trendMonths: trendMonths.map(function (m) { return m.label + (m.label === 'Jan' ? " '" + String(m.year).slice(-2) : ''); }),
       hasMasterList: Object.keys(mlByKey).length > 0,
       winDays: winDays,
+      hourly: { safe: safeHourly.map(function (m) { return self._r2(m / 60); }),
+                sched: schedHourly.map(function (m) { return self._r2(m / 60); }) },
+      concentration: concentration,
       audit: { agents: perAgent.length, doubleAgentDays: Object.keys(doubleDays).length,
                overlapAgentDays: Object.keys(overlapDays).length }
     });
