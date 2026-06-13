@@ -39,8 +39,30 @@ var SafeTracker = {
   },
 
   // SAFE capability lives in the MasterList Skills text as the skill
-  // "Smart wear" (the SAFE program's skill name). Tolerant of spacing/hyphen.
-  _canSafe: function (skills) { return /smart\s*-?\s*wear/i.test(String(skills || '')); },
+  // "SmartWear" (the SAFE program's skill name). Tolerant of spacing/hyphen.
+  _canSafe: function (skills) { return /smart[\s-]*wear/i.test(String(skills || '')); },
+
+  // MasterList Skills are a SharePoint multi-value cell: "Name;#Lvl;#Name;#Lvl…".
+  // Parse it into a readable list and pull the SmartWear proficiency level.
+  _parseSkills: function (raw) {
+    var s = String(raw || '').trim();
+    if (!s) return { pretty: '', swLevel: null };
+    var list = [];
+    if (s.indexOf(';#') !== -1) {
+      var parts = s.split(';#');
+      for (var i = 0; i < parts.length; i += 2) {
+        var nm = String(parts[i] || '').trim(); if (!nm) continue;
+        var lv = (i + 1 < parts.length) ? String(parts[i + 1]).trim() : '';
+        list.push({ name: nm, lvl: /^\d+$/.test(lv) ? parseInt(lv, 10) : null });
+      }
+    } else {
+      s.split(/[;,]/).forEach(function (t) { t = t.trim(); if (t) list.push({ name: t, lvl: null }); });
+    }
+    var swLevel = null;
+    list.forEach(function (x) { if (/smart[\s-]*wear/i.test(x.name) && x.lvl != null) swLevel = x.lvl; });
+    var pretty = list.map(function (x) { return x.lvl != null ? x.name + ' (' + x.lvl + ')' : x.name; }).join(' · ');
+    return { pretty: pretty, swLevel: swLevel };
+  },
 
   getAnalytics: function (mode, refDate, regionFilter, cycleFilter) {
     regionFilter = regionFilter || 'All';
@@ -88,13 +110,14 @@ var SafeTracker = {
         var nm = String(r[0]).trim();
         if (!nm) return;
         var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(nm) : nm.toLowerCase();
+        var parsed = self._parseSkills(r[3]);
         mlByKey[key] = { name: nm, level: parseInt(r[1], 10) || 2, sup: String(r[2] || '').trim(),
-                         skills: String(r[3] || '').trim(), lang: self._inferLang(r[3]), canSafe: self._canSafe(r[3]) };
+                         skills: parsed.pretty, swLevel: parsed.swLevel, lang: self._inferLang(r[3]), canSafe: self._canSafe(r[3]) };
       });
     }
     var profileOf = function (agent) {
       var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(agent) : String(agent).toLowerCase();
-      return mlByKey[key] || { name: agent, level: 2, sup: '', skills: '', lang: 'EN', canSafe: false };
+      return mlByKey[key] || { name: agent, level: 2, sup: '', skills: '', swLevel: null, lang: 'EN', canSafe: false };
     };
 
     var seen = {};
@@ -342,7 +365,7 @@ var SafeTracker = {
 
       return {
         name: n, region: a.region,
-        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, canSafe: !!pf.canSafe,
+        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, canSafe: !!pf.canSafe, swLevel: (pf.swLevel != null ? pf.swLevel : null),
         band: band, monthEq: monthEq,
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
