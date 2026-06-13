@@ -103,6 +103,11 @@ function getSafeScheduleBoard(dateStr, agentsPipe) {
     ? SafeTracker.getScheduleBoard(dateStr, agentsPipe)
     : JSON.stringify({ error: 'SafeTracker not loaded.' });
 }
+function getSafeScheduleRange(startStr, endStr, agentsPipe) {
+  return (typeof SafeTracker !== 'undefined')
+    ? SafeTracker.getScheduleRange(startStr, endStr, agentsPipe)
+    : JSON.stringify({ error: 'SafeTracker not loaded.' });
+}
 
 // --- OT OPEN SLOTS (WFM JSON export) ---
 function importOtOpenSlots(t) {

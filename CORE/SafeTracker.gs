@@ -282,8 +282,9 @@ var SafeTracker = {
     });
     var providersHourly = providerSets.map(function (s) { return Object.keys(s).length; });
 
-    // SUPPLY: capable agents on shift per clock hour (schedule — secondary overlay).
-    var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {};
+    // SUPPLY: capable agents on shift per clock hour (schedule — rotation-aware,
+    // because it only counts capable agents who ACTUALLY have a schedule row).
+    var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {}, scheduledCapable = {};
     var readSched = function (sheet) {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
@@ -297,6 +298,7 @@ var SafeTracker = {
         var ss = WT._timeToMins(ssRaw), se = WT._timeToMins(seRaw);
         if (se <= ss) se += 1440;
         schedDaySet[dStr] = true;
+        scheduledCapable[k] = true;                        // actually worked the window
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
         WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; });
@@ -407,7 +409,7 @@ var SafeTracker = {
         safeHourly: safeHourly.map(function (m) { return self._r2(m / 60); }),
         providersHourly: providersHourly, capableOnShiftHourly: capableOnShiftHourly,
         thinHours: thinHours, thinThreshold: thinThreshold,
-        capable: { total: Object.keys(capable).length, byShift: byShift },
+        capable: { total: Object.keys(scheduledCapable).length, trainedTotal: Object.keys(capable).length, byShift: byShift },
         headline: { thinPct: thinPct, thinSafeH: self._r2(thinSafeH), totalSafeH: self._r2(totalSafeH),
                     thinHourCount: thinHours.length, minCovHour: minCovHour }
       },
@@ -428,33 +430,32 @@ var SafeTracker = {
   // shift envelope or breaks, flagged hasFull=false.
 
   _normKey: function (n) { return (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(n) : String(n).trim().toLowerCase(); },
+  // Like _normKey but drops single-letter tokens (middle initials) so
+  // "Wong Lawrence J" and "Wong Lawrence" resolve to the same person.
+  _coreKey: function (n) { return this._normKey(n).split(' ').filter(function (t) { return t.length > 1; }).join(' '); },
+  _regionOf: function (nm) {
+    if (typeof RegionRegistry !== 'undefined') { var r = RegionRegistry.getRegion(nm); if (r) return r; }
+    return 'Onshore';
+  },
 
+  // Roster for the Compare "Add agent" search — ONLY onshore SmartWear-capable
+  // agents (offshore never does SAFE; non-capable agents can't carry it).
   getScheduleRoster: function () {
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     if (!WT) return '[]';
     var self = this;
-    var byKey = {};
-    var ml = {};
+    var out = [];
     var dbML = WT._getDB('WF_MASTERLIST');
     if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
         var nm = String(r[0]).trim(); if (!nm) return;
-        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]) };
-        byKey[self._normKey(nm)] = nm;
+        if (!self._canSafe(r[3])) return;                  // must have SmartWear
+        if (self._regionOf(nm) === 'Offshore') return;     // offshore never does SAFE
+        var parsed = self._parseSkills(r[3]);
+        out.push({ name: nm, level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]), swLevel: parsed.swLevel });
       });
     }
-    ['Schedule_History', 'Raw Schedule', 'WF_ROLES'].forEach(function (sh) {
-      var db = WT._getDB(sh);
-      if (!db || db.getLastRow() < 2) return;
-      db.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
-        var nm = String(r[0]).trim(); if (!nm) return;
-        var k = self._normKey(nm); if (!byKey[k]) byKey[k] = nm;
-      });
-    });
-    var out = Object.keys(byKey).map(function (k) {
-      var prof = ml[k] || { level: 2, lang: 'EN' };
-      return { name: byKey[k], level: prof.level, lang: prof.lang };
-    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+    out.sort(function (a, b) { return a.name.localeCompare(b.name); });
     return JSON.stringify(out);
   },
 
@@ -464,8 +465,12 @@ var SafeTracker = {
     var self = this;
     var wanted = String(agentsPipe || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
     if (!wanted.length) return JSON.stringify({ date: dateStr, agents: [] });
-    var wantKey = {};
-    wanted.forEach(function (n) { wantKey[self._normKey(n)] = n; });
+    var wantKey = {}, wantCore = {};
+    wanted.forEach(function (n) { wantKey[self._normKey(n)] = n; var c = self._coreKey(n); if (c && !wantCore[c]) wantCore[c] = n; });
+    // Resolve a sheet row name to a requested agent — exact key first, then a
+    // looser core-key (ignores middle initials / token order) so name variants join.
+    var resolve = function (nm) { return wantKey[self._normKey(nm)] || wantCore[self._coreKey(nm)] || null; };
+    var schedNamesForDate = {};   // distinct schedule names present on this date (any agent)
 
     var toMin = function (t) { return WT._timeToMins(t); };
     var byAgent = {};
@@ -494,10 +499,13 @@ var SafeTracker = {
       if (!rs || rs.getLastRow() < 2) return;
       rs.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
         var nm = String(row[0]).trim(); if (!nm) return;
-        var k = self._normKey(nm); if (!wantKey[k]) return;
         if (WT._formatDate(row[2]) !== dateStr) return;
+        var ssR = String(row[3] || '').trim(), seR = String(row[4] || '').trim();
+        if (ssR && seR) schedNamesForDate[self._normKey(nm)] = true;   // someone scheduled this date
+        var want = resolve(nm); if (!want) return;
+        var k = self._normKey(want);
         if (byAgent[k] && byAgent[k].hasFull) return; // already covered (history wins over Raw)
-        var ag = ensure(wantKey[k]);
+        var ag = ensure(want);
         ag.hasFull = true; anyFull = true;
         ag.region = String(row[6] || '').trim();
         // Empty start/end ("Off"/absent days) must NOT become a 00:00–00:00
@@ -526,12 +534,13 @@ var SafeTracker = {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
       db.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
-        var nm = String(row[0]).trim(); var k = self._normKey(nm);
-        if (!wantKey[k]) return;
+        var nm = String(row[0]).trim(); if (!nm) return;
+        var want = resolve(nm); if (!want) return;
+        var k = self._normKey(want);
         if (byAgent[k] && byAgent[k].hasFull) return; // already full from Raw Schedule
         if (WT._formatDate(row[1]) !== dateStr) return;
         var t = mapper(row);
-        pushSeg(ensure(wantKey[k]), t[0], t[1], row[sIdx], row[eIdx]);
+        pushSeg(ensure(want), t[0], t[1], row[sIdx], row[eIdx]);
       });
     };
     pull('WF_ROLES', function (r) { var v = String(r[2]).toUpperCase(); return v.indexOf('SAFE') !== -1 ? ['SAFE', 'SAFE'] : (v.indexOf('ICL') !== -1 ? ['ICL', 'ICL'] : ((v.indexOf('ULC') !== -1 || v.indexOf('FIRE') !== -1) ? ['ULC', 'ULC FIRE'] : ['TOWER', 'Tower'])); }, 3, 4);
@@ -574,7 +583,102 @@ var SafeTracker = {
       var h = WT._getDB('Schedule_History');
       return !!(h && h.getLastRow() > 1);
     })();
+    var matchedFull = result.filter(function (a) { return a.hasFull; }).length;
     return JSON.stringify({ date: dateStr, agents: result, archived: anyFull, hasArchive: hasArchive,
-                            hasMasterList: Object.keys(ml).length > 0 });
+                            hasMasterList: Object.keys(ml).length > 0,
+                            diag: { schedRowsForDate: Object.keys(schedNamesForDate).length, matchedFull: matchedFull, requested: wanted.length } });
+  },
+
+  // RANGE version of the board for the Compare "Week" view: each agent's full
+  // schedule (shift + breaks/lunch + activities) for every date in [startStr,endStr].
+  // Returns agents[].days keyed by date. Range is capped to 31 days.
+  getScheduleRange: function (startStr, endStr, agentsPipe) {
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
+    if (!WT) return JSON.stringify({ error: 'Engine unavailable.' });
+    var self = this;
+    var wanted = String(agentsPipe || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
+    if (!wanted.length || !startStr || !endStr) return JSON.stringify({ start: startStr, end: endStr, dates: [], agents: [] });
+    if (endStr < startStr) { var t0 = startStr; startStr = endStr; endStr = t0; }
+    // build the list of dates (cap 31)
+    var dates = [], dCur = new Date(startStr + 'T12:00:00'), dEnd = new Date(endStr + 'T12:00:00'), guard = 0;
+    while (dCur <= dEnd && guard < 31) { dates.push(Utilities.formatDate(dCur, 'America/Toronto', 'yyyy-MM-dd')); dCur.setDate(dCur.getDate() + 1); guard++; }
+    var endCap = dates[dates.length - 1] || endStr;
+
+    var wantKey = {}, wantCore = {};
+    wanted.forEach(function (n) { wantKey[self._normKey(n)] = n; var c = self._coreKey(n); if (c && !wantCore[c]) wantCore[c] = n; });
+    var resolve = function (nm) { return wantKey[self._normKey(nm)] || wantCore[self._coreKey(nm)] || null; };
+    var toMin = function (t) { return WT._timeToMins(t); };
+    var byAD = {};   // normKey -> { dateStr -> dayObj }
+    var dayOf = function (want, dStr) {
+      var k = self._normKey(want); byAD[k] = byAD[k] || {};
+      if (!byAD[k][dStr]) byAD[k][dStr] = { shiftStart: null, shiftEnd: null, hasFull: false, segments: [], absent: '' };
+      return byAD[k][dStr];
+    };
+    var pushSeg = function (day, type, label, sRaw, eRaw) {
+      var sm = toMin(sRaw), em = toMin(eRaw); if (sm < 0 || em < 0) return; if (em <= sm) em += 1440;
+      day.segments.push({ type: type, label: label, startMin: sm % 1440, endMin: em, time: WT._minsToTime(sm) + ' - ' + WT._minsToTime(em) });
+    };
+    var BRK = { 'LUNCH': ['LUNCH', 'Lunch'], 'BREAK': ['BREAK', 'Break'], 'TRAINING': ['COACH', 'Training'],
+                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'] };
+    var readFull = function (sheetName) {
+      var rs = WT._getDB(sheetName); if (!rs || rs.getLastRow() < 2) return;
+      rs.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        var nm = String(row[0]).trim(); if (!nm) return;
+        var dStr = WT._formatDate(row[2]); if (!dStr || dStr < startStr || dStr > endCap) return;
+        var want = resolve(nm); if (!want) return;
+        var day = dayOf(want, dStr); if (day.hasFull) return;       // history wins over Raw
+        day.hasFull = true;
+        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
+        if (ssRaw && seRaw) { var ss = toMin(ssRaw), se = toMin(seRaw); day.shiftStart = ss % 1440; day.shiftEnd = (se <= ss ? se + 1440 : se); }
+        try { JSON.parse(row[7] || '[]').forEach(function (b) { var m = BRK[String(b.type || '').toUpperCase()] || ['OTHER', String(b.type || 'Activity')]; pushSeg(day, m[0], m[1], b.start, b.end); }); } catch (e) {}
+        if (String(row[9] || '').trim()) day.absent = String(row[9]).trim();
+      });
+    };
+    readFull('Schedule_History'); readFull('Raw Schedule');
+    var pull = function (sheet, mapper, sIdx, eIdx) {
+      var db = WT._getDB(sheet); if (!db || db.getLastRow() < 2) return;
+      db.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        var nm = String(row[0]).trim(); if (!nm) return;
+        var want = resolve(nm); if (!want) return;
+        var dStr = WT._formatDate(row[1]); if (!dStr || dStr < startStr || dStr > endCap) return;
+        var day = dayOf(want, dStr); if (day.hasFull) return;
+        var t = mapper(row); pushSeg(day, t[0], t[1], row[sIdx], row[eIdx]);
+      });
+    };
+    pull('WF_ROLES', function (r) { var v = String(r[2]).toUpperCase(); return v.indexOf('SAFE') !== -1 ? ['SAFE', 'SAFE'] : (v.indexOf('ICL') !== -1 ? ['ICL', 'ICL'] : ((v.indexOf('ULC') !== -1 || v.indexOf('FIRE') !== -1) ? ['ULC', 'ULC FIRE'] : ['TOWER', 'Tower'])); }, 3, 4);
+    pull('WF_COACHING', function () { return ['COACH', 'Coaching']; }, 3, 4);
+    pull('WF_FURLOUGH', function () { return ['ACSU', 'ACSU']; }, 3, 4);
+    pull('WF_OVERTIME', function (r) { return ['OT', 'OT ' + String(r[4] || '')]; }, 6, 7);
+    pull('WF_ABSENCES', function (r) { return ['ABS', String(r[2] || 'Absence')]; }, 3, 4);
+
+    var ml = {};
+    var dbML = WT._getDB('WF_MASTERLIST');
+    if (dbML && dbML.getLastRow() > 1) {
+      dbML.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+        var nm = String(r[0]).trim(); if (!nm) return;
+        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]) };
+      });
+    }
+    var agentsOut = wanted.map(function (n) {
+      var k = self._normKey(n); var p = ml[k] || { level: 2, lang: 'EN' };
+      var daysMap = byAD[k] || {}; var total = 0;
+      var days = dates.map(function (dStr) {
+        var day = daysMap[dStr] || { shiftStart: null, shiftEnd: null, hasFull: false, segments: [], absent: '' };
+        day.segments.sort(function (a, b) { return a.startMin - b.startMin; });
+        if (day.shiftStart == null && day.segments.length) {
+          day.shiftStart = day.segments[0].startMin;
+          day.shiftEnd = day.segments.reduce(function (mx, s2) { return Math.max(mx, s2.endMin); }, 0);
+        }
+        day.date = dStr;
+        day.shiftStartStr = day.shiftStart != null ? WT._minsToTime(day.shiftStart) : '';
+        day.shiftEndStr = day.shiftEnd != null ? WT._minsToTime(day.shiftEnd) : '';
+        day.noData = !day.hasFull && !(day.segments && day.segments.length);
+        day.safeH = day.segments.reduce(function (s, x) { return s + (x.type === 'SAFE' ? (x.endMin - x.startMin) / 60 : 0); }, 0);
+        total += day.safeH;
+        return day;
+      });
+      return { name: n, level: p.level, lang: p.lang, days: days, safeTotal: self._r2(total) };
+    });
+    return JSON.stringify({ start: startStr, end: endCap, dates: dates, agents: agentsOut, hasMasterList: Object.keys(ml).length > 0 });
   }
 };

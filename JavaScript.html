@@ -181,10 +181,10 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE12 · clean floor-view skills display';
+  var APP_BUILD = 'build 2026.06.13-SAFE13 · rotation-aware capable + Day/Week Compare + diag';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false, boardDrillDate: null
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day'
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -1573,14 +1573,14 @@
 
               var chartCard = '<div class="aether-card" style="padding:18px 20px; margin-bottom:18px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;"><i data-lucide="bar-chart-3" width="13" style="vertical-align:-2px;"></i> SAFE demand (bars) vs capable supply (line), by hour of day</div><div style="position:relative; height:280px;"><canvas id="safe-coverage-chart" style="display:block;"></canvas></div></div>';
 
-              var cap = cov.capable || { total: 0, byShift: {} }; var bs = cap.byShift || {};
+              var cap = cov.capable || { total: 0, trainedTotal: 0, byShift: {} }; var bs = cap.byShift || {};
               var rosterCard = '<div class="aether-card" style="padding:18px 20px;">' +
-                  '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:12px;">SAFE-capable roster <span style="text-transform:none; color:var(--text-muted);">(Smart wear · onshore)</span></div>' +
+                  '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:12px;">SAFE-capable roster <span style="text-transform:none; color:var(--text-muted);">(SmartWear · onshore · actually scheduled this window)</span></div>' +
                   '<div style="display:flex; gap:24px; flex-wrap:wrap;">' +
-                  [['Capable agents', cap.total, 'var(--text-main)'], ['Work mornings', bs.morning || 0, SHC.Morning], ['Work evenings', bs.evening || 0, SHC.Evening], ['Work nights', bs.night || 0, SHC.Night]].map(function(x) {
+                  [['Scheduled & capable', cap.total, 'var(--text-main)'], ['Work mornings', bs.morning || 0, SHC.Morning], ['Work evenings', bs.evening || 0, SHC.Evening], ['Work nights', bs.night || 0, SHC.Night]].map(function(x) {
                       return '<div><div style="font-size:0.6rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">' + x[0] + '</div><div style="font-size:1.9rem; font-weight:800; color:' + x[2] + '; line-height:1; font-variant-numeric:tabular-nums;">' + x[1] + '</div></div>';
                   }).join('') + '</div>' +
-                  '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:12px;">Thin evening/night capability is the structural cause: fewer capable agents are on the clock, so the same names must carry SAFE.</div></div>';
+                  '<div style="font-size:0.68rem; color:var(--text-muted); font-weight:600; margin-top:12px;"><b>' + (cap.trainedTotal || 0) + '</b> agents are SmartWear-trained in total, but only <b>' + cap.total + '</b> actually worked this window (Week A/B rotation + days off). Thin evening/night capability is the structural cause — fewer capable agents on the clock means the same names must carry SAFE.</div></div>';
 
               var thinRows = (cov.thinHours || []).slice().sort(function(a, b) { return (cov.safeHourly[b] || 0) - (cov.safeHourly[a] || 0); }).map(function(h) {
                   var top = pa.filter(function(x) { return (x.byHour || [])[h] > 0; }).sort(function(x, y) { return y.byHour[h] - x.byHour[h]; }).slice(0, 3).map(function(x) { return escapeHTML(x.name) + ' (' + x.byHour[h] + 'h)'; }).join(', ');
@@ -1697,36 +1697,64 @@
               var chips = state.boardAgents.map(function(n) {
                   return '<span style="display:inline-flex; align-items:center; gap:5px; background:rgba(99,102,241,0.10); border:1px solid var(--accent-primary); border-radius:99px; padding:3px 6px 3px 11px; font-size:0.76rem; font-weight:700;">' + escapeHTML(n) + '<button onclick="removeBoardAgent(\'' + escapeHTML(n).replace(/'/g, "\\'") + '\')" style="appearance:none; border:none; background:transparent; cursor:pointer; color:var(--text-muted); display:flex;"><i data-lucide="x" width="13"></i></button></span>';
               }).join(' ');
-              var datalist = '<datalist id="board-roster">' + (state.boardRoster || []).map(function(r) { return '<option value="' + escapeHTML(r.name) + '">L' + r.level + ' ' + r.lang + '</option>'; }).join('') + '</datalist>';
+              var datalist = '<datalist id="board-roster">' + (state.boardRoster || []).map(function(r) { return '<option value="' + escapeHTML(r.name) + '">L' + r.level + ' ' + r.lang + (r.swLevel != null ? ' · SW' + r.swLevel : '') + '</option>'; }).join('') + '</datalist>';
 
               var legend = '<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:0.62rem; font-weight:700; color:var(--text-muted);">' +
                   ['SAFE','ICL','ULC','TOWER','COACH','ACSU','OT'].map(function(t) { return '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC[t] + ';"></span>' + t + '</span>'; }).join('') +
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC.LUNCH + '; opacity:0.6;"></span>Break/Lunch</span>' +
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:14px;height:9px;border-radius:2px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.4);"></span>Shift window</span></div>';
 
-              // ── day nav + smart-pin + add controls ──
+              var isWeek = state.safeCompareMode === 'week';
               var drillDate = state.boardDrillDate || state.trackerDate;
-              var ddObj = new Date(drillDate + 'T12:00:00');
-              var ddNice = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][ddObj.getDay()] + ', ' + escapeHTML(drillDate);
+              var navLabel;
+              if (isWeek) { var wr = compareWeekRange(); navLabel = 'Week of ' + escapeHTML(wr.start); }
+              else { var ddObj = new Date(drillDate + 'T12:00:00'); navLabel = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][ddObj.getDay()] + ', ' + escapeHTML(drillDate); }
+              var cmBtn = function(m, l) { return '<button onclick="setSafeCompareMode(\'' + m + '\')" class="sort-btn ' + (state.safeCompareMode === m ? 'active' : '') + '" style="text-transform:none; letter-spacing:0; height:34px;">' + l + '</button>'; };
               var controls = '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
-                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><button class="btn btn-glass" style="height:34px; width:36px; padding:0;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
+                  cmBtn('day', 'Day') + cmBtn('week', 'Week') +
+                  '<button class="btn btn-glass" style="height:34px; width:36px; padding:0; margin-left:4px;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
                   '<input type="date" class="input-aether" style="width:auto; height:34px; font-weight:700; font-size:0.85rem;" value="' + escapeHTML(drillDate) + '" onchange="setSafeBoardDate(this.value)">' +
                   '<button class="btn btn-glass" style="height:34px; width:36px; padding:0;" onclick="safeBoardShift(1)"><i data-lucide="chevron-right" width="16"></i></button>' +
-                  '<span style="font-weight:800; font-size:0.95rem; margin-left:4px;">' + ddNice + '</span></div>' +
+                  '<span style="font-weight:800; font-size:0.9rem; margin-left:4px;">' + navLabel + '</span></div>' +
                   '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin every SAFE-capable agent who logged SAFE this window"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin every Level 4+ agent with SAFE this window">L4+</button>' +
-                  '<span class="search-wrap" style="width:180px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add any agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin every SAFE-capable agent"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin every Level 4+ agent">L4+</button>' +
+                  '<span class="search-wrap" style="width:180px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add capable agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
                   '<button class="btn btn-primary" style="height:34px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button>' +
                   (state.boardAgents.length ? '<button class="btn btn-glass" style="height:34px; font-size:0.74rem;" onclick="clearBoardAgents()">clear</button>' : '') +
                   '</div></div>';
 
+              var spinner = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
+
+              // Week grid: each pinned agent × the 7 days, compact full-schedule strips.
+              var weekGrid = function() {
+                  var rd = state.boardRangeData; if (!rd || !rd.agents) return spinner;
+                  if (rd.error) return '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(rd.error) + '</div>';
+                  var DN = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                  var hdr = '<div style="display:flex; gap:5px; margin-bottom:6px;"><div style="width:160px; flex-shrink:0;"></div>' + (rd.dates || []).map(function(dt) { var p = dt.split('-'); var dd = new Date(+p[0], +p[1]-1, +p[2], 12); var today = dt === localDateStr(); return '<div style="flex:1; text-align:center; font-size:0.6rem; font-weight:800; color:' + (today ? 'var(--accent-primary)' : 'var(--text-muted)') + ';">' + DN[dd.getDay()] + ' ' + (+p[2]) + '</div>'; }).join('') + '</div>';
+                  var rows = _orderAgents(rd.agents).map(function(a) {
+                      var jsN = escapeHTML(a.name).replace(/'/g, "\\'");
+                      var cells = (a.days || []).map(function(day) {
+                          var env = (day.shiftStart != null && day.shiftEnd != null) ? rectsOf(day.shiftStart, day.shiftEnd).map(function(r) { var el = r[0]/1440*100, ew = (r[1]-r[0])/1440*100; return '<div style="position:absolute; left:' + el + '%; width:' + ew + '%; top:0; bottom:0; background:rgba(99,102,241,0.10); border-radius:2px;"></div>'; }).join('') : '';
+                          var blocks = (day.segments || []).map(blk).join('');
+                          var has = day.hasFull || (day.segments && day.segments.length);
+                          var ttl = day.date + (day.shiftStartStr ? ' · ' + day.shiftStartStr + '–' + day.shiftEndStr : '') + (day.safeH ? ' · ' + (Math.round(day.safeH*10)/10) + 'h SAFE' : '') + (day.absent ? ' · ' + day.absent : (has ? '' : ' · off/none'));
+                          return '<div onclick="setSafeBoardDate(\'' + day.date + '\'); setSafeCompareMode(\'day\');" title="' + escapeHTML(ttl) + '" style="flex:1; position:relative; height:26px; background:' + (has ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.015)') + '; border:1px solid var(--glass-border); border-radius:4px; overflow:hidden; cursor:pointer;">' + env + blocks + '</div>';
+                      }).join('');
+                      return '<div style="display:flex; gap:5px; align-items:center; margin-bottom:5px;"><div style="width:160px; flex-shrink:0; min-width:0; display:flex; align-items:center; gap:4px;"><span style="font-weight:700; font-size:0.74rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + '</span>' + lvlChip(a.level) + '<span style="margin-left:auto; font-size:0.62rem; font-weight:800; color:var(--status-active); flex-shrink:0;">' + (a.safeTotal || 0) + 'h</span><button title="Remove" onclick="removeBoardAgent(\'' + jsN + '\')" style="appearance:none; border:none; background:transparent; color:var(--text-muted); cursor:pointer; flex-shrink:0; padding:0 2px;"><i data-lucide="x" width="13"></i></button></div>' + cells + '</div>';
+                  }).join('');
+                  return hdr + rows;
+              };
+
               var body;
-              if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Pin agents to compare their <b>full daily schedule</b> side by side — shift window, breaks/lunch, and every activity (SAFE highlighted). Use “Pin capable”, “L4+”, the search box, or pin from the Agents tab.</div>';
-              else if (state.boardLoading) body = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
+              if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Pin agents to compare their <b>full schedule</b> — shift window, breaks/lunch, and every activity (SAFE highlighted). Use “Pin capable”, “L4+”, the search box, or pin from the Agents tab. Toggle <b>Week</b> for a multi-day view.</div>';
+              else if (isWeek) { body = (state.boardLoading && !state.boardRangeData) ? spinner : weekGrid(); }
+              else if (state.boardLoading && !state.boardData) body = spinner;
               else if (bd.error) body = '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
               else {
-                  var banner = (bd.archived === false) ? '<div style="display:flex; align-items:flex-start; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule archived for this date' + (bd.hasArchive ? '' : ' yet — the archive fills from your next WFM import') + '. Rows show logged activity only, without the base shift or breaks.</span></div>' : '';
+                  var dg = bd.diag || {};
+                  var banner = (bd.archived === false) ? '<div style="display:flex; align-items:flex-start; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule for ' + escapeHTML(bd.date || drillDate) + '. ' + (dg.schedRowsForDate ? '<b>' + dg.schedRowsForDate + '</b> agents were scheduled that day but only <b>' + (dg.matchedFull || 0) + '</b> matched your pins — likely a name variant.' : 'No schedule rows exist for that date yet — import the WFM schedule covering it.') + ' Rows show logged activity only.</span></div>' : '';
                   body = banner + axis + (bd.agents || []).map(rowFor).join('');
               }
 
@@ -2221,48 +2249,89 @@
       if (typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(function(r) { try { state.boardRoster = JSON.parse(r); } catch(e) { state.boardRoster = []; } if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleRoster();
   }
-  function fetchScheduleBoard() {
+  // The Sunday→Saturday week containing the current Compare date.
+  function compareWeekRange() {
+      var base = state.boardDrillDate || state.trackerDate;
+      var d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() - d.getDay());
+      var s = localDateStr(d); var e = new Date(d); e.setDate(e.getDate() + 6);
+      return { start: s, end: localDateStr(e) };
+  }
+  function _orderAgents(arr) { var by = {}; (arr || []).forEach(function(a) { by[a.name] = a; }); return state.boardAgents.map(function(n) { return by[n]; }).filter(Boolean); }
+  // Fetch schedule data for the given names (day tableau or week range). When
+  // merge=true the result is folded into the cache (fast single-agent add);
+  // when false it replaces it (date/mode change / bulk).
+  function fetchCompare(namesToFetch, replace) {
       if (typeof google === 'undefined') return;
-      var date = state.boardDrillDate || state.trackerDate;
-      var names = state.boardAgents || [];
-      if (!names.length) { state.boardData = { date: date, agents: [] }; state.boardLoading = false; if (state.view === 'tracker') render(); return; }
-      names = names.slice(0, 60);                          // keep the request sane
+      namesToFetch = (namesToFetch || []).slice(0, 60);
+      if (!namesToFetch.length) { render(); return; }
+      var week = state.safeCompareMode === 'week';
       state.boardLoading = true;
       var token = ++boardFetchToken;
-      setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; state.boardData = { date: date, agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (state.view === 'tracker') render(); } }, 25000);
-      google.script.run.withSuccessHandler(function(r) { if (token !== boardFetchToken) return; try { state.boardData = JSON.parse(r); } catch(e) { state.boardData = { agents: [] }; } state.boardLoading = false; if (state.view === 'tracker') render(); })
-          .withFailureHandler(function(err) { if (token !== boardFetchToken) return; state.boardLoading = false; state.boardData = { agents: [], error: (err && err.message) || 'Board error.' }; if (state.view === 'tracker') render(); })
-          .getSafeScheduleBoard(date, names.join('|'));
+      setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; var eo = { agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (week) state.boardRangeData = eo; else state.boardData = eo; if (state.view === 'tracker') render(); } }, 25000);
+      var ok = function(parsed) {
+          if (token !== boardFetchToken) return;
+          state.boardLoading = false;
+          if (week) {
+              if (replace || !state.boardRangeData || !state.boardRangeData.agents) state.boardRangeData = parsed;
+              else { var by = {}; state.boardRangeData.agents.forEach(function(a) { by[a.name] = a; }); parsed.agents.forEach(function(a) { by[a.name] = a; }); state.boardRangeData = { start: parsed.start, end: parsed.end, dates: parsed.dates, agents: _orderAgents(Object.keys(by).map(function(k) { return by[k]; })) }; }
+          } else {
+              if (replace || !state.boardData || !state.boardData.agents) state.boardData = parsed;
+              else { var bb = {}; state.boardData.agents.forEach(function(a) { bb[a.name] = a; }); parsed.agents.forEach(function(a) { bb[a.name] = a; }); state.boardData = { date: parsed.date, archived: parsed.archived, hasArchive: parsed.hasArchive, diag: parsed.diag, agents: _orderAgents(Object.keys(bb).map(function(k) { return bb[k]; })) }; }
+          }
+          if (state.view === 'tracker') render();
+      };
+      var runner = google.script.run
+          .withSuccessHandler(function(r) { var p = { agents: [] }; try { p = JSON.parse(r); } catch(e) {} ok(p); })
+          .withFailureHandler(function(err) { if (token !== boardFetchToken) return; state.boardLoading = false; var eo = { agents: [], error: (err && err.message) || 'Board error.' }; if (week) state.boardRangeData = eo; else state.boardData = eo; if (state.view === 'tracker') render(); });
+      if (week) { var w = compareWeekRange(); runner.getSafeScheduleRange(w.start, w.end, namesToFetch.join('|')); }
+      else { runner.getSafeScheduleBoard(state.boardDrillDate || state.trackerDate, namesToFetch.join('|')); }
   }
+  window.setSafeCompareMode = function(m) { if (state.safeCompareMode === m) return; state.safeCompareMode = m; if (state.boardAgents.length) fetchCompare(state.boardAgents, true); render(); };
   // Bulk-pin SAFE agents matching criteria — capableOnly uses the Smart-wear flag.
   window.smartPinSafe = function(minLevel, capableOnly) {
       minLevel = parseInt(minLevel, 10) || 0;
       var pa = (state.trackerData && state.trackerData.perAgent) || [];
-      var added = 0;
+      var fresh = [];
       pa.forEach(function(a) {
           if (minLevel && a.level < minLevel) return;
           if (capableOnly && a.canSafe === false) return;
-          if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); added++; }
+          if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); }
       });
-      if (added) { showToast('Pinned ' + added + ' agent' + (added === 1 ? '' : 's')); fetchScheduleBoard(); }
-      else showToast('No new matching agents');
-      render();
+      if (fresh.length) { showToast('Pinned ' + fresh.length + ' agent' + (fresh.length === 1 ? '' : 's')); fetchCompare(fresh, false); }
+      else { showToast('No new matching agents'); render(); }
   };
-  window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; render(); };
+  window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; state.boardRangeData = null; render(); };
   window.setSafeView = function(v) {
       state.safeView = v;
       if (v === 'compare') {
           if (!state.boardRoster) fetchScheduleRoster();
           if (state.boardAgents.length === 0) { state.safePins.forEach(function(n) { if (state.boardAgents.indexOf(n) === -1) state.boardAgents.push(n); }); if (state.safeSelectedAgent && state.boardAgents.indexOf(state.safeSelectedAgent) === -1) state.boardAgents.push(state.safeSelectedAgent); }
           if (!state.boardDrillDate) state.boardDrillDate = state.trackerDate;
-          if (state.boardAgents.length) fetchScheduleBoard();
+          if (state.boardAgents.length) fetchCompare(state.boardAgents, true);
       }
       render();
   };
-  window.addBoardAgent = function(name) { name = (name || '').trim(); if (!name) { render(); return; } if (state.boardAgents.indexOf(name) === -1) { state.boardAgents.push(name); fetchScheduleBoard(); } var el = document.getElementById('board-search'); if (el) el.value = ''; render(); };
-  window.removeBoardAgent = function(name) { var i = state.boardAgents.indexOf(name); if (i > -1) { state.boardAgents.splice(i, 1); fetchScheduleBoard(); } render(); };
-  window.safeBoardShift = function(delta) { var base = state.boardDrillDate || state.trackerDate; var dt = new Date(base + 'T12:00:00'); dt.setDate(dt.getDate() + delta); state.boardDrillDate = localDateStr(dt); fetchScheduleBoard(); render(); };
-  window.setSafeBoardDate = function(v) { if (v) { state.boardDrillDate = v; fetchScheduleBoard(); render(); } };
+  // Add = fetch only the new agent and merge (fast); already-loaded → instant.
+  window.addBoardAgent = function(name) {
+      name = (name || '').trim(); var el = document.getElementById('board-search'); if (el) el.value = '';
+      if (!name) { render(); return; }
+      if (state.boardAgents.indexOf(name) === -1) {
+          state.boardAgents.push(name);
+          var cache = state.safeCompareMode === 'week' ? state.boardRangeData : state.boardData;
+          var have = cache && cache.agents && cache.agents.some(function(a) { return a.name === name; });
+          if (have) { if (cache.agents) cache.agents = _orderAgents(cache.agents); render(); }
+          else fetchCompare([name], false);
+      } else render();
+  };
+  // Remove = instant client-side splice, no round-trip.
+  window.removeBoardAgent = function(name) {
+      var i = state.boardAgents.indexOf(name); if (i > -1) state.boardAgents.splice(i, 1);
+      if (state.boardData && state.boardData.agents) state.boardData.agents = state.boardData.agents.filter(function(a) { return a.name !== name; });
+      if (state.boardRangeData && state.boardRangeData.agents) state.boardRangeData.agents = state.boardRangeData.agents.filter(function(a) { return a.name !== name; });
+      render();
+  };
+  window.safeBoardShift = function(delta) { var base = state.boardDrillDate || state.trackerDate; var dt = new Date(base + 'T12:00:00'); dt.setDate(dt.getDate() + (state.safeCompareMode === 'week' ? delta * 7 : delta)); state.boardDrillDate = localDateStr(dt); fetchCompare(state.boardAgents, true); render(); };
+  window.setSafeBoardDate = function(v) { if (v) { state.boardDrillDate = v; fetchCompare(state.boardAgents, true); render(); } };
   window.toggleSafePin = function(ev, name) { ev.stopPropagation(); if (state.safePins.has(name)) state.safePins.delete(name); else state.safePins.add(name); render(); };
   window.toggleSafeDay = function(date) { state.safeOpenDay = (state.safeOpenDay === date ? null : date); render(); };
   window.setMgmtDate = function(v) { if (!v) return; state.mgmtDate = v; fetchMgmtData(); render(); };
