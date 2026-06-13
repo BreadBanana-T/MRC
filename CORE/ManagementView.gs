@@ -57,6 +57,10 @@ var ManagementView = {
       var q = Math.floor((m - 1) / 3) * 3;
       s = new Date(y, q, 1); e = new Date(y, q + 3, 1);
       ps = new Date(y, q - 3, 1); pe = s;
+    } else if (grain === 'ytd') {
+      // Calendar year so far; previous period is the same span a year earlier.
+      s = new Date(y, 0, 1); e = new Date(y + 1, 0, 1);
+      ps = new Date(y - 1, 0, 1); pe = s;
     } else { // week, Sunday → Saturday
       var ref = new Date(y, m - 1, d);
       s = new Date(ref.getTime()); s.setDate(s.getDate() - s.getDay());
@@ -87,6 +91,13 @@ var ManagementView = {
         var nx = new Date(cur.getTime()); nx.setDate(nx.getDate() + 1);
         wins.push({ start: cur.getTime(), end: Math.min(nx.getTime(), selEnd), label: String(cur.getDate()) });
         cur = nx;
+      }
+    } else if (grain === 'ytd') { // calendar year → 12 month columns
+      var mc = new Date(selStart);
+      while (mc.getTime() < selEnd) {
+        var mn = new Date(mc.getFullYear(), mc.getMonth() + 1, 1);
+        wins.push({ start: mc.getTime(), end: Math.min(mn.getTime(), selEnd), label: this._fmt(mc.getTime(), 'MMM') });
+        mc = mn;
       }
     } else { // quarter → Sun–Sat weeks clamped to the quarter
       var wk = new Date(selStart); wk.setDate(wk.getDate() - wk.getDay()); // Sunday on/before quarter start
@@ -123,7 +134,7 @@ var ManagementView = {
   },
 
   getDashboard: function(grain, refDateStr) {
-    grain = (grain === 'day' || grain === 'month' || grain === 'quarter') ? grain : 'week';
+    grain = (grain === 'day' || grain === 'month' || grain === 'quarter' || grain === 'ytd') ? grain : 'week';
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     if (!WT) return JSON.stringify({ error: 'Engine unavailable.' });
     if (!refDateStr || refDateStr.length < 10) refDateStr = Utilities.formatDate(new Date(), this.TZ, 'yyyy-MM-dd');
@@ -468,6 +479,7 @@ var ManagementView = {
     if (grain === 'day') periodLabel = this._fmt(pb.selStart, 'EEE MMM d, yyyy');
     else if (grain === 'month') periodLabel = this._fmt(pb.selStart, 'MMMM yyyy');
     else if (grain === 'quarter') periodLabel = 'Q' + (Math.floor(new Date(pb.selStart).getMonth() / 3) + 1) + ' ' + new Date(pb.selStart).getFullYear();
+    else if (grain === 'ytd') periodLabel = 'YTD ' + new Date(pb.selStart).getFullYear() + ' · Jan 1 – ' + this._fmt(Math.min(pb.selEnd, nowMs) - 86400000, 'MMM d');
     else periodLabel = this._fmt(pb.selStart, 'MMM d') + ' – ' + this._fmt(pb.selEnd - 86400000, 'MMM d');
 
     return JSON.stringify({
@@ -480,7 +492,7 @@ var ManagementView = {
       sel: {
         label: periodLabel,
         startStr: this._fmt(pb.selStart, 'yyyy-MM-dd'),
-        endStr: this._fmt(pb.selEnd - 86400000, 'yyyy-MM-dd'),
+        endStr: this._fmt((grain === 'ytd' ? Math.min(pb.selEnd, nowMs) : pb.selEnd) - 86400000, 'yyyy-MM-dd'),
         topOt: topList(topOt),
         topSafe: topList(topSafe),
         topTower: topList(topTower),

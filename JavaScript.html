@@ -171,7 +171,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE7 · schedule tableau';
+  var APP_BUILD = 'build 2026.06.13-SAFE8 · overnight tableau + history + YTD';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeBoardDate: null, safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRoster: null, boardLoading: false
@@ -1249,6 +1249,7 @@
           text = fmt(s2) + ' → ' + fmt(e2) + ' · ops 7-7';
       }
       else if (state.trackerRange === 'month') text = MN[m - 1] + ' ' + y;
+      else if (state.trackerRange === 'ytd') text = 'YTD ' + y + ' · Jan 1 → ' + fmt(dt);
       else text = 'Q' + (Math.floor((m - 1) / 3) + 1) + ' ' + y;
       return '<span style="font-size:0.72rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.10); border:1px solid var(--accent-primary); padding:5px 12px; border-radius:8px; white-space:nowrap;">' + text + '</span>';
   }
@@ -1323,7 +1324,7 @@
       if (isAbsences) {
           headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerDate=this.value+\'-01-01\'; state.selectedAbsenceAgent=null; state.absenceMonthFilter=\'ALL\'; fetchTrackerData();"><option value="2026" ' + (state.trackerDate.substring(0,4)==='2026'?'selected':'') + '>Year: 2026</option><option value="2025" ' + (state.trackerDate.substring(0,4)==='2025'?'selected':'') + '>Year: 2025</option></select>';
       } else if (!isTraining) {
-          headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);"><option value="day" ' + (state.trackerRange==='day'?'selected':'') + '>Daily</option><option value="week" ' + (state.trackerRange==='week'?'selected':'') + '>Weekly</option><option value="month" ' + (state.trackerRange==='month'?'selected':'') + '>Monthly</option><option value="quarter" ' + (state.trackerRange==='quarter'?'selected':'') + '>Quarterly</option></select><input type="date" class="input-aether" style="width:auto; height:34px;" value="' + state.trackerDate + '" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">' + trackerRangeChip();
+          headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="handleRangeChange(this.value);"><option value="day" ' + (state.trackerRange==='day'?'selected':'') + '>Daily</option><option value="week" ' + (state.trackerRange==='week'?'selected':'') + '>Weekly</option><option value="month" ' + (state.trackerRange==='month'?'selected':'') + '>Monthly</option><option value="quarter" ' + (state.trackerRange==='quarter'?'selected':'') + '>Quarterly</option><option value="ytd" ' + (state.trackerRange==='ytd'?'selected':'') + '>YTD</option></select><input type="date" class="input-aether" style="width:auto; height:34px;" value="' + state.trackerDate + '" onchange="state.trackerDate=this.value; handleRangeChange(state.trackerRange);">' + trackerRangeChip();
       }
       headerHtml += '</div></div>';
 
@@ -1493,21 +1494,31 @@
           var bandChip = function(bd) { var m = BAND[bd] || BAND.NORMAL; return '<span style="font-size:0.56rem; font-weight:800; color:' + m.c + '; background:' + m.bg + '; padding:1px 7px; border-radius:99px;">' + bd + '</span>'; };
 
           // ── shared 24h timeline ──
+          // Static 2-hour gridlines (noon stronger) reused inside each track.
+          var tlGrid = '';
+          for (var tgh = 2; tgh < 24; tgh += 2) tlGrid += '<div style="position:absolute; left:' + (tgh / 24 * 100) + '%; top:0; bottom:0; width:1px; background:var(--text-muted); opacity:' + (tgh === 12 ? '0.30' : '0.14') + '; pointer-events:none;"></div>';
           var tlSeg = function(seg) {
-              var left = seg.startMin / 1440 * 100;
-              var w = Math.max(1.3, (seg.dur || 0) * 60 / 1440 * 100);
-              if (left + w > 100) w = 100 - left;
               var col = SHC[seg.shift] || '#94a3b8';
               var ot = seg.src === 'OT' ? 'background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.4) 0 3px,transparent 3px 6px);' : '';
-              return '<div title="' + escapeHTML(seg.time) + ' · ' + seg.hours + 'h · ' + seg.shift + (seg.src === 'OT' ? ' · OT' : '') + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:3px; bottom:3px; background:' + col + '; ' + ot + ' border-radius:4px;"></div>';
+              var sMin = seg.startMin, eMin = seg.startMin + (seg.dur || 0) * 60;
+              // Split overnight spans so the post-midnight portion is not lost.
+              var rects = [];
+              var b1 = Math.min(eMin, 1440); if (b1 > sMin) rects.push([sMin, b1]);
+              if (eMin > 1440) { var b2 = Math.min(eMin - 1440, 1440); if (b2 > 0) rects.push([0, b2]); }
+              return rects.map(function(r, idx) {
+                  var left = r[0] / 1440 * 100, w = Math.max(1.1, (r[1] - r[0]) / 1440 * 100);
+                  var cont = rects.length > 1;
+                  var radius = cont ? (idx === 0 ? '4px 0 0 4px' : '0 4px 4px 0') : '4px';
+                  return '<div title="' + escapeHTML(seg.time) + ' · ' + seg.hours + 'h · ' + seg.shift + (seg.src === 'OT' ? ' · OT' : '') + (cont ? ' · overnight' : '') + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:3px; bottom:3px; background:' + col + '; ' + ot + ' border-radius:' + radius + '; z-index:3;"></div>';
+              }).join('');
           };
           var tlRow = function(name, segs, right, onclick) {
               return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;' + (onclick ? ' cursor:pointer;' : '') + '"' + (onclick ? ' onclick="' + onclick + '"' : '') + '>' +
                   '<div style="width:148px; flex-shrink:0; font-weight:700; font-size:0.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHTML(name) + '">' + escapeHTML(name) + '</div>' +
-                  '<div style="position:relative; flex:1; height:24px; background:rgba(0,0,0,0.04); border-radius:6px; border:1px solid var(--glass-border);">' + segs.map(tlSeg).join('') + '</div>' +
+                  '<div style="position:relative; flex:1; height:26px; background:rgba(0,0,0,0.04); border-radius:6px; border:1px solid var(--glass-border); overflow:hidden;">' + tlGrid + segs.map(tlSeg).join('') + '</div>' +
                   '<div style="width:50px; flex-shrink:0; text-align:right; font-weight:800; font-size:0.76rem; font-variant-numeric:tabular-nums;">' + right + '</div></div>';
           };
-          var tlAxis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 8px;"><div style="width:148px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:700; color:var(--text-muted);"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div><div style="width:50px; flex-shrink:0;"></div></div>';
+          var tlAxis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 8px;"><div style="width:148px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:800; color:var(--text-muted);"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div><div style="width:50px; flex-shrink:0;"></div></div>';
 
           // ── header sub-toggle + threshold legend ──
           var viewBtn = function(v, label) { return '<button onclick="setSafeView(\'' + v + '\')" class="sort-btn ' + (state.safeView === v ? 'active' : '') + '" style="text-transform:none; letter-spacing:0;">' + label + '</button>'; };
@@ -1535,34 +1546,74 @@
           if (state.safeView === 'board') {
               var boardDate = state.safeBoardDate || state.trackerDate;
               var bd = state.boardData || { agents: [] };
-              var TYPEC = { SAFE: '#34d399', ICL: '#c084fc', ULC: '#fb923c', TOWER: '#38bdf8', COACH: '#fbbf24', ACSU: '#94a3b8', OT: '#f472b6', BREAK: '#cbd5e1', LUNCH: '#9ca3af', ABS: '#f87171', OTHER: '#64748b' };
+              // Distinct, high-contrast palette (SAFE pops; breaks/lunch are
+              // subordinate). White block text stays legible on every hue.
+              var TYPEC = { SAFE: '#10b981', ICL: '#a855f7', ULC: '#f97316', TOWER: '#0ea5e9', COACH: '#f59e0b', ACSU: '#64748b', OT: '#ec4899', BREAK: '#94a3b8', LUNCH: '#78716c', ABS: '#ef4444', OTHER: '#6b7280' };
               var dobj = new Date(boardDate + 'T12:00:00');
               var niceDate = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dobj.getDay()] + ', ' + escapeHTML(boardDate);
 
-              // hour axis 0..24
-              var axis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 10px;"><div style="width:170px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:700; color:var(--text-muted);">';
+              // hour axis 0..24 (labels align with the 2-hour gridlines below)
+              var axis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 10px;"><div style="width:170px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:800; color:var(--text-muted); letter-spacing:0.3px;">';
               for (var hax = 0; hax <= 24; hax += 2) axis += '<span>' + (hax < 10 ? '0' + hax : hax) + '</span>';
               axis += '</div><div style="width:30px; flex-shrink:0;"></div></div>';
 
+              // Static 2-hour gridlines + a stronger noon divider, drawn once and
+              // reused inside every row track.
+              var gridLines = '';
+              for (var gh = 2; gh < 24; gh += 2) {
+                  var isNoon = gh === 12;
+                  gridLines += '<div style="position:absolute; left:' + (gh / 24 * 100) + '%; top:0; bottom:0; width:1px; background:var(--text-muted); opacity:' + (isNoon ? '0.30' : '0.14') + '; pointer-events:none;"></div>';
+              }
+              // "Now" marker — only when viewing today.
+              var nowMark = '';
+              if (boardDate === localDateStr()) {
+                  var nowD = new Date(); var nowMin = nowD.getHours() * 60 + nowD.getMinutes();
+                  nowMark = '<div title="now" style="position:absolute; left:' + (nowMin / 1440 * 100) + '%; top:-3px; bottom:-3px; width:2px; background:var(--status-alert); box-shadow:0 0 5px var(--status-alert); z-index:5; pointer-events:none;"></div>';
+              }
+
+              // Split any [startMin, endMin) that crosses midnight into the
+              // visible segments [start,1440) and [0,end-1440) so overnight
+              // shifts/activities render on BOTH sides of the day.
+              var rectsOf = function(sMin, eMin) {
+                  var out = [];
+                  var b1 = Math.min(eMin, 1440);
+                  if (b1 > sMin) out.push([sMin, b1]);
+                  if (eMin > 1440) { var b2 = Math.min(eMin - 1440, 1440); if (b2 > 0) out.push([0, b2]); }
+                  return out;
+              };
+
               var blk = function(seg) {
-                  var left = seg.startMin / 1440 * 100, w = Math.max(1.1, (seg.endMin - seg.startMin) / 1440 * 100);
-                  if (left + w > 100) w = 100 - left;
                   var c = TYPEC[seg.type] || TYPEC.OTHER;
                   var faint = (seg.type === 'BREAK' || seg.type === 'LUNCH');
-                  return '<div title="' + escapeHTML(seg.label) + ' · ' + escapeHTML(seg.time) + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:3px; bottom:3px; background:' + c + '; ' + (faint ? 'opacity:0.5; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.5) 0 2px,transparent 2px 5px);' : '') + ' border-radius:3px; display:flex; align-items:center; justify-content:center; overflow:hidden;">' + (w > 7 ? '<span style="font-size:0.52rem; font-weight:800; color:#fff; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.3);">' + escapeHTML(seg.type) + '</span>' : '') + '</div>';
+                  var rects = rectsOf(seg.startMin, seg.endMin);
+                  return rects.map(function(r, idx) {
+                      var left = r[0] / 1440 * 100, w = Math.max(0.9, (r[1] - r[0]) / 1440 * 100);
+                      var cont = rects.length > 1; // crosses midnight
+                      var inner = '';
+                      if (w > 13) inner = escapeHTML(seg.type) + ' <span style="font-weight:600; opacity:0.95;">' + escapeHTML(seg.time) + '</span>';
+                      else if (w > 5) inner = escapeHTML(seg.type);
+                      var radius = cont ? (idx === 0 ? '4px 0 0 4px' : '0 4px 4px 0') : '4px';
+                      return '<div title="' + escapeHTML(seg.label) + ' · ' + escapeHTML(seg.time) + (cont ? ' · overnight' : '') + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:4px; bottom:4px; background:' + c + '; ' + (faint ? 'opacity:0.55; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.5) 0 2px,transparent 2px 5px);' : (seg.type === 'SAFE' ? 'box-shadow:0 0 0 1px rgba(255,255,255,0.25), 0 1px 5px rgba(16,185,129,0.55);' : '')) + ' border-radius:' + radius + '; z-index:3; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:0 3px;">' + (inner ? '<span style="font-size:0.55rem; font-weight:800; color:#fff; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.45);">' + inner + '</span>' : '') + '</div>';
+                  }).join('');
               };
               var rowFor = function(a3) {
                   var env = '';
                   if (a3.shiftStart != null && a3.shiftEnd != null) {
-                      var el = a3.shiftStart / 1440 * 100, ew = (a3.shiftEnd - a3.shiftStart) / 1440 * 100; if (el + ew > 100) ew = 100 - el;
-                      env = '<div style="position:absolute; left:' + el + '%; width:' + ew + '%; top:0; bottom:0; background:rgba(99,102,241,0.06); border-left:2px solid rgba(99,102,241,0.35); border-right:2px solid rgba(99,102,241,0.35); border-radius:4px;"></div>';
+                      env = rectsOf(a3.shiftStart, a3.shiftEnd).map(function(r) {
+                          var el = r[0] / 1440 * 100, ew = (r[1] - r[0]) / 1440 * 100;
+                          return '<div style="position:absolute; left:' + el + '%; width:' + ew + '%; top:0; bottom:0; background:rgba(99,102,241,0.08); border-top:1px solid rgba(99,102,241,0.30); border-bottom:1px solid rgba(99,102,241,0.30); border-left:2px solid rgba(99,102,241,0.45); border-right:2px solid rgba(99,102,241,0.45); border-radius:4px; z-index:1;"></div>';
+                      }).join('');
                   }
                   var blocks = (a3.segments || []).map(blk).join('');
-                  var shiftTxt = a3.shiftStartStr ? a3.shiftStartStr + '–' + a3.shiftEndStr + (a3.hasFull ? '' : ' · activities only') : (a3.segments && a3.segments.length ? 'no shift envelope' : '<span style="color:var(--status-warn);">nothing scheduled</span>');
+                  var crossesNight = (a3.shiftEnd != null && a3.shiftEnd > 1440);
+                  var shiftTxt = a3.shiftStartStr
+                      ? '<b style="color:var(--text-secondary);">' + a3.shiftStartStr + '–' + a3.shiftEndStr + '</b>' + (crossesNight ? ' <span style="color:var(--accent-primary);">+1d</span>' : '') + (a3.hasFull ? '' : ' · activities only')
+                      : (a3.noData ? '<span style="color:var(--status-warn);"><i data-lucide="moon" width="11" style="vertical-align:-2px;"></i> no schedule archived</span>'
+                                   : (a3.segments && a3.segments.length ? 'no shift envelope' : '<span style="color:var(--status-warn);">nothing scheduled</span>'));
                   var jsN = escapeHTML(a3.name).replace(/'/g, "\\'");
-                  return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">' +
-                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a3.name) + lvlChip(a3.level) + langChip(a3.lang) + '</div><div style="font-size:0.6rem; color:var(--text-muted); font-weight:600;">' + shiftTxt + (a3.absent ? ' · <span style="color:var(--status-alert);">' + escapeHTML(a3.absent) + '</span>' : '') + '</div></div>' +
-                      '<div style="position:relative; flex:1; height:30px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border);">' + env + blocks + '</div>' +
+                  return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:9px;">' +
+                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a3.name) + lvlChip(a3.level) + langChip(a3.lang) + '</div><div style="font-size:0.62rem; color:var(--text-muted); font-weight:600;">' + shiftTxt + (a3.absent ? ' · <span style="color:var(--status-alert);">' + escapeHTML(a3.absent) + '</span>' : '') + '</div></div>' +
+                      '<div style="position:relative; flex:1; height:38px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border); overflow:hidden;">' + gridLines + env + blocks + nowMark + '</div>' +
                       '<button title="Remove" onclick="removeBoardAgent(\'' + jsN + '\')" style="width:30px; flex-shrink:0; appearance:none; border:none; background:transparent; color:var(--text-muted); cursor:pointer;"><i data-lucide="x" width="15"></i></button></div>';
               };
 
@@ -1581,7 +1632,13 @@
               if (state.boardLoading) body = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
               else if (bd.error) body = '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
               else if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Search and add agents above to build the schedule tableau. Tip: pin agents in the Agents tab and they appear here automatically.</div>';
-              else body = axis + (bd.agents || []).map(rowFor).join('');
+              else {
+                  var banner = '';
+                  if (bd.archived === false) {
+                      banner = '<div style="display:flex; align-items:flex-start; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule archived for this date' + (bd.hasArchive ? '' : ' yet — the schedule archive starts filling from your next WFM import') + '. Any rows below come from historical activity logs (SAFE/OT/coaching/…) only, without the base shift or breaks.</span></div>';
+                  }
+                  body = banner + axis + (bd.agents || []).map(rowFor).join('');
+              }
 
               return headerHtml + kpis + subHead +
                   '<div class="aether-card" style="padding:20px 24px; margin-bottom:30px;">' +
@@ -2138,7 +2195,7 @@
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between; row-gap:10px;">' +
           '<div><h2 style="margin:0; font-size:1.3rem;">Management View</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">Corporate calendar · graphs show the selected period subdivided · loads once, refresh manually</div></div>' +
           '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
-          grainBtn('Daily','day') + grainBtn('Weekly','week') + grainBtn('Monthly','month') + grainBtn('Quarterly','quarter') +
+          grainBtn('Daily','day') + grainBtn('Weekly','week') + grainBtn('Monthly','month') + grainBtn('Quarterly','quarter') + grainBtn('YTD','ytd') +
           '<input type="date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700; cursor:pointer;" value="' + escapeHTML(state.mgmtDate) + '" onchange="setMgmtDate(this.value)" onclick="try{this.showPicker();}catch(e){}">' +
           '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
           '</div>' +
@@ -2156,7 +2213,7 @@
       var cur = (d.totals || {}).sel || {};
       var prev = (d.totals || {}).prev || {};
       var sel = d.sel || {};
-      var word = ({ day: 'day', week: 'week', month: 'month', quarter: 'quarter' })[d.grain] || 'period';
+      var word = ({ day: 'day', week: 'week', month: 'month', quarter: 'quarter', ytd: 'year' })[d.grain] || 'period';
 
       var delta = function(curV, prevV, goodWhenUp, suffix) {
           if (curV == null || prevV == null) return '';

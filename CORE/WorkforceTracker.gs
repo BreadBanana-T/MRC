@@ -618,6 +618,15 @@ var WorkforceTracker = {
           cycle = this._getCycleForEpoch(tStart);
           label = `${Utilities.formatDate(wStart, "America/Toronto", "MMM dd, HH:mm")} to ${Utilities.formatDate(wEnd, "America/Toronto", "MMM dd, HH:mm")}`;
       } 
+      else if (mode === 'ytd') {
+          // Year-to-date: Jan 1 of the reference year through the reference day.
+          let sDate = new Date(rY, 0, 1, 0, 0, 0, 0);
+          tStart = sDate.getTime();
+          let eDate = new Date(rY, rM - 1, rD, 23, 59, 59, 999);
+          tEnd = eDate.getTime();
+          label = `YTD ${rY}: Jan 01 to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`;
+          cycle = "YTD";
+      }
       else if (mode === 'month' || mode === 'quarter') {
           let sMonth = (mode === 'month') ? rM - 1 : Math.floor((rM - 1) / 3) * 3;
           let eMonth = (mode === 'month') ? rM : sMonth + 3;
@@ -626,10 +635,10 @@ var WorkforceTracker = {
           tStart = sDate.getTime();
           let eDate = new Date(rY, eMonth, 0, 23, 59, 59, 999);
           tEnd = eDate.getTime();
-          label = mode === 'month' 
-              ? `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}` 
+          label = mode === 'month'
+              ? `Month: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`
               : `Q${Math.floor((rM - 1) / 3) + 1}: ${Utilities.formatDate(sDate, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(eDate, "America/Toronto", "MMM dd")}`;
-          cycle = mode === 'month' ? "MONTH" : "QUARTER"; 
+          cycle = mode === 'month' ? "MONTH" : "QUARTER";
       }
       return { start: tStart, end: tEnd, label: label, cycle: cycle, startStr: Utilities.formatDate(new Date(tStart), "America/Toronto", "yyyy-MM-dd") };
   },

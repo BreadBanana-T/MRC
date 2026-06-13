@@ -129,6 +129,17 @@ function processWFMImport(rawText, forcedDate) {
       var tWrite = new Date().getTime();
       sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
       Logger.log('[wfm] setValues done in ' + (new Date().getTime() - tWrite) + 'ms');
+
+      // Permanent schedule archive: Raw Schedule is wiped every paste (current
+      // period only), so going back in time loses all shift/break fidelity.
+      // Append each pasted day into Schedule_History, deduped by agent+date so
+      // re-pasting the same period self-heals instead of duplicating.
+      try {
+        var tArch = new Date().getTime();
+        var nArch = archiveScheduleHistory(ss, rosterData);
+        Logger.log('[wfm] archived ' + nArch + ' rows to Schedule_History in ' + (new Date().getTime() - tArch) + 'ms');
+      } catch (eArch) { Logger.log('[wfm] Schedule_History archive failed: ' + eArch); }
+
       if (typeof AgentMonitor !== 'undefined') {
         var tMon = new Date().getTime();
         AgentMonitor.getPayload();
@@ -219,6 +230,60 @@ function safeParseDateStr(ds, defY, defM, defD) {
     }
     if (y < 100) y += 2000;
     return { y, m, d, str: `${y}-${m < 10 ? '0'+m : m}-${d < 10 ? '0'+d : d}` };
+}
+
+// ─────────────────────────── SCHEDULE HISTORY ───────────────────────────
+// Keep a permanent, full-fidelity record of every pasted schedule day so the
+// SAFE Day Board can show real shifts + breaks for ANY past date — not just
+// the current period that lives in (and is wiped from) "Raw Schedule".
+//
+// Columns mirror Raw Schedule exactly:
+//   [0]Agent [1]ID [2]DateStr [3]Shift Start [4]Shift End [5]Shift Type
+//   [6]Region [7]Breaks JSON [8]Role [9]AbsentType [10]StartEpoch [11]EndEpoch
+//
+// Dedup key = lowercased agent name + '|' + date. A re-paste of the same period
+// replaces those agent-days rather than stacking duplicates. Rows older than
+// HISTORY_KEEP_DAYS are pruned so the sheet can't grow without bound.
+var HISTORY_KEEP_DAYS = 550; // ~18 months
+function _histDedupKey(name, dateStr) {
+  return String(name || '').trim().toLowerCase() + '|' + String(dateStr || '').trim();
+}
+function archiveScheduleHistory(ss, rosterData) {
+  if (!rosterData || !rosterData.length) return 0;
+  var HEADERS = ["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"];
+  var hist = ss.getSheetByName("Schedule_History");
+  if (!hist) {
+    hist = ss.insertSheet("Schedule_History");
+    hist.appendRow(HEADERS);
+    hist.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+  }
+
+  // Agent-days present in this paste — these supersede any archived copy.
+  var incoming = {};
+  rosterData.forEach(function (r) { incoming[_histDedupKey(r[0], r[2])] = true; });
+
+  // Prune cutoff (yyyy-MM-dd string compare is safe for ISO dates).
+  var cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - HISTORY_KEEP_DAYS);
+  var cutoffStr = Utilities.formatDate(cutoff, "America/Toronto", "yyyy-MM-dd");
+
+  var kept = [];
+  var last = hist.getLastRow();
+  if (last > 1) {
+    var existing = hist.getRange(2, 1, last - 1, 12).getValues();
+    for (var i = 0; i < existing.length; i++) {
+      var row = existing[i];
+      var dStr = String(row[2] || '').trim();
+      if (dStr && dStr < cutoffStr) continue;                 // prune stale
+      if (incoming[_histDedupKey(row[0], dStr)]) continue;    // superseded by this paste
+      kept.push(row);
+    }
+  }
+
+  var merged = kept.concat(rosterData);
+  if (last > 1) hist.deleteRows(2, last - 1);
+  if (merged.length) hist.getRange(2, 1, merged.length, 12).setValues(merged);
+  return merged.length;
 }
 
 // parseTime() is shared from CORE/AgentMonitor.gs (one global scope in GAS).

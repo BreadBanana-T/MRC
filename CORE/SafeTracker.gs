@@ -288,7 +288,7 @@ var SafeTracker = {
         byKey[self._normKey(nm)] = nm;
       });
     }
-    ['Raw Schedule', 'WF_ROLES'].forEach(function (sh) {
+    ['Schedule_History', 'Raw Schedule', 'WF_ROLES'].forEach(function (sh) {
       var db = WT._getDB(sh);
       if (!db || db.getLastRow() < 2) return;
       db.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
@@ -327,21 +327,32 @@ var SafeTracker = {
                          time: WT._minsToTime(sm) + ' - ' + WT._minsToTime(em) });
     };
 
-    // 1) Raw Schedule — full fidelity (current period only)
-    var rs = WT._getDB('Raw Schedule');
-    if (rs && rs.getLastRow() > 1) {
+    // 1) Full fidelity (shift + breaks). Schedule_History is the permanent
+    //    archive (any date); Raw Schedule holds only the current pasted period.
+    //    Read history first, then fill any gaps from Raw Schedule. An agent that
+    //    is already "full" from history is never overwritten.
+    var anyFull = false;
+    var BRK = { 'LUNCH': ['LUNCH', 'Lunch'], 'BREAK': ['BREAK', 'Break'], 'TRAINING': ['COACH', 'Training'],
+                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'] };
+    var readFull = function (sheetName) {
+      var rs = WT._getDB(sheetName);
+      if (!rs || rs.getLastRow() < 2) return;
       rs.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
         var nm = String(row[0]).trim(); if (!nm) return;
         var k = self._normKey(nm); if (!wantKey[k]) return;
         if (WT._formatDate(row[2]) !== dateStr) return;
+        if (byAgent[k] && byAgent[k].hasFull) return; // already covered (history wins over Raw)
         var ag = ensure(wantKey[k]);
-        ag.hasFull = true;
+        ag.hasFull = true; anyFull = true;
         ag.region = String(row[6] || '').trim();
-        var ss = toMin(row[3]), se = toMin(row[4]);
-        if (ss >= 0) ag.shiftStart = ss % 1440;
-        if (se >= 0) ag.shiftEnd = (se <= ss ? se + 1440 : se);
-        var BRK = { 'LUNCH': ['LUNCH', 'Lunch'], 'BREAK': ['BREAK', 'Break'], 'TRAINING': ['COACH', 'Training'],
-                    'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'] };
+        // Empty start/end ("Off"/absent days) must NOT become a 00:00–00:00
+        // envelope — only set an envelope when both times are present.
+        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
+        if (ssRaw && seRaw) {
+          var ss = toMin(ssRaw), se = toMin(seRaw);
+          ag.shiftStart = ss % 1440;
+          ag.shiftEnd = (se <= ss ? se + 1440 : se);
+        }
         try {
           var brks = JSON.parse(row[7] || '[]');
           brks.forEach(function (b) {
@@ -351,7 +362,9 @@ var SafeTracker = {
         } catch (e) {}
         if (String(row[9] || '').trim()) ag.absent = String(row[9]).trim();
       });
-    }
+    };
+    readFull('Schedule_History');
+    readFull('Raw Schedule');
 
     // 2) Historical fallback — activity sheets for agents not covered by Raw Schedule
     var pull = function (sheet, mapper, sIdx, eIdx) {
@@ -395,8 +408,18 @@ var SafeTracker = {
       ag.level = p.level; ag.lang = p.lang;
       ag.shiftStartStr = ag.shiftStart != null ? WT._minsToTime(ag.shiftStart) : '';
       ag.shiftEndStr = ag.shiftEnd != null ? WT._minsToTime(ag.shiftEnd) : '';
+      // Nothing in any source for this agent+date → honest "not archived" state,
+      // never a misleading 00:00–00:00.
+      ag.noData = !ag.hasFull && !(ag.segments && ag.segments.length);
       return ag;
     });
-    return JSON.stringify({ date: dateStr, agents: result, hasMasterList: Object.keys(ml).length > 0 });
+    // Whether ANY full (shift+breaks) record exists for this date in either the
+    // permanent archive or the current period — drives the board-level banner.
+    var hasArchive = (function () {
+      var h = WT._getDB('Schedule_History');
+      return !!(h && h.getLastRow() > 1);
+    })();
+    return JSON.stringify({ date: dateStr, agents: result, archived: anyFull, hasArchive: hasArchive,
+                            hasMasterList: Object.keys(ml).length > 0 });
   }
 };
