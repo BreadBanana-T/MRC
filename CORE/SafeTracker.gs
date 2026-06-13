@@ -3,25 +3,20 @@
  *
  * Per-agent view of SAFE hours, built to answer two questions with receipts:
  *   1. "Where do this agent's SAFE hours come from, and when did they spike?"
- *   2. "Is this the RIGHT agent for SAFE, or is a higher-value profile
- *       (bilingual / high ERC level) being spent on work a junior EN agent
- *       could do?"  → redeployment ammunition.
+ *   2. WHEN exactly — open any day to see the morning/evening/night split
+ *      and the actual segment windows (a scheduler view of SAFE).
  *
  * SOURCES (two doors; manual floor "Assign SAFE" is status-only, never hours):
  *   SCHED — WF_ROLES SAFE blocks   |   OT — WF_OVERTIME SAFE-bucket overtime
  *
  * EXTRAS over the plain forensic view:
  *   - 14-month trailing TREND per agent (independent of the selected window)
- *     so a post-Feb-2026 explosion is visible at a glance, with surge
- *     detection (recent months vs prior baseline).
- *   - MasterList profile per agent: ERC Level, inferred Language (EN/FR/BL
- *     from the Skills field — raw skills surfaced for verification),
- *     supervisor.
- *   - FIT classification:
- *       ideal — EN, level ≤ 2  → SAFE is an appropriate use of this profile
- *       over  — level ≥ 4 OR bilingual → overqualified; SAFE hours here are
- *               "redeployable" to scarce bilingual / senior work
- *       review— everything between (level 3, or FR-mono)
+ *     so a post-Feb-2026 explosion is visible at a glance (peak highlighted).
+ *   - MasterList profile per agent (data only, no recommendations): ERC
+ *     Level, inferred Language (EN/FR/BL from Skills), supervisor.
+ *   - Monthly threshold band per agent (normalized to a 30-day month when
+ *     not viewing a full month):
+ *       RED  ≥ 50 h/mo   |   WARN 40–50   |   NORMAL 25–40   |   LOW < 25
  *
  * Flags: DOUBLE (same block in SCHED and OT), OVERLAP (same-source overlap).
  * Length is NOT flagged — long SAFE segments are normal.
@@ -41,12 +36,6 @@ var SafeTracker = {
     if (/biling|bilingue/.test(s) || (hasFr && hasEn)) return 'BL';
     if (hasFr) return 'FR';
     return 'EN';
-  },
-
-  _fitOf: function (level, lang) {
-    if (level >= 4 || lang === 'BL') return 'over';
-    if (lang === 'EN' && level <= 2) return 'ideal';
-    return 'review';
   },
 
   getAnalytics: function (mode, refDate, regionFilter, cycleFilter) {
@@ -140,7 +129,7 @@ var SafeTracker = {
         var key = src + '|' + agent + '|' + effDate + '|' + split.shift + '|' + sMins;
         if (!grouped[key]) {
           grouped[key] = { date: effDate, agent: agent, region: region, shift: split.shift, src: src, hours: split.hours,
-                           timeStart: WT._minsToTime(split.startMins), timeEnd: WT._minsToTime(split.endMins), rawDay: dStr };
+                           startMin: split.startMins % 1440, timeStart: WT._minsToTime(split.startMins), timeEnd: WT._minsToTime(split.endMins), rawDay: dStr };
         } else {
           grouped[key].hours += split.hours;
           grouped[key].timeEnd = WT._minsToTime(split.endMins);
@@ -214,11 +203,13 @@ var SafeTracker = {
       if (doubleDays[dayKey]) flags.push('DOUBLE');
       if (overlapDays[dayKey]) flags.push('OVERLAP');
       return { date: g.date, agent: g.agent, shift: g.shift, src: g.src, hours: h,
-               time: g.timeStart + ' - ' + g.timeEnd, flags: flags };
+               startMin: g.startMin, dur: h, time: g.timeStart + ' - ' + g.timeEnd, flags: flags };
     });
 
+    var winDays = Math.max(1, Math.round((bounds.end - bounds.start) / 86400000));
+    var bandOf = function (mEq) { return mEq >= 50 ? 'RED' : (mEq >= 40 ? 'WARN' : (mEq < 25 ? 'LOW' : 'NORMAL')); };
     var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, count: events.length,
-                   redeploy: 0, fitIdeal: 0, fitReview: 0, fitOver: 0 };
+                   bRed: 0, bWarn: 0, bNormal: 0, bLow: 0 };
 
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
@@ -232,30 +223,20 @@ var SafeTracker = {
       Object.keys(overlapDays).forEach(function (k) { if (k.indexOf(n + '|') === 0) nOverlap++; });
 
       var pf = profileOf(n);
-      var fit = self._fitOf(pf.level, pf.lang);
       var totalH = self._r2(a.total);
-      if (fit === 'ideal') totals.fitIdeal += totalH;
-      else if (fit === 'over') { totals.fitOver += totalH; totals.redeploy += totalH; }
-      else totals.fitReview += totalH;
+      var monthEq = (mode === 'month') ? totalH : self._r2(totalH / winDays * 30.42);
+      var band = bandOf(monthEq);
+      if (band === 'RED') totals.bRed++; else if (band === 'WARN') totals.bWarn++; else if (band === 'LOW') totals.bLow++; else totals.bNormal++;
 
-      // Trend array (14 months) + surge detection.
+      // Trend array (14 months) — pure data; the chart speaks for itself.
       var tb = trendByAgent[n] || {};
       var trend = trendMonths.map(function (m) { return { key: m.key, label: m.label, year: m.year, hours: self._r2(tb[m.key] || 0) }; });
       var peak = trend.reduce(function (mx, x) { return x.hours > mx.hours ? x : mx; }, { hours: 0, key: '' });
-      var recent = (trend[11].hours + trend[12].hours + trend[13].hours) / 3;
-      var prior = (trend[5].hours + trend[6].hours + trend[7].hours + trend[8].hours + trend[9].hours + trend[10].hours) / 6;
-      var surge = prior >= 1 && recent >= prior * 2 && recent >= 8;
-      var surgeMonth = '';
-      if (surge) {
-        var base = prior * 1.6;
-        for (var ti = 1; ti < trend.length; ti++) {
-          if (trend[ti].hours >= base && trend[ti - 1].hours < base) { surgeMonth = trend[ti].label + ' ' + trend[ti].year; break; }
-        }
-      }
 
       return {
         name: n, region: a.region,
-        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, fit: fit,
+        level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup,
+        band: band, monthEq: monthEq,
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
         days: dayKeys.length, segs: a.segs,
@@ -263,11 +244,11 @@ var SafeTracker = {
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
         dayMap: a.days,
         doubleDays: nDouble, overlapDays: nOverlap,
-        trend: trend, trendPeak: { month: peak.key, hours: peak.hours }, surge: surge, surgeMonth: surgeMonth
+        trend: trend, trendPeak: { month: peak.key, hours: peak.hours }
       };
     }).sort(function (x, y) { return y.total - x.total; });
 
-    ['all', 'morning', 'evening', 'night', 'sched', 'ot', 'redeploy', 'fitIdeal', 'fitReview', 'fitOver'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
+    ['all', 'morning', 'evening', 'night', 'sched', 'ot'].forEach(function (k) { totals[k] = self._r2(totals[k]); });
     events.sort(function (a, b) { return a.date.localeCompare(b.date) || a.agent.localeCompare(b.agent) || a.src.localeCompare(b.src); });
 
     return JSON.stringify({
@@ -275,8 +256,9 @@ var SafeTracker = {
       grid: [], events: events, totals: totals, perAgent: perAgent,
       trendMonths: trendMonths.map(function (m) { return m.label + (m.label === 'Jan' ? " '" + String(m.year).slice(-2) : ''); }),
       hasMasterList: Object.keys(mlByKey).length > 0,
+      winDays: winDays,
       audit: { agents: perAgent.length, doubleAgentDays: Object.keys(doubleDays).length,
-               overlapAgentDays: Object.keys(overlapDays).length, surges: perAgent.filter(function (a) { return a.surge; }).length }
+               overlapAgentDays: Object.keys(overlapDays).length }
     });
   }
 };
