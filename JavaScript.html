@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.14-SAFE18 · read shift from epochs (fixes 12/30/1899 + overnight)';
+  var APP_BUILD = 'build 2026.06.14-SAFE19 · pin-capable parity + OT true-fill + Mgmt pre-coded OT';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null
@@ -1906,7 +1906,9 @@
           var ot2 = d.otTotals || { x1: 0, x15: 0, OnQueue: 0, OffQueue: 0, Other: 0, SAFE: 0 };
           var op = d.open || null;
           var given = (d.totals && d.totals.all) || 0;
-          var fill = (op && op.hours > 0) ? Math.round((given / op.hours) * 1000) / 10 : null;
+          // fill = posted slots actually filled (≤100%); pre-coded = OT given with no matching posted slot.
+          var fill = (op && op.fillRate != null) ? op.fillRate : null;
+          var preCoded = (op && op.preCoded) || 0;
           var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
 
           var kpiCell = function(label, value, sub, color) {
@@ -1915,8 +1917,8 @@
           var reqLine = op ? Object.keys(op.skills).sort().map(function(k) { return escapeHTML(k) + ' <b style="color:var(--text-main);">' + op.skills[k] + 'h</b>'; }).join(' · ') : '';
           var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px; margin:20px 0;">' +
               kpiCell('Open — posted by WFM', op ? op.hours + 'h' : '—', op ? op.slots + ' slot' + (op.slots === 1 ? '' : 's') + (op.hidden ? ' · ' + op.hidden + ' hidden (excl.)' : '') : 'paste the WFM slots JSON via Import', 'var(--accent-primary)') +
-              kpiCell('Given — in schedules', given.toFixed(1) + 'h', '&times;1: ' + (ot2.x1 || 0).toFixed(1) + 'h · &times;1.5: ' + (ot2.x15 || 0).toFixed(1) + 'h', 'var(--status-active)') +
-              kpiCell('Fill Rate', fill != null ? fill + '%' : '—', op ? 'given ÷ open hours' : 'needs open-slot data', fillColor) +
+              kpiCell('Given — in schedules', given.toFixed(1) + 'h', '&times;1: ' + (ot2.x1 || 0).toFixed(1) + 'h · &times;1.5: ' + (ot2.x15 || 0).toFixed(1) + 'h' + (preCoded > 0 ? ' · ' + preCoded.toFixed(1) + 'h pre-coded/extra' : ''), 'var(--status-active)') +
+              kpiCell('Fill Rate', fill != null ? fill + '%' : '—', op ? (op.fillHours != null ? op.fillHours.toFixed(1) + 'h of ' + op.hours + 'h posted filled' : 'posted slots filled') + (preCoded > 0 ? ' · +' + preCoded.toFixed(1) + 'h pre-coded' : '') : 'needs open-slot data', fillColor) +
               (op && op.acsuHours ? kpiCell('ACSU Released Offered', op.acsuHours + 'h', op.acsuSlots + ' slot' + (op.acsuSlots === 1 ? '' : 's') + ' · voluntary time off, not OT', 'var(--status-warn)') : '') +
               (op && reqLine ? kpiCell('Posted by Requirement', Object.keys(op.skills).length + ' <span style="font-size:0.95rem;">group' + (Object.keys(op.skills).length === 1 ? '' : 's') + '</span>', reqLine, 'var(--status-role)') : '') +
               '</div>';
@@ -2341,7 +2343,7 @@
       if (typeof google === 'undefined') { showToast('Language → ' + nx); return; }
       google.script.run.withSuccessHandler(function() { showToast(name + ' → ' + nx); state.boardRoster = null; fetchScheduleRoster(); fetchTrackerData(); }).withFailureHandler(function() { showToast('Language save failed'); }).setSafeAgentLang(name, nx);
   };
-  function fetchScheduleDates() { if (typeof google === 'undefined') return; google.script.run.withSuccessHandler(function(r) { try { state.scheduleDates = JSON.parse(r); } catch(e) { state.scheduleDates = []; } if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleDates(); }
+  function fetchScheduleDates() { if (typeof google === 'undefined') return; google.script.run.withSuccessHandler(function(r) { try { state.scheduleDates = JSON.parse(r); } catch(e) { state.scheduleDates = []; } if (!state.boardDrillDate && state.scheduleDates.length) state.boardDrillDate = state.scheduleDates[0]; if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleDates(); }
   // Bulk-pin SAFE agents matching criteria — capableOnly uses the Smart-wear flag.
   // Pin SAFE-capable agents who actually have a shift on the SELECTED date,
   // within the focused hours — not whoever did SAFE somewhere in the period.
@@ -2359,7 +2361,7 @@
           matches.slice(0, CAP).forEach(function(a) { if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); } });
           if (fresh.length) { showToast('Pinned ' + fresh.length + ' capable agent' + (fresh.length === 1 ? '' : 's') + ' scheduled ' + date + hrTxt + (matches.length > CAP ? ' (of ' + matches.length + ')' : '')); fetchCompare(fresh, false); }
           else if (matches.length) { showToast('Those ' + matches.length + ' are already pinned'); render(); }
-          else { showToast('No capable agents scheduled ' + date + hrTxt + (minLevel ? ' at L' + minLevel + '+' : '') + ' — try “All hours” or a date with an imported schedule'); render(); }
+          else { var sd = state.scheduleDates || []; var hint = sd.length ? (sd.indexOf(date) === -1 ? ' — no schedule imported for that date; latest is ' + sd[0] : ' — try “All hours”') : ' — no schedule imported yet'; showToast('No capable agents scheduled ' + date + hrTxt + (minLevel ? ' at L' + minLevel + '+' : '') + hint); render(); }
       }).withFailureHandler(function() { showToast('Capable lookup failed'); }).getSafeCapableScheduledForDate(date, hs, he);
   };
   window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; state.boardRangeData = null; render(); };
@@ -2487,7 +2489,7 @@
           }).join(' · ');
 
       var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px;">' +
-          kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents') +
+          kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents' + ((cur.preCodedOt || 0) > 0 ? ' · <b style="color:var(--accent-primary);">+' + cur.preCodedOt + 'h pre-coded (future)</b>' : '')) +
           (function() {
               // Fill rate compares to-date vs to-date; the posting itself is
               // shown for the FULL period (it's plan data, already decided).

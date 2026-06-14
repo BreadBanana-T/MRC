@@ -154,7 +154,8 @@ var ManagementView = {
       return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
-               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
+               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+               preCodedOt: 0 };
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
@@ -233,6 +234,11 @@ var ManagementView = {
             var nm = String(row[0]).trim();
             topOt[nm] = (topOt[nm] || 0) + selH;
           }
+          // Pre-coded future OT: the portion of this OT beyond the to-date cap.
+          // Worked OT (selH) stays capped at today; this is shown separately so
+          // already-coded future OT isn't invisible (it appears in the OT Tracker).
+          var futH = self._overlapH(iv, Math.max(pb.selStart, selCap), pb.selEnd);
+          if (futH > 0) selT.preCodedOt += futH;
         });
       }
     } catch (e) {}
@@ -454,7 +460,7 @@ var ManagementView = {
     } catch (e) {}
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt'];
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
       delete o._idpSum; delete o._idpN;

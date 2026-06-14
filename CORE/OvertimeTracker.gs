@@ -430,6 +430,20 @@ var OvertimeTracker = {
 
   // Open-slot aggregation for the analytics window. Only Type=OT rows count
   // toward open-OT; ACSU released-time is reported separately.
+  // TRUE fill of posted slots: credit given OT against posted open hours per day,
+  // capped at what was posted that day (matched ≤ open ⇒ fillRate ≤ 100%). OT given
+  // with no matching posted slot (pre-coded / over-subscribed) is reported as
+  // `preCoded` rather than inflating the ratio past 100%. Mutates + returns `open`.
+  _fillFromOpen: function (open, givenTotal) {
+    if (!open) return open;
+    var matched = 0;
+    (open.days || []).forEach(function (d) { matched += Math.min(d.open || 0, d.given || 0); });
+    open.fillHours = Math.round(matched * 100) / 100;
+    open.fillRate = open.hours > 0 ? Math.round((matched / open.hours) * 1000) / 10 : null;
+    open.preCoded = Math.max(0, Math.round(((givenTotal || 0) - matched) * 100) / 100);
+    return open;
+  },
+
   _openBlock: function(WT, bounds, mode, cycleFilter, givenByDay) {
     var open = { hours: 0, slots: 0, hidden: 0, skills: {}, acsuHours: 0, acsuSlots: 0, days: [], windows: [] };
     var db = WT._getDB(this.OPEN_SHEET);
@@ -589,6 +603,8 @@ var OvertimeTracker = {
     events.forEach(function (e) { givenByDay[e.date] = (givenByDay[e.date] || 0) + e.hours; });
     var open = null;
     try { open = this._openBlock(WT, bounds, mode, cycleFilter, givenByDay); } catch (e) {}
+
+    if (open) this._fillFromOpen(open, totals.all);
 
     return JSON.stringify({
       mode: mode, trackerType: 'overtime', label: bounds.label, cycle: bounds.cycle,

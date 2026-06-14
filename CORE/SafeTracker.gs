@@ -568,8 +568,19 @@ var SafeTracker = {
         var nm = String(row[0]).trim(); if (!nm) return;
         if (WT._formatDate(row[2]) !== dateStr) return;
         var k = self._normKey(nm); var c = cap[k]; if (!c || seen[k]) return;
-        var sh = self._shiftFromRow(row); if (!sh) return;   // real shift only
-        if (!overlaps(sh.start % 1440, sh.end)) return;
+        // "Scheduled" = the Coverage rule: a shift envelope exists in either the
+        // text columns or the epoch columns. Don't require a PARSEABLE text time
+        // (fr-CA cells display as "12/30/1899"); the epoch path / lenient parse
+        // recovers the real window so a scheduled capable agent is never dropped.
+        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
+        var hasEpoch = String(row[10] || '').trim() && String(row[11] || '').trim();
+        if (!ssRaw && !seRaw && !hasEpoch) return;
+        var sh = self._shiftFromRow(row);                    // epoch-first, accurate
+        if (!sh) {                                           // last resort: lenient parse (parity with Coverage)
+          var ls = WT._timeToMins(ssRaw), le = WT._timeToMins(seRaw);
+          sh = { start: ls % 1440, end: (le <= ls ? le + 1440 : le) };
+        }
+        if (!fullDay && !overlaps(sh.start % 1440, sh.end)) return;
         seen[k] = true;
         out.push({ name: c.name, level: c.level, lang: c.lang, shiftStartStr: WT._minsToTime(sh.start % 1440), shiftEndStr: WT._minsToTime(sh.end) });
       });
