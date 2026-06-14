@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.14-SAFE16 · fix 00:00 shift (fr-CA "11 h 00" time parsing)';
+  var APP_BUILD = 'build 2026.06.14-SAFE17 · Pin capable = scheduled-on-this-date/shift only';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null
@@ -1743,8 +1743,8 @@
                   '<span style="display:inline-flex; gap:4px; align-items:center; margin-left:4px;">' + cyBtn('WEEK A', 'A') + cyBtn('WEEK B', 'B') + '</span>' +
                   loadChip + '</div>' +
                   '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' + hourSel +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin the top SAFE-capable agents"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin top Level 4+ agents">L4+</button>' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin SAFE-capable agents scheduled on this date/shift"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin L4+ capable agents scheduled on this date/shift">L4+</button>' +
                   '<span class="search-wrap" style="width:170px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add capable agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
                   '<button class="btn btn-primary" style="height:34px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button>' +
                   (state.boardAgents.length ? '<button class="btn btn-glass" style="height:34px; font-size:0.74rem;" onclick="clearBoardAgents()">clear</button>' : '') +
@@ -2343,16 +2343,24 @@
   };
   function fetchScheduleDates() { if (typeof google === 'undefined') return; google.script.run.withSuccessHandler(function(r) { try { state.scheduleDates = JSON.parse(r); } catch(e) { state.scheduleDates = []; } if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleDates(); }
   // Bulk-pin SAFE agents matching criteria — capableOnly uses the Smart-wear flag.
+  // Pin SAFE-capable agents who actually have a shift on the SELECTED date,
+  // within the focused hours — not whoever did SAFE somewhere in the period.
   window.smartPinSafe = function(minLevel, capableOnly) {
       minLevel = parseInt(minLevel, 10) || 0;
-      var CAP = 12;   // pinning everyone is unreadable — take the heaviest SAFE users
-      var pa = (state.trackerData && state.trackerData.perAgent) || [];
-      var matches = pa.filter(function(a) { return (!minLevel || a.level >= minLevel) && !(capableOnly && a.canSafe === false); })
-          .sort(function(a, b) { return (b.total || 0) - (a.total || 0); });
-      var fresh = [];
-      matches.slice(0, CAP).forEach(function(a) { if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); } });
-      if (fresh.length) { showToast('Pinned top ' + fresh.length + ' by SAFE hours' + (matches.length > CAP ? ' (of ' + matches.length + ' — add more by search)' : '')); fetchCompare(fresh, false); }
-      else { showToast('No new matching agents'); render(); }
+      var date = state.boardDrillDate || state.trackerDate;
+      var hs = state.compareHourStart, he = state.compareHourEnd;
+      var hrTxt = (hs > 0 || he < 1440) ? ' ' + ('0'+Math.floor(hs/60)).slice(-2) + ':00–' + ('0'+(Math.floor(he/60)%24||(he>=1440?24:0))).slice(-2) + ':00' : '';
+      if (typeof google === 'undefined') { showToast('Pin capable needs the live app'); return; }
+      showToast('Finding capable agents scheduled ' + date + hrTxt + '…');
+      google.script.run.withSuccessHandler(function(json) {
+          var list = []; try { list = JSON.parse(json); } catch (e) {}
+          var matches = list.filter(function(a) { return !minLevel || a.level >= minLevel; });
+          var CAP = 25, fresh = [];
+          matches.slice(0, CAP).forEach(function(a) { if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); } });
+          if (fresh.length) { showToast('Pinned ' + fresh.length + ' capable agent' + (fresh.length === 1 ? '' : 's') + ' scheduled ' + date + hrTxt + (matches.length > CAP ? ' (of ' + matches.length + ')' : '')); fetchCompare(fresh, false); }
+          else if (matches.length) { showToast('Those ' + matches.length + ' are already pinned'); render(); }
+          else { showToast('No capable agents scheduled ' + date + hrTxt + (minLevel ? ' at L' + minLevel + '+' : '') + ' — try “All hours” or a date with an imported schedule'); render(); }
+      }).withFailureHandler(function() { showToast('Capable lookup failed'); }).getSafeCapableScheduledForDate(date, hs, he);
   };
   window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; state.boardRangeData = null; render(); };
   window.setSafeView = function(v) {

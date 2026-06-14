@@ -111,6 +111,9 @@ function getSafeScheduleRange(startStr, endStr, agentsPipe) {
 function getSafeScheduleDates() {
   return (typeof SafeTracker !== 'undefined') ? SafeTracker.getScheduleDates() : '[]';
 }
+function getSafeCapableScheduledForDate(dateStr, hStart, hEnd) {
+  return (typeof SafeTracker !== 'undefined') ? SafeTracker.getCapableScheduledForDate(dateStr, hStart, hEnd) : '[]';
+}
 function setSafeAgentLang(name, lang) {
   return (typeof SafeTracker !== 'undefined') ? SafeTracker.setAgentLang(name, lang) : 'Error';
 }

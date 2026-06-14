@@ -510,6 +510,51 @@ var SafeTracker = {
     return JSON.stringify(Object.keys(set).sort().reverse().slice(0, 120));
   },
 
+  // Onshore SmartWear-capable agents who actually have a REAL shift on `dateStr`
+  // overlapping the [hStart,hEnd] minute window (hEnd may exceed 1440 for an
+  // overnight focus). This is what "Pin capable" uses so it only pins people
+  // who are genuinely working that date/shift — never someone from another week
+  // who merely did SAFE elsewhere in the period (which is what produced the
+  // misleading "activities only" rows).
+  getCapableScheduledForDate: function (dateStr, hStart, hEnd) {
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null; if (!WT || !dateStr) return '[]';
+    var self = this;
+    hStart = (hStart == null) ? 0 : Number(hStart); hEnd = (hEnd == null) ? 1440 : Number(hEnd);
+    var fullDay = (hStart <= 0 && hEnd >= 1440);
+    var cap = {}; var langMap = self._loadLangMap();
+    var dbML = WT._getDB('WF_MASTERLIST');
+    if (dbML && dbML.getLastRow() > 1) {
+      dbML.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+        var nm = String(r[0]).trim(); if (!nm) return;
+        if (!self._canSafe(r[3])) return; if (self._regionOf(nm) === 'Offshore') return;
+        cap[self._normKey(nm)] = { name: nm, level: parseInt(r[1], 10) || 2, lang: langMap[self._normKey(nm)] || self._inferLang(r[3]) };
+      });
+    }
+    var overlaps = function (s, e) {
+      if (fullDay) return true;
+      var wins = (hEnd <= 1440) ? [[hStart, hEnd]] : [[hStart, 1440], [0, hEnd - 1440]];
+      var segs = []; var b1 = Math.min(e, 1440); if (b1 > s) segs.push([s, b1]); if (e > 1440) segs.push([0, e - 1440]);
+      return segs.some(function (sg) { return wins.some(function (w) { return sg[1] > w[0] && sg[0] < w[1]; }); });
+    };
+    var seen = {}, out = [];
+    var read = function (sheet) {
+      var rs = WT._getDB(sheet); if (!rs || rs.getLastRow() < 2) return;
+      rs.getDataRange().getDisplayValues().slice(1).forEach(function (row) {
+        var nm = String(row[0]).trim(); if (!nm) return;
+        if (WT._formatDate(row[2]) !== dateStr) return;
+        var k = self._normKey(nm); var c = cap[k]; if (!c || seen[k]) return;
+        var ss = self._safeTime(row[3]), se = self._safeTime(row[4]); if (ss < 0 || se < 0) return;   // real shift only
+        var seAdj = (se <= ss ? se + 1440 : se);
+        if (!overlaps(ss % 1440, seAdj)) return;
+        seen[k] = true;
+        out.push({ name: c.name, level: c.level, lang: c.lang, shiftStartStr: WT._minsToTime(ss % 1440), shiftEndStr: WT._minsToTime(seAdj) });
+      });
+    };
+    read('Schedule_History'); read('Raw Schedule');
+    out.sort(function (a, b) { return (b.level - a.level) || a.name.localeCompare(b.name); });
+    return JSON.stringify(out);
+  },
+
   // Roster for the Compare "Add agent" search — ONLY onshore SmartWear-capable
   // agents (offshore never does SAFE; non-capable agents can't carry it).
   getScheduleRoster: function () {
