@@ -467,6 +467,31 @@ var SafeTracker = {
     return h * 60 + mm;
   },
 
+  // Minutes-of-day (America/Toronto) for a Unix-ms epoch. Locale-proof.
+  _epochToMin: function (ms) {
+    var hm = Utilities.formatDate(new Date(Number(ms)), 'America/Toronto', 'HH:mm');
+    var p = hm.split(':'); return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+  },
+
+  // The shift window for a schedule row as { start, end } minutes (end may
+  // exceed 1440 for an overnight shift), or null when the row has no real
+  // shift. PREFERS the StartEpoch/EndEpoch columns (10,11) — the same
+  // unambiguous values the floor view uses — because the "Shift Start/End"
+  // text columns are often time-values that a fr-CA sheet formats as
+  // date-only ("12/30/1899"), losing the time entirely. Falls back to parsing
+  // the text columns when epochs are absent (older archive rows).
+  _shiftFromRow: function (row) {
+    var rs = row[10], re = row[11];
+    var msS = Number(String(rs).replace(/[,\s]/g, '')), msE = Number(String(re).replace(/[,\s]/g, ''));   // tolerate "1,781,…" display
+    if (rs !== '' && rs != null && re !== '' && re != null && !isNaN(msS) && !isNaN(msE) && msS > 0 && msE > msS) {
+      var dur = Math.round((msE - msS) / 60000);
+      if (dur > 0 && dur <= 1440) { var sm = this._epochToMin(msS); return { start: sm, end: sm + dur }; }
+    }
+    var ss = this._safeTime(row[3]), se = this._safeTime(row[4]);
+    if (ss >= 0 && se >= 0) return { start: ss % 1440, end: (se <= ss ? se + 1440 : se) };
+    return null;
+  },
+
   // Manual language overrides (skills rarely encode language). Stored in
   // WF_LANG_MAP [Agent Key, Display Name, Lang] so they persist across imports.
   _loadLangMap: function () {
@@ -543,11 +568,10 @@ var SafeTracker = {
         var nm = String(row[0]).trim(); if (!nm) return;
         if (WT._formatDate(row[2]) !== dateStr) return;
         var k = self._normKey(nm); var c = cap[k]; if (!c || seen[k]) return;
-        var ss = self._safeTime(row[3]), se = self._safeTime(row[4]); if (ss < 0 || se < 0) return;   // real shift only
-        var seAdj = (se <= ss ? se + 1440 : se);
-        if (!overlaps(ss % 1440, seAdj)) return;
+        var sh = self._shiftFromRow(row); if (!sh) return;   // real shift only
+        if (!overlaps(sh.start % 1440, sh.end)) return;
         seen[k] = true;
-        out.push({ name: c.name, level: c.level, lang: c.lang, shiftStartStr: WT._minsToTime(ss % 1440), shiftEndStr: WT._minsToTime(seAdj) });
+        out.push({ name: c.name, level: c.level, lang: c.lang, shiftStartStr: WT._minsToTime(sh.start % 1440), shiftEndStr: WT._minsToTime(sh.end) });
       });
     };
     read('Schedule_History'); read('Raw Schedule');
@@ -629,15 +653,9 @@ var SafeTracker = {
         ag.region = String(row[6] || '').trim();
         // Empty start/end ("Off"/absent days) must NOT become a 00:00–00:00
         // envelope — only set an envelope when both times are present.
-        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
-        if (ssRaw && seRaw) {
-          var ss = toMin(ssRaw), se = toMin(seRaw);
-          if (shiftDiag.length < 4) shiftDiag.push({ name: want, src: sheetName, rawStart: ssRaw, rawEnd: seRaw, parsedStart: ss, parsedEnd: se });
-          if (ss >= 0 && se >= 0) {     // only a REAL time pair becomes an envelope
-            ag.shiftStart = ss % 1440;
-            ag.shiftEnd = (se <= ss ? se + 1440 : se);
-          }
-        }
+        var sh = self._shiftFromRow(row);
+        if (shiftDiag.length < 4) shiftDiag.push({ name: want, src: sheetName, rawStart: String(row[3] || ''), rawEnd: String(row[4] || ''), epochS: String(row[10] || ''), epochE: String(row[11] || ''), parsedStart: sh ? sh.start : -1, parsedEnd: sh ? sh.end : -1 });
+        if (sh) { ag.shiftStart = sh.start; ag.shiftEnd = sh.end; }
         try {
           var brks = JSON.parse(row[7] || '[]');
           brks.forEach(function (b) {
@@ -751,7 +769,7 @@ var SafeTracker = {
         var day = dayOf(want, dStr); if (day.hasFull) return;       // history wins over Raw
         day.hasFull = true;
         var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
-        if (ssRaw && seRaw) { var ss = toMin(ssRaw), se = toMin(seRaw); if (ss >= 0 && se >= 0) { day.shiftStart = ss % 1440; day.shiftEnd = (se <= ss ? se + 1440 : se); } }
+        var shR = self._shiftFromRow(row); if (shR) { day.shiftStart = shR.start; day.shiftEnd = shR.end; }
         try { JSON.parse(row[7] || '[]').forEach(function (b) { var m = BRK[String(b.type || '').toUpperCase()] || ['OTHER', String(b.type || 'Activity')]; pushSeg(day, m[0], m[1], b.start, b.end); }); } catch (e) {}
         if (String(row[9] || '').trim()) day.absent = String(row[9]).trim();
       });
