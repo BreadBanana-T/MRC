@@ -72,11 +72,11 @@ flowchart TD
 `WF_COACHING`, `WF_FURLOUGH`, `WF_ROLES`, `WF_ABSENCES`, `WF_IDP`) → `OvertimeTracker.importFromSchedule`
 (`WF_OVERTIME`) → `archiveUnifiedReport` × (ALL/WEEK A/WEEK B) per affected month.
 
-> ⚠️ **Crash‑safety:** the 5 destructive upserts (`WorkforceTracker._runDestructiveLogic`) and the
-> archives do `clearContents()` **then** `setValues()`. If an import times out in that gap, the sheet
-> is left **empty/partial** — this is why a soft‑crashed import can make the **Absence Tracker (or any
-> tracker) "stop working"** until a clean re‑import. `Schedule_History`/`Raw Schedule` were converted
-> to overwrite‑in‑place (SAFE20); the 5 `WF_*` upserts have **not** yet (planned).
+> ✅ **Crash‑safety (FIXED, SAFE21):** `Schedule_History`, `Raw Schedule`, and the 5 destructive upserts
+> (`WorkforceTracker._runDestructiveLogic`) now **overwrite in place + clear the tail** instead of
+> `clearContents()`‑then‑`setValues()`. A timed‑out import can no longer leave a tracker's sheet empty.
+> All time columns are also written as **plain text** so Sheets cannot coerce `"9:00 AM"` into a date
+> serial (`12/30/1899`).
 
 ---
 
@@ -112,10 +112,13 @@ flowchart TD
 | `_calculateEpochBoundaries` (`:593`) | — | day/week/month/quarter/ytd window for the **trackers** |
 | `ManagementView._periodBounds` (`:48`) | — | **separate** calendar window for Mgmt View (Sun–Sat weeks) |
 
-**The big parser split:** `_timeToMins` returns **0** for anything it can't read (incl. fr‑CA date‑formatted
-`"12/30/1899"` cells), so a tool using it silently gets midnight. `_shiftFromRow` reads the **epoch
-columns** and is locale‑proof. SAFE uses the robust path; **OT/Mgmt/Absence/Unified still use the lenient
-`_timeToMins` on text columns** → same row, different time.
+**The big parser split (NARROWED, SAFE21):** `_timeToMins` now parses fr‑CA `"13 h 30"`, meridian‑anywhere
+(`"9:00:00 p.m."`→21:00), and day‑fractions, and rejects date serials — matching `_safeTime` except it
+still returns **0** (not −1) on truly empty/unparseable input to preserve its callers' contract. So
+OT/Mgmt/Absence/Unified now read fr‑CA times correctly. Only a fully date‑formatted cell (`"12/30/1899"`,
+time wholly stripped) is unrecoverable from text — and the importer now writes time columns as **plain
+text** so that coercion no longer happens. `_shiftFromRow` (epoch‑first) remains the most robust and is
+used by the SAFE board where the epoch columns exist.
 
 ---
 
@@ -134,16 +137,20 @@ columns** and is locale‑proof. SAFE uses the robust path; **OT/Mgmt/Absence/Un
 
 ## 5. Known divergences → impact → fix (the roadmap)
 
-| # | Divergence | Where | Impact | Fix direction |
+| # | Status | Divergence | Impact | Resolution |
 |---|---|---|---|---|
-| D1 | **OT/Mgmt/Absence/Unified parse times with `_timeToMins` (text)**, SAFE uses epoch‑first `_shiftFromRow` | §3 | fr‑CA `"12/30/1899"` cells → **0/midnight** in every non‑SAFE tool (wrong OT/absence/role hours) | Route all time reads through one epoch‑first helper (promote `_shiftFromRow`/`_safeTime` into shared use, or have `_timeToMins` consult epochs) |
-| D2 | **OT analytics uses raw agent names**; others normalize | §4 | "First Last" vs "Last, First" splits/merges OT differently than SAFE/Mgmt | Normalize with `_normalizeAgentKey` in OT analytics + import |
-| D3 | **`_timeToMins` returns 0 on failure** (not −1) | `:1175` | silent midnight instead of a visible error | Return −1 + callers guard (SAFE already does via `_safeTime`) |
-| D4 | **Different windows/caps**: trackers use `_calculateEpochBoundaries` (no cap), Mgmt caps actuals at `now`, Unified caps `epoch<=now` | §4 | same metric differs across tools; future pre‑coded OT shows in OT Tracker, hidden in Mgmt/Unified | One documented rule per metric class: *actuals=to‑date, plan/forecast=full period* (Mgmt `preCodedOt` is the pattern to copy) |
-| D5 | **Destructive upserts clear‑then‑write** | `_runDestructiveLogic:580` | a soft‑crashed import empties a tracker's sheet | Overwrite‑in‑place + clear tail (already done for Schedule_History/Raw; apply to the 5 `WF_*`) |
-| D6 | **Dedup keys differ** (SAFE has `src`, OT lacks it) | §4 | re‑imports can double‑count in one tool, not another | Standardize an idempotent `agent|date|type|start|end` key |
-| D7 | **Absence count semantics differ**: Mgmt = agent‑day (priority real>late>approved); Absence Tracker = merge same‑day+type | §4 | UNAB counts can differ between Mgmt and Absence Tracker | Pick one canonical "1 absence = 1 agent‑day‑type" rule and share it |
-| D8 | **Region resolution order differs** per tool | §4 | an agent can be Onshore in one view, Offshore in another | Make `RegionRegistry` the single authority everywhere (it mostly is — enforce consistently) |
+| D1 | ✅ **FIXED (SAFE21)** | non‑SAFE tools parsed times with lenient `_timeToMins` | fr‑CA `"9 h 00"`/`"9:00:00 p.m."` → 0/midnight everywhere | `_timeToMins` upgraded to parse fr‑CA + meridian‑anywhere + reject serials; importer writes time cols as plain text so no coercion |
+| D3 | ✅ **FIXED (SAFE21)** | `_timeToMins` mis‑read serials/odd formats | silent wrong times | serials/junk now → 0 explicitly; valid fr‑CA/meridian formats parse correctly; empty stays 0 (contract kept) |
+| D5 | ✅ **FIXED (SAFE21)** | destructive upserts clear‑then‑write | a soft‑crashed import emptied a tracker's sheet | `_runDestructiveLogic` + `Schedule_History`/`Raw Schedule` now overwrite‑in‑place + clear tail (covered by tests N & archive) |
+| D4 | ✅ **Handled** | actuals vs plan caps | future pre‑coded OT hidden in Mgmt | rule documented; Mgmt `preCodedOt` implements it (SAFE19). Apply same pattern if new forecast metrics are added |
+| D2 | ⏸️ **Held (low‑risk)** | OT analytics uses raw names | only matters if OT is cross‑joined by name | OT is single‑source (names come from one paste, already consistent). Normalize **only** when adding a cross‑tool name join — doing it now would change displayed groupings with no observed bug |
+| D6 | ⏸️ **Held (would change counts)** | dedup keys differ per tool | re‑imports could double‑count | each tool's key is internally consistent today; unifying risks shifting reported totals — change only with a migration + re‑archive |
+| D7 | ⏸️ **Held (would change counts)** | Mgmt agent‑day vs Absence merge‑same‑day | UNAB counts can differ slightly | both already collapse a shift to ~1 per agent‑day‑type; forcing identical math could move published absence numbers — align deliberately, not blind |
+| D8 | ✅ **Mostly enforced** | region resolution order | rare onshore/offshore disagreement | `RegionRegistry` is authoritative on import + in SAFE/Absence/Unified; Mgmt reads the stored region column (written from the same registry at import) |
+
+> **Why D2/D6/D7 are intentionally held:** they don't fix a reported failure and they *change numbers*.
+> "Foolproof" means not silently shifting your published OT/absence totals without a deliberate
+> migration. Say the word on any one and I'll do it with a re‑archive + before/after diff.
 
 ---
 

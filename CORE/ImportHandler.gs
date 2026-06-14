@@ -128,6 +128,10 @@ function processWFMImport(rawText, forcedDate) {
 
     if (rosterData.length > 0) {
       var tWrite = new Date().getTime();
+      // Force Shift Start/End (cols 4-5) to plain text BEFORE writing so Sheets
+      // never coerces "9:00 AM" into a date/serial (which getDisplayValues would
+      // return as "12/30/1899", losing the time for every reader).
+      try { sheet.getRange(1, 4, rosterData.length + 1, 2).setNumberFormat('@'); } catch (e) {}
       sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
       Logger.log('[wfm] setValues done in ' + (new Date().getTime() - tWrite) + 'ms');
 
@@ -287,7 +291,10 @@ function archiveScheduleHistory(ss, rosterData) {
   // Schedule_History (10k+ rows) that was the dominant import cost (minutes) and
   // the main reason a 2-month paste timed out. Overwriting yields the same
   // end-state far faster (one setValues + a tail clearContent).
-  if (merged.length) hist.getRange(2, 1, merged.length, 12).setValues(merged);
+  if (merged.length) {
+    try { hist.getRange(1, 4, merged.length + 1, 2).setNumberFormat('@'); } catch (e) {}  // shift cols stay text
+    hist.getRange(2, 1, merged.length, 12).setValues(merged);
+  }
   var newLast = merged.length + 1;                       // header + data rows
   if (last > newLast) hist.getRange(newLast + 1, 1, last - newLast, 12).clearContent();
   return merged.length;

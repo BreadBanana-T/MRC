@@ -577,9 +577,26 @@ var WorkforceTracker = {
           return true;
       });
       const combined = retainedRows.concat(newRows);
-      sheet.clearContents(); 
-      sheet.appendRow(headers);
-      if (combined.length > 0) sheet.getRange(2, 1, combined.length, combined[0].length).setValues(combined);
+      // Crash-safe write: overwrite in place + clear the tail, never clearContents()
+      // first. A timed-out import previously left the sheet EMPTY in the gap between
+      // clearContents() and setValues() — which silently broke whichever tracker reads
+      // it (e.g. the Absence Tracker). Header is rewritten in place; data overwrites;
+      // any leftover rows below are blanked.
+      const ncol = combined.length > 0 ? combined[0].length : headers.length;
+      const prevLast = sheet.getLastRow();
+      // Force time columns to PLAIN TEXT before writing so "9:00 AM" is never coerced
+      // into a date/serial that getDisplayValues() would return as "12/30/1899".
+      try {
+        headers.forEach(function (h, i) {
+          if (/time|start|end|interval/i.test(String(h)) && !/epoch/i.test(String(h))) {
+            sheet.getRange(1, i + 1, Math.max(2, combined.length + 1), 1).setNumberFormat('@');
+          }
+        });
+      } catch (e) {}
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      if (combined.length > 0) sheet.getRange(2, 1, combined.length, ncol).setValues(combined);
+      const dlNewLast = combined.length + 1;
+      if (prevLast > dlNewLast) sheet.getRange(dlNewLast + 1, 1, prevLast - dlNewLast, ncol).clearContent();
   },
 
   _getCycleForEpoch: function(epoch) {
@@ -1164,18 +1181,24 @@ var WorkforceTracker = {
   },
   _timeToMins: function(tStr) {
        if (tStr == null || tStr === "") return 0;
-       let s = String(tStr).trim();
+       // Date objects: format in the sheet TZ so getHours() can't drift.
+       let s = (tStr instanceof Date) ? Utilities.formatDate(tStr, "America/Toronto", 'HH:mm') : String(tStr).trim();
+       if (!s) return 0;
        let num = Number(s);
-       if (!isNaN(num) && s !== "" && !s.includes(":")) { let m = Math.round(num * 1440);
-       return m >= 1440 ? m % 1440 : m;
+       if (!isNaN(num) && s.indexOf(':') === -1 && !/h/i.test(s)) {
+           // day fraction (0.375 = 9:00). Whole numbers are date serials, NOT a time-of-day → 0.
+           return (num > 0 && num < 1.5) ? Math.round(num * 1440) % 1440 : 0;
        }
-       if (tStr instanceof Date) { s = Utilities.formatDate(tStr, "America/Toronto", 'HH:mm');
-       }
-       let match = s.match(/(\d{1,2})[:\.](\d{2})\s*([AP]M)?/i);
+       // French-Canadian 24h clock that a fr-CA sheet returns: "13 h 30", "9 h", "11h00".
+       let fr = s.match(/^(\d{1,2})\s*h\s*(\d{2})?$/i);
+       if (fr) { let fh = parseInt(fr[1], 10), fm = fr[2] ? parseInt(fr[2], 10) : 0; return (fh > 23 || fm > 59) ? 0 : fh * 60 + fm; }
+       let match = s.match(/(\d{1,2})[:\.](\d{2})/);   // HH:MM, ignoring any trailing :SS
        if (!match) return 0;
-       let h = parseInt(match[1]), m = parseInt(match[2]), amp = match[3] ? match[3].toUpperCase() : null;
+       let h = parseInt(match[1], 10), m = parseInt(match[2], 10);
+       let amp = /p\.?\s*m/i.test(s) ? 'PM' : (/a\.?\s*m/i.test(s) ? 'AM' : null);   // meridian anywhere in the string
        if (amp === 'PM' && h < 12) h += 12;
-       if (amp === 'AM' && h === 12) h = 0; 
+       if (amp === 'AM' && h === 12) h = 0;
+       if (h > 23 || m > 59) return 0;
        return (h * 60) + m;
   },
   
