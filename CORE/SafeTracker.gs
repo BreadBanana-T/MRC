@@ -445,15 +445,20 @@ var SafeTracker = {
   // Parse a schedule cell into minutes-since-midnight, or -1 when it is NOT a
   // real time-of-day. Deliberately stricter than WT._timeToMins, which maps
   // date serials and unparseable junk to 0 — that's what was rendering every
-  // shift as a bogus 00:00–00:00 once Sheets coerced "9:00 AM" cells into
-  // date/serial values on re-import. Times are fractions <1 of a day; whole
-  // numbers are date serials and must never be read as a clock time.
+  // shift as a bogus 00:00–00:00. Handles 12h ("9:00 AM"), coerced 12h with
+  // seconds ("5:00:00 p.m.", meridian anywhere), 24h ("17:00"), the French-
+  // Canadian "13 h 30" form that a fr-CA spreadsheet returns from
+  // getDisplayValues(), day-fractions (0.375) and Date objects; rejects date
+  // serials, bare integers, date strings and empties.
   _safeTime: function (raw) {
     if (raw == null) return -1;
     if (raw instanceof Date) return raw.getHours() * 60 + raw.getMinutes();
     var s = String(raw).trim(); if (!s) return -1;
     var num = Number(s);
     if (!isNaN(num) && s.indexOf(':') === -1) { return (num > 0 && num < 1.5) ? Math.round(num * 1440) % 1440 : -1; }
+    // French-Canadian 24h clock: "13 h 30", "9 h", "11h00".
+    var fr = s.match(/^(\d{1,2})\s*h\s*(\d{2})?$/i);
+    if (fr) { var fh = parseInt(fr[1], 10), fm = fr[2] ? parseInt(fr[2], 10) : 0; return (fh > 23 || fm > 59) ? -1 : fh * 60 + fm; }
     var m = s.match(/(\d{1,2})[:.](\d{2})/); if (!m) return -1;   // grab HH:MM (ignore trailing :SS)
     var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
     var ap = /p\.?\s*m/i.test(s) ? 'PM' : (/a\.?\s*m/i.test(s) ? 'AM' : null);   // meridian anywhere
