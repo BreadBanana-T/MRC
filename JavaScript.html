@@ -181,10 +181,10 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.13-SAFE13 · rotation-aware capable + Day/Week Compare + diag';
+  var APP_BUILD = 'build 2026.06.14-SAFE14 · Compare hour-focus + Week A/B + lang override + loading';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day'
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -1501,7 +1501,7 @@
               NORMAL: { c: 'var(--status-active)', bg: 'rgba(5,150,105,0.10)',  lbl: 'Normal · 25–40h' },
               LOW:    { c: 'var(--text-muted)',    bg: 'rgba(0,0,0,0.05)',      lbl: 'Low · <25h' }
           };
-          var langChip = function(lang) { var c = lang === 'BL' ? '#7c3aed' : (lang === 'FR' ? '#0ea5e9' : '#64748b'); return '<span style="font-size:0.56rem; font-weight:800; color:#fff; background:' + c + '; padding:1px 6px; border-radius:99px;">' + lang + '</span>'; };
+          var langChip = function(lang, name) { var c = lang === 'BL' ? '#7c3aed' : (lang === 'FR' ? '#0ea5e9' : '#64748b'); var base = 'font-size:0.56rem; font-weight:800; color:#fff; background:' + c + '; padding:1px 6px; border-radius:99px;'; if (!name) return '<span style="' + base + '">' + lang + '</span>'; var jn = escapeHTML(String(name)).replace(/'/g, "\\'"); return '<span onclick="cycleAgentLang(event,\'' + jn + '\',\'' + lang + '\')" title="Click to change language (EN→FR→BL)" style="' + base + ' cursor:pointer;">' + lang + '</span>'; };
           var lvlChip = function(lv) { var hi = lv >= 4; return '<span style="font-size:0.56rem; font-weight:800; color:' + (hi ? '#fff' : 'var(--text-secondary)') + '; background:' + (hi ? '#7c3aed' : 'rgba(0,0,0,0.06)') + '; padding:1px 6px; border-radius:99px;">L' + lv + '</span>'; };
           var bandChip = function(bd) { var m = BAND[bd] || BAND.NORMAL; return '<span style="font-size:0.56rem; font-weight:800; color:' + m.c + '; background:' + m.bg + '; padding:1px 7px; border-radius:99px;">' + bd + '</span>'; };
           // SmartWear (SAFE-capability) chip — green when capable, shows proficiency level if known.
@@ -1624,19 +1624,20 @@
           // ════════════ COMPARE — full daily schedule tableau ════════════
           if (state.safeView === 'compare') {
               var bd = state.boardData || { agents: [] };
+              var boardFocusShade = '';   // dim-outside overlay for the hour-focus window
               // Distinct, high-contrast palette (SAFE pops; breaks/lunch are
               // subordinate). White block text stays legible on every hue.
               var TYPEC = { SAFE: '#10b981', ICL: '#a855f7', ULC: '#f97316', TOWER: '#0ea5e9', COACH: '#f59e0b', ACSU: '#64748b', OT: '#ec4899', BREAK: '#94a3b8', LUNCH: '#78716c', ABS: '#ef4444', OTHER: '#6b7280' };
 
               // hour axis 0..24 (labels align with the 2-hour gridlines below)
               var axis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 10px;"><div style="width:170px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:800; color:var(--text-muted); letter-spacing:0.3px;">';
-              for (var hax = 0; hax <= 24; hax += 2) axis += '<span>' + (hax < 10 ? '0' + hax : hax) + '</span>';
+              for (var hax = 0; hax <= 24; hax += 3) axis += '<span>' + (hax < 10 ? '0' + hax : hax) + '</span>';
               axis += '</div><div style="width:30px; flex-shrink:0;"></div></div>';
 
               // Static 2-hour gridlines + a stronger noon divider, drawn once and
               // reused inside every row track.
               var gridLines = '';
-              for (var gh = 2; gh < 24; gh += 2) {
+              for (var gh = 3; gh < 24; gh += 3) {
                   var isNoon = gh === 12;
                   gridLines += '<div style="position:absolute; left:' + (gh / 24 * 100) + '%; top:0; bottom:0; width:1px; background:var(--text-muted); opacity:' + (isNoon ? '0.30' : '0.14') + '; pointer-events:none;"></div>';
               }
@@ -1658,18 +1659,25 @@
                   return out;
               };
 
+              var SHORT = { LUNCH: 'LUNCH', BREAK: 'BRK', TRAINING: 'COACH', COACH: 'COACH', ACSU: 'ACSU', SAFE: 'SAFE', ICL: 'ICL', ULC: 'ULC', TOWER: 'TWR', OT: 'OT', ABS: 'ABS', OTHER: 'ACT' };
               var blk = function(seg) {
                   var c = TYPEC[seg.type] || TYPEC.OTHER;
-                  var faint = (seg.type === 'BREAK' || seg.type === 'LUNCH');
+                  var isBreak = (seg.type === 'BREAK'), isLunch = (seg.type === 'LUNCH');
                   var rects = rectsOf(seg.startMin, seg.endMin);
                   return rects.map(function(r, idx) {
                       var left = r[0] / 1440 * 100, w = Math.max(0.9, (r[1] - r[0]) / 1440 * 100);
                       var cont = rects.length > 1; // crosses midnight
+                      var lbl = SHORT[seg.type] || escapeHTML(seg.type);
                       var inner = '';
-                      if (w > 13) inner = escapeHTML(seg.type) + ' <span style="font-weight:600; opacity:0.95;">' + escapeHTML(seg.time) + '</span>';
-                      else if (w > 5) inner = escapeHTML(seg.type);
+                      if (w > 12) inner = lbl + ' <span style="font-weight:600; opacity:0.9;">' + escapeHTML(seg.time) + '</span>';
+                      else if (w > 3.5) inner = lbl;
                       var radius = cont ? (idx === 0 ? '4px 0 0 4px' : '0 4px 4px 0') : '4px';
-                      return '<div title="' + escapeHTML(seg.label) + ' · ' + escapeHTML(seg.time) + (cont ? ' · overnight' : '') + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:4px; bottom:4px; background:' + c + '; ' + (faint ? 'opacity:0.55; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.5) 0 2px,transparent 2px 5px);' : (seg.type === 'SAFE' ? 'box-shadow:0 0 0 1px rgba(255,255,255,0.25), 0 1px 5px rgba(16,185,129,0.55);' : '')) + ' border-radius:' + radius + '; z-index:3; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:0 3px;">' + (inner ? '<span style="font-size:0.55rem; font-weight:800; color:#fff; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.45);">' + inner + '</span>' : '') + '</div>';
+                      // Breaks/lunch: muted with a clear dashed outline so they read as "off-phone"
+                      // zones; SAFE: bright with a green glow; everything else: solid + thin outline.
+                      var deco = isLunch ? 'opacity:0.92; border:1.5px dashed rgba(255,255,255,0.85);'
+                               : isBreak ? 'opacity:0.85; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,0.55) 0 3px,transparent 3px 7px); border:1px solid rgba(255,255,255,0.5);'
+                               : (seg.type === 'SAFE' ? 'box-shadow:0 0 0 1px rgba(255,255,255,0.35), 0 1px 6px rgba(16,185,129,0.7);' : 'box-shadow:inset 0 0 0 1px rgba(255,255,255,0.18);');
+                      return '<div title="' + escapeHTML(seg.label) + ' · ' + escapeHTML(seg.time) + (cont ? ' · overnight' : '') + '" style="position:absolute; left:' + left + '%; width:' + w + '%; top:4px; bottom:4px; background:' + c + '; ' + deco + ' border-radius:' + radius + '; z-index:3; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:0 3px;">' + (inner ? '<span style="font-size:0.55rem; font-weight:800; color:#fff; white-space:nowrap; text-shadow:0 1px 1px rgba(0,0,0,0.5);">' + inner + '</span>' : '') + '</div>';
                   }).join('');
               };
               var rowFor = function(a3) {
@@ -1688,8 +1696,8 @@
                                    : (a3.segments && a3.segments.length ? 'no shift envelope' : '<span style="color:var(--status-warn);">nothing scheduled</span>'));
                   var jsN = escapeHTML(a3.name).replace(/'/g, "\\'");
                   return '<div style="display:flex; align-items:center; gap:10px; margin-bottom:9px;">' +
-                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a3.name) + lvlChip(a3.level) + langChip(a3.lang) + '</div><div style="font-size:0.62rem; color:var(--text-muted); font-weight:600;">' + shiftTxt + (a3.absent ? ' · <span style="color:var(--status-alert);">' + escapeHTML(a3.absent) + '</span>' : '') + '</div></div>' +
-                      '<div style="position:relative; flex:1; height:38px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border); overflow:hidden;">' + gridLines + env + blocks + nowMark + '</div>' +
+                      '<div style="width:170px; flex-shrink:0; min-width:0;"><div style="font-weight:700; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:5px;">' + escapeHTML(a3.name) + lvlChip(a3.level) + langChip(a3.lang, a3.name) + '</div><div style="font-size:0.62rem; color:var(--text-muted); font-weight:600;">' + shiftTxt + (a3.absent ? ' · <span style="color:var(--status-alert);">' + escapeHTML(a3.absent) + '</span>' : '') + '</div></div>' +
+                      '<div style="position:relative; flex:1; height:38px; background:rgba(0,0,0,0.03); border-radius:6px; border:1px solid var(--glass-border); overflow:hidden;">' + gridLines + env + blocks + boardFocusShade + nowMark + '</div>' +
                       '<button title="Remove" onclick="removeBoardAgent(\'' + jsN + '\')" style="width:30px; flex-shrink:0; appearance:none; border:none; background:transparent; color:var(--text-muted); cursor:pointer;"><i data-lucide="x" width="15"></i></button></div>';
               };
 
@@ -1706,26 +1714,44 @@
 
               var isWeek = state.safeCompareMode === 'week';
               var drillDate = state.boardDrillDate || state.trackerDate;
+              var curCycle = cycleOfDate(drillDate);
               var navLabel;
               if (isWeek) { var wr = compareWeekRange(); navLabel = 'Week of ' + escapeHTML(wr.start); }
               else { var ddObj = new Date(drillDate + 'T12:00:00'); navLabel = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][ddObj.getDay()] + ', ' + escapeHTML(drillDate); }
+
+              // hour-focus window (filters agents + dims outside the chosen hours)
+              var FS = state.compareHourStart, FE = state.compareHourEnd, FULLDAY = (FS <= 0 && FE >= 1440);
+              var curHour = (FS / 60) + '-' + (FE / 60);
+              var hourPresets = [['0-24','All hours'],['7-15','Morning 07–15'],['15-23','Evening 15–23'],['23-31','Night 23–07'],['20-26','Late 20–02']];
+              var hourSel = '<select class="input-aether" style="width:auto; height:34px; font-weight:700; font-size:0.74rem;" onchange="setCompareHours(this.value)" title="Focus the timeline on specific hours">' + hourPresets.map(function(o) { return '<option value="' + o[0] + '" ' + (o[0] === curHour ? 'selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>';
+              var shadeRanges = [];
+              if (!FULLDAY) { if (FE <= 1440) { if (FS > 0) shadeRanges.push([0, FS]); if (FE < 1440) shadeRanges.push([FE, 1440]); } else { var tail = FE - 1440; if (tail < FS) shadeRanges.push([tail, FS]); } }
+              boardFocusShade = shadeRanges.map(function(r) { return '<div style="position:absolute; left:' + (r[0]/1440*100) + '%; width:' + ((r[1]-r[0])/1440*100) + '%; top:0; bottom:0; background:rgba(0,0,0,0.22); z-index:4; pointer-events:none;"></div>'; }).join('');
+              var segOverlap = function(s, e) { if (FULLDAY) return true; var wins = (FE <= 1440) ? [[FS, FE]] : [[FS, 1440], [0, FE - 1440]]; var segs = []; var b1 = Math.min(e, 1440); if (b1 > s) segs.push([s, b1]); if (e > 1440) segs.push([0, e - 1440]); return segs.some(function(sg) { return wins.some(function(w) { return sg[1] > w[0] && sg[0] < w[1]; }); }); };
+              var agInFocus = function(ag) { if (FULLDAY) return true; if (ag.shiftStart != null && ag.shiftEnd != null && segOverlap(ag.shiftStart, ag.shiftEnd)) return true; return (ag.segments || []).some(function(s) { return segOverlap(s.startMin, s.endMin); }); };
+
               var cmBtn = function(m, l) { return '<button onclick="setSafeCompareMode(\'' + m + '\')" class="sort-btn ' + (state.safeCompareMode === m ? 'active' : '') + '" style="text-transform:none; letter-spacing:0; height:34px;">' + l + '</button>'; };
+              var cyBtn = function(c, l) { return '<button onclick="compareJumpCycle(\'' + c + '\')" class="sort-btn ' + (curCycle === c ? 'active' : '') + '" style="text-transform:none; letter-spacing:0; height:34px; padding:0 9px;" title="Jump to the nearest ' + c + ' week">' + l + '</button>'; };
+              var loadChip = state.boardLoading ? '<span style="display:inline-flex; align-items:center; gap:6px; font-size:0.72rem; font-weight:700; color:var(--accent-primary); margin-left:6px;"><span style="width:14px;height:14px;border:2px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;"></span>loading…</span>' : '';
               var controls = '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">' +
                   '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
                   cmBtn('day', 'Day') + cmBtn('week', 'Week') +
                   '<button class="btn btn-glass" style="height:34px; width:36px; padding:0; margin-left:4px;" onclick="safeBoardShift(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
                   '<input type="date" class="input-aether" style="width:auto; height:34px; font-weight:700; font-size:0.85rem;" value="' + escapeHTML(drillDate) + '" onchange="setSafeBoardDate(this.value)">' +
                   '<button class="btn btn-glass" style="height:34px; width:36px; padding:0;" onclick="safeBoardShift(1)"><i data-lucide="chevron-right" width="16"></i></button>' +
-                  '<span style="font-weight:800; font-size:0.9rem; margin-left:4px;">' + navLabel + '</span></div>' +
-                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin every SAFE-capable agent"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
-                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin every Level 4+ agent">L4+</button>' +
-                  '<span class="search-wrap" style="width:180px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add capable agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
+                  '<span style="font-weight:800; font-size:0.85rem; margin-left:4px;">' + navLabel + '</span>' +
+                  '<span style="display:inline-flex; gap:4px; align-items:center; margin-left:4px;">' + cyBtn('WEEK A', 'A') + cyBtn('WEEK B', 'B') + '</span>' +
+                  loadChip + '</div>' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">' + hourSel +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(0,true)" title="Pin the top SAFE-capable agents"><i data-lucide="sparkles" width="14"></i> Pin capable</button>' +
+                  '<button class="btn btn-glass" style="height:34px; font-size:0.76rem;" onclick="smartPinSafe(4,false)" title="Pin top Level 4+ agents">L4+</button>' +
+                  '<span class="search-wrap" style="width:170px;"><i data-lucide="search" width="15"></i><input id="board-search" class="input-search" list="board-roster" placeholder="Add capable agent…" onkeydown="if(event.key===\'Enter\'){addBoardAgent(this.value); event.preventDefault();}"></span>' + datalist +
                   '<button class="btn btn-primary" style="height:34px;" onclick="addBoardAgent(document.getElementById(\'board-search\').value)"><i data-lucide="plus" width="15"></i> Add</button>' +
                   (state.boardAgents.length ? '<button class="btn btn-glass" style="height:34px; font-size:0.74rem;" onclick="clearBoardAgents()">clear</button>' : '') +
                   '</div></div>';
 
               var spinner = '<div style="padding:40px; text-align:center;"><div style="width:36px;height:36px;border:3px solid var(--glass-border);border-top-color:var(--accent-primary);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>';
+              var fLbl = function(m) { var hh = Math.floor((m / 60) % 24); return (hh < 10 ? '0' : '') + hh + ':00'; };
 
               // Week grid: each pinned agent × the 7 days, compact full-schedule strips.
               var weekGrid = function() {
@@ -1740,30 +1766,36 @@
                           var blocks = (day.segments || []).map(blk).join('');
                           var has = day.hasFull || (day.segments && day.segments.length);
                           var ttl = day.date + (day.shiftStartStr ? ' · ' + day.shiftStartStr + '–' + day.shiftEndStr : '') + (day.safeH ? ' · ' + (Math.round(day.safeH*10)/10) + 'h SAFE' : '') + (day.absent ? ' · ' + day.absent : (has ? '' : ' · off/none'));
-                          return '<div onclick="setSafeBoardDate(\'' + day.date + '\'); setSafeCompareMode(\'day\');" title="' + escapeHTML(ttl) + '" style="flex:1; position:relative; height:26px; background:' + (has ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.015)') + '; border:1px solid var(--glass-border); border-radius:4px; overflow:hidden; cursor:pointer;">' + env + blocks + '</div>';
+                          return '<div onclick="setSafeBoardDate(\'' + day.date + '\'); setSafeCompareMode(\'day\');" title="' + escapeHTML(ttl) + '" style="flex:1; position:relative; height:26px; background:' + (has ? 'rgba(0,0,0,0.03)' : 'rgba(0,0,0,0.015)') + '; border:1px solid var(--glass-border); border-radius:4px; overflow:hidden; cursor:pointer;">' + env + blocks + boardFocusShade + '</div>';
                       }).join('');
                       return '<div style="display:flex; gap:5px; align-items:center; margin-bottom:5px;"><div style="width:160px; flex-shrink:0; min-width:0; display:flex; align-items:center; gap:4px;"><span style="font-weight:700; font-size:0.74rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a.name) + '</span>' + lvlChip(a.level) + '<span style="margin-left:auto; font-size:0.62rem; font-weight:800; color:var(--status-active); flex-shrink:0;">' + (a.safeTotal || 0) + 'h</span><button title="Remove" onclick="removeBoardAgent(\'' + jsN + '\')" style="appearance:none; border:none; background:transparent; color:var(--text-muted); cursor:pointer; flex-shrink:0; padding:0 2px;"><i data-lucide="x" width="13"></i></button></div>' + cells + '</div>';
                   }).join('');
                   return hdr + rows;
               };
 
+              var latest = (state.scheduleDates && state.scheduleDates.length) ? state.scheduleDates[0] : null;
               var body;
-              if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Pin agents to compare their <b>full schedule</b> — shift window, breaks/lunch, and every activity (SAFE highlighted). Use “Pin capable”, “L4+”, the search box, or pin from the Agents tab. Toggle <b>Week</b> for a multi-day view.</div>';
+              if (!state.boardAgents.length) body = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">Pin agents to compare their <b>full schedule</b> — shift window, breaks/lunch, and every activity (SAFE highlighted). Use “Pin capable”, “L4+”, the search box, or pin from the Agents tab. Toggle <b>Week</b> for a multi-day view, or focus specific <b>hours</b>.</div>';
               else if (isWeek) { body = (state.boardLoading && !state.boardRangeData) ? spinner : weekGrid(); }
               else if (state.boardLoading && !state.boardData) body = spinner;
               else if (bd.error) body = '<div style="padding:30px; text-align:center; color:var(--status-alert); font-weight:700;">' + escapeHTML(bd.error) + '</div>';
               else {
                   var dg = bd.diag || {};
-                  var banner = (bd.archived === false) ? '<div style="display:flex; align-items:flex-start; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary);"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0; margin-top:1px;"></i><span>No full schedule for ' + escapeHTML(bd.date || drillDate) + '. ' + (dg.schedRowsForDate ? '<b>' + dg.schedRowsForDate + '</b> agents were scheduled that day but only <b>' + (dg.matchedFull || 0) + '</b> matched your pins — likely a name variant.' : 'No schedule rows exist for that date yet — import the WFM schedule covering it.') + ' Rows show logged activity only.</span></div>' : '';
-                  body = banner + axis + (bd.agents || []).map(rowFor).join('');
+                  var jumpBtn = (latest && latest !== (bd.date || drillDate)) ? ' <button class="btn btn-glass" style="height:24px; font-size:0.68rem; padding:0 8px; margin-left:6px;" onclick="setSafeBoardDate(\'' + latest + '\')">Jump to latest schedule (' + latest + ')</button>' : '';
+                  var banner = (bd.archived === false) ? '<div style="display:flex; align-items:center; gap:8px; padding:10px 14px; margin-bottom:12px; border-radius:10px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); font-size:0.72rem; font-weight:600; color:var(--text-secondary); flex-wrap:wrap;"><i data-lucide="archive" width="15" style="color:var(--status-warn); flex-shrink:0;"></i><span>No full schedule for ' + escapeHTML(bd.date || drillDate) + '. ' + (dg.schedRowsForDate ? '<b>' + dg.schedRowsForDate + '</b> were scheduled that day but only <b>' + (dg.matchedFull || 0) + '</b> matched your pins — likely a name variant.' : 'No schedule rows exist for that date — pick a date that was imported.') + ' Rows show logged activity only.</span>' + jumpBtn + '</div>' : '';
+                  var allAg = bd.agents || [];
+                  var visAg = FULLDAY ? allAg : allAg.filter(agInFocus);
+                  var focusNote = !FULLDAY ? '<div style="font-size:0.66rem; font-weight:700; color:var(--text-muted); margin-bottom:8px;"><i data-lucide="clock" width="12" style="vertical-align:-2px;"></i> Focused ' + fLbl(FS) + '–' + fLbl(FE) + ' · showing ' + visAg.length + ' of ' + allAg.length + ' pinned (others not scheduled in this window)</div>' : '';
+                  body = banner + focusNote + axis + visAg.map(rowFor).join('');
               }
+              var dimStyle = state.boardLoading ? 'opacity:0.5; transition:opacity 0.2s; pointer-events:none;' : 'transition:opacity 0.2s;';
 
               return headerHtml + kpis + subHead +
                   '<div class="aether-card" style="padding:20px 24px; margin-bottom:30px;">' +
                   controls +
                   (chips ? '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chips + '</div>' : '') +
                   '<div style="margin-bottom:12px;">' + legend + '</div>' +
-                  body + '</div>';
+                  '<div style="' + dimStyle + '">' + body + '</div></div>';
           }
 
           // ════════════ AGENTS ════════════
@@ -1784,7 +1816,7 @@
               return '<div class="hover-bg" style="padding:12px 14px; margin-bottom:8px; border-radius:12px; background:var(--card-bg); cursor:pointer; border:1px solid ' + (isSel ? 'var(--accent-primary)' : 'var(--glass-border)') + ';" onclick="state.safeSelectedAgent=\'' + jsName + '\'; render();">' +
                   '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">' +
                   '<span style="display:flex; align-items:center; gap:6px; min-width:0;"><button title="Pin to Day Board" onclick="toggleSafePin(event, \'' + jsName + '\')" style="appearance:none; border:none; background:transparent; cursor:pointer; padding:0; color:' + (pinned ? 'var(--accent-primary)' : 'var(--text-muted)') + '; flex-shrink:0;"><i data-lucide="' + (pinned ? 'pin' : 'pin') + '" width="13" style="' + (pinned ? '' : 'opacity:0.4;') + '"></i></button>' +
-                  '<span style="font-weight:800; font-size:0.9rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a2.name) + '</span>' + lvlChip(a2.level) + langChip(a2.lang) + swChip(a2) + '</span>' +
+                  '<span style="font-weight:800; font-size:0.9rem; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(a2.name) + '</span>' + lvlChip(a2.level) + langChip(a2.lang, a2.name) + swChip(a2) + '</span>' +
                   '<span style="display:flex; align-items:center; gap:6px; flex-shrink:0;">' + bandChip(a2.band) + '<span style="font-weight:800; font-size:0.92rem; color:' + bm.c + '; font-variant-numeric:tabular-nums;">' + a2.total + 'h</span></span></div>' +
                   '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:5px;">' + a2.days + 'd · avg ' + a2.avgPerDay + 'h' + (d.mode !== 'month' ? ' · ≈' + a2.monthEq + 'h/mo' : '') + (a2.thinShare > 0 ? ' · <span style="color:var(--accent-primary); font-weight:800;">' + a2.thinShare + '% thin-hr</span>' : '') + (d.hasMasterList && a2.canSafe === false ? ' · <span style="color:var(--status-warn); font-weight:800;" title="No Smart wear skill in MasterList">⚠ not coded</span>' : '') + (a2.doubleDays > 0 ? ' · <span style="color:var(--status-alert); font-weight:800;">' + a2.doubleDays + 'd dbl</span>' : '') + '</div>' +
                   meter(a2) + '</div>';
@@ -1847,7 +1879,7 @@
               rightCol = '<div class="aether-card" style="padding:0; display:flex; flex-direction:column; max-height:calc(100vh - 360px); min-height:440px;">' +
                   '<div style="padding:20px 24px; border-bottom:1px solid var(--glass-border);"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">' +
                   '<div style="min-width:0;"><button class="btn btn-glass" style="height:28px; font-size:0.72rem; margin-bottom:10px;" onclick="state.safeSelectedAgent=null; render();"><i data-lucide="arrow-left" width="13"></i> All agents</button>' +
-                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><span style="font-weight:800; font-size:1.45rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</span>' + lvlChip(selA.level) + langChip(selA.lang) + swChip(selA) + bandChip(selA.band) + '</div>' +
+                  '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><span style="font-weight:800; font-size:1.45rem; letter-spacing:-0.3px;">' + escapeHTML(selA.name) + '</span>' + lvlChip(selA.level) + langChip(selA.lang, selA.name) + swChip(selA) + bandChip(selA.band) + '</div>' +
                   '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + selA.days + ' SAFE days · ' + selA.segs + ' segments · avg <b style="color:var(--text-main);">' + selA.avgPerDay + 'h</b>' + (selA.sup ? ' · Sup: ' + escapeHTML(selA.sup) : '') + (d.mode !== 'month' ? ' · ≈<b style="color:var(--text-main);">' + selA.monthEq + 'h</b>/mo' : '') + '</div>' + skillsLine + '</div>' +
                   '<div style="text-align:right; flex-shrink:0;"><div class="cnum" style="font-size:2.3rem; font-weight:800; color:' + bm.c + '; line-height:1; font-variant-numeric:tabular-nums;">' + selA.total + 'h</div><div style="font-size:0.6rem; font-weight:700; color:var(--text-muted); margin-top:6px;"><span style="color:#6366f1;">Sch ' + selA.srcSched + 'h</span> · <span style="color:#f472b6;">OT ' + selA.srcOt + 'h</span></div></div></div></div>' +
                   '<div style="padding:16px 24px; border-bottom:1px solid var(--glass-border);"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;"><i data-lucide="trending-up" width="13" style="vertical-align:-2px;"></i> 14-Month SAFE Trend</div><div style="position:relative; height:160px;"><canvas id="safe-trend-chart" style="display:block;"></canvas></div></div>' +
@@ -2287,17 +2319,36 @@
       else { runner.getSafeScheduleBoard(state.boardDrillDate || state.trackerDate, namesToFetch.join('|')); }
   }
   window.setSafeCompareMode = function(m) { if (state.safeCompareMode === m) return; state.safeCompareMode = m; if (state.boardAgents.length) fetchCompare(state.boardAgents, true); render(); };
+  // Focus the Compare timeline on a clock-hour window (filters agents + dims outside).
+  window.setCompareHours = function(v) {
+      var p = String(v).split('-'); state.compareHourStart = (parseInt(p[0], 10) || 0) * 60; state.compareHourEnd = (parseInt(p[1], 10) || 24) * 60;
+      render();
+  };
+  // WEEK A/B rotation for the date (anchor 2026-01-29, mirrors backend).
+  function cycleOfDate(ds) { var d = new Date(ds + 'T12:00:00'); var tU = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0); if (d.getHours() >= 23) tU += 86400000; var dw = Math.floor(Math.floor((tU - Date.UTC(2026, 0, 29, 12, 0, 0)) / 86400000) / 7); return (Math.abs(dw) % 2 === 1) ? 'WEEK B' : 'WEEK A'; }
+  window.compareJumpCycle = function(target) {
+      var base = state.boardDrillDate || state.trackerDate; var d = new Date(base + 'T12:00:00');
+      if (cycleOfDate(localDateStr(d)) !== target) d.setDate(d.getDate() - 7);
+      state.boardDrillDate = localDateStr(d); fetchCompare(state.boardAgents, true); render();
+  };
+  // Cycle an agent's language EN→FR→BL→EN and persist it.
+  window.cycleAgentLang = function(ev, name, cur) {
+      if (ev) ev.stopPropagation();
+      var order = ['EN', 'FR', 'BL']; var nx = order[(order.indexOf(cur) + 1) % 3];
+      if (typeof google === 'undefined') { showToast('Language → ' + nx); return; }
+      google.script.run.withSuccessHandler(function() { showToast(name + ' → ' + nx); state.boardRoster = null; fetchScheduleRoster(); fetchTrackerData(); }).withFailureHandler(function() { showToast('Language save failed'); }).setSafeAgentLang(name, nx);
+  };
+  function fetchScheduleDates() { if (typeof google === 'undefined') return; google.script.run.withSuccessHandler(function(r) { try { state.scheduleDates = JSON.parse(r); } catch(e) { state.scheduleDates = []; } if (state.view === 'tracker' && state.safeView === 'compare') render(); }).getSafeScheduleDates(); }
   // Bulk-pin SAFE agents matching criteria — capableOnly uses the Smart-wear flag.
   window.smartPinSafe = function(minLevel, capableOnly) {
       minLevel = parseInt(minLevel, 10) || 0;
+      var CAP = 12;   // pinning everyone is unreadable — take the heaviest SAFE users
       var pa = (state.trackerData && state.trackerData.perAgent) || [];
+      var matches = pa.filter(function(a) { return (!minLevel || a.level >= minLevel) && !(capableOnly && a.canSafe === false); })
+          .sort(function(a, b) { return (b.total || 0) - (a.total || 0); });
       var fresh = [];
-      pa.forEach(function(a) {
-          if (minLevel && a.level < minLevel) return;
-          if (capableOnly && a.canSafe === false) return;
-          if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); }
-      });
-      if (fresh.length) { showToast('Pinned ' + fresh.length + ' agent' + (fresh.length === 1 ? '' : 's')); fetchCompare(fresh, false); }
+      matches.slice(0, CAP).forEach(function(a) { if (state.boardAgents.indexOf(a.name) === -1) { state.boardAgents.push(a.name); fresh.push(a.name); } });
+      if (fresh.length) { showToast('Pinned top ' + fresh.length + ' by SAFE hours' + (matches.length > CAP ? ' (of ' + matches.length + ' — add more by search)' : '')); fetchCompare(fresh, false); }
       else { showToast('No new matching agents'); render(); }
   };
   window.clearBoardAgents = function() { state.boardAgents = []; state.boardData = null; state.boardRangeData = null; render(); };
@@ -2305,6 +2356,7 @@
       state.safeView = v;
       if (v === 'compare') {
           if (!state.boardRoster) fetchScheduleRoster();
+          if (!state.scheduleDates) fetchScheduleDates();
           if (state.boardAgents.length === 0) { state.safePins.forEach(function(n) { if (state.boardAgents.indexOf(n) === -1) state.boardAgents.push(n); }); if (state.safeSelectedAgent && state.boardAgents.indexOf(state.safeSelectedAgent) === -1) state.boardAgents.push(state.safeSelectedAgent); }
           if (!state.boardDrillDate) state.boardDrillDate = state.trackerDate;
           if (state.boardAgents.length) fetchCompare(state.boardAgents, true);

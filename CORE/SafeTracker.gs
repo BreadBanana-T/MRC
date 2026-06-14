@@ -103,6 +103,7 @@ var SafeTracker = {
     };
 
     // ── MasterList profiles ──
+    var langMap = self._loadLangMap();
     var mlByKey = {};
     var dbML = WT._getDB('WF_MASTERLIST');
     if (dbML && dbML.getLastRow() > 1) {
@@ -112,7 +113,7 @@ var SafeTracker = {
         var key = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey(nm) : nm.toLowerCase();
         var parsed = self._parseSkills(r[3]);
         mlByKey[key] = { name: nm, level: parseInt(r[1], 10) || 2, sup: String(r[2] || '').trim(),
-                         skills: parsed.pretty, swLevel: parsed.swLevel, lang: self._inferLang(r[3]), canSafe: self._canSafe(r[3]) };
+                         skills: parsed.pretty, swLevel: parsed.swLevel, lang: langMap[key] || self._inferLang(r[3]), canSafe: self._canSafe(r[3]) };
       });
     }
     var profileOf = function (agent) {
@@ -292,6 +293,9 @@ var SafeTracker = {
         var nm = String(row[0]).trim(); if (!nm) return;
         var k = nk(nm); if (!capable[k]) return;           // only SAFE-capable agents
         var dStr = WT._formatDate(row[2]); if (!dStr || dStr < winStartStr || dStr > winEndStr) return;
+        if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {   // respect Week A/B rotation
+          if (WT._getCycleForEpoch(new Date(dStr + 'T12:00:00').getTime()) !== cycleFilter) return;
+        }
         var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
         if (!ssRaw || !seRaw) return;
         var dk = k + '|' + dStr; if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins
@@ -438,12 +442,56 @@ var SafeTracker = {
     return 'Onshore';
   },
 
+  // Manual language overrides (skills rarely encode language). Stored in
+  // WF_LANG_MAP [Agent Key, Display Name, Lang] so they persist across imports.
+  _loadLangMap: function () {
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null; var map = {};
+    if (!WT) return map;
+    var db = WT._getDB('WF_LANG_MAP');
+    if (db && db.getLastRow() > 1) {
+      db.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+        var k = String(r[0] || '').trim(); var lang = String(r[2] || '').trim().toUpperCase();
+        if (k && lang) map[k] = lang;
+      });
+    }
+    return map;
+  },
+  setAgentLang: function (name, lang) {
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null; if (!WT) return 'Error';
+    name = String(name || '').trim(); lang = String(lang || '').trim().toUpperCase();
+    if (!name) return 'Error';
+    if (['EN', 'FR', 'BL'].indexOf(lang) === -1) lang = 'EN';
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('WF_LANG_MAP');
+    if (!sh) { sh = ss.insertSheet('WF_LANG_MAP'); sh.appendRow(['Agent Key', 'Display Name', 'Lang']); }
+    var key = this._normKey(name);
+    var last = sh.getLastRow();
+    var rows = last > 1 ? sh.getRange(2, 1, last - 1, 3).getValues() : [];
+    for (var i = 0; i < rows.length; i++) { if (String(rows[i][0]) === key) { sh.getRange(i + 2, 2, 1, 2).setValues([[name, lang]]); return 'OK'; } }
+    sh.appendRow([key, name, lang]); return 'OK';
+  },
+  // Distinct dates that actually have a full shift envelope (for the Compare
+  // "jump to latest schedule" hint). Newest first, capped.
+  getScheduleDates: function () {
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null; if (!WT) return '[]';
+    var set = {};
+    ['Schedule_History', 'Raw Schedule'].forEach(function (sh) {
+      var db = WT._getDB(sh); if (!db || db.getLastRow() < 2) return;
+      db.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+        if (!String(r[3] || '').trim() || !String(r[4] || '').trim()) return;
+        var d = WT._formatDate(r[2]); if (d) set[d] = true;
+      });
+    });
+    return JSON.stringify(Object.keys(set).sort().reverse().slice(0, 120));
+  },
+
   // Roster for the Compare "Add agent" search — ONLY onshore SmartWear-capable
   // agents (offshore never does SAFE; non-capable agents can't carry it).
   getScheduleRoster: function () {
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     if (!WT) return '[]';
     var self = this;
+    var langMap = self._loadLangMap();
     var out = [];
     var dbML = WT._getDB('WF_MASTERLIST');
     if (dbML && dbML.getLastRow() > 1) {
@@ -452,7 +500,7 @@ var SafeTracker = {
         if (!self._canSafe(r[3])) return;                  // must have SmartWear
         if (self._regionOf(nm) === 'Offshore') return;     // offshore never does SAFE
         var parsed = self._parseSkills(r[3]);
-        out.push({ name: nm, level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]), swLevel: parsed.swLevel });
+        out.push({ name: nm, level: parseInt(r[1], 10) || 2, lang: langMap[self._normKey(nm)] || self._inferLang(r[3]), swLevel: parsed.swLevel });
       });
     }
     out.sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -550,12 +598,12 @@ var SafeTracker = {
     pull('WF_ABSENCES', function (r) { return ['ABS', String(r[2] || 'Absence')]; }, 3, 4);
 
     // attach level/lang from MasterList
-    var ml = {};
+    var ml = {}; var lmO = self._loadLangMap();
     var dbML = WT._getDB('WF_MASTERLIST');
     if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
         var nm = String(r[0]).trim(); if (!nm) return;
-        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]) };
+        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: lmO[self._normKey(nm)] || self._inferLang(r[3]) };
       });
     }
 
@@ -651,12 +699,12 @@ var SafeTracker = {
     pull('WF_OVERTIME', function (r) { return ['OT', 'OT ' + String(r[4] || '')]; }, 6, 7);
     pull('WF_ABSENCES', function (r) { return ['ABS', String(r[2] || 'Absence')]; }, 3, 4);
 
-    var ml = {};
+    var ml = {}; var lmO = self._loadLangMap();
     var dbML = WT._getDB('WF_MASTERLIST');
     if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
         var nm = String(r[0]).trim(); if (!nm) return;
-        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: self._inferLang(r[3]) };
+        ml[self._normKey(nm)] = { level: parseInt(r[1], 10) || 2, lang: lmO[self._normKey(nm)] || self._inferLang(r[3]) };
       });
     }
     var agentsOut = wanted.map(function (n) {
