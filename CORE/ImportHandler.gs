@@ -20,16 +20,17 @@ function processWFMImport(rawText, forcedDate) {
   if (typeof RegionRegistry !== 'undefined') RegionRegistry.beginBatch();
 
   try {
-    // sheet.clear() is O(rows) and can take 30-60s on a sheet that's been
-    // populated several times. deleteRows + clearContents on the header
-    // range is much faster and gets the same end-state.
+    // Reset by clearing CONTENT (fast, no row reflow) rather than deleteRows,
+    // which physically removes/shifts every row and on a 2-month re-paste
+    // (thousands of rows) costs tens of seconds. clearContent blanks the old
+    // data in one batch; the new rows overwrite from row 2.
     var t0 = new Date().getTime();
     var lastRow = sheet.getLastRow();
-    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-    sheet.getRange(1, 1, 1, sheet.getLastColumn() || 12).clearContent();
+    if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 12).clearContent();
+    var hdrRange = sheet.getRange(1, 1, 1, 12);
+    hdrRange.setValues([["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]]);
+    hdrRange.setFontWeight("bold").setBackground("#e0e0e0");
     Logger.log('[wfm] sheet reset in ' + (new Date().getTime() - t0) + 'ms (was ' + lastRow + ' rows)');
-    sheet.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
-    sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
 
   const lines = rawText.split(/\r?\n/);
   Logger.log('[wfm] parsing ' + lines.length + ' lines');
@@ -281,8 +282,14 @@ function archiveScheduleHistory(ss, rosterData) {
   }
 
   var merged = kept.concat(rosterData);
-  if (last > 1) hist.deleteRows(2, last - 1);
+  // Write in place + clear the tail instead of deleteRows(2,last-1). deleteRows is
+  // O(all rows) and physically reflows the whole sheet — on an 18-month
+  // Schedule_History (10k+ rows) that was the dominant import cost (minutes) and
+  // the main reason a 2-month paste timed out. Overwriting yields the same
+  // end-state far faster (one setValues + a tail clearContent).
   if (merged.length) hist.getRange(2, 1, merged.length, 12).setValues(merged);
+  var newLast = merged.length + 1;                       // header + data rows
+  if (last > newLast) hist.getRange(newLast + 1, 1, last - newLast, 12).clearContent();
   return merged.length;
 }
 
