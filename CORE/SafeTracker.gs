@@ -442,6 +442,26 @@ var SafeTracker = {
     return 'Onshore';
   },
 
+  // Parse a schedule cell into minutes-since-midnight, or -1 when it is NOT a
+  // real time-of-day. Deliberately stricter than WT._timeToMins, which maps
+  // date serials and unparseable junk to 0 — that's what was rendering every
+  // shift as a bogus 00:00–00:00 once Sheets coerced "9:00 AM" cells into
+  // date/serial values on re-import. Times are fractions <1 of a day; whole
+  // numbers are date serials and must never be read as a clock time.
+  _safeTime: function (raw) {
+    if (raw == null) return -1;
+    if (raw instanceof Date) return raw.getHours() * 60 + raw.getMinutes();
+    var s = String(raw).trim(); if (!s) return -1;
+    var num = Number(s);
+    if (!isNaN(num) && s.indexOf(':') === -1) { return (num > 0 && num < 1.5) ? Math.round(num * 1440) % 1440 : -1; }
+    var m = s.match(/(\d{1,2})[:.](\d{2})/); if (!m) return -1;   // grab HH:MM (ignore trailing :SS)
+    var h = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+    var ap = /p\.?\s*m/i.test(s) ? 'PM' : (/a\.?\s*m/i.test(s) ? 'AM' : null);   // meridian anywhere
+    if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+    if (h > 23 || mm > 59) return -1;
+    return h * 60 + mm;
+  },
+
   // Manual language overrides (skills rarely encode language). Stored in
   // WF_LANG_MAP [Agent Key, Display Name, Lang] so they persist across imports.
   _loadLangMap: function () {
@@ -520,8 +540,9 @@ var SafeTracker = {
     var resolve = function (nm) { return wantKey[self._normKey(nm)] || wantCore[self._coreKey(nm)] || null; };
     var schedNamesForDate = {};   // distinct schedule names present on this date (any agent)
 
-    var toMin = function (t) { return WT._timeToMins(t); };
+    var toMin = function (t) { return self._safeTime(t); };
     var byAgent = {};
+    var shiftDiag = [];   // first few raw shift cells, surfaced in diag for transparency
     var ensure = function (name) {
       var k = self._normKey(name);
       if (!byAgent[k]) byAgent[k] = { name: name, shiftStart: null, shiftEnd: null, hasFull: false, region: '', segments: [] };
@@ -561,8 +582,11 @@ var SafeTracker = {
         var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
         if (ssRaw && seRaw) {
           var ss = toMin(ssRaw), se = toMin(seRaw);
-          ag.shiftStart = ss % 1440;
-          ag.shiftEnd = (se <= ss ? se + 1440 : se);
+          if (shiftDiag.length < 4) shiftDiag.push({ name: want, src: sheetName, rawStart: ssRaw, rawEnd: seRaw, parsedStart: ss, parsedEnd: se });
+          if (ss >= 0 && se >= 0) {     // only a REAL time pair becomes an envelope
+            ag.shiftStart = ss % 1440;
+            ag.shiftEnd = (se <= ss ? se + 1440 : se);
+          }
         }
         try {
           var brks = JSON.parse(row[7] || '[]');
@@ -634,7 +658,7 @@ var SafeTracker = {
     var matchedFull = result.filter(function (a) { return a.hasFull; }).length;
     return JSON.stringify({ date: dateStr, agents: result, archived: anyFull, hasArchive: hasArchive,
                             hasMasterList: Object.keys(ml).length > 0,
-                            diag: { schedRowsForDate: Object.keys(schedNamesForDate).length, matchedFull: matchedFull, requested: wanted.length } });
+                            diag: { schedRowsForDate: Object.keys(schedNamesForDate).length, matchedFull: matchedFull, requested: wanted.length, shiftSamples: shiftDiag } });
   },
 
   // RANGE version of the board for the Compare "Week" view: each agent's full
@@ -655,7 +679,7 @@ var SafeTracker = {
     var wantKey = {}, wantCore = {};
     wanted.forEach(function (n) { wantKey[self._normKey(n)] = n; var c = self._coreKey(n); if (c && !wantCore[c]) wantCore[c] = n; });
     var resolve = function (nm) { return wantKey[self._normKey(nm)] || wantCore[self._coreKey(nm)] || null; };
-    var toMin = function (t) { return WT._timeToMins(t); };
+    var toMin = function (t) { return self._safeTime(t); };
     var byAD = {};   // normKey -> { dateStr -> dayObj }
     var dayOf = function (want, dStr) {
       var k = self._normKey(want); byAD[k] = byAD[k] || {};
@@ -677,7 +701,7 @@ var SafeTracker = {
         var day = dayOf(want, dStr); if (day.hasFull) return;       // history wins over Raw
         day.hasFull = true;
         var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
-        if (ssRaw && seRaw) { var ss = toMin(ssRaw), se = toMin(seRaw); day.shiftStart = ss % 1440; day.shiftEnd = (se <= ss ? se + 1440 : se); }
+        if (ssRaw && seRaw) { var ss = toMin(ssRaw), se = toMin(seRaw); if (ss >= 0 && se >= 0) { day.shiftStart = ss % 1440; day.shiftEnd = (se <= ss ? se + 1440 : se); } }
         try { JSON.parse(row[7] || '[]').forEach(function (b) { var m = BRK[String(b.type || '').toUpperCase()] || ['OTHER', String(b.type || 'Activity')]; pushSeg(day, m[0], m[1], b.start, b.end); }); } catch (e) {}
         if (String(row[9] || '').trim()) day.absent = String(row[9]).trim();
       });

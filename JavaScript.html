@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.14-SAFE14 · Compare hour-focus + Week A/B + lang override + loading';
+  var APP_BUILD = 'build 2026.06.14-SAFE15 · fix 00:00 shift envelope (strict time parse) + diag';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null
@@ -1786,7 +1786,10 @@
                   var allAg = bd.agents || [];
                   var visAg = FULLDAY ? allAg : allAg.filter(agInFocus);
                   var focusNote = !FULLDAY ? '<div style="font-size:0.66rem; font-weight:700; color:var(--text-muted); margin-bottom:8px;"><i data-lucide="clock" width="12" style="vertical-align:-2px;"></i> Focused ' + fLbl(FS) + '–' + fLbl(FE) + ' · showing ' + visAg.length + ' of ' + allAg.length + ' pinned (others not scheduled in this window)</div>' : '';
-                  body = banner + focusNote + axis + visAg.map(rowFor).join('');
+                  // Diagnostic: if shift cells parsed to a non-time, show the raw stored values.
+                  var bad = (dg.shiftSamples || []).filter(function(s) { return s.parsedStart < 0 || s.parsedEnd < 0; });
+                  var diagNote = bad.length ? '<div style="font-size:0.62rem; color:var(--status-warn); margin-bottom:8px; font-weight:600;">⚠ Unreadable shift times in the archive (showing raw stored values): ' + bad.slice(0,3).map(function(s){ return escapeHTML(s.name) + ' [' + escapeHTML(String(s.rawStart)) + ' / ' + escapeHTML(String(s.rawEnd)) + ']'; }).join(', ') + ' — please send me this line.</div>' : '';
+                  body = banner + focusNote + diagNote + axis + visAg.map(rowFor).join('');
               }
               var dimStyle = state.boardLoading ? 'opacity:0.5; transition:opacity 0.2s; pointer-events:none;' : 'transition:opacity 0.2s;';
 
