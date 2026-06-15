@@ -389,6 +389,9 @@ var WorkforceTracker = {
         } catch (e) {}
     }
 
+    // Invalidate the SAFE analytics cache so the next view recomputes on fresh data.
+    try { PropertiesService.getScriptProperties().setProperty('WF_CACHE_VER', String(Date.now())); } catch (e) {}
+
     if (msg.length === 0) return `Basic Schedule Synced. (Archiving queued: ${queued.join(', ')})`;
     return `Synced: ${msg.join(' | ')}. Archiving queued: ${queued.join(', ')}`;
     } finally {

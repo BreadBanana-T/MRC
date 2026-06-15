@@ -156,6 +156,7 @@ function rebuildDataSheets(alsoArchives) {
     if (last > 1) sh.getRange(2, 1, last - 1, Math.max(1, sh.getLastColumn())).clearContent();
     cleared.push(name);
   });
+  try { PropertiesService.getScriptProperties().setProperty('WF_CACHE_VER', String(Date.now())); } catch (e) {}  // bust analytics cache
   Logger.log('[rebuildDataSheets] cleared: ' + cleared.join(', ') + (alsoArchives ? ' (incl. archives)' : ''));
   return JSON.stringify({ ok: true, cleared: cleared });
 }

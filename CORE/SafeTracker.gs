@@ -71,6 +71,15 @@ var SafeTracker = {
     if (!WT) return JSON.stringify({ error: 'Engine unavailable.' });
 
     var self = this;
+    // Cache the whole analytics payload per (mode·date·region·cycle), invalidated by
+    // a version stamp the import bumps. Recomputing the full read + 14-month trend on
+    // every view/mode-switch is what made a full-year DB time out; now it's computed
+    // once per slice. If the first compute exceeds the client watchdog, the server
+    // still finishes and caches, so a retry is instant.
+    var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
+    var _ck = 'safeAn|' + mode + '|' + refDate + '|' + regionFilter + '|' + (cycleFilter || 'ALL') + '|' + _ver;
+    var _cache = null; try { _cache = CacheService.getScriptCache(); } catch (e) {}
+    if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
     var bounds = WT._calculateEpochBoundaries(mode, refDate);
     var searchStart = new Date(bounds.start); searchStart.setDate(searchStart.getDate() - 1);
     var sStr = Utilities.formatDate(searchStart, 'America/Toronto', 'yyyy-MM-dd');
@@ -418,7 +427,7 @@ var SafeTracker = {
       if (!mlByKey[k]) unm[e.agent] = true; else if (!capable[k]) dnc[e.agent] = true;
     });
 
-    return JSON.stringify({
+    var __payload = JSON.stringify({
       mode: mode, trackerType: 'safe', label: bounds.label, cycle: bounds.cycle,
       grid: [], events: events, totals: totals, perAgent: perAgent,
       trendMonths: trendMonths.map(function (m) { return m.label + (m.label === 'Jan' ? " '" + String(m.year).slice(-2) : ''); }),
@@ -437,6 +446,8 @@ var SafeTracker = {
       audit: { agents: perAgent.length, doubleAgentDays: Object.keys(doubleDays).length,
                overlapAgentDays: Object.keys(overlapDays).length }
     });
+    if (_cache) { try { var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, 21600); } catch (e) {} }
+    return __payload;
   },
 
   // ───────────────────────── SCHEDULE BOARD ─────────────────────────
