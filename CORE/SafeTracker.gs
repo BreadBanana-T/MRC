@@ -226,14 +226,14 @@ var SafeTracker = {
       var h = self._r2(g.hours);
       if (!agents[g.agent]) {
         agents[g.agent] = { name: g.agent, region: g.region, total: 0, morning: 0, evening: 0, night: 0,
-                            srcSched: 0, srcOt: 0, days: {}, segs: 0 };
+                            srcSched: 0, srcOt: 0, otByDay: {}, days: {}, segs: 0 };
       }
       var a = agents[g.agent];
       a.total += h; a.segs++;
       if (g.shift === 'Morning') a.morning += h;
       else if (g.shift === 'Evening') a.evening += h;
       else a.night += h;
-      if (g.src === 'SCHED') a.srcSched += h; else a.srcOt += h;
+      if (g.src === 'SCHED') a.srcSched += h; else { a.srcOt += h; a.otByDay[g.rawDay] = self._r2((a.otByDay[g.rawDay] || 0) + h); }
       a.days[g.date] = self._r2((a.days[g.date] || 0) + h);
       var dayKey = g.agent + '|' + g.rawDay;
       var flags = [];
@@ -245,7 +245,7 @@ var SafeTracker = {
 
     var winDays = Math.max(1, Math.round((bounds.end - bounds.start) / 86400000));
     var bandOf = function (mEq) { return mEq >= 50 ? 'RED' : (mEq >= 40 ? 'WARN' : (mEq < 25 ? 'LOW' : 'NORMAL')); };
-    var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, count: events.length,
+    var totals = { all: 0, morning: 0, evening: 0, night: 0, sched: 0, ot: 0, otShift: 0, otIncr: 0, count: events.length,
                    bRed: 0, bWarn: 0, bNormal: 0, bLow: 0 };
 
     // ── Capability + hour-of-day COVERAGE (the management proof) ──────────
@@ -296,6 +296,7 @@ var SafeTracker = {
     // because it only counts capable agents who ACTUALLY have a schedule row).
     var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {}, scheduledCapable = {};
     var agentShift = {};   // normKey -> { "startMin|endMin": count } → most common shift window
+    var schedDayByAgent = {};   // normKey|date -> true: agent had a real scheduled shift that day
     var readSched = function (sheet) {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
@@ -315,6 +316,7 @@ var SafeTracker = {
         var dk = k + '|' + dStr; if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins
         schedDaySet[dStr] = true;
         scheduledCapable[k] = true;                          // actually worked the window
+        schedDayByAgent[k + '|' + dStr] = true;              // this agent was scheduled this day
         var asm = agentShift[k] = agentShift[k] || {};       // tally this shift window
         var spk = (ss % 1440) + '|' + se; asm[spk] = (asm[spk] || 0) + 1;
         addHourly(capHourMin, ss, se);
@@ -365,8 +367,15 @@ var SafeTracker = {
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       var ash = shiftModeOf(nk(n));
+      // Split SAFE-via-OT: hours on a day the agent was scheduled = extending their
+      // shift; hours on a non-scheduled day = an OT agent brought in to do SAFE
+      // (incremental capacity, not their normal shift).
+      var _ak = nk(n), otShiftH = 0, otIncrH = 0;
+      Object.keys(a.otByDay || {}).forEach(function (d) { if (schedDayByAgent[_ak + '|' + d]) otShiftH += a.otByDay[d]; else otIncrH += a.otByDay[d]; });
+      otShiftH = self._r2(otShiftH); otIncrH = self._r2(otIncrH);
       totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
       totals.sched += a.srcSched; totals.ot += a.srcOt;
+      totals.otShift += otShiftH; totals.otIncr += otIncrH;
       var dayKeys = Object.keys(a.days);
       var maxDay = null;
       dayKeys.forEach(function (d) { if (!maxDay || a.days[d] > a.days[maxDay]) maxDay = d; });
@@ -397,7 +406,7 @@ var SafeTracker = {
         level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, canSafe: !!pf.canSafe, swLevel: (pf.swLevel != null ? pf.swLevel : null),
         band: band, monthEq: monthEq,
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
-        srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
+        srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt), srcOtShift: otShiftH, srcOtIncr: otIncrH,
         days: dayKeys.length, segs: a.segs,
         byHour: byHour, thinShare: thinShare,
         shiftStartStr: ash ? WT._minsToTime(ash.start) : '', shiftEndStr: ash ? WT._minsToTime(ash.end) : '',

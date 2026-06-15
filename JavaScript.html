@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE36 · OT OffQ codes (OTSTOFQ/OTOFQ) = SAFE-on-OT';
+  var APP_BUILD = 'build 2026.06.15-SAFE37 · split SAFE-on-OT: extending shift vs incremental OT pickup';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -1551,7 +1551,7 @@
           var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:14px; margin:16px 0 0;">' +
               kpiS('Total SAFE', (t2.all || 0).toFixed(1) + 'h', (audit.agents || 0) + ' agents · ' + (t2.count || 0) + ' segs', 'var(--status-active)') +
               kpiS('From Schedule', (t2.sched || 0).toFixed(1) + 'h', 'M ' + (t2.morning||0).toFixed(0) + ' / E ' + (t2.evening||0).toFixed(0) + ' / N ' + (t2.night||0).toFixed(0), SRC.SCHED.c) +
-              kpiS('From Overtime', (t2.ot || 0).toFixed(1) + 'h', 'SAFE-bucket OT', SRC.OT.c) +
+              kpiS('From Overtime', (t2.ot || 0).toFixed(1) + 'h', (t2.otShift || 0).toFixed(1) + 'h extending shift · ' + (t2.otIncr || 0).toFixed(1) + 'h incremental (OT pickup)', SRC.OT.c) +
               kpiS('Threshold ' + (d.mode === 'month' ? '' : '(≈/mo)'), (t2.bRed || 0) + ' RED', '⚠ ' + (t2.bWarn||0) + ' warn · ' + (t2.bNormal||0) + ' normal · ' + (t2.bLow||0) + ' low', (t2.bRed||0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') +
               ((audit.doubleAgentDays || 0) > 0 ? kpiS('⚠ Double', String(audit.doubleAgentDays) + ' days', 'same block in sched + OT', 'var(--status-alert)') : '') +
               '</div>';
