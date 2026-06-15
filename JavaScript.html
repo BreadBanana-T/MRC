@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE26 · SL chart counts!=%, axis labels + crosshair hover';
+  var APP_BUILD = 'build 2026.06.15-SAFE27 · lunch chart always shows SVL/ACK (or no sample) in tooltip';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -2700,8 +2700,17 @@
           var L = d.lunch;
           var lOpts = baseOpts(true);
           lOpts.scales.x.ticks.maxTicksLimit = 24;   // 96 × 15-min → ~hourly labels
-          lOpts.scales.y = { stacked: true, beginAtZero: true, position: 'left', grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
-          lOpts.scales.y1 = { position: 'right', beginAtZero: true, suggestedMax: 100, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          lOpts.scales.y = { stacked: true, beginAtZero: true, position: 'left', title: { display: true, text: 'agents on lunch/break', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          lOpts.scales.y1 = { position: 'right', beginAtZero: true, suggestedMax: 100, title: { display: true, text: 'SVL % / ACK', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          // SVL/ACK come from Stats History, which doesn't sample every 15-min slot
+          // (overnight gaps). Their line points are null there, so Chart.js would drop
+          // them from the tooltip. Keep the bars in the body and ALWAYS report SVL/ACK
+          // in the footer (saying "no sample" when the interval has none).
+          lOpts.plugins.tooltip.filter = function(it) { return it.dataset.yAxisID !== 'y1'; };
+          lOpts.plugins.tooltip.callbacks.footer = function(items) {
+              var i = items[0].dataIndex; var s = L.svl[i], a = L.ack[i];
+              return 'SVL: ' + (s == null ? 'no sample' : s + '%') + '   ·   ACK: ' + (a == null ? 'no sample' : a + 's');
+          };
           charts.mgmtLunch = new Chart(elLunch.getContext('2d'), { type: 'bar', data: { labels: L.labels, datasets: [
               { label: 'Lunch · Offshore', data: L.offLunch, backgroundColor: '#fb923c', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
               { label: 'Lunch · Onshore', data: L.onLunch, backgroundColor: '#fdba74', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
