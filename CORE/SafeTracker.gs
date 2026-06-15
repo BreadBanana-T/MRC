@@ -296,13 +296,15 @@ var SafeTracker = {
         if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {   // respect Week A/B rotation
           if (WT._getCycleForEpoch(new Date(dStr + 'T12:00:00').getTime()) !== cycleFilter) return;
         }
-        var ssRaw = String(row[3] || '').trim(), seRaw = String(row[4] || '').trim();
-        if (!ssRaw || !seRaw) return;
+        // Epoch-first shift envelope (same robust path as the board). Reading the
+        // TEXT shift columns via _timeToMins made every coerced "12/30/1899"/"9 h 00"
+        // cell parse to 0→0, so capable agents were counted on-shift 00:00–24:00 and
+        // the "capable on shift" line pinned flat at the headcount (~20, "maxed out").
+        var sh = self._shiftFromRow(row); if (!sh) return;   // need a real shift window
+        var ss = sh.start, se = sh.end;                      // se may exceed 1440 (overnight)
         var dk = k + '|' + dStr; if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins
-        var ss = WT._timeToMins(ssRaw), se = WT._timeToMins(seRaw);
-        if (se <= ss) se += 1440;
         schedDaySet[dStr] = true;
-        scheduledCapable[k] = true;                        // actually worked the window
+        scheduledCapable[k] = true;                          // actually worked the window
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
         WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; });
