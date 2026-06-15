@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-OT43 · OT open-slot import: truncated pastes no longer delete existing days (warned + merged by slot)';
+  var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -1937,6 +1937,8 @@
           // fill = posted slots actually filled (≤100%); pre-coded = OT given with no matching posted slot.
           var fill = (op && op.fillRate != null) ? op.fillRate : null;
           var preCoded = (op && op.preCoded) || 0;
+          var preCodedSlots = (op && op.preCodedSlots) || 0;
+          var totalSlots = op ? (op.slots + preCodedSlots) : 0;
           var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
 
           var kpiCell = function(label, value, sub, color) {
@@ -1944,7 +1946,7 @@
           };
           var reqLine = op ? Object.keys(op.skills).sort().map(function(k) { return escapeHTML(k) + ' <b style="color:var(--text-main);">' + op.skills[k] + 'h</b>'; }).join(' · ') : '';
           var kpis = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px; margin:20px 0;">' +
-              kpiCell('Open — posted by WFM', op ? op.hours + 'h' : '—', op ? op.slots + ' slot' + (op.slots === 1 ? '' : 's') + (op.hidden ? ' · ' + op.hidden + ' hidden (excl.)' : '') : 'paste the WFM slots JSON via Import', 'var(--accent-primary)') +
+              kpiCell('OT slots — posted + pre-coded', op ? totalSlots + ' slot' + (totalSlots === 1 ? '' : 's') : '—', op ? op.slots + ' posted (' + op.hours + 'h) + ' + preCodedSlots + ' pre-coded' + (op.hidden ? ' · ' + op.hidden + ' hidden (excl.)' : '') : 'paste the WFM slots JSON via Import', 'var(--accent-primary)') +
               kpiCell('Given — in schedules', given.toFixed(1) + 'h', '&times;1: ' + (ot2.x1 || 0).toFixed(1) + 'h · &times;1.5: ' + (ot2.x15 || 0).toFixed(1) + 'h' + (preCoded > 0 ? ' · ' + preCoded.toFixed(1) + 'h pre-coded/extra' : ''), 'var(--status-active)') +
               kpiCell('Fill Rate', fill != null ? fill + '%' : '—', op ? (op.fillHours != null ? '<b style="color:var(--text-main);">' + op.fillHours.toFixed(1) + 'h</b> of ' + op.hours + 'h posted slots taken' : 'posted slots filled') + (preCoded > 0 ? '<br><span style="color:var(--status-warn);">+' + preCoded.toFixed(1) + 'h extra OT given (no posted slot)</span>' : '') : 'needs open-slot data', fillColor) +
               (op && op.acsuHours ? kpiCell('ACSU Released Offered', op.acsuHours + 'h', op.acsuSlots + ' slot' + (op.acsuSlots === 1 ? '' : 's') + ' · voluntary time off, not OT', 'var(--status-warn)') : '') +

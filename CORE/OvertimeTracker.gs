@@ -652,7 +652,7 @@ var OvertimeTracker = {
         (segByDate[w.date] || []).forEach(function (g) {
           var gs = g.s, ge = g.e <= g.s ? g.e + 1440 : g.e;
           var os = Math.max(ws, gs), oe = Math.min(we, ge);
-          if (oe > os) { var hh = (oe - os) / 60; covered += hh; who[g.agent] = (who[g.agent] || 0) + hh; }
+          if (oe > os) { var hh = (oe - os) / 60; covered += hh; who[g.agent] = (who[g.agent] || 0) + hh; g._matched = true; }
         });
         var capped = Math.min(w.hours, Math.round(covered * 100) / 100);
         w.filledH = capped;
@@ -665,6 +665,11 @@ var OvertimeTracker = {
       open.fillRate = open.hours > 0 ? Math.round((fillH / open.hours) * 1000) / 10 : null;
       open.preCoded = Math.max(0, Math.round((totals.all - matchedH) * 100) / 100);
     }
+
+    // Pre-coded SLOT count = scheduled OT blocks that filled no posted window
+    // (coded straight into schedules). With no posted windows at all, every
+    // given block is pre-coded. Lets the headline read opened + pre-coded.
+    if (open) open.preCodedSlots = givenSegs.filter(function (g) { return !g._matched; }).length;
 
     return JSON.stringify({
       mode: mode, trackerType: 'overtime', label: bounds.label, cycle: bounds.cycle,
