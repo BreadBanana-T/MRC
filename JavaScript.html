@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE31 · one-click Rebuild (clears activity+schedule, preserves manual/IDP/GEM)';
+  var APP_BUILD = 'build 2026.06.15-SAFE32 · fix import timeout: defer archives + split schedule into 2 budgets';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -3013,6 +3013,16 @@
           if (state.view === 'insights') fetchInsightData();
       }, 180000);
 
+      // Drain the deferred month-archive queue out-of-band (each call has its own
+      // execution budget), looping until nothing remains. Non-blocking.
+      var flushArchivesLoop = function() {
+          if (typeof google === 'undefined') return;
+          google.script.run.withSuccessHandler(function(r) {
+              var o = {}; try { o = JSON.parse(r); } catch (e) {}
+              if (o && o.done === false && (o.remaining || 0) > 0) flushArchivesLoop();
+              else if (o && (o.archived || []).length) { if (state.view === 'insights') fetchInsightData(); }
+          }).withFailureHandler(function() {}).flushPendingArchives();
+      };
       var onSuccess = function(trackerResult) {
           if (settled) return; settled = true; clearTimeout(backstop);
           console.log('[sync] success:', trackerResult);
@@ -3024,6 +3034,7 @@
           if (state.view === 'insights') fetchInsightData();
           var notifMsg = isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.');
           google.script.run.addGlobalNotification(notifMsg);
+          if (!isOtOpen) flushArchivesLoop();   // archive the imported month(s) in the background
       };
       var onFailure = function(err) {
           if (settled) return; settled = true; clearTimeout(backstop);
@@ -3045,15 +3056,20 @@
               .withSuccessHandler(onSuccess)
               .withFailureHandler(onFailure)
               .importOtOpenSlots(t);
+      } else if (isIdp) {
+          showToast('Syncing IDP…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importWorkforceData('', t);
       } else {
-          showToast('Syncing Database...');
-          // importWorkforceData now archives the schedule (Raw Schedule +
-          // Schedule_History) in the same call, so SAFE hours can't exist without a
-          // shift. No separate fire-and-forget runImport (it could silently fail).
-          google.script.run
-              .withSuccessHandler(onSuccess)
-              .withFailureHandler(onFailure)
-              .importWorkforceData(isIdp ? '' : t, isIdp ? t : '');
+          // Schedule: run the archive (ImportHandler → Raw Schedule + Schedule_History)
+          // and the activity parse (importData) as TWO sequential server calls, so each
+          // gets its own 6-min budget. A single combined call was timing out — but
+          // sequential + handled still guarantees BOTH run (no silent fire-and-forget),
+          // so SAFE hours can't exist without a shift.
+          showToast('Syncing schedule…');
+          google.script.run.withSuccessHandler(function() {
+              showToast('Schedule archived — syncing activities…');
+              google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importWorkforceData(t, '');
+          }).withFailureHandler(onFailure).runImport(t);
       }
   };
 

@@ -370,25 +370,27 @@ var WorkforceTracker = {
         if (muSet) props.setProperty('MU_SET', muSet);
     } catch(e) {}
     
-    // --- SMART AUTO-ARCHIVE LOGIC ---
+    // --- DEFERRED AUTO-ARCHIVE ---
+    // archiveUnifiedReport reads ~8 sheets × 3 cycles per affected month and was the
+    // dominant import cost (it alone could blow the 6-min limit). QUEUE the months
+    // instead; the client calls flushPendingArchives() right after import, in its own
+    // execution budget. Past-month cycle filters get archived a beat later, not never.
     let affectedMonths = new Set();
     schedDates.concat(idpDates).forEach(d => {
-        if (d && d.length >= 7) affectedMonths.add(d.substring(0, 7) + "-01"); 
+        if (d && d.length >= 7) affectedMonths.add(d.substring(0, 7) + "-01");
     });
-
-    let archiveMsg = [];
-    affectedMonths.forEach(monthStr => {
+    let queued = [];
+    if (affectedMonths.size) {
         try {
-            // Archive all three slices so past-month cycle filters work offline.
-            this.archiveUnifiedReport(monthStr, 'ALL');
-            this.archiveUnifiedReport(monthStr, 'WEEK A');
-            this.archiveUnifiedReport(monthStr, 'WEEK B');
-            archiveMsg.push(monthStr.substring(0, 7));
-        } catch(e) {}
-    });
+            let aprops = PropertiesService.getScriptProperties();
+            let pend = {}; try { pend = JSON.parse(aprops.getProperty('PENDING_ARCHIVE') || '{}'); } catch (e) {}
+            affectedMonths.forEach(m => { pend[m] = true; queued.push(m.substring(0, 7)); });
+            aprops.setProperty('PENDING_ARCHIVE', JSON.stringify(pend));
+        } catch (e) {}
+    }
 
-    if (msg.length === 0) return `Basic Schedule Synced. (Auto-Archived: ${archiveMsg.join(', ')})`;
-    return `Synced: ${msg.join(' | ')}. Auto-Archived: ${archiveMsg.join(', ')}`;
+    if (msg.length === 0) return `Basic Schedule Synced. (Archiving queued: ${queued.join(', ')})`;
+    return `Synced: ${msg.join(' | ')}. Archiving queued: ${queued.join(', ')}`;
     } finally {
       if (_regionBatch) RegionRegistry.commitBatch();
     }
@@ -1043,6 +1045,30 @@ var WorkforceTracker = {
         finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.isBackupMRC === true);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
+  },
+
+  // Drains the queue of months that importData deferred, archiving each (ALL/
+  // WEEK A/WEEK B) within a time budget so it never hits the 6-min limit. The
+  // client calls this after an import and loops while `remaining` > 0.
+  flushPendingArchives: function() {
+      var props = PropertiesService.getScriptProperties();
+      var pend = {}; try { pend = JSON.parse(props.getProperty('PENDING_ARCHIVE') || '{}'); } catch (e) {}
+      var months = Object.keys(pend);
+      if (!months.length) return JSON.stringify({ done: true, archived: [], remaining: 0 });
+      var done = [], t0 = Date.now();
+      for (var i = 0; i < months.length; i++) {
+          if (Date.now() - t0 > 270000) break;   // ~4.5 min — leave headroom under the 6-min cap
+          var m = months[i];
+          try {
+              this.archiveUnifiedReport(m, 'ALL');
+              this.archiveUnifiedReport(m, 'WEEK A');
+              this.archiveUnifiedReport(m, 'WEEK B');
+              done.push(m.substring(0, 7)); delete pend[m];
+          } catch (e) {}
+      }
+      props.setProperty('PENDING_ARCHIVE', JSON.stringify(pend));
+      var remaining = Object.keys(pend).length;
+      return JSON.stringify({ done: remaining === 0, archived: done, remaining: remaining });
   },
 
   archiveUnifiedReport: function(refDateStr, cycleFilter) {
