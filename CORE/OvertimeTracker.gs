@@ -35,17 +35,17 @@ var OvertimeTracker = {
   // and OTST wins over OT -- critical because every code shares the "OT" stem.
   OT_CODES: [
     { c: 'OTSTOTHRCB', rate: 1.0, bucket: 'Other',    brk: true  },
-    { c: 'OTSTOFQCB',  rate: 1.0, bucket: 'OffQueue', brk: true  },
+    { c: 'OTSTOFQCB',  rate: 1.0, bucket: 'SAFE',     brk: true  },
     { c: 'OTOTHRCB',   rate: 1.5, bucket: 'Other',    brk: true  },
-    { c: 'OTOFQCB',    rate: 1.5, bucket: 'OffQueue', brk: true  },
+    { c: 'OTOFQCB',    rate: 1.5, bucket: 'SAFE',     brk: true  },
     { c: 'OTSTOTHR',   rate: 1.0, bucket: 'Other',    brk: false },
-    { c: 'OTSTOFQ',    rate: 1.0, bucket: 'OffQueue', brk: false },
+    { c: 'OTSTOFQ',    rate: 1.0, bucket: 'SAFE',     brk: false },
     { c: 'OTSTODQ',    rate: 1.0, bucket: 'OffQueue', brk: false },
     { c: 'OTST SAFE',  rate: 1.0, bucket: 'SAFE',     brk: false },
     { c: 'OTSTSAFE',   rate: 1.0, bucket: 'SAFE',     brk: false },
     { c: 'OTSTCB',     rate: 1.0, bucket: 'OnQueue',  brk: true  },
     { c: 'OTOTHR',     rate: 1.5, bucket: 'Other',    brk: false },
-    { c: 'OTOFQ',      rate: 1.5, bucket: 'OffQueue', brk: false },
+    { c: 'OTOFQ',      rate: 1.5, bucket: 'SAFE',     brk: false },
     { c: 'OTST',       rate: 1.0, bucket: 'OnQueue',  brk: false },
     { c: 'OTCB',       rate: 1.5, bucket: 'OnQueue',  brk: true  },
     { c: 'OT',         rate: 1.5, bucket: 'OnQueue',  brk: false }
@@ -89,12 +89,13 @@ var OvertimeTracker = {
     else if (/\bX?\s*1\s*X?\b/.test(s) || /OTST/.test(compact)) rate = 1.0;
     else rate = 1.5;
 
-    // Bucket: Off Queue (Hors file) checked before File so "Hors file" can't
-    // fall through to the On Queue default.
+    // Bucket: in this operation Off-Queue ("Hors file" / OFQ / OffQ) overtime is
+    // SAFE agents working OT, so it maps to SAFE — not a generic OffQueue bucket.
+    // (ODQ is a distinct off-queue-data code and stays OffQueue.)
     var bucket;
-    if (/HORS\s*FIL/.test(sDot) || /\bOFQ\b/.test(s) || /\bODQ\b/.test(s) || /OFF\s*QUEUE/.test(sDot) || /\bOFFQ\b/.test(s)) bucket = 'OffQueue';
+    if (/HORS\s*FIL/.test(sDot) || /\bOFQ\b/.test(s) || /OFF\s*QUEUE/.test(sDot) || /\bOFFQ\b/.test(s) || /\bSAFE\b/.test(s)) bucket = 'SAFE';
+    else if (/\bODQ\b/.test(s)) bucket = 'OffQueue';
     else if (/\bAUTRE\b/.test(s) || /\bOTHR\b/.test(s) || /\bOTHER\b/.test(s)) bucket = 'Other';
-    else if (/\bSAFE\b/.test(s)) bucket = 'SAFE';
     else bucket = 'OnQueue';
 
     var brk = /\bCB\b/.test(s) || /\bPAUSE\b/.test(s) || /\bBREAK\b/.test(s);
