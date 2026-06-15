@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE38 · OT per-slot matching: who took each posted window + clearer fill';
+  var APP_BUILD = 'build 2026.06.15-SAFE39 · TRUE per-day capable staffing (no averaging) — scarcity proof';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -1619,7 +1619,9 @@
                       '</div>';
               }
 
-              return headerHtml + kpis + subHead + headline + chartCard +
+              var bdArr = cov.byDay || [];
+              var byDayCard = bdArr.length ? '<div class="aether-card" style="padding:18px 20px; margin-bottom:18px;"><div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px;"><i data-lucide="users" width="13" style="vertical-align:-2px;"></i> TRUE capable agents scheduled — per day (not averaged)</div><div style="font-size:0.64rem; color:var(--text-muted); font-weight:600; margin-bottom:10px;">distinct SmartWear agents actually on the schedule each day, by shift · hover for names — a day showing <b>1</b> means one person had to carry SAFE</div><div style="position:relative; height:' + (bdArr.length > 40 ? 260 : 220) + 'px;"><canvas id="safe-capable-byday" style="display:block;"></canvas></div></div>' : '';
+              return headerHtml + kpis + subHead + headline + chartCard + byDayCard +
                   '<div class="grid-split" style="grid-template-columns: 1fr 1fr; gap:18px; align-items:start;">' + thinCard + carrierCard + '</div>' +
                   '<div style="margin-top:18px;">' + rosterCard + '</div>' + dataHealthNote +
                   '<div style="padding-bottom:30px;"></div>';
@@ -3258,6 +3260,45 @@
               animation: { duration: 800, easing: 'easeOutQuart' }
           }
       });
+
+      // TRUE capable agents scheduled per DAY (no averaging) — the scarcity proof.
+      var elBD = document.getElementById('safe-capable-byday');
+      if (elBD && cov.byDay && cov.byDay.length) {
+          if (charts.safeCapByDay) { charts.safeCapByDay.destroy(); charts.safeCapByDay = null; }
+          var bd = cov.byDay;
+          var dlabels = bd.map(function(x) { var p = x.date.split('-'); return p[1] + '/' + p[2]; });
+          charts.safeCapByDay = new Chart(elBD.getContext('2d'), {
+              type: 'bar',
+              data: { labels: dlabels, datasets: [
+                  { label: 'Morning', data: bd.map(function(x) { return x.morning; }), backgroundColor: '#fbbf24', stack: 'c', maxBarThickness: 30 },
+                  { label: 'Evening', data: bd.map(function(x) { return x.evening; }), backgroundColor: '#fb7185', stack: 'c', maxBarThickness: 30 },
+                  { label: 'Night', data: bd.map(function(x) { return x.night; }), backgroundColor: '#818cf8', stack: 'c', maxBarThickness: 30 }
+              ] },
+              options: {
+                  responsive: true, maintainAspectRatio: false, resizeDelay: 200,
+                  interaction: { mode: 'index', intersect: false, axis: 'x' },
+                  plugins: {
+                      legend: { display: true, labels: { font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor, boxWidth: 10, usePointStyle: true } },
+                      tooltip: {
+                          backgroundColor: isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)', titleColor: isDark ? '#e2e8f0' : '#0f172a',
+                          bodyColor: isDark ? '#cbd5e1' : '#334155', footerColor: isDark ? '#93c5fd' : '#1d4ed8',
+                          borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 11, cornerRadius: 9, boxPadding: 5,
+                          titleFont: { family: "'Outfit', sans-serif", weight: '800', size: 12 }, bodyFont: { family: "'Outfit', sans-serif", weight: '600', size: 11.5 },
+                          footerFont: { family: "'Outfit', sans-serif", weight: '700', size: 11 },
+                          callbacks: {
+                              title: function(items) { var dd = bd[items[0].dataIndex]; var p = dd.date.split('-'); var dn = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(+p[0], +p[1]-1, +p[2]).getDay()]; return dn + ' ' + dd.date + ' — ' + dd.count + ' capable on the schedule'; },
+                              footer: function(items) { var nm = bd[items[0].dataIndex].names || []; return nm.length ? nm.slice(0, 18).join(', ') + (nm.length > 18 ? ' +' + (nm.length - 18) : '') : 'none scheduled'; }
+                          }
+                      }
+                  },
+                  scales: {
+                      x: { stacked: true, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '700', size: 9 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 31 } },
+                      y: { stacked: true, beginAtZero: true, grid: { color: gridColor }, title: { display: true, text: 'capable agents scheduled', color: textColor, font: { size: 9, weight: '700' } }, ticks: { precision: 0, stepSize: 1, font: { size: 10 }, color: textColor } }
+                  },
+                  animation: { duration: 600 }
+              }
+          });
+      }
   }
 
   // Per-agent: when THIS agent does SAFE (bars) vs capable coverage (line).

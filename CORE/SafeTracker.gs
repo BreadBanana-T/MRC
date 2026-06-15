@@ -297,6 +297,7 @@ var SafeTracker = {
     var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {}, scheduledCapable = {};
     var agentShift = {};   // normKey -> { "startMin|endMin": count } → most common shift window
     var schedDayByAgent = {};   // normKey|date -> true: agent had a real scheduled shift that day
+    var capDay = {};            // date -> { all:{}, Morning:{}, Evening:{}, Night:{} } distinct capable agents scheduled that day
     var readSched = function (sheet) {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
@@ -321,13 +322,24 @@ var SafeTracker = {
         var spk = (ss % 1440) + '|' + se; asm[spk] = (asm[spk] || 0) + 1;
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
-        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; });
+        var cd = capDay[dStr] = capDay[dStr] || { all: {}, Morning: {}, Evening: {}, Night: {} };
+        cd.all[k] = true;
+        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; cd[sp.shift][k] = true; });
       });
     };
     readSched('Schedule_History');
     readSched('Raw Schedule');
     var numSchedDays = Object.keys(schedDaySet).length;
     var hasSchedule = numSchedDays > 0;
+    // TRUE per-day capable staffing (NOT averaged): each day, the distinct capable
+    // agents actually scheduled, split by shift. This is the scarcity proof — a day
+    // with only one capable name on the clock shows 1, with that name listed.
+    var capableByDay = Object.keys(capDay).sort().map(function (d) {
+      var cd = capDay[d];
+      return { date: d, count: Object.keys(cd.all).length,
+               morning: Object.keys(cd.Morning).length, evening: Object.keys(cd.Evening).length, night: Object.keys(cd.Night).length,
+               names: Object.keys(cd.all).map(function (k) { return (capable[k] || {}).name || k; }).sort() };
+    });
     // avg concurrent capable headcount per clock hour = agent-minutes / 60 / days.
     var capableOnShiftHourly = capHourMin.map(function (m) { return hasSchedule ? self._r2(m / 60 / numSchedDays) : 0; });
 
@@ -448,6 +460,7 @@ var SafeTracker = {
         providersHourly: providersHourly, capableOnShiftHourly: capableOnShiftHourly,
         thinHours: thinHours, thinThreshold: thinThreshold,
         capable: { total: Object.keys(scheduledCapable).length, trainedTotal: Object.keys(capable).length, byShift: byShift },
+        byDay: capableByDay,
         headline: { thinPct: thinPct, thinSafeH: self._r2(thinSafeH), totalSafeH: self._r2(totalSafeH),
                     thinHourCount: thinHours.length, minCovHour: minCovHour }
       },
