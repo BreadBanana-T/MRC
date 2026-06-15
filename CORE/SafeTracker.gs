@@ -322,9 +322,9 @@ var SafeTracker = {
         var spk = (ss % 1440) + '|' + se; asm[spk] = (asm[spk] || 0) + 1;
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
-        var cd = capDay[dStr] = capDay[dStr] || { all: {}, Morning: {}, Evening: {}, Night: {} };
-        cd.all[k] = true;
-        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; cd[sp.shift][k] = true; });
+        var cd = capDay[dStr] = capDay[dStr] || {};   // normKey -> minutes-equivalent per band
+        var rec = cd[k] = cd[k] || { Morning: 0, Evening: 0, Night: 0 };
+        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; rec[sp.shift] += (sp.hours || 0); });
       });
     };
     readSched('Schedule_History');
@@ -335,10 +335,15 @@ var SafeTracker = {
     // agents actually scheduled, split by shift. This is the scarcity proof — a day
     // with only one capable name on the clock shows 1, with that name listed.
     var capableByDay = Object.keys(capDay).sort().map(function (d) {
-      var cd = capDay[d];
-      return { date: d, count: Object.keys(cd.all).length,
-               morning: Object.keys(cd.Morning).length, evening: Object.keys(cd.Evening).length, night: Object.keys(cd.Night).length,
-               names: Object.keys(cd.all).map(function (k) { return (capable[k] || {}).name || k; }).sort() };
+      var cd = capDay[d], keys = Object.keys(cd), m = 0, e = 0, n = 0, names = [];
+      keys.forEach(function (k) {
+        var r = cd[k];   // count each agent ONCE, in the band where they're scheduled most
+        if (r.Morning >= r.Evening && r.Morning >= r.Night) m++;
+        else if (r.Evening >= r.Night) e++;
+        else n++;
+        names.push((capable[k] || {}).name || k);
+      });
+      return { date: d, count: keys.length, morning: m, evening: e, night: n, names: names.sort() };
     });
     // avg concurrent capable headcount per clock hour = agent-minutes / 60 / days.
     var capableOnShiftHourly = capHourMin.map(function (m) { return hasSchedule ? self._r2(m / 60 / numSchedDays) : 0; });
