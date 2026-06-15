@@ -323,14 +323,17 @@ var OvertimeTracker = {
   },
 
   // Pastes are routinely truncated mid-array. Salvage everything up to the
-  // last complete slot object instead of failing.
+  // last complete slot object instead of failing — but REPORT that we salvaged
+  // (truncated:true) so the importer never treats a partial paste as the full
+  // truth and silently deletes days it didn't actually contain.
   _tolerantParse: function(raw) {
     var txt = String(raw).trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
     var tryParse = function(t) { try { return JSON.parse(t); } catch (e) { return null; } };
+    var trunc = false;
     var obj = tryParse(txt);
     if (!obj) {
       var idx = txt.lastIndexOf('},{"date"');
-      if (idx > -1) obj = tryParse(txt.substring(0, idx + 1) + ']}');
+      if (idx > -1) { obj = tryParse(txt.substring(0, idx + 1) + ']}'); if (obj) trunc = true; }
     }
     if (!obj) {
       var arrIdx = txt.indexOf('[');
@@ -339,32 +342,39 @@ var OvertimeTracker = {
         var o2 = tryParse(t2);
         if (!o2) {
           var idx2 = t2.lastIndexOf('},{"date"');
-          if (idx2 > -1) o2 = tryParse(t2.substring(0, idx2 + 1) + ']');
+          if (idx2 > -1) { o2 = tryParse(t2.substring(0, idx2 + 1) + ']'); if (o2) trunc = true; }
         }
         if (o2) obj = { slots: o2 };
       }
     }
-    if (!obj) return null;
-    if (Array.isArray(obj)) return obj;
-    if (obj.slots && Array.isArray(obj.slots)) return obj.slots;
-    return null;
+    if (!obj) return { slots: null, truncated: false };
+    if (Array.isArray(obj)) return { slots: obj, truncated: trunc };
+    if (obj.slots && Array.isArray(obj.slots)) return { slots: obj.slots, truncated: trunc };
+    return { slots: null, truncated: false };
   },
 
   importOpenSlots: function(raw) {
     if (!raw || !String(raw).trim()) return 'OT Open: empty paste.';
     var self = this;
+    var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
     var txt = String(raw).trim();
-    var rows = [], dates = {}, seen = {};
+    var truncated = false;
+    var rows = [], dates = {}, seen = {}, newSigs = {};
+    // Stable per-slot identity (date|start|end|activity) so a truncated re-paste
+    // can replace only the exact slots it contains, never a whole day.
+    var sigOf = function(r) { return (self._parseDateLoose(WT ? WT._formatDate(r[0]) : r[0]) || String(r[0])) + '|' + r[1] + '|' + r[2] + '|' + r[4]; };
     var push = function(row) {
       if (!row) return;
       if (seen[row[14]]) return; seen[row[14]] = true;
-      rows.push(row); dates[row[0]] = true;
+      rows.push(row); dates[row[0]] = true; newSigs[sigOf(row)] = true;
     };
 
     if (txt.indexOf('"slotCount"') !== -1 || /^[\[{]/.test(txt)) {
       // ── JSON path ──
-      var slots = this._tolerantParse(txt);
+      var parsed = this._tolerantParse(txt);
+      var slots = parsed.slots;
       if (!slots || !slots.length) return 'OT Open: no slot objects found in the JSON.';
+      truncated = parsed.truncated;
       slots.forEach(function(sl, i) {
         try {
           push(self._openRow(
@@ -415,9 +425,17 @@ var OvertimeTracker = {
     }
     var keep = [];
     if (sheet.getLastRow() > 1) {
-      var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
-      keep = sheet.getRange(2, 1, sheet.getLastRow() - 1, W).getDisplayValues()
-        .filter(function(r) { return !dates[self._parseDateLoose(WT ? WT._formatDate(r[0]) : r[0])]; });
+      var existing = sheet.getRange(2, 1, sheet.getLastRow() - 1, W).getDisplayValues();
+      if (truncated) {
+        // Salvaged/partial paste: the tail day(s) are under-represented, so a
+        // by-date wipe would DELETE complete slots we simply didn't receive.
+        // Replace only the exact slots present in this paste; keep everything else.
+        keep = existing.filter(function(r) { return !newSigs[sigOf(r)]; });
+      } else {
+        // Complete export = current truth for its days (filled/cancelled slots
+        // legitimately disappear), so a full day refresh is correct.
+        keep = existing.filter(function(r) { return !dates[self._parseDateLoose(WT ? WT._formatDate(r[0]) : r[0])]; });
+      }
       sheet.getRange(2, 1, sheet.getLastRow() - 1, W).clearContent();
     }
     var all = keep.concat(rows);
@@ -425,8 +443,12 @@ var OvertimeTracker = {
 
     var nOt = rows.filter(function(r) { return r[8] === 'OT'; }).length;
     var nAcsu = rows.filter(function(r) { return r[8] === 'ACSU'; }).length;
-    return 'Open slots: ' + rows.length + ' window(s) across ' + Object.keys(dates).length + ' day(s) — ' +
-           nOt + ' OT, ' + nAcsu + ' ACSU released-time' + (rows.length - nOt - nAcsu ? ', ' + (rows.length - nOt - nAcsu) + ' other' : '') + '.';
+    var nHidden = rows.filter(function(r) { return r[13] === 'N'; }).length;
+    var msg = 'Open slots: ' + rows.length + ' window(s) across ' + Object.keys(dates).length + ' day(s) — ' +
+           nOt + ' OT, ' + nAcsu + ' ACSU released-time' + (rows.length - nOt - nAcsu ? ', ' + (rows.length - nOt - nAcsu) + ' other' : '') +
+           (nHidden ? ' · ' + nHidden + ' hidden (not counted)' : '') + '.';
+    if (truncated) msg = '⚠ Paste looked TRUNCATED — salvaged ' + rows.length + ' complete slot(s) and merged them WITHOUT deleting existing days. Re-copy the FULL board to fully refresh those days. ' + msg;
+    return msg;
   },
 
   // Open-slot aggregation for the analytics window. Only Type=OT rows count
