@@ -355,6 +355,18 @@ var SafeTracker = {
       });
       return { date: d, count: keys.length, morning: m, evening: e, night: n, names: names.sort() };
     });
+    // Day-level scarcity: a day is "thin" when its distinct capable-scheduled count
+    // sits at/below half the median day (same rule the hourly view uses). This lets
+    // the UI surface ONLY the dangerous days instead of every date in the window.
+    var dayThinThreshold = 0;
+    (function () {
+      var dc = capableByDay.filter(function (x) { return x.count > 0; }).map(function (x) { return x.count; });
+      if (!dc.length) return;
+      var s = dc.slice().sort(function (p, q) { return p - q; }), mid = Math.floor(s.length / 2);
+      var med = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+      dayThinThreshold = self._r2(0.5 * med);
+      capableByDay.forEach(function (x) { x.thin = x.count > 0 && x.count <= dayThinThreshold; });
+    })();
     // avg concurrent capable headcount per clock hour = agent-minutes / 60 / days.
     var capableOnShiftHourly = capHourMin.map(function (m) { return hasSchedule ? self._r2(m / 60 / numSchedDays) : 0; });
 
@@ -475,7 +487,7 @@ var SafeTracker = {
         providersHourly: providersHourly, capableOnShiftHourly: capableOnShiftHourly,
         thinHours: thinHours, thinThreshold: thinThreshold,
         capable: { total: Object.keys(scheduledCapable).length, trainedTotal: Object.keys(capable).length, byShift: byShift },
-        byDay: capableByDay,
+        byDay: capableByDay, dayThinThreshold: dayThinThreshold,
         headline: { thinPct: thinPct, thinSafeH: self._r2(thinSafeH), totalSafeH: self._r2(totalSafeH),
                     thinHourCount: thinHours.length, minCovHour: minCovHour }
       },
