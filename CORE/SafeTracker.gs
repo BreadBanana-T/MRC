@@ -101,9 +101,12 @@ var SafeTracker = {
     var trendEndKey = trendMonths[trendMonths.length - 1].key;
     var trendByAgent = {};
     var seenTrend = {};
+    var firstSafeEpoch = {};   // normKey -> earliest SAFE-delivery epoch (capability-onset proxy)
     var addTrend = function (agent, dStr, sMins, eRaw, src) {
       var mo = dStr.substring(0, 7);
       if (trendIdx[mo] === undefined) return;
+      var fk = self._normKey(agent), fep = new Date(dStr + 'T12:00:00').getTime();
+      if (firstSafeEpoch[fk] === undefined || fep < firstSafeEpoch[fk]) firstSafeEpoch[fk] = fep;
       var td = src + '|' + agent + '|' + dStr + '|' + sMins + '|' + eRaw;
       if (seenTrend[td]) return; seenTrend[td] = true;
       var em = eRaw <= sMins ? eRaw + 1440 : eRaw;
@@ -322,9 +325,16 @@ var SafeTracker = {
         var spk = (ss % 1440) + '|' + se; asm[spk] = (asm[spk] || 0) + 1;
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
-        var cd = capDay[dStr] = capDay[dStr] || {};   // normKey -> minutes-equivalent per band
-        var rec = cd[k] = cd[k] || { Morning: 0, Evening: 0, Night: 0 };
-        WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; rec[sp.shift] += (sp.hours || 0); });
+        var splits = WT._getShiftSplits(ss, se);
+        splits.forEach(function (sp) { sb[sp.shift] = true; });
+        // Time-aware per-day capable: count an agent only on/after the date they FIRST
+        // actually did SAFE. The current MasterList tag must NOT be applied retroactively
+        // to dates before they were a SAFE agent (fixes the historical over-count).
+        if (firstSafeEpoch[k] !== undefined && firstSafeEpoch[k] <= new Date(dStr + 'T12:00:00').getTime()) {
+          var cd = capDay[dStr] = capDay[dStr] || {};   // normKey -> minutes-equivalent per band
+          var rec = cd[k] = cd[k] || { Morning: 0, Evening: 0, Night: 0 };
+          splits.forEach(function (sp) { rec[sp.shift] += (sp.hours || 0); });
+        }
       });
     };
     readSched('Schedule_History');
