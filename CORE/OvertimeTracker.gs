@@ -524,6 +524,7 @@ var OvertimeTracker = {
 
     var rows = db.getDataRange().getDisplayValues().slice(1);
     var grouped = {};
+    var givenSegs = [];   // raw given OT segments, for per-slot matching against posted windows
     var seen = {};
 
     rows.forEach(function (row) {
@@ -548,6 +549,12 @@ var OvertimeTracker = {
       if (seen[dedup]) return; seen[dedup] = true;
 
       var endMins = endRaw < startMins ? endRaw + 1440 : endRaw;
+
+      // Raw segment for matching to posted open slots (respect the cycle filter).
+      if (!((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') ||
+          WT._getCycleForEpoch(new Date(rY, rM - 1, rD, Math.floor(startMins / 60), startMins % 60, 0, 0).getTime()) === cycleFilter) {
+        givenSegs.push({ agent: agent, date: dStr, s: startMins, e: endMins });
+      }
 
       WT._getShiftSplits(startMins, endMins).forEach(function (split) {
         var epoch = new Date(rY, rM - 1, rD, Math.floor(split.startMins / 60), split.startMins % 60, 0, 0).getTime();
@@ -606,6 +613,36 @@ var OvertimeTracker = {
     try { open = this._openBlock(WT, bounds, mode, cycleFilter, givenByDay); } catch (e) {}
 
     if (open) this._fillFromOpen(open, totals.all);
+
+    // Per-slot matching: attribute given OT to each posted OT window by date + time
+    // overlap, so the windows table shows WHO took each slot and the fill rate is
+    // derived from real matches (not a day-level proxy). "Pre-coded" = given OT that
+    // overlaps no posted window (extra OT on top of what was posted).
+    if (open && open.windows && open.windows.length && givenSegs.length) {
+      var segByDate = {};
+      givenSegs.forEach(function (g) { (segByDate[g.date] = segByDate[g.date] || []).push(g); });
+      var toM = function (t) { return WT._timeToMins(t); };
+      var fillH = 0, matchedH = 0;
+      open.windows.forEach(function (w) {
+        if (w.type !== 'OT') { w.filledH = 0; w.takenBy = []; w.takenCount = 0; return; }
+        var ws = toM(w.start), we = toM(w.end); if (we <= ws) we += 1440;
+        var who = {}, covered = 0;
+        (segByDate[w.date] || []).forEach(function (g) {
+          var gs = g.s, ge = g.e <= g.s ? g.e + 1440 : g.e;
+          var os = Math.max(ws, gs), oe = Math.min(we, ge);
+          if (oe > os) { var hh = (oe - os) / 60; covered += hh; who[g.agent] = (who[g.agent] || 0) + hh; }
+        });
+        var capped = Math.min(w.hours, Math.round(covered * 100) / 100);
+        w.filledH = capped;
+        w.takenCount = Object.keys(who).length;
+        w.takenBy = Object.keys(who).sort(function (a, b) { return who[b] - who[a]; }).slice(0, 6)
+                      .map(function (n) { return { name: n, h: Math.round(who[n] * 100) / 100 }; });
+        fillH += capped; matchedH += covered;
+      });
+      open.fillHours = Math.round(fillH * 100) / 100;
+      open.fillRate = open.hours > 0 ? Math.round((fillH / open.hours) * 1000) / 10 : null;
+      open.preCoded = Math.max(0, Math.round((totals.all - matchedH) * 100) / 100);
+    }
 
     return JSON.stringify({
       mode: mode, trackerType: 'overtime', label: bounds.label, cycle: bounds.cycle,
