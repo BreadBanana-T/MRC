@@ -1057,7 +1057,7 @@ var WorkforceTracker = {
       if (!months.length) return JSON.stringify({ done: true, archived: [], remaining: 0 });
       var done = [], t0 = Date.now();
       for (var i = 0; i < months.length; i++) {
-          if (Date.now() - t0 > 270000) break;   // ~4.5 min — leave headroom under the 6-min cap
+          if (Date.now() - t0 > 90000) break;   // ~90s per call — stay gentle so it never hogs the server
           var m = months[i];
           try {
               this.archiveUnifiedReport(m, 'ALL');

@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE33 · remove rebuild UI button (admin editor-only)';
+  var APP_BUILD = 'build 2026.06.15-SAFE34 · fix post-import timeout: 60s watchdog + gentle single archive flush';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -654,10 +654,10 @@
       setTimeout(function() {
           if (myToken === trackerFetchToken && state.trackerLoading) {
               state.trackerLoading = false;
-              state.trackerData = { error: 'Request timed out after 25s. The server did not respond — if you just updated the code, redeploy the Apps Script web app as a NEW VERSION (Deploy → Manage deployments → edit → New version), then hard-refresh. Check the Apps Script execution log for errors.' };
+              state.trackerData = { error: 'Request timed out after 60s. The server did not respond — if you just updated the code, redeploy the Apps Script web app as a NEW VERSION (Deploy → Manage deployments → edit → New version), then hard-refresh. Check the Apps Script execution log for errors.' };
               if (state.view === 'tracker') render();
           }
-      }, 25000);
+      }, 60000);
       if (state.view === 'tracker') render(); 
       if (state.trackerMode === 'absences') {
           google.script.run.withSuccessHandler(function(res) {
@@ -2308,7 +2308,7 @@
       var week = state.safeCompareMode === 'week';
       state.boardLoading = true;
       var token = ++boardFetchToken;
-      setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; var eo = { agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (week) state.boardRangeData = eo; else state.boardData = eo; if (state.view === 'tracker') render(); } }, 25000);
+      setTimeout(function() { if (token === boardFetchToken && state.boardLoading) { state.boardLoading = false; var eo = { agents: [], error: 'Timed out. Redeploy the web app as a new version if you just updated the code.' }; if (week) state.boardRangeData = eo; else state.boardData = eo; if (state.view === 'tracker') render(); } }, 60000);
       var ok = function(parsed) {
           if (token !== boardFetchToken) return;
           state.boardLoading = false;
@@ -3001,15 +3001,19 @@
           if (state.view === 'insights') fetchInsightData();
       }, 180000);
 
-      // Drain the deferred month-archive queue out-of-band (each call has its own
-      // execution budget), looping until nothing remains. Non-blocking.
-      var flushArchivesLoop = function() {
+      // Drain the deferred month-archive queue ONCE, 6s after import, so it never
+      // hammers the server or competes with the user's navigation (which was timing
+      // out the SAFE fetch after a full-year re-upload). Leftover months drain on
+      // subsequent imports — archives are an offline convenience, not required for
+      // live views.
+      var flushArchivesOnce = function() {
           if (typeof google === 'undefined') return;
-          google.script.run.withSuccessHandler(function(r) {
-              var o = {}; try { o = JSON.parse(r); } catch (e) {}
-              if (o && o.done === false && (o.remaining || 0) > 0) flushArchivesLoop();
-              else if (o && (o.archived || []).length) { if (state.view === 'insights') fetchInsightData(); }
-          }).withFailureHandler(function() {}).flushPendingArchives();
+          setTimeout(function() {
+              google.script.run.withSuccessHandler(function(r) {
+                  var o = {}; try { o = JSON.parse(r); } catch (e) {}
+                  if (o && (o.archived || []).length && state.view === 'insights') fetchInsightData();
+              }).withFailureHandler(function() {}).flushPendingArchives();
+          }, 6000);
       };
       var onSuccess = function(trackerResult) {
           if (settled) return; settled = true; clearTimeout(backstop);
@@ -3022,7 +3026,7 @@
           if (state.view === 'insights') fetchInsightData();
           var notifMsg = isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.');
           google.script.run.addGlobalNotification(notifMsg);
-          if (!isOtOpen) flushArchivesLoop();   // archive the imported month(s) in the background
+          if (!isOtOpen) flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
       var onFailure = function(err) {
           if (settled) return; settled = true; clearTimeout(backstop);
