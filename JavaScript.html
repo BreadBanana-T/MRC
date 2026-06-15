@@ -181,10 +181,11 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.14-SAFE23 · Coverage supply line epoch-first (fixes flat "maxed at 20")';
+  var APP_BUILD = 'build 2026.06.15-SAFE24 · dynamic Shrinkage chart + Stacking Lunches (concurrency vs SVL/ACK)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -2525,7 +2526,8 @@
       return headerHtml + kpisHtml +
           '<div style="display:flex; flex-direction:column; gap:24px; margin-bottom:24px;">' +
           chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)') +
-          chartCard('Off-Phone Hours', 'mgmt-chart-roles', 'SAFE · ICL · ULC · Tower · Coaching · ACSU') +
+          shrinkCard() +
+          chartCard('Stacking Lunches & Breaks — concurrency vs Service', 'mgmt-chart-lunch', 'agents on lunch/break at once (15-min), Onshore vs Offshore · SVL % + ACK on right axis' + lunchPeakSub()) +
           chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absences & Lates'), 'mgmt-chart-sl', slSub) +
           chartCard('Absence Mix — Onshore vs Offshore', 'mgmt-chart-abs', 'per type; solid = Onshore, striped tone = Offshore') +
           '</div>' +
@@ -2536,6 +2538,74 @@
           topTable('Top Coaching', coachRows, 'var(--status-role)') +
           '</div>';
   }
+
+  // ── Shrinkage chart: dynamic, toggleable off-phone categories + live % line ──
+  // ICL / ULC FIRE are on-phone and never appear here.
+  var MGMT_SHRINK_CATS = [
+      { k: 'acsu', label: 'ACSU', color: '#94a3b8' },
+      { k: 'tower', label: 'Tower', color: '#38bdf8' },
+      { k: 'reading', label: 'Reading', color: '#a78bfa' },
+      { k: 'breakH', label: 'Breaks', color: '#fbbf24' },
+      { k: 'lunchH', label: 'Lunch', color: '#fb923c' },
+      { k: 'safe', label: 'SAFE', color: '#34d399' },
+      { k: 'coach', label: 'Coaching', color: '#f472b6' }
+  ];
+  function renderShrinkChips() {
+      return MGMT_SHRINK_CATS.map(function(c) {
+          var on = !!state.mgmtShrinkCats[c.k];
+          return '<button onclick="toggleShrinkCat(\'' + c.k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid ' + c.color + '; background:' + (on ? c.color : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;"><span style="width:9px; height:9px; border-radius:2px; background:' + (on ? '#fff' : c.color) + ';"></span>' + c.label + '</button>';
+      }).join('');
+  }
+  function shrinkCard() {
+      return '<div class="aether-card" style="padding:24px; overflow:visible;">' +
+          '<div class="section-header">Shrinkage<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">selected off-phone ÷ scheduled hours · click chips to include/exclude · ICL/ULC FIRE are on-phone (excluded)</span></div>' +
+          '<div id="shrink-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + renderShrinkChips() + '</div>' +
+          '<div style="position:relative; height:340px; width:100%;"><canvas id="mgmt-chart-shrink" style="display:block;"></canvas></div></div>';
+  }
+  function lunchPeakSub() {
+      var l = state.mgmtData && state.mgmtData.lunch; if (!l) return '';
+      var p = [];
+      if (l.peakOff && l.peakOff.val) p.push('Offshore peak ' + l.peakOff.val + ' @ ' + l.peakOff.label);
+      if (l.peakOn && l.peakOn.val) p.push('Onshore peak ' + l.peakOn.val + ' @ ' + l.peakOn.label);
+      return p.length ? ' · ' + p.join(' · ') : '';
+  }
+  window.toggleShrinkCat = function(cat) {
+      state.mgmtShrinkCats[cat] = !state.mgmtShrinkCats[cat];
+      var box = document.getElementById('shrink-chips'); if (box) box.innerHTML = renderShrinkChips();
+      buildShrinkChart();
+  };
+  // Self-contained so the chip toggles can rebuild it without re-animating every chart.
+  window.buildShrinkChart = function() {
+      if (typeof Chart === 'undefined' || !state.mgmtData || !state.mgmtData.buckets) return;
+      var el = document.getElementById('mgmt-chart-shrink'); if (!el) return;
+      var buckets = state.mgmtData.buckets;
+      var labels = buckets.map(function(b) { return b.label; });
+      var isDark = document.body.classList.contains('dark');
+      var textColor = isDark ? '#94a3b8' : '#64748b';
+      var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)';
+      var manyBars = labels.length > 16; var bw = manyBars ? 22 : 46;
+      var onCats = MGMT_SHRINK_CATS.filter(function(c) { return state.mgmtShrinkCats[c.k]; });
+      var sets = onCats.map(function(c) { return { label: c.label, data: buckets.map(function(b) { return b[c.k] || 0; }), backgroundColor: c.color, borderRadius: 4, maxBarThickness: bw, stack: 'shrink', yAxisID: 'y' }; });
+      var pct = buckets.map(function(b) { var num = onCats.reduce(function(s, c) { return s + (b[c.k] || 0); }, 0); return (b.schedH > 0) ? Math.round((num / b.schedH) * 1000) / 10 : null; });
+      sets.push({ type: 'line', label: 'Shrinkage %', data: pct, borderColor: '#ef4444', borderWidth: 3, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#ef4444', yAxisID: 'y1', spanGaps: true, order: 0 });
+      if (charts.mgmtShrink) charts.mgmtShrink.destroy();
+      charts.mgmtShrink = new Chart(el.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: sets }, options: {
+          responsive: true, maintainAspectRatio: false, resizeDelay: 150,
+          layout: { padding: { top: 10, right: 14, bottom: 2, left: 4 } },
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+              legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 9, boxHeight: 9, padding: 14, font: { family: "'Outfit', sans-serif", weight: '700', size: 12 }, color: textColor } },
+              tooltip: { enabled: true, mode: 'index', intersect: false, backgroundColor: isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: isDark ? '#e2e8f0' : '#0f172a', bodyColor: isDark ? '#cbd5e1' : '#334155', borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, boxPadding: 6, usePointStyle: true, titleFont: { family: "'Outfit', sans-serif", weight: '800', size: 13 }, bodyFont: { family: "'Outfit', sans-serif", weight: '600', size: 12.5 },
+                  callbacks: { label: function(c2) { return c2.dataset.yAxisID === 'y1' ? ' Shrinkage: ' + (c2.parsed.y == null ? '—' : c2.parsed.y + '%') : ' ' + c2.dataset.label + ': ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h'; } } }
+          },
+          scales: {
+              x: { stacked: true, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '700', size: 11 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: manyBars ? 18 : 31 } },
+              y: { stacked: true, beginAtZero: true, position: 'left', grid: { color: gridColor }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } },
+              y1: { position: 'right', beginAtZero: true, suggestedMax: 100, grid: { display: false }, ticks: { callback: function(v) { return v + '%'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } }
+          },
+          animation: { duration: 500 }
+      } });
+  };
 
   function initMgmtCharts() {
       if (typeof Chart === 'undefined' || !state.mgmtData || !state.mgmtData.buckets) return;
@@ -2577,7 +2647,7 @@
       };
       var bw = manyBars ? 22 : 46;
 
-      ['mgmtOt', 'mgmtRoles', 'mgmtSl', 'mgmtAbs'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
+      ['mgmtOt', 'mgmtRoles', 'mgmtShrink', 'mgmtLunch', 'mgmtSl', 'mgmtAbs'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
 
       var elOt = document.getElementById('mgmt-chart-ot');
       if (elOt) {
@@ -2601,16 +2671,22 @@
               } };
           charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: otSets }, options: otOpts });
       }
-      var elRoles = document.getElementById('mgmt-chart-roles');
-      if (elRoles) {
-          charts.mgmtRoles = new Chart(elRoles.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: [
-              { label: 'SAFE', data: buckets.map(function(b) { return b.safe; }), backgroundColor: '#34d399', borderRadius: 4, maxBarThickness: bw },
-              { label: 'ICL', data: buckets.map(function(b) { return b.icl; }), backgroundColor: '#c084fc', borderRadius: 4, maxBarThickness: bw },
-              { label: 'ULC', data: buckets.map(function(b) { return b.ulc; }), backgroundColor: '#fb923c', borderRadius: 4, maxBarThickness: bw },
-              { label: 'Tower', data: buckets.map(function(b) { return b.tower; }), backgroundColor: '#38bdf8', borderRadius: 4, maxBarThickness: bw },
-              { label: 'Coaching', data: buckets.map(function(b) { return b.coach; }), backgroundColor: '#fbbf24', borderRadius: 4, maxBarThickness: bw },
-              { label: 'ACSU', data: buckets.map(function(b) { return b.acsu; }), backgroundColor: '#94a3b8', borderRadius: 4, maxBarThickness: bw }
-          ] }, options: baseOpts(true) });
+      buildShrinkChart();   // dynamic shrinkage (replaces Off-Phone Hours)
+      var elLunch = document.getElementById('mgmt-chart-lunch');
+      if (elLunch && d.lunch) {
+          var L = d.lunch;
+          var lOpts = baseOpts(true);
+          lOpts.scales.x.ticks.maxTicksLimit = 24;   // 96 × 15-min → ~hourly labels
+          lOpts.scales.y = { stacked: true, beginAtZero: true, position: 'left', grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          lOpts.scales.y1 = { position: 'right', beginAtZero: true, suggestedMax: 100, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          charts.mgmtLunch = new Chart(elLunch.getContext('2d'), { type: 'bar', data: { labels: L.labels, datasets: [
+              { label: 'Lunch · Offshore', data: L.offLunch, backgroundColor: '#fb923c', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
+              { label: 'Lunch · Onshore', data: L.onLunch, backgroundColor: '#fdba74', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
+              { label: 'Break · Offshore', data: L.offBreak, backgroundColor: '#fbbf24', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
+              { label: 'Break · Onshore', data: L.onBreak, backgroundColor: '#fde68a', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
+              { type: 'line', label: 'SVL %', data: L.svl, borderColor: '#38bdf8', borderWidth: 2.5, tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 0 },
+              { type: 'line', label: 'ACK', data: L.ack, borderColor: '#f472b6', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 0 }
+          ] }, options: lOpts });
       }
       var elSl = document.getElementById('mgmt-chart-sl');
       if (elSl) {

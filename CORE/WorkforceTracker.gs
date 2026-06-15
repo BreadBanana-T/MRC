@@ -96,7 +96,7 @@ var WorkforceTracker = {
       // Word-aware role matcher. Bare substring checks turned words like
       // "vehicle"/"article" (icl) and "feuille" (feu) into role hours.
       // Leading-only boundaries on icl/ulc keep variants like "ICL2" matching.
-      const ROLE_RGX = /safe onqueue|safe en ligne|\bicl|\bincident|\bulc|\bfire\b|\bfeu\b|wofqt|woqft|\btower\b/;
+      const ROLE_RGX = /safe onqueue|safe en ligne|\bicl|\bincident|\bulc|\bfire\b|\bfeu\b|wofqt|woqft|\btower\b|\breading\b|\blecture\b/;
       
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
@@ -152,6 +152,7 @@ var WorkforceTracker = {
                   else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
                   else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
+                  else if (actLower.includes('reading') || actLower.includes('lecture')) roleType = "READING";
               }
               
               if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
@@ -210,6 +211,7 @@ var WorkforceTracker = {
                   else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
                   else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
+                  else if (actLower.includes('reading') || actLower.includes('lecture')) roleType = "READING";
               }
 
               let isOff = csvParts[5] && csvParts[5].includes("Offshore");

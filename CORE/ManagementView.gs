@@ -155,13 +155,16 @@ var ManagementView = {
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
                openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
-               preCodedOt: 0 };
+               preCodedOt: 0,
+               // Shrinkage inputs: scheduled hours (denominator) + off-phone hour buckets.
+               reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
       return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
                coach: 0, acsu: 0, coachSessions: 0, slAvg: null, ackAvg: null,
-               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0 };
+               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+               reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     });
     // Absence series: aligned with buckets for week/month/quarter; a single
     // whole-period entry for day grain (hourly absence bars are meaningless).
@@ -250,6 +253,7 @@ var ManagementView = {
         var key = null;
         if (role.indexOf('SAFE') !== -1) key = 'safe';
         else if (role.indexOf('TOWER') !== -1 || role.indexOf('WOFQT') !== -1 || role.indexOf('WOQFT') !== -1) key = 'tower';
+        else if (role.indexOf('READING') !== -1 || role.indexOf('LECTURE') !== -1) key = 'reading';
         else if (role.indexOf('ICL') !== -1) key = 'icl';
         else if (role.indexOf('ULC') !== -1 || role.indexOf('FIRE') !== -1) key = 'ulc';
         if (!key) return;
@@ -459,8 +463,87 @@ var ManagementView = {
       }
     } catch (e) {}
 
+    // ── Shrinkage inputs + Stacking-lunch concurrency ──────────────────────────
+    // One pass over the full schedule (Schedule_History wins over Raw Schedule):
+    //  • scheduled hours per bucket (the shrinkage denominator),
+    //  • break/lunch hours per bucket (shrinkage numerator pieces),
+    //  • a 15-min intraday concurrency curve (agents on lunch/break at once),
+    //    split Onshore vs Offshore, for the stacking-lunch chart.
+    var NIV = 96;                                   // 96 × 15-min buckets in a day
+    var lunchAgg = { onL: [], offL: [], onB: [], offB: [] };
+    for (var _i = 0; _i < NIV; _i++) { lunchAgg.onL[_i] = 0; lunchAgg.offL[_i] = 0; lunchAgg.onB[_i] = 0; lunchAgg.offB[_i] = 0; }
+    var lunchDays = {};
+    try {
+      var schedSeen = {};
+      var addConc = function(sMin, eMin, region, isLunch) {
+        if (eMin <= sMin) eMin += 1440;
+        var arr = region === 'Offshore' ? (isLunch ? lunchAgg.offL : lunchAgg.offB) : (isLunch ? lunchAgg.onL : lunchAgg.onB);
+        for (var m = sMin; m < eMin; m += 15) { arr[Math.floor((m % 1440) / 15)] += 1; }
+      };
+      ['Schedule_History', 'Raw Schedule'].forEach(function(shName) {
+        var db = WT._getDB(shName);
+        if (!db || db.getLastRow() < 2) return;
+        db.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+          var nm = String(row[0]).trim(); if (!nm) return;
+          var dStr = WT._formatDate(row[2]); if (!dStr) return;
+          var dayMs = self._dayStartEpoch(dStr); if (dayMs < 0) return;
+          if (dayMs + 86400000 * 2 < pb.prevStart || dayMs >= pb.selEnd) return;          // window gate
+          var sk = nm.toLowerCase() + '|' + dStr; if (schedSeen[sk]) return; schedSeen[sk] = true;  // history wins
+          var region = String(row[6] || '').indexOf('Offshore') !== -1 ? 'Offshore' : 'Onshore';
+          // Scheduled hours from epochs (locale-proof); fall back to text shift cols.
+          var msS = Number(String(row[10]).replace(/[,\s]/g, '')), msE = Number(String(row[11]).replace(/[,\s]/g, ''));
+          if (row[10] !== '' && row[11] !== '' && !isNaN(msS) && !isNaN(msE) && msS > 0 && msE > msS && (msE - msS) <= 86400000) {
+            distribute({ s: msS, e: msE }, function(t, h) { t.schedH += h; }, function(b, h) { b.schedH += h; });
+          } else {
+            var siv = self._segInterval(WT, dayMs, row[3], row[4]);
+            if (siv) distribute(siv, function(t, h) { t.schedH += h; }, function(b, h) { b.schedH += h; });
+          }
+          if (dayMs >= pb.selStart && dayMs < pb.selEnd) lunchDays[dStr] = true;
+          var brks; try { brks = JSON.parse(row[7] || '[]'); } catch (e2) { brks = []; }
+          brks.forEach(function(bk) {
+            var sMin = WT._timeToMins(bk.start), eMin = WT._timeToMins(bk.end);
+            if (eMin === sMin) return;
+            var isLunch = /lunch|repas|meal/i.test(String(bk.type || ''));
+            var isBreak = /break|pause/i.test(String(bk.type || ''));
+            if (!isLunch && !isBreak) return;
+            var em = eMin <= sMin ? eMin + 1440 : eMin;
+            var iv = { s: dayMs + sMin * 60000, e: dayMs + em * 60000 };
+            distribute(iv, function(t, h) { if (isLunch) t.lunchH += h; else t.breakH += h; },
+                           function(b, h) { if (isLunch) b.lunchH += h; else b.breakH += h; });
+            if (dayMs >= pb.selStart && dayMs < pb.selEnd) addConc(sMin, eMin, region, isLunch);
+          });
+        });
+      });
+    } catch (e) {}
+    // Average the intraday curve into a "typical day" across the window's days.
+    var nLunchDays = Math.max(1, Object.keys(lunchDays).length);
+    ['onL', 'offL', 'onB', 'offB'].forEach(function(kk) { lunchAgg[kk] = lunchAgg[kk].map(function(v) { return Math.round((v / nLunchDays) * 10) / 10; }); });
+    // Intraday SVL/ACK overlay (averaged per 15-min interval-of-day across the window).
+    var lunchSvl = [], lunchAck = [];
+    for (var _j = 0; _j < NIV; _j++) { lunchSvl[_j] = null; lunchAck[_j] = null; }
+    try {
+      var sh2 = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Stats History');
+      if (sh2 && sh2.getLastRow() > 1) {
+        var accS = [], accA = [], accN = [];
+        for (var _k = 0; _k < NIV; _k++) { accS[_k] = 0; accA[_k] = 0; accN[_k] = 0; }
+        sh2.getDataRange().getValues().slice(1).forEach(function(r) {
+          var t = new Date(r[0]).getTime(); if (isNaN(t) || t < pb.selStart || t >= pb.selEnd) return;
+          var svl = parseFloat(r[1]) || 0; if (svl > 0 && svl <= 1) svl = svl * 100; if (svl <= 0) return;
+          var ack = parseFloat(String(r[2]).replace(/[^\d.]/g, '')) || 0;
+          var dd = new Date(t); var idx = Math.floor((dd.getHours() * 60 + dd.getMinutes()) / 15);
+          if (idx < 0 || idx >= NIV) return;
+          accS[idx] += svl; accA[idx] += ack; accN[idx] += 1;
+        });
+        for (var _m = 0; _m < NIV; _m++) { if (accN[_m] > 0) { lunchSvl[_m] = Math.round((accS[_m] / accN[_m]) * 10) / 10; lunchAck[_m] = Math.round(accA[_m] / accN[_m]); } }
+      }
+    } catch (e) {}
+    var peakOf = function(arr) { var mx = 0, mi = -1; arr.forEach(function(v, i) { if (v > mx) { mx = v; mi = i; } }); return { val: mx, label: mi < 0 ? '' : (('0' + Math.floor(mi / 4)).slice(-2) + ':' + ('0' + ((mi % 4) * 15)).slice(-2)) }; };
+    var lunchLabels = []; for (var _n = 0; _n < NIV; _n++) { lunchLabels[_n] = ('0' + Math.floor(_n / 4)).slice(-2) + ':' + ('0' + ((_n % 4) * 15)).slice(-2); }
+    var lunchObj = { labels: lunchLabels, onLunch: lunchAgg.onL, offLunch: lunchAgg.offL, onBreak: lunchAgg.onB, offBreak: lunchAgg.offB,
+                     svl: lunchSvl, ack: lunchAck, peakOn: peakOf(lunchAgg.onL), peakOff: peakOf(lunchAgg.offL), days: Object.keys(lunchDays).length };
+
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
       delete o._idpSum; delete o._idpN;
@@ -494,6 +577,7 @@ var ManagementView = {
       generated: Utilities.formatDate(new Date(), this.TZ, 'yyyy-MM-dd HH:mm'),
       buckets: buckets,
       abs: absSeries,
+      lunch: lunchObj,
       totals: { sel: selT, prev: prevT },
       sel: {
         label: periodLabel,
