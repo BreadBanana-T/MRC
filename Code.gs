@@ -141,6 +141,28 @@ function importWorkforceData(sched, idp) {
   return WorkforceTracker.importData(sched, idp);
 }
 
+// One-click clean rebuild: clears ONLY the schedule + activity sheets (and, if
+// asked, the monthly report archive) so the user can re-upload from scratch with
+// no duplicates/orphans. EXPLICIT allow-list — never touches WF_MASTERLIST,
+// WF_REGION_MAP, WF_LANG_MAP, WF_IDP, WF_OT_OPEN, GEM, Stats, DB_Sessions,
+// Overtime_Tracking, Training_* or Outage History. Clears CONTENT (keeps header
+// row) so there is no slow row-reflow.
+function rebuildDataSheets(alsoArchives) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targets = ['Raw Schedule', 'WF_ROLES', 'WF_COACHING', 'WF_FURLOUGH', 'WF_ABSENCES', 'WF_OVERTIME', 'Schedule_History'];
+  if (alsoArchives) targets.push('Weekly_Archives_V3');
+  var cleared = [];
+  targets.forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var last = sh.getLastRow();
+    if (last > 1) sh.getRange(2, 1, last - 1, Math.max(1, sh.getLastColumn())).clearContent();
+    cleared.push(name);
+  });
+  Logger.log('[rebuildDataSheets] cleared: ' + cleared.join(', ') + (alsoArchives ? ' (incl. archives)' : ''));
+  return JSON.stringify({ ok: true, cleared: cleared });
+}
+
 // ── Chunked upload transport ──────────────────────────────────────────────
 // google.script.run reliably carries ~1 MB; large WFM/IDP pastes blow past
 // that and get dropped silently with no error and no response. Chunk the

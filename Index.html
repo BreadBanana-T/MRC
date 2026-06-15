@@ -100,6 +100,12 @@
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
           </div>
+          <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">
+             <div style="font-size:0.7rem; font-weight:800; color:var(--status-alert); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Danger zone — clean rebuild</div>
+             <div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-bottom:10px; line-height:1.5;">Clears the schedule + activity sheets (Raw Schedule, Schedule_History, WF_ROLES / COACHING / FURLOUGH / ABSENCES, WF_OVERTIME) so you can re-upload clean — no duplicates or orphans. <b style="color:var(--status-active);">Preserves</b> MasterList, Region map, Language map, IDP, OT-open slots, GEM &amp; Stats.</div>
+             <label style="display:flex; align-items:center; gap:8px; font-size:0.74rem; font-weight:700; margin-bottom:12px; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" id="rebuild-archives"> also clear the monthly report archive (Weekly_Archives_V3)</label>
+             <button class="btn btn-glass" style="border-color:var(--status-alert); color:var(--status-alert);" onclick="confirmRebuildData()"><i data-lucide="trash-2" width="16"></i> Rebuild data sheets</button>
+          </div>
        </div>
     </div>
 
