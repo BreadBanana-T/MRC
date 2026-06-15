@@ -136,12 +136,14 @@ function flushPendingArchives() {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.flushPendingArchives() : '{}';
 }
 
-// One-click clean rebuild: clears ONLY the schedule + activity sheets (and, if
-// asked, the monthly report archive) so the user can re-upload from scratch with
-// no duplicates/orphans. EXPLICIT allow-list — never touches WF_MASTERLIST,
-// WF_REGION_MAP, WF_LANG_MAP, WF_IDP, WF_OT_OPEN, GEM, Stats, DB_Sessions,
-// Overtime_Tracking, Training_* or Outage History. Clears CONTENT (keeps header
-// row) so there is no slow row-reflow.
+// ADMIN-ONLY — intentionally NOT wired to any UI button (too destructive for an
+// everyday user). Run it manually from the Apps Script editor: rebuildDataSheets()
+// or rebuildDataSheets(true). Clears ONLY the schedule + activity sheets (and, if
+// asked, the monthly report archive) for a clean re-upload with no duplicates/
+// orphans. EXPLICIT allow-list — never touches WF_MASTERLIST, WF_REGION_MAP,
+// WF_LANG_MAP, WF_IDP, WF_OT_OPEN, GEM, Stats, DB_Sessions, Overtime_Tracking,
+// Training_* or Outage History. Clears CONTENT (keeps the header row) so there is
+// no slow row-reflow.
 function rebuildDataSheets(alsoArchives) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var targets = ['Raw Schedule', 'WF_ROLES', 'WF_COACHING', 'WF_FURLOUGH', 'WF_ABSENCES', 'WF_OVERTIME', 'Schedule_History'];
