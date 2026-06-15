@@ -128,7 +128,17 @@ function getWorkforceAnalytics(mode, date, type, region, cycleFilter) {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 
 }
 function importWorkforceData(sched, idp) {
-  return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error";
+  if (typeof WorkforceTracker === 'undefined') return "Error";
+  // Archive the full schedule (Raw Schedule + Schedule_History) in the SAME server
+  // call as the activity parse, so SAFE/role hours can never be written without the
+  // matching shift envelope. Previously the raw-schedule writer was a separate,
+  // fire-and-forget google.script.run call that could silently fail/time out —
+  // producing "SAFE hours but no shift" in Coverage. (processChunkedImport runs
+  // ImportHandler itself, so this only affects the direct/small-import path.)
+  if (sched && String(sched).trim() && typeof ImportHandler !== 'undefined') {
+    try { ImportHandler.run(sched); } catch (e) { Logger.log('[importWorkforceData] ImportHandler failed: ' + e); }
+  }
+  return WorkforceTracker.importData(sched, idp);
 }
 
 // ── Chunked upload transport ──────────────────────────────────────────────

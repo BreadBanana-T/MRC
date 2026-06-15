@@ -72,6 +72,11 @@ flowchart TD
 `WF_COACHING`, `WF_FURLOUGH`, `WF_ROLES`, `WF_ABSENCES`, `WF_IDP`) → `OvertimeTracker.importFromSchedule`
 (`WF_OVERTIME`) → `archiveUnifiedReport` × (ALL/WEEK A/WEEK B) per affected month.
 
+> **Both import paths archive (SAFE29).** The direct/small path `importWorkforceData` now also runs
+> `ImportHandler.run(sched)` in the same call. Previously it relied on a separate fire‑and‑forget
+> `runImport` call that could silently fail — which is how `WF_ROLES` (SAFE hours) could exist with no
+> `Schedule_History` row ("SAFE hours but no shift" in Coverage).
+
 > ✅ **Crash‑safety (FIXED, SAFE21):** `Schedule_History`, `Raw Schedule`, and the 5 destructive upserts
 > (`WorkforceTracker._runDestructiveLogic`) now **overwrite in place + clear the tail** instead of
 > `clearContents()`‑then‑`setValues()`. A timed‑out import can no longer leave a tracker's sheet empty.
