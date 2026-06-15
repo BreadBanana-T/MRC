@@ -286,6 +286,7 @@ var SafeTracker = {
     // SUPPLY: capable agents on shift per clock hour (schedule — rotation-aware,
     // because it only counts capable agents who ACTUALLY have a schedule row).
     var capHourMin = mk24(), schedDaySet = {}, shiftBands = {}, schedSeen = {}, scheduledCapable = {};
+    var agentShift = {};   // normKey -> { "startMin|endMin": count } → most common shift window
     var readSched = function (sheet) {
       var db = WT._getDB(sheet);
       if (!db || db.getLastRow() < 2) return;
@@ -305,6 +306,8 @@ var SafeTracker = {
         var dk = k + '|' + dStr; if (schedSeen[dk]) return; schedSeen[dk] = true;   // history wins
         schedDaySet[dStr] = true;
         scheduledCapable[k] = true;                          // actually worked the window
+        var asm = agentShift[k] = agentShift[k] || {};       // tally this shift window
+        var spk = (ss % 1440) + '|' + se; asm[spk] = (asm[spk] || 0) + 1;
         addHourly(capHourMin, ss, se);
         var sb = shiftBands[k] = shiftBands[k] || {};
         WT._getShiftSplits(ss, se).forEach(function (sp) { sb[sp.shift] = true; });
@@ -342,8 +345,17 @@ var SafeTracker = {
       if (b.Night) byShift.night++;
     });
 
+    // Most common scheduled shift window per agent (for the thin-hour carrier list).
+    var shiftModeOf = function (key) {
+      var m = agentShift[key]; if (!m) return null;
+      var best = null, bc = 0;
+      Object.keys(m).forEach(function (pk) { if (m[pk] > bc) { bc = m[pk]; best = pk; } });
+      if (!best) return null;
+      var p = best.split('|'); return { start: parseInt(p[0], 10), end: parseInt(p[1], 10) };
+    };
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
+      var ash = shiftModeOf(nk(n));
       totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
       totals.sched += a.srcSched; totals.ot += a.srcOt;
       var dayKeys = Object.keys(a.days);
@@ -379,6 +391,8 @@ var SafeTracker = {
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt),
         days: dayKeys.length, segs: a.segs,
         byHour: byHour, thinShare: thinShare,
+        shiftStartStr: ash ? WT._minsToTime(ash.start) : '', shiftEndStr: ash ? WT._minsToTime(ash.end) : '',
+        shiftPattern: ash ? (Math.floor(ash.start / 60) + '–' + Math.floor((ash.end % 1440) / 60)) : '',
         avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
         dayMap: a.days,
