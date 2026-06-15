@@ -181,7 +181,7 @@
   // deployed?" is answerable at a glance (GAS freezes code per deployment
   // version; pasting files + browser refresh is NOT enough without a new
   // version).
-  var APP_BUILD = 'build 2026.06.15-SAFE29 · direct import now archives schedule (fixes SAFE-hours-but-no-shift)';
+  var APP_BUILD = 'build 2026.06.15-SAFE30 · fix invisible tooltip footer (SVL/ACK + fill-rate)';
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
@@ -2659,6 +2659,10 @@
                       padding: 12, cornerRadius: 10, boxPadding: 6, usePointStyle: true,
                       titleFont: { family: "'Outfit', sans-serif", weight: '800', size: 13 },
                       bodyFont: { family: "'Outfit', sans-serif", weight: '600', size: 12.5 },
+                      // footerColor defaults to white → invisible on the light tooltip; set it
+                      // so footers (lunch SVL/ACK, OT fill-rate) are actually readable.
+                      footerColor: isDark ? '#93c5fd' : '#1d4ed8', footerMarginTop: 8,
+                      footerFont: { family: "'Outfit', sans-serif", weight: '800', size: 12 },
                       callbacks: {}
                   }
               },
