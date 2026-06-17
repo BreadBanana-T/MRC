@@ -14,15 +14,21 @@ function calculateMetrics(inText, outText) {
     report: ""
   };
 
-  // SVL OUT = Actual-weighted SL over ALL priority 1-4 service types.
-  // Reverse-engineered against paired MAS pastes + reported stats:
-  // including 4-COMM makes the samples match exactly (the old list
-  // omitted it and consistently under-reported by 1-2 points).
+  // SVL OUT = Actual-weighted SL over the EXACT service types on the MAS
+  // heatmap the reported SVL/ACK are read from:
+  //   1-FIRE 1-GAS 1-H/U 1-MED 3-VID 4-BURG 4-TAMP
+  // NOT 4-COMM / 2-CCM / 2-FARM / 3-LWK — those are not on that heatmap, and
+  // an earlier note here wrongly added 4-COMM (dropping it changes nothing:
+  // its SL sits on the blend). Verified across 5 paired captures.
+  // NOTE: the heatmap measures these on a different basis than this
+  // bureau-wide alarm export — its 4-BURG cell can sit ~2 pts above the raw's
+  // 4-BURG in ANY window — so this from-raw figure tracks the reported SVL to
+  // ~1-3 pts but is not digit-exact. That residual is a data-source
+  // difference, not a queue-list bug; it cannot be closed from this raw.
   const LIST_SVL = [
       "1-FIRE", "1-GAS", "1-H/U", "1-MED",
-      "2-CCM", "2-FARM",
-      "3-LWK", "3-VID",
-      "4-BURG", "4-COMM", "4-TAMP"
+      "3-VID",
+      "4-BURG", "4-TAMP"
   ];
 
   // Trend % uses only the "priority" queues the tableau tracks for trending.
