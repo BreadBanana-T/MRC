@@ -188,7 +188,11 @@
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
-      trackerAux: null, trackerAuxLoading: false, trackerAuxKey: null
+      trackerAux: null, trackerAuxLoading: false, trackerAuxKey: null,
+      // Personalized Management View: per-browser layout (hidden KPI cards +
+      // added tracker sections, all on the Sun–Sat management week). Loaded
+      // lazily from localStorage via getMgmtLayout().
+      mgmtCustomize: false, mgmtLayout: null
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -2483,6 +2487,119 @@
       }).getManagementDashboard(state.mgmtGrain, state.mgmtDate);
   }
 
+  // ───────────────── PERSONALIZED MANAGEMENT VIEW (per-browser) ────────────────
+  // A manager can hide built-in KPI cards and ADD focused "tracker sections"
+  // (Overtime, Coaching, SAFE, Absence, …). Every section is powered by the
+  // SAME management dashboard data, so it automatically follows the Sun–Sat
+  // management week — no Wed–Wed / Week A-B mismatch. Layout persists in
+  // localStorage so each manager keeps their own view.
+  var MGMT_LAYOUT_KEY = 'mgmt_layout_v1';
+  // Section registry: a label, color, the per-bucket series getter and the
+  // period total getter (read off the dashboard payload).
+  var MGMT_SECTIONS = {
+      overtime: { label: 'Overtime', color: '#818cf8', unit: 'h', total: function(c) { return c.ot || 0; }, series: function(b) { return b.ot || 0; } },
+      coaching: { label: 'Coaching', color: '#f59e0b', unit: 'h', total: function(c) { return c.coach || 0; }, series: function(b) { return b.coach || 0; } },
+      safe:     { label: 'SAFE', color: '#10b981', unit: 'h', total: function(c) { return c.safe || 0; }, series: function(b) { return b.safe || 0; } },
+      tower:    { label: 'Tower', color: '#0ea5e9', unit: 'h', total: function(c) { return c.tower || 0; }, series: function(b) { return b.tower || 0; } },
+      reading:  { label: 'Reading', color: '#a78bfa', unit: 'h', total: function(c) { return c.reading || 0; }, series: function(b) { return b.reading || 0; } },
+      acsu:     { label: 'VFurlough (ACSU)', color: '#94a3b8', unit: 'h', total: function(c) { return c.acsu || 0; }, series: function(b) { return b.acsu || 0; } },
+      idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
+      absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
+  };
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl'];
+  function getMgmtLayout() {
+      if (!state.mgmtLayout) {
+          var def = { hidden: {}, sections: [], chart: {} };
+          try { var raw = localStorage.getItem(MGMT_LAYOUT_KEY); if (raw) def = Object.assign(def, JSON.parse(raw)); } catch (e) {}
+          if (!def.hidden) def.hidden = {}; if (!def.sections) def.sections = []; if (!def.chart) def.chart = {};
+          state.mgmtLayout = def;
+      }
+      return state.mgmtLayout;
+  }
+  function saveMgmtLayout() { try { localStorage.setItem(MGMT_LAYOUT_KEY, JSON.stringify(getMgmtLayout())); } catch (e) {} }
+  window.toggleMgmtCustomize = function() { state.mgmtCustomize = !state.mgmtCustomize; render(); };
+  window.toggleMgmtCard = function(k) { var L = getMgmtLayout(); L.hidden[k] = !L.hidden[k]; saveMgmtLayout(); render(); };
+  window.addMgmtSection = function(type) { var L = getMgmtLayout(); if (MGMT_SECTIONS[type] && L.sections.indexOf(type) === -1) { L.sections.push(type); saveMgmtLayout(); render(); } };
+  window.removeMgmtSection = function(type) { var L = getMgmtLayout(); var i = L.sections.indexOf(type); if (i > -1) { L.sections.splice(i, 1); saveMgmtLayout(); render(); } };
+  window.setMgmtSectionChart = function(type, kind) { var L = getMgmtLayout(); L.chart[type] = kind; saveMgmtLayout(); render(); };
+  window.resetMgmtLayout = function() { state.mgmtLayout = { hidden: {}, sections: [], chart: {} }; saveMgmtLayout(); render(); };
+
+  // Customize panel — chips to re-show hidden cards + add tracker sections.
+  function mgmtCustomizePanel() {
+      if (!state.mgmtCustomize) return '';
+      var L = getMgmtLayout();
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level' };
+      var cardChips = MGMT_KPI_KEYS.map(function(k) {
+          var on = !L.hidden[k];
+          return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
+      }).join('');
+      var sectionChips = Object.keys(MGMT_SECTIONS).map(function(type) {
+          var added = L.sections.indexOf(type) !== -1;
+          var s = MGMT_SECTIONS[type];
+          return '<button onclick="' + (added ? 'removeMgmtSection' : 'addMgmtSection') + '(\'' + type + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid ' + s.color + '; background:' + (added ? s.color : 'transparent') + '; color:' + (added ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;"><span style="width:9px; height:9px; border-radius:2px; background:' + (added ? '#fff' : s.color) + ';"></span>' + (added ? s.label + ' ✕' : s.label) + '</button>';
+      }).join('');
+      return '<div class="aether-card" style="padding:18px 22px; margin-bottom:24px; border:1.5px dashed var(--accent-primary);">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;"><div style="font-size:0.8rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px;"><i data-lucide="layout-dashboard" width="14"></i> Customize my view</div><button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="resetMgmtLayout()">Reset</button></div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">KPI cards</div>' +
+          '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + cardChips + '</div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add tracker sections <span style="text-transform:none; font-weight:600;">(filtered to this Sun–Sat week)</span></div>' +
+          '<div style="display:flex; flex-wrap:wrap; gap:6px;">' + sectionChips + '</div>' +
+          '</div>';
+  }
+
+  // Rendered tracker-section cards (one chart each) + their chart-type toggle.
+  function mgmtSectionsHtml() {
+      var L = getMgmtLayout();
+      if (!L.sections.length) return '';
+      var d = state.mgmtData || {};
+      var cur = (d.totals || {}).sel || {};
+      return '<div class="grid-split" style="margin-bottom:24px;">' + L.sections.map(function(type) {
+          var s = MGMT_SECTIONS[type]; if (!s) return '';
+          var kind = L.chart[type] || 'bar';
+          var total = Math.round((s.total(cur) || 0) * 10) / 10;
+          var typeBtn = function(kd, lbl) { return '<button onclick="setMgmtSectionChart(\'' + type + '\',\'' + kd + '\')" class="sort-btn ' + (kind === kd ? 'active' : '') + '" style="text-transform:none; letter-spacing:0; height:26px; font-size:0.7rem;">' + lbl + '</button>'; };
+          return '<div class="aether-card" style="padding:24px; overflow:visible;">' +
+              '<div class="section-header" style="display:flex; justify-content:space-between; align-items:center;"><span style="display:flex; align-items:center; gap:8px;"><span style="width:11px; height:11px; border-radius:3px; background:' + s.color + ';"></span>' + s.label + ' <span style="font-size:0.95rem; font-weight:800; color:var(--text-main);">' + total + (s.unit || '') + '</span></span>' +
+              '<span style="display:flex; gap:4px; align-items:center;">' + typeBtn('bar', 'Bars') + typeBtn('line', 'Line') + (state.mgmtCustomize ? '<button onclick="removeMgmtSection(\'' + type + '\')" title="Remove section" style="background:transparent; border:none; color:var(--status-alert); font-weight:800; cursor:pointer; font-size:1rem; line-height:1;">✕</button>' : '') + '</span></div>' +
+              '<div style="position:relative; height:300px; width:100%;"><canvas id="mgmt-sec-' + type + '" style="display:block;"></canvas></div></div>';
+      }).join('') + '</div>';
+  }
+
+  // Build the charts for the added tracker sections (called from initMgmtCharts).
+  function buildMgmtSectionCharts() {
+      if (typeof Chart === 'undefined' || !state.mgmtData || !state.mgmtData.buckets) return;
+      var L = getMgmtLayout();
+      var d = state.mgmtData;
+      var buckets = d.buckets || [];
+      var absSeries = d.abs || [];
+      var t = _mgmtChartTheme();
+      var ff = "'Outfit', sans-serif";
+      var manyBars = buckets.length > 16; var bw = manyBars ? 22 : 46;
+      // Tear down any section charts whose card was removed since last render.
+      Object.keys(charts).forEach(function(k) { if (k.indexOf('mgmtSec_') === 0 && charts[k]) { charts[k].destroy(); charts[k] = null; } });
+      L.sections.forEach(function(type) {
+          var s = MGMT_SECTIONS[type]; if (!s) return;
+          var key = 'mgmtSec_' + type;
+          var el = document.getElementById('mgmt-sec-' + type); if (!el) return;
+          if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+          var kind = L.chart[type] || 'bar';
+          var labels, data;
+          if (s.fromAbs) { labels = absSeries.map(function(a) { return a.label; }); data = absSeries.map(function(a) { return a.absHours || 0; }); }
+          else { labels = buckets.map(function(b) { return b.label; }); data = buckets.map(function(b) { return s.series(b); }); }
+          var ds = (kind === 'line')
+              ? { label: s.label, data: data, borderColor: s.color, backgroundColor: s.color + '22', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: s.color }
+              : { label: s.label, data: data, backgroundColor: s.color, borderRadius: 4, maxBarThickness: bw };
+          var opts = { responsive: true, maintainAspectRatio: false, resizeDelay: 150, layout: { padding: { top: 10, right: 14, bottom: 2, left: 4 } },
+              interaction: { mode: 'index', intersect: false, axis: 'x' }, hover: { mode: 'index', intersect: false, axis: 'x' },
+              plugins: { legend: { display: false },
+                  tooltip: { enabled: true, mode: 'index', intersect: false, backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, usePointStyle: true, callbacks: { label: function(c2) { return ' ' + s.label + ': ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + (s.unit || ''); } } } },
+              scales: { x: { grid: { display: false }, ticks: { font: { family: ff, weight: '700', size: 11 }, color: t.textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: manyBars ? 18 : 31 } },
+                  y: { beginAtZero: true, grid: { color: t.gridColor }, ticks: { callback: function(v) { return v + (s.unit || ''); }, font: { family: ff, weight: '600', size: 11 }, color: t.textColor } } },
+              animation: { duration: 500 } };
+          charts[key] = new Chart(el.getContext('2d'), { type: kind === 'line' ? 'line' : 'bar', data: { labels: labels, datasets: [ds] }, options: opts });
+      });
+  }
+
   function renderMgmt() {
       var grainBtn = function(label, val) {
           var active = state.mgmtGrain === val;
@@ -2514,6 +2631,7 @@
           grainBtn('Daily','day') + grainBtn('Weekly','week') + grainBtn('Monthly','month') + grainBtn('Quarterly','quarter') + grainBtn('YTD','ytd') +
           '<input type="date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700; cursor:pointer;" value="' + escapeHTML(state.mgmtDate) + '" onchange="setMgmtDate(this.value)" onclick="try{this.showPicker();}catch(e){}">' +
           '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
+          '<button class="btn ' + (state.mgmtCustomize ? 'btn-primary' : 'btn-glass') + '" style="height:32px; font-size:0.78rem;" onclick="toggleMgmtCustomize()"><i data-lucide="sliders-horizontal" width="14"></i> ' + (state.mgmtCustomize ? 'Done' : 'Customize') + '</button>' +
           '</div>' +
           (stripHtml ? '<div style="width:100%;">' + stripHtml + '</div>' : '') +
           '</div>';
@@ -2580,23 +2698,31 @@
       var aSh = cur.absShift || { Night: 0, Morning: 0, Evening: 0 };
       var absShiftSub = 'by shift — Night <b style="color:var(--text-main);">' + aSh.Night + 'h</b> · Morning <b style="color:var(--text-main);">' + aSh.Morning + 'h</b> · Evening <b style="color:var(--text-main);">' + aSh.Evening + 'h</b>';
 
+      var otCoverageCard = (function() {
+          // Fill rate compares to-date vs to-date; the posting itself is
+          // shown for the FULL period (it's plan data, already decided).
+          var fill = (cur.openOtToDate > 0) ? Math.round((cur.ot / cur.openOtToDate) * 1000) / 10 : null;
+          var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
+          var skills = Object.keys(cur.openSkills || {}).sort().map(function(k) { return escapeHTML(k) + ' ' + cur.openSkills[k] + 'h'; }).join(' · ');
+          var headline = fill != null ? fill + '%' : ((cur.openOt || 0) > 0 ? (cur.openOt || 0) + 'h' : '—');
+          return kpi('OT Coverage', headline, delta(cur.openOt, prev.openOt, true, 'h'), 'posted <b style="color:var(--text-main);">' + (cur.openOt || 0) + 'h</b> / ' + (cur.openSlots || 0) + ' slots for the period' + (cur.openOtToDate ? ' · ' + cur.openOtToDate + 'h elapsed' : '') + (skills ? '<br>' + skills : ''), fillColor);
+      })();
+      // Keyed cards so the personalized layout can hide any of them.
+      var kpiCards = [
+          { k: 'ot', html: kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents' + ((cur.preCodedOt || 0) > 0 ? ' · <b style="color:var(--accent-primary);">+' + cur.preCodedOt + 'h pre-coded (future)</b>' : '')) },
+          { k: 'coded', html: kpi('Offline / Coded Hours', codedTotal + 'h', delta(codedTotal, prevCodedTotal, false, 'h'), codedBreak) },
+          { k: 'otcov', html: otCoverageCard },
+          { k: 'idp', html: kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short, incl. forecast' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') },
+          { k: 'coaching', html: kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') },
+          { k: 'absence', html: kpi('Absence Hours', absHrs + 'h' + (weekPct != null ? ' <span style="font-size:1rem; font-weight:800; color:var(--text-muted);">(' + weekPct + '% of week)</span>' : ''), delta(cur.absHours, prev.absHours, false, 'h'), absShiftSub + '<br>' + (cur.absences || 0) + ' agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), absHrs > 0 ? 'var(--status-alert)' : 'var(--text-main)') },
+          { k: 'sl', html: kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) }
+      ];
+      var mLayout = getMgmtLayout();
       var kpisHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px;">' +
-          kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents' + ((cur.preCodedOt || 0) > 0 ? ' · <b style="color:var(--accent-primary);">+' + cur.preCodedOt + 'h pre-coded (future)</b>' : '')) +
-          kpi('Offline / Coded Hours', codedTotal + 'h', delta(codedTotal, prevCodedTotal, false, 'h'), codedBreak) +
-          (function() {
-              // Fill rate compares to-date vs to-date; the posting itself is
-              // shown for the FULL period (it's plan data, already decided).
-              var fill = (cur.openOtToDate > 0) ? Math.round((cur.ot / cur.openOtToDate) * 1000) / 10 : null;
-              var fillColor = fill == null ? 'var(--text-muted)' : (fill >= 80 ? 'var(--status-active)' : (fill >= 50 ? 'var(--status-warn)' : 'var(--status-alert)'));
-              var skills = Object.keys(cur.openSkills || {}).sort().map(function(k) { return escapeHTML(k) + ' ' + cur.openSkills[k] + 'h'; }).join(' · ');
-              var headline = fill != null ? fill + '%' : ((cur.openOt || 0) > 0 ? (cur.openOt || 0) + 'h' : '—');
-              return kpi('OT Coverage', headline, delta(cur.openOt, prev.openOt, true, 'h'), 'posted <b style="color:var(--text-main);">' + (cur.openOt || 0) + 'h</b> / ' + (cur.openSlots || 0) + ' slots for the period' + (cur.openOtToDate ? ' · ' + cur.openOtToDate + 'h elapsed' : '') + (skills ? '<br>' + skills : ''), fillColor);
-          })() +
-          kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short, incl. forecast' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') +
-          kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') +
-          kpi('Absence Hours', absHrs + 'h' + (weekPct != null ? ' <span style="font-size:1rem; font-weight:800; color:var(--text-muted);">(' + weekPct + '% of week)</span>' : ''), delta(cur.absHours, prev.absHours, false, 'h'), absShiftSub + '<br>' + (cur.absences || 0) + ' agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), absHrs > 0 ? 'var(--status-alert)' : 'var(--text-main)') +
-          kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) +
-          '</div>';
+          kpiCards.filter(function(c) { return !mLayout.hidden[c.k]; }).map(function(c) {
+              if (!state.mgmtCustomize) return c.html;
+              return '<div style="position:relative;">' + c.html + '<button onclick="toggleMgmtCard(\'' + c.k + '\')" title="Hide this card" style="position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.2);">✕</button></div>';
+          }).join('') + '</div>';
 
       var chartCard = function(title, canvasId, sub) {
           return '<div class="aether-card" style="padding:24px; overflow:visible;"><div class="section-header">' + title + (sub ? '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + sub + '</span>' : '') + '</div><div style="position:relative; height:320px; width:100%;"><canvas id="' + canvasId + '" style="display:block;"></canvas></div></div>';
@@ -2619,7 +2745,7 @@
       // Stacking Lunches & Breaks and Absence Mix (Onshore vs Offshore) were
       // moved OUT of this executive view into the operational Furlough / Absence
       // trackers (see renderTracker) per management direction.
-      return headerHtml + kpisHtml +
+      return headerHtml + mgmtCustomizePanel() + kpisHtml + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)') +
           shrinkCard() +
@@ -2788,6 +2914,7 @@
           charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: otSets }, options: otOpts });
       }
       buildShrinkChart();   // dynamic shrinkage (replaces Off-Phone Hours)
+      buildMgmtSectionCharts();   // personalized "add a tracker" section charts
       // Service Level vs Absence BY SHIFT — SL% line (left) with real-absence
       // HOURS stacked Night/Morning/Evening (right) + ALU lates, so a dip in SL
       // can be read against which shift the absences land on.
