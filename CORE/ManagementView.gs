@@ -29,6 +29,16 @@
  *     leave (excluded). Day priority: real > late > approved.
  *   - UNAB (and every type) carries an offshore count so "most UNABs are
  *     offshore" is visible directly in the graphs.
+ *   - ABSENCE HOURS: real-absence hours are also summed (absHours/absHoursOff)
+ *     and split Night/Morning/Evening (absShift, via _getShiftSplits) per the
+ *     totals AND per bucket (absSeries[].absShift). The client renders "% of
+ *     the Sun–Sat week" as absHours ÷ schedH and a concentration-by-shift view.
+ *   - CODED/OFFLINE TOTAL: the client sums ot + acsu(VFurlough) + reading +
+ *     elearn + tower into one figure shown beside its breakdown. `elearn` reads
+ *     WF_ROLES roles matching ELEARN/E-LEARN/VILT/VIRTUAL — 0 until a feed exists.
+ *   - lunch (stacking concurrency) and abs (per-type onshore/offshore mix) are
+ *     still emitted but are now rendered in the operational Furlough / Absence
+ *     trackers, not here (decluttered per management direction).
  */
 
 var ManagementView = {
@@ -151,9 +161,13 @@ var ManagementView = {
     var prevCap = Math.min(pb.prevEnd, nowMs);
 
     var newTotals = function() {
-      return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
+      return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
+               // Absence HOURS (not just agent-day counts) + shift concentration.
+               // absShift is real-absence hours split Night/Morning/Evening; the
+               // "% of week" is derived on the client as absHours ÷ schedH.
+               absHours: 0, absHoursOff: 0, absShift: { Night: 0, Morning: 0, Evening: 0 },
                openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
                preCodedOt: 0,
                // Shrinkage inputs: scheduled hours (denominator) + off-phone hour buckets.
@@ -162,15 +176,20 @@ var ManagementView = {
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
       return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
-               coach: 0, acsu: 0, coachSessions: 0, slAvg: null, ackAvg: null,
+               coach: 0, acsu: 0, elearn: 0, coachSessions: 0, slAvg: null, ackAvg: null,
                openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     });
     // Absence series: aligned with buckets for week/month/quarter; a single
     // whole-period entry for day grain (hourly absence bars are meaningless).
+    // absHours + absShift power the per-shift concentration + SL-vs-absence-by-shift charts.
+    var newAbsEntry = function(label) {
+      return { label: label, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
+               absTypes: {}, absTypesOff: {}, absHours: 0, absShift: { Night: 0, Morning: 0, Evening: 0 } };
+    };
     var absSeries = (grain === 'day')
-      ? [{ label: wins.length ? this._fmt(pb.selStart, 'MMM d') : '', absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0, absTypes: {}, absTypesOff: {} }]
-      : wins.map(function(w) { return { label: w.label, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0, absTypes: {}, absTypesOff: {} }; });
+      ? [newAbsEntry(wins.length ? this._fmt(pb.selStart, 'MMM d') : '')]
+      : wins.map(function(w) { return newAbsEntry(w.label); });
 
     var topOt = {}, topSafe = {}, topTower = {}, topCoach = {};
 
@@ -254,6 +273,7 @@ var ManagementView = {
         if (role.indexOf('SAFE') !== -1) key = 'safe';
         else if (role.indexOf('TOWER') !== -1 || role.indexOf('WOFQT') !== -1 || role.indexOf('WOQFT') !== -1) key = 'tower';
         else if (role.indexOf('READING') !== -1 || role.indexOf('LECTURE') !== -1) key = 'reading';
+        else if (role.indexOf('ELEARN') !== -1 || role.indexOf('E-LEARN') !== -1 || role.indexOf('VILT') !== -1 || role.indexOf('VIRTUAL') !== -1) key = 'elearn';
         else if (role.indexOf('ICL') !== -1) key = 'icl';
         else if (role.indexOf('ULC') !== -1 || role.indexOf('FIRE') !== -1) key = 'ulc';
         if (!key) return;
@@ -391,11 +411,24 @@ var ManagementView = {
           if (!dayInfo[k]) {
             dayInfo[k] = { dayMid: dayMid, inSel: inSel,
                            region: String(row[5] || '').indexOf('Offshore') !== -1 ? 'Offshore' : 'Onshore',
-                           real: {}, late: false, appr: false };
+                           real: {}, late: false, appr: false,
+                           hrs: 0, shift: { Night: 0, Morning: 0, Evening: 0 } };
           }
           if (apprRgx.test(type)) dayInfo[k].appr = true;
           else if (lateRgx.test(type)) dayInfo[k].late = true;
-          else dayInfo[k].real[type] = true;
+          else {
+            dayInfo[k].real[type] = true;
+            // Real-absence HOURS, split across the Night/Morning/Evening shift
+            // windows (07-15 / 15-23 / 23-07) so concentration-by-shift is exact.
+            var sMin = WT._timeToMins(row[3]), eMin = WT._timeToMins(row[4]);
+            if (sMin >= 0 && eMin >= 0 && eMin !== sMin) {
+              if (eMin <= sMin) eMin += 1440;
+              WT._getShiftSplits(sMin, eMin).forEach(function(sp) {
+                dayInfo[k].hrs += sp.hours;
+                if (dayInfo[k].shift[sp.shift] != null) dayInfo[k].shift[sp.shift] += sp.hours;
+              });
+            }
+          }
         });
         Object.keys(dayInfo).forEach(function(k) {
           var di = dayInfo[k];
@@ -404,6 +437,9 @@ var ManagementView = {
           if (realTypes.length) {
             t.absences += 1;
             if (di.region === 'Offshore') t.absOff += 1; else t.absOn += 1;
+            t.absHours += di.hrs;
+            if (di.region === 'Offshore') t.absHoursOff += di.hrs;
+            t.absShift.Night += di.shift.Night; t.absShift.Morning += di.shift.Morning; t.absShift.Evening += di.shift.Evening;
             realTypes.forEach(function(ty) {
               t.absTypes[ty] = (t.absTypes[ty] || 0) + 1;
               if (di.region === 'Offshore') t.absTypesOff[ty] = (t.absTypesOff[ty] || 0) + 1;
@@ -420,6 +456,8 @@ var ManagementView = {
             if (realTypes.length) {
               srs.absences += 1;
               if (di.region === 'Offshore') srs.absOff += 1; else srs.absOn += 1;
+              srs.absHours += di.hrs;
+              srs.absShift.Night += di.shift.Night; srs.absShift.Morning += di.shift.Morning; srs.absShift.Evening += di.shift.Evening;
               realTypes.forEach(function(ty) {
                 srs.absTypes[ty] = (srs.absTypes[ty] || 0) + 1;
                 if (di.region === 'Offshore') srs.absTypesOff[ty] = (srs.absTypesOff[ty] || 0) + 1;
@@ -543,13 +581,15 @@ var ManagementView = {
                      svl: lunchSvl, ack: lunchAck, peakOn: peakOf(lunchAgg.onL), peakOff: peakOf(lunchAgg.offL), days: Object.keys(lunchDays).length };
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'elearn', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
+    var roundShift = function(s) { if (!s) return; s.Night = round1(s.Night); s.Morning = round1(s.Morning); s.Evening = round1(s.Evening); };
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
       delete o._idpSum; delete o._idpN;
     };
     buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
-    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); finIdp(t); });
+    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
+    absSeries.forEach(function(a) { a.absHours = round1(a.absHours); roundShift(a.absShift); });
 
     var topList = function(map) {
       return Object.keys(map)
