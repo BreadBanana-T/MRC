@@ -2506,7 +2506,7 @@
       idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
       absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
   };
-  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl'];
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex'];
   function getMgmtLayout() {
       if (!state.mgmtLayout) {
           var def = { hidden: {}, sections: [], chart: {} };
@@ -2528,7 +2528,7 @@
   function mgmtCustomizePanel() {
       if (!state.mgmtCustomize) return '';
       var L = getMgmtLayout();
-      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level' };
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table' };
       var cardChips = MGMT_KPI_KEYS.map(function(k) {
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
@@ -2544,6 +2544,64 @@
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + cardChips + '</div>' +
           '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add tracker sections <span style="text-transform:none; font-weight:600;">(filtered to this Sun–Sat week)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px;">' + sectionChips + '</div>' +
+          '</div>';
+  }
+
+  // IEX Coding Compiled + Misc — mirrors the manager's weekly sheet: each code
+  // with its hours, a group subtotal ("Total" column), the Coaching+Offtasks
+  // grand total, all scoped to the selected period. Codes the import pipeline
+  // does not capture yet are flagged "pending feed".
+  function mgmtCodingCard() {
+      var L = getMgmtLayout();
+      if (L.hidden['iex']) return '';
+      var d = state.mgmtData || {};
+      var cur = (d.totals || {}).sel || {};
+      var codes = cur.codes || {};
+      var periodLbl = (d.sel && d.sel.label) ? d.sel.label : '';
+      var PENDING = { 'LFQI': 1, 'CLASSROOM': 1, 'AUTH': 1, 'SME': 1, 'E Learning': 1 };
+      var GROUPS = [
+          { key: 'acsu', title: 'ACSU', rows: [['ACSU', 'Company Solicited Time Off']] },
+          { key: 'coaching', title: 'Coaching', rows: [['CE-HUDDLE', ''], ['QUAL', 'Quality Session'], ['ONE', 'Meeting: One on One'], ['SBYS', 'SidexSide Coaching']] },
+          { key: 'offtask', title: 'Offtasks', rows: [['READ', ''], ['LFQI', 'On Loan, OffQ, OPEX'], ['WOFQT', 'Team Lead Ofq Work'], ['VILT', 'Virtual Training']] },
+          { key: 'misc', title: 'Misc', rows: [['CLASSROOM', ''], ['MEET', 'Dir / Roadshows'], ['AUTH', 'Authorized time off'], ['SME', 'Loan Off Queue'], ['E Learning', '(Check)'], ['OT', 'Overtime']] }
+      ];
+      var fmt = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
+      var groupSum = function(g) { return g.rows.reduce(function(s, r) { return s + (codes[r[0]] || 0); }, 0); };
+      var sumKeys = function(arr) { return arr.reduce(function(s, k) { return s + (codes[k] || 0); }, 0); };
+
+      var rowHtml = function(code, label) {
+          var pending = PENDING[code];
+          var v = codes[code] || 0;
+          return '<tr style="border-bottom:1px solid var(--glass-border);">' +
+              '<td style="padding:6px 10px; font-weight:800; color:var(--text-main); white-space:nowrap;">' + escapeHTML(code) + (label ? ' <span style="font-weight:600; color:var(--text-muted);">' + escapeHTML(label) + '</span>' : '') + '</td>' +
+              '<td style="padding:6px 10px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums; color:' + (pending ? 'var(--text-muted)' : 'var(--text-main)') + ';">' + (pending && v === 0 ? '<span style="font-style:italic; font-weight:600;">pending feed</span>' : fmt(v)) + '</td>' +
+              '</tr>';
+      };
+      var groupHtml = GROUPS.map(function(g) {
+          var sub = groupSum(g);
+          var GC = { acsu: '#0ea5e9', coaching: '#f59e0b', offtask: '#a78bfa', misc: '#94a3b8' }[g.key];
+          return '<div style="margin-bottom:14px; break-inside:avoid;">' +
+              '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:' + GC + '1a; border-left:3px solid ' + GC + '; border-radius:6px; margin-bottom:4px;">' +
+                  '<span style="font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:' + GC + ';">' + g.title + '</span>' +
+                  '<span style="font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-main);">' + fmt(sub) + '</span>' +
+              '</div>' +
+              '<table style="width:100%; border-collapse:collapse; font-size:0.82rem;"><tbody>' + g.rows.map(function(r) { return rowHtml(r[0], r[1]); }).join('') + '</tbody></table>' +
+              '</div>';
+      }).join('');
+
+      var coachT = sumKeys(['CE-HUDDLE', 'QUAL', 'ONE', 'SBYS']);
+      var offT = sumKeys(['READ', 'LFQI', 'WOFQT', 'VILT']);
+      var grand = coachT + offT;
+      var totalsStrip = '<div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; padding-top:14px; border-top:2px solid var(--glass-border);">' +
+          ['ACSU ' + fmt(codes['ACSU'] || 0), 'Coaching ' + fmt(coachT), 'Offtasks ' + fmt(offT)].map(function(s) { return '<span style="font-size:0.72rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); border:1px solid var(--glass-border); padding:5px 12px; border-radius:8px;">' + s + '</span>'; }).join('') +
+          '<span style="font-size:0.78rem; font-weight:800; color:#fff; background:var(--accent-primary); padding:5px 14px; border-radius:8px;">Coaching + Offtasks Total ' + fmt(grand) + '</span>' +
+          '</div>';
+
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'iex\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px; margin-bottom:24px;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:center;"><span>IEX Coding Compiled &amp; Misc' + (periodLbl ? ' <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + escapeHTML(periodLbl) + ' · coded hours by type, with group totals</span>' : '') + '</span>' + removeBtn + '</div>' +
+          '<div style="columns:2; column-gap:28px;">' + groupHtml + '</div>' +
+          totalsStrip +
           '</div>';
   }
 
@@ -2745,7 +2803,7 @@
       // Stacking Lunches & Breaks and Absence Mix (Onshore vs Offshore) were
       // moved OUT of this executive view into the operational Furlough / Absence
       // trackers (see renderTracker) per management direction.
-      return headerHtml + mgmtCustomizePanel() + kpisHtml + mgmtSectionsHtml() +
+      return headerHtml + mgmtCustomizePanel() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)') +
           shrinkCard() +

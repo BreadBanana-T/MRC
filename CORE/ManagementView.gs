@@ -143,6 +143,25 @@ var ManagementView = {
     return o > 0 ? o / 3600000 : 0;
   },
 
+  // Map a raw WF_COACHING activity string to its IEX code (matches the manager's
+  // "IEX Coding Compiled" + "Misc" tables). Returns null when it isn't one of
+  // the tracked codes, so we don't invent buckets.
+  _coachCode: function(act) {
+    act = String(act || '').toLowerCase();
+    if (/huddle/.test(act)) return 'CE-HUDDLE';
+    if (/qual|quality/.test(act)) return 'QUAL';
+    if (/one on one|one-on-one|individuelle/.test(act)) return 'ONE';
+    if (/sbys|side ?by ?side|sidexside/.test(act)) return 'SBYS';
+    if (/vilt|virtual/.test(act)) return 'VILT';
+    if (/e[- ]?learning|elearn/.test(act)) return 'E Learning';
+    if (/classroom/.test(act)) return 'CLASSROOM';
+    if (/roadshow|\bmeet\b|réunion/.test(act)) return 'MEET';
+    if (/lfqi|on loan|off ?q|opex/.test(act)) return 'LFQI';
+    if (/\bauth\b|authorized/.test(act)) return 'AUTH';
+    if (/\bsme\b/.test(act)) return 'SME';
+    return null;
+  },
+
   getDashboard: function(grain, refDateStr) {
     grain = (grain === 'day' || grain === 'month' || grain === 'quarter' || grain === 'ytd') ? grain : 'week';
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
@@ -168,6 +187,9 @@ var ManagementView = {
                // absShift is real-absence hours split Night/Morning/Evening; the
                // "% of week" is derived on the client as absHours ÷ schedH.
                absHours: 0, absHoursOff: 0, absShift: { Night: 0, Morning: 0, Evening: 0 },
+               // Per-IEX-code hours for the "IEX Coding Compiled / Misc" card
+               // (period to-date totals). Keyed by code, e.g. {'CE-HUDDLE':8.4}.
+               codes: {},
                openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
                preCodedOt: 0,
                // Shrinkage inputs: scheduled hours (denominator) + off-phone hour buckets.
@@ -284,6 +306,9 @@ var ManagementView = {
           var nm = String(row[0]).trim();
           if (key === 'safe') topSafe[nm] = (topSafe[nm] || 0) + selH;
           else if (key === 'tower') topTower[nm] = (topTower[nm] || 0) + selH;
+          // IEX coding rows derived from roles (offtask group).
+          var rcode = (key === 'reading') ? 'READ' : (key === 'tower') ? 'WOFQT' : (key === 'elearn') ? 'VILT' : null;
+          if (rcode) selT.codes[rcode] = (selT.codes[rcode] || 0) + selH;
         }
       });
     } catch (e) {}
@@ -306,6 +331,8 @@ var ManagementView = {
         if (selH > 0) {
           if (!topCoach[nm]) topCoach[nm] = { sessions: 0, hours: 0 };
           topCoach[nm].hours += selH;
+          var ccode = self._coachCode(row[2]);
+          if (ccode) selT.codes[ccode] = (selT.codes[ccode] || 0) + selH;
         }
       });
     } catch (e) {}
@@ -590,6 +617,9 @@ var ManagementView = {
     buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
     [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
     absSeries.forEach(function(a) { a.absHours = round1(a.absHours); roundShift(a.absShift); });
+    // Codes derived directly from category totals, then round everything.
+    selT.codes.ACSU = selT.acsu; selT.codes.OT = selT.ot;
+    Object.keys(selT.codes).forEach(function(c) { selT.codes[c] = round1(selT.codes[c]); });
 
     var topList = function(map) {
       return Object.keys(map)
