@@ -192,7 +192,10 @@
       // Personalized Management View: per-browser layout (hidden KPI cards +
       // added tracker sections, all on the Sun–Sat management week). Loaded
       // lazily from localStorage via getMgmtLayout().
-      mgmtCustomize: false, mgmtLayout: null
+      mgmtCustomize: false, mgmtLayout: null,
+      // Real operational trackers EMBEDDED into the Management View (fetched
+      // from their own backends so the data is the genuine tracker, not a copy).
+      mgmtEmbed: { data: {}, loading: {}, key: {} }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -2476,6 +2479,8 @@
   function fetchMgmtData() {
       state.mgmtLoading = true;
       if (typeof google === 'undefined') { state.mgmtLoading = false; return; }
+      // Load any embedded real trackers the manager saved (anchored on mgmtDate).
+      try { getMgmtLayout().embeds.forEach(fetchMgmtEmbed); } catch (e) {}
       google.script.run.withSuccessHandler(function(res) {
           try { state.mgmtData = JSON.parse(res); } catch(e) { state.mgmtData = { error: 'Could not parse management data.' }; }
           state.mgmtLoading = false;
@@ -2506,16 +2511,44 @@
       idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
       absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
   };
-  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex'];
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline'];
   function getMgmtLayout() {
       if (!state.mgmtLayout) {
-          var def = { hidden: {}, sections: [], chart: {} };
+          var def = { hidden: {}, sections: [], chart: {}, embeds: [] };
           try { var raw = localStorage.getItem(MGMT_LAYOUT_KEY); if (raw) def = Object.assign(def, JSON.parse(raw)); } catch (e) {}
-          if (!def.hidden) def.hidden = {}; if (!def.sections) def.sections = []; if (!def.chart) def.chart = {};
+          if (!def.hidden) def.hidden = {}; if (!def.sections) def.sections = []; if (!def.chart) def.chart = {}; if (!def.embeds) def.embeds = [];
           state.mgmtLayout = def;
       }
       return state.mgmtLayout;
   }
+
+  // Real trackers that can be embedded into the Management View. Each pulls its
+  // OWN backend (the genuine tracker data), anchored on the management date.
+  // NOTE: the operational trackers run a Wed→Wed week, so an embed shows that
+  // tracker's native week (its label is surfaced) — not the Sun–Sat window.
+  var MGMT_EMBEDS = {
+      overtime: { label: 'Overtime Tracker', color: '#818cf8' },
+      furlough: { label: 'Furlough Tracker', color: '#0ea5e9' },
+      coaching: { label: 'Coaching Tracker', color: '#f59e0b' },
+      safe:     { label: 'SAFE Tracker', color: '#10b981' }
+  };
+  function fetchMgmtEmbed(type) {
+      if (typeof google === 'undefined' || !MGMT_EMBEDS[type]) return;
+      var ref = state.mgmtDate;
+      var key = type + '|' + ref;
+      var E = state.mgmtEmbed;
+      if (E.key[type] === key && E.data[type] && !E.data[type].error) return;
+      E.key[type] = key; E.loading[type] = true;
+      var ok = function(res) { try { E.data[type] = JSON.parse(res); } catch (e) { E.data[type] = { error: 'Could not parse tracker data.' }; } E.loading[type] = false; if (state.view === 'mgmt') render(); };
+      var fail = function(err) { E.data[type] = { error: (err && err.message) || 'Tracker backend error.' }; E.loading[type] = false; if (state.view === 'mgmt') render(); };
+      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      if (type === 'overtime') r.getOvertimeAnalytics('week', ref, 'All', 'ALL');
+      else if (type === 'furlough') r.getWorkforceAnalytics('week', ref, 'furlough', 'Onshore', 'ALL');
+      else if (type === 'coaching') r.getWorkforceAnalytics('week', ref, 'coaching', 'All', 'ALL');
+      else if (type === 'safe') r.getSafeAnalytics('week', ref, 'All', 'ALL');
+  }
+  window.addMgmtEmbed = function(type) { var L = getMgmtLayout(); if (MGMT_EMBEDS[type] && L.embeds.indexOf(type) === -1) { L.embeds.push(type); saveMgmtLayout(); fetchMgmtEmbed(type); render(); } };
+  window.removeMgmtEmbed = function(type) { var L = getMgmtLayout(); var i = L.embeds.indexOf(type); if (i > -1) { L.embeds.splice(i, 1); saveMgmtLayout(); render(); } };
   function saveMgmtLayout() { try { localStorage.setItem(MGMT_LAYOUT_KEY, JSON.stringify(getMgmtLayout())); } catch (e) {} }
   window.toggleMgmtCustomize = function() { state.mgmtCustomize = !state.mgmtCustomize; render(); };
   window.toggleMgmtCard = function(k) { var L = getMgmtLayout(); L.hidden[k] = !L.hidden[k]; saveMgmtLayout(); render(); };
@@ -2528,10 +2561,15 @@
   function mgmtCustomizePanel() {
       if (!state.mgmtCustomize) return '';
       var L = getMgmtLayout();
-      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table' };
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table' };
       var cardChips = MGMT_KPI_KEYS.map(function(k) {
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
+      }).join('');
+      var embedChips = Object.keys(MGMT_EMBEDS).map(function(type) {
+          var added = L.embeds.indexOf(type) !== -1;
+          var e = MGMT_EMBEDS[type];
+          return '<button onclick="' + (added ? 'removeMgmtEmbed' : 'addMgmtEmbed') + '(\'' + type + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid ' + e.color + '; background:' + (added ? e.color : 'transparent') + '; color:' + (added ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;"><span style="width:9px; height:9px; border-radius:2px; background:' + (added ? '#fff' : e.color) + ';"></span>' + (added ? e.label + ' ✕' : e.label) + '</button>';
       }).join('');
       var sectionChips = Object.keys(MGMT_SECTIONS).map(function(type) {
           var added = L.sections.indexOf(type) !== -1;
@@ -2540,11 +2578,89 @@
       }).join('');
       return '<div class="aether-card" style="padding:18px 22px; margin-bottom:24px; border:1.5px dashed var(--accent-primary);">' +
           '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;"><div style="font-size:0.8rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px;"><i data-lucide="layout-dashboard" width="14"></i> Customize my view</div><button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="resetMgmtLayout()">Reset</button></div>' +
-          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">KPI cards</div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Bring in a tracker <span style="text-transform:none; font-weight:600;">(the real tracker, embedded here — no tab switch)</span></div>' +
+          '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + embedChips + '</div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">KPI cards <span style="text-transform:none; font-weight:600;">(show / hide)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + cardChips + '</div>' +
-          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add tracker sections <span style="text-transform:none; font-weight:600;">(filtered to this Sun–Sat week)</span></div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add a quick metric <span style="text-transform:none; font-weight:600;">(Sun–Sat mini-chart)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px;">' + sectionChips + '</div>' +
           '</div>';
+  }
+
+  // Embedded real-tracker cards: a compact-but-genuine summary of each tracker's
+  // own backend data + a chart, so managers don't change tabs.
+  function mgmtEmbedsHtml() {
+      var L = getMgmtLayout();
+      if (!L.embeds || !L.embeds.length) return '';
+      var fmt = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
+      var chip = function(lbl, val, c) { return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:0.7rem; font-weight:800; color:var(--text-secondary); background:rgba(0,0,0,0.04); padding:3px 10px; border-radius:99px;"><span style="width:7px; height:7px; border-radius:50%; background:' + (c || 'var(--text-muted)') + ';"></span>' + lbl + ' <b style="color:var(--text-main);">' + val + '</b></span>'; };
+      return '<div class="grid-split" style="margin-bottom:24px;">' + L.embeds.map(function(type) {
+          var e = MGMT_EMBEDS[type];
+          var data = state.mgmtEmbed.data[type];
+          var loading = state.mgmtEmbed.loading[type];
+          var removeBtn = '<button onclick="removeMgmtEmbed(\'' + type + '\')" title="Remove tracker" style="background:transparent; border:none; color:var(--status-alert); font-weight:800; cursor:pointer; font-size:1rem; line-height:1;">✕</button>';
+          var head = '', body = '', wkLbl = (data && data.label) ? data.label : '';
+          if (loading || !data) {
+              body = '<div style="height:240px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading ' + e.label + '…</div>';
+          } else if (data.error) {
+              body = '<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(data.error) + '</div>';
+          } else {
+              var T = data.totals || {};
+              var chips = '', total = '';
+              if (type === 'overtime') {
+                  var ot = data.otTotals || {}; var op = data.open || {};
+                  total = fmt(T.all);
+                  chips = chip('×1', fmt(ot.x1), '#818cf8') + chip('×1.5', fmt(ot.x15), '#f472b6') + chip('On-Q', fmt(ot.OnQueue), '#10b981') + chip('Off-Q', fmt(ot.OffQueue), '#f59e0b') + (op.fillRate != null ? chip('Fill', op.fillRate + '%', '#0ea5e9') : '');
+              } else if (type === 'furlough') {
+                  total = fmt(T.all);
+                  chips = chip('Morning', fmt(T.morning), '#38bdf8') + chip('Evening', fmt(T.evening), '#fb923c') + chip('Night', fmt(T.night), '#6366f1') + chip('Events', (T.count || 0), '#94a3b8');
+              } else if (type === 'coaching') {
+                  total = fmt(T.all);
+                  chips = chip('Sessions', (T.count || 0), '#f59e0b') + chip('Morning', fmt(T.morning), '#38bdf8') + chip('Evening', fmt(T.evening), '#fb923c') + chip('Night', fmt(T.night), '#6366f1');
+              } else if (type === 'safe') {
+                  var cov = (data.coverage || {}).headline || {};
+                  total = fmt((data.coverage || {}).headline ? cov.totalSafeH : T.all);
+                  chips = (cov.thinPct != null ? chip('Thin cover', cov.thinPct + '%', '#f87171') : '') + chip('Sched', fmt(T.sched), '#6366f1') + chip('OT', fmt(T.ot), '#f472b6') + (T.bRed != null ? chip('>50h', T.bRed, '#dc2626') : '');
+              }
+              head = '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">' + chips + '</div>';
+              body = head + '<div style="position:relative; height:220px; width:100%;"><canvas id="mgmt-embed-' + type + '" style="display:block;"></canvas></div>';
+          }
+          return '<div class="aether-card" style="padding:24px; overflow:visible;">' +
+              '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span style="display:flex; align-items:center; gap:8px; min-width:0;"><span style="width:11px; height:11px; border-radius:3px; background:' + e.color + '; flex-shrink:0;"></span>' + e.label + (wkLbl ? '<span style="font-size:0.66rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + escapeHTML(wkLbl) + ' (operational week)</span>' : '') + '</span><span style="display:flex; gap:8px; align-items:center;">' + (total ? '<span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + total + '</span>' : '') + removeBtn + '</span></div>' +
+              body + '</div>';
+      }).join('') + '</div>';
+  }
+
+  // Charts for embedded trackers (shift-split doughnut from each tracker's totals).
+  function buildMgmtEmbedCharts() {
+      if (typeof Chart === 'undefined') return;
+      var L = getMgmtLayout();
+      var t = _mgmtChartTheme();
+      var ff = "'Outfit', sans-serif";
+      Object.keys(charts).forEach(function(k) { if (k.indexOf('mgmtEmbed_') === 0 && charts[k]) { charts[k].destroy(); charts[k] = null; } });
+      (L.embeds || []).forEach(function(type) {
+          var data = state.mgmtEmbed.data[type];
+          if (!data || data.error) return;
+          var el = document.getElementById('mgmt-embed-' + type); if (!el) return;
+          var key = 'mgmtEmbed_' + type;
+          var T = data.totals || {};
+          var labels, vals, colors;
+          if (type === 'safe' && data.coverage && data.coverage.headline) {
+              labels = ['Scheduled', 'OT']; vals = [T.sched || 0, T.ot || 0]; colors = ['#6366f1', '#f472b6'];
+          } else {
+              labels = ['Morning', 'Evening', 'Night']; vals = [T.morning || 0, T.evening || 0, T.night || 0]; colors = ['#38bdf8', '#fb923c', '#6366f1'];
+          }
+          var sum = vals.reduce(function(s, v) { return s + v; }, 0);
+          var dOpts = { responsive: true, maintainAspectRatio: false, cutout: '58%', layout: { padding: 8 },
+              plugins: { legend: { display: true, position: 'bottom', labels: { usePointStyle: true, boxWidth: 9, boxHeight: 9, padding: 12, font: { family: ff, weight: '700', size: 11 }, color: t.textColor } },
+                  tooltip: { backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, usePointStyle: true, callbacks: { label: function(c2) { var v = c2.parsed || 0; var pct = sum > 0 ? Math.round(v / sum * 100) : 0; return ' ' + c2.label + ': ' + (Math.round(v * 10) / 10) + 'h (' + pct + '%)'; } } } },
+              animation: { duration: 500 } };
+          if (sum <= 0) {
+              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: ['No hours this week'], datasets: [{ data: [1], backgroundColor: [t.gridColor], borderWidth: 0 }] }, options: Object.assign({}, dOpts, { plugins: { legend: { display: false }, tooltip: { enabled: false } } }) });
+          } else {
+              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: labels, datasets: [{ data: vals, backgroundColor: colors, borderColor: t.isDark ? '#0f172a' : '#fff', borderWidth: 2 }] }, options: dOpts });
+          }
+      });
   }
 
   // IEX Coding Compiled + Misc — mirrors the manager's weekly sheet: each code
@@ -2579,11 +2695,11 @@
       };
       var groupHtml = GROUPS.map(function(g) {
           var sub = groupSum(g);
-          var GC = { acsu: '#0ea5e9', coaching: '#f59e0b', offtask: '#a78bfa', misc: '#94a3b8' }[g.key];
-          return '<div style="margin-bottom:14px; break-inside:avoid;">' +
-              '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:' + GC + '1a; border-left:3px solid ' + GC + '; border-radius:6px; margin-bottom:4px;">' +
-                  '<span style="font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:' + GC + ';">' + g.title + '</span>' +
-                  '<span style="font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-main);">' + fmt(sub) + '</span>' +
+          var GC = { acsu: 'var(--region-on)', coaching: 'var(--status-warn)', offtask: 'var(--status-role)', misc: 'var(--text-muted)' }[g.key];
+          return '<div style="margin-bottom:16px; break-inside:avoid;">' +
+              '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--glass-border); margin-bottom:2px;">' +
+                  '<span style="display:flex; align-items:center; gap:8px; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-muted);"><span style="width:9px; height:9px; border-radius:50%; background:' + GC + '; flex-shrink:0;"></span>' + g.title + '</span>' +
+                  '<span style="font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-main); font-size:0.95rem;">' + fmt(sub) + '</span>' +
               '</div>' +
               '<table style="width:100%; border-collapse:collapse; font-size:0.82rem;"><tbody>' + g.rows.map(function(r) { return rowHtml(r[0], r[1]); }).join('') + '</tbody></table>' +
               '</div>';
@@ -2603,6 +2719,43 @@
           '<div style="columns:2; column-gap:28px;">' + groupHtml + '</div>' +
           totalsStrip +
           '</div>';
+  }
+
+  // Offline Tasks, Absences & Furlough — per-bucket table mirroring the weekly
+  // sheet: Furlough (ACSU) hours + real-absence hours split Night/Morning(Day)/
+  // Evening per day, with a period total row. Project hours aren't tracked yet.
+  function mgmtOfflineTableCard() {
+      var L = getMgmtLayout();
+      if (L.hidden['offline']) return '';
+      var d = state.mgmtData || {};
+      var buckets = d.buckets || [];
+      var absSeries = d.abs || [];
+      if (d.grain === 'day' || absSeries.length !== buckets.length || !buckets.length) return '';
+      var fmt = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
+      var tF = 0, tN = 0, tM = 0, tE = 0;
+      var rows = buckets.map(function(b, i) {
+          var sh = (absSeries[i] || {}).absShift || {};
+          var fur = b.acsu || 0, n = sh.Night || 0, m = sh.Morning || 0, e = sh.Evening || 0;
+          tF += fur; tN += n; tM += m; tE += e;
+          return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);">' +
+              '<td style="padding:8px 12px; font-weight:700; color:var(--text-main);">' + escapeHTML(b.label) + '</td>' +
+              '<td style="padding:8px 12px; text-align:right; color:var(--text-muted); font-style:italic; font-size:0.76rem;">pending</td>' +
+              '<td style="padding:8px 12px; text-align:right; font-variant-numeric:tabular-nums; color:var(--text-main);">' + fmt(fur) + '</td>' +
+              '<td style="padding:8px 12px; text-align:right; font-variant-numeric:tabular-nums; color:#6366f1; font-weight:700;">' + fmt(n) + '</td>' +
+              '<td style="padding:8px 12px; text-align:right; font-variant-numeric:tabular-nums; color:#38bdf8; font-weight:700;">' + fmt(m) + '</td>' +
+              '<td style="padding:8px 12px; text-align:right; font-variant-numeric:tabular-nums; color:#fb923c; font-weight:700;">' + fmt(e) + '</td>' +
+              '</tr>';
+      }).join('');
+      var th = function(t, alignR) { return '<th style="padding:10px 12px; text-align:' + (alignR ? 'right' : 'left') + '; font-size:0.66rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">' + t + '</th>'; };
+      var tdT = function(v, color) { return '<td style="padding:10px 12px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums; color:' + (color || 'var(--text-main)') + ';">' + v + '</td>'; };
+      var totalRow = '<tr style="border-top:2px solid var(--glass-border); background:rgba(0,0,0,0.015);">' +
+          '<td style="padding:10px 12px; font-weight:800; color:var(--text-main);">Total</td>' + tdT('—', 'var(--text-muted)') + tdT(fmt(tF)) + tdT(fmt(tN), '#6366f1') + tdT(fmt(tM), '#38bdf8') + tdT(fmt(tE), '#fb923c') + '</tr>';
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'offline\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px; margin-bottom:24px; overflow-x:auto;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:center;"><span>Offline Tasks, Absences &amp; Furlough <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· Furlough = ACSU · absence hours by shift · Project hrs pending feed</span></span>' + removeBtn + '</div>' +
+          '<table style="width:100%; border-collapse:collapse; font-size:0.84rem;">' +
+          '<thead><tr style="border-bottom:1px solid var(--glass-border);">' + th('') + th('Project', true) + th('Furlough', true) + th('Abs · Night', true) + th('Abs · Morning', true) + th('Abs · Evening', true) + '</tr></thead>' +
+          '<tbody>' + rows + totalRow + '</tbody></table></div>';
   }
 
   // Rendered tracker-section cards (one chart each) + their chart-type toggle.
@@ -2782,8 +2935,13 @@
               return '<div style="position:relative;">' + c.html + '<button onclick="toggleMgmtCard(\'' + c.k + '\')" title="Hide this card" style="position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,0.2);">✕</button></div>';
           }).join('') + '</div>';
 
-      var chartCard = function(title, canvasId, sub) {
-          return '<div class="aether-card" style="padding:24px; overflow:visible;"><div class="section-header">' + title + (sub ? '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + sub + '</span>' : '') + '</div><div style="position:relative; height:320px; width:100%;"><canvas id="' + canvasId + '" style="display:block;"></canvas></div></div>';
+      var chartCard = function(title, canvasId, sub, total) {
+          return '<div class="aether-card" style="padding:24px; overflow:visible;">' +
+              '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
+                  '<span style="min-width:0;">' + title + (sub ? '<span style="display:block; font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none; margin-top:3px; white-space:normal;">' + sub + '</span>' : '') + '</span>' +
+                  (total != null ? '<span style="font-size:1.5rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums; white-space:nowrap; line-height:1;">' + total + '</span>' : '') +
+              '</div>' +
+              '<div style="position:relative; height:320px; width:100%;"><canvas id="' + canvasId + '" style="display:block;"></canvas></div></div>';
       };
 
       var topTable = function(title, rows, color) {
@@ -2800,18 +2958,22 @@
       var slSub = d.grain === 'day' ? 'hourly avg SL — absences are on the KPI card for single days' : 'avg SL (line) · absence hours stacked by shift (right) · ALU lates';
       var shiftTotal = aSh.Night + aSh.Morning + aSh.Evening;
 
-      // Stacking Lunches & Breaks and Absence Mix (Onshore vs Offshore) were
-      // moved OUT of this executive view into the operational Furlough / Absence
-      // trackers (see renderTracker) per management direction.
-      return headerHtml + mgmtCustomizePanel() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
+      // Stacking Lunches is shown here (dashboard) AND in the Furlough tracker.
+      // Absence Mix (onshore/offshore) lives in the Absence tracker.
+      return headerHtml + mgmtCustomizePanel() + mgmtEmbedsHtml() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)') +
+          chartCard('Staffing — Requirement vs Open', 'mgmt-chart-idp', 'avg net seats per ' + (d.grain === 'day' ? 'hour' : 'day') + ' (green = surplus, red = short) · dashed = IDP hours short', (cur.idpDeficit || 0) + 'h short') +
+          chartCard('Stacking Lunches &amp; Breaks', 'mgmt-chart-lunch', 'agents on lunch/break at once (15-min) · Onshore vs Offshore · SVL %/ACK right axis' + lunchPeakSub(), (d.lunch && d.lunch.peakOff && d.lunch.peakOff.val ? 'peak ' + Math.max(d.lunch.peakOff.val, (d.lunch.peakOn ? d.lunch.peakOn.val : 0)) : null)) +
+          '</div>' +
+          '<div class="grid-split" style="margin-bottom:24px;">' +
+          chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)', (cur.ot || 0) + 'h') +
           shrinkCard() +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub) +
-          chartCard('Absence Concentration by Shift', 'mgmt-chart-absshift', 'real-absence hours · Night 23–07 · Morning 07–15 · Evening 15–23' + (shiftTotal > 0 ? ' · explains where targets slip' : ' · none this ' + word)) +
+          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? cur.slAvg + '%' : null) +
+          chartCard('Absence Concentration by Shift', 'mgmt-chart-absshift', 'real-absence hours · Night 23–07 · Morning 07–15 · Evening 15–23' + (shiftTotal > 0 ? ' · explains where targets slip' : ' · none this ' + word), (cur.absHours || 0) + 'h') +
           '</div>' +
+          mgmtOfflineTableCard() +
           '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:18px; padding-bottom:40px;">' +
           topTable('Top Overtime — ' + escapeHTML(sel.label || ''), hrs(sel.topOt), 'var(--accent-primary)') +
           topTable('Top SAFE', hrs(sel.topSafe), 'var(--status-active)') +
@@ -2947,7 +3109,7 @@
       };
       var bw = manyBars ? 22 : 46;
 
-      ['mgmtOt', 'mgmtRoles', 'mgmtShrink', 'mgmtLunch', 'mgmtSl', 'mgmtAbs', 'mgmtAbsShift'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
+      ['mgmtOt', 'mgmtRoles', 'mgmtShrink', 'mgmtLunch', 'mgmtSl', 'mgmtAbs', 'mgmtAbsShift', 'mgmtIdp'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
 
       var elOt = document.getElementById('mgmt-chart-ot');
       if (elOt) {
@@ -2972,7 +3134,25 @@
           charts.mgmtOt = new Chart(elOt.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: otSets }, options: otOpts });
       }
       buildShrinkChart();   // dynamic shrinkage (replaces Off-Phone Hours)
-      buildMgmtSectionCharts();   // personalized "add a tracker" section charts
+      buildMgmtSectionCharts();   // personalized "quick metric" mini-charts
+      buildMgmtEmbedCharts();     // embedded real-tracker charts
+      // Staffing — Requirement vs Open (IDP net seats per bucket + hours short).
+      var elIdp = document.getElementById('mgmt-chart-idp');
+      if (elIdp) {
+          var netData = buckets.map(function(b) { return b.idpNet; });
+          var defData = buckets.map(function(b) { return b.idpDeficit || 0; });
+          var idpOpts = baseOpts(false);
+          idpOpts.scales.y = { position: 'left', title: { display: true, text: 'avg net seats', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          idpOpts.scales.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'hours short', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          idpOpts.plugins.tooltip.callbacks = { label: function(c2) { if (c2.dataset.yAxisID === 'y1') return ' Short: ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h'; var v = c2.parsed.y; return ' Net seats: ' + (v == null ? '—' : (v > 0 ? '+' : '') + (Math.round(v * 10) / 10)); } };
+          var idpSets = [
+              { label: 'Net seats', data: netData, backgroundColor: netData.map(function(v) { return (v != null && v < 0) ? 'rgba(248,113,113,0.7)' : 'rgba(16,185,129,0.7)'; }), borderRadius: 4, maxBarThickness: bw, yAxisID: 'y' },
+              { type: 'line', label: 'IDP hours short', data: defData, borderColor: '#f87171', borderWidth: 2, borderDash: [6, 5], pointRadius: 0, pointHoverRadius: 4, tension: 0.35, yAxisID: 'y1', spanGaps: true, order: 0 }
+          ];
+          charts.mgmtIdp = new Chart(elIdp.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: idpSets }, options: idpOpts });
+      }
+      // Stacking Lunches & Breaks — back in the dashboard (also in Furlough tracker).
+      if (d.lunch) buildLunchChartInto('mgmt-chart-lunch', 'mgmtLunch', d.lunch);
       // Service Level vs Absence BY SHIFT — SL% line (left) with real-absence
       // HOURS stacked Night/Morning/Evening (right) + ALU lates, so a dip in SL
       // can be read against which shift the absences land on.
