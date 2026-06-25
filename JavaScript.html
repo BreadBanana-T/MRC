@@ -195,7 +195,9 @@
       mgmtCustomize: false, mgmtLayout: null,
       // Real operational trackers EMBEDDED into the Management View (fetched
       // from their own backends so the data is the genuine tracker, not a copy).
-      mgmtEmbed: { data: {}, loading: {}, key: {} }
+      mgmtEmbed: { data: {}, loading: {}, key: {} },
+      // Today's stacking-lunch concurrency for the Overview dashboard (daily only).
+      overviewLunch: null, overviewLunchLoading: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -671,7 +673,7 @@
       if (state.view === 'tracker') render();
       // Relocated management charts (Stacking Lunches / Absence Mix) follow the
       // Sun–Sat management week — fetched alongside the tracker's own data.
-      if (state.trackerMode === 'furlough' || state.trackerMode === 'absences') fetchTrackerAux();
+      if (state.trackerMode === 'absences') fetchTrackerAux();
       if (state.trackerMode === 'absences') {
           google.script.run.withSuccessHandler(function(res) {
               if (myToken !== trackerFetchToken) return;
@@ -829,12 +831,12 @@
           if (activeId) { var reFocus = document.getElementById(activeId); if (reFocus) { reFocus.focus(); if (cursorStart !== null) { try { reFocus.setSelectionRange(cursorStart, cursorEnd); } catch(e) {} } } }
           
           if (state.view === 'overview') initOverviewChart();
+          if (state.view === 'overview' && state.overviewLunch && !state.overviewLunch.error && state.overviewLunch.lunch) buildLunchChartInto('overview-lunch-chart', 'overviewLunch', state.overviewLunch.lunch);
           if (state.view === 'tracker' && state.trackerMode !== 'absences' && state.trackerMode !== 'training') initTrackerChart();
           if (state.view === 'tracker' && state.trackerMode === 'overtime') initOtOpenChart();
           if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeView === 'agents' && state.safeSelectedAgent) { initSafeTrendChart(); initSafeAgentHourChart(); }
           if (state.view === 'tracker' && state.trackerMode === 'safe' && state.safeView === 'coverage') initSafeCoverageChart();
           // Relocated management charts inside the trackers (Sun–Sat week).
-          if (state.view === 'tracker' && state.trackerMode === 'furlough' && state.trackerAux && !state.trackerAux.error) buildLunchChartInto('tracker-lunch-chart', 'trackerLunch', state.trackerAux.lunch);
           if (state.view === 'tracker' && state.trackerMode === 'absences' && state.trackerAux && !state.trackerAux.error) buildAbsMixChartInto('tracker-absmix-chart', 'trackerAbsMix', state.trackerAux.abs);
           if (state.view === 'mgmt') initMgmtCharts();
           if (state.view === 'calc') updatePonr();
@@ -1045,7 +1047,16 @@
       return '<div class="aether-card tile-aurora" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:12px 20px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages <span class="aurora-label" style="font-size:0.6rem; letter-spacing:0.14em;">Real-time</span>' + errBadge + '</div><div style="display:flex; align-items:center; gap:12px;"><span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</span>' + tableauBtn + '</div></div><div class="outage-grid">' + cols + '</div></div>';
   }
 
+  // Today's stacking-lunch concurrency (daily) for the Overview dashboard.
+  function fetchOverviewLunch() {
+      if (typeof google === 'undefined') return;
+      state.overviewLunchLoading = true;
+      google.script.run.withSuccessHandler(function(res) { try { state.overviewLunch = JSON.parse(res); } catch (e) { state.overviewLunch = { error: 'Could not parse data.' }; } state.overviewLunchLoading = false; if (state.view === 'overview') render(); })
+          .withFailureHandler(function(err) { state.overviewLunch = { error: (err && err.message) || 'Backend error.' }; state.overviewLunchLoading = false; if (state.view === 'overview') render(); })
+          .getManagementDashboard('day', localDateStr(new Date()));
+  }
   function renderOverview() {
+      if (typeof google !== 'undefined' && !state.overviewLunch && !state.overviewLunchLoading) fetchOverviewLunch();
       var unplanCount = (state.agents.unplanned||[]).length;
       var planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
       var activeCount = (state.agents.active||[]).length;
@@ -1071,8 +1082,20 @@
                  renderStaffingTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div><div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">' + iclCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div><div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">' + ulcCount + '</div></div></div></div>' +
-                 '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div></div>';
+                 '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +
+                 mgmtLunchTile() + '</div>';
       return html;
+  }
+
+  // Stacking Lunches & Breaks — Overview dashboard, today only.
+  function mgmtLunchTile() {
+      var lo = state.overviewLunch;
+      var body;
+      if (state.overviewLunchLoading || !lo) body = '<div style="height:300px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading today’s breaks…</div>';
+      else if (lo.error) body = '<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(lo.error) + '</div>';
+      else if (!lo.lunch) body = '<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">No break data for today.</div>';
+      else body = '<div style="position:relative; height:300px; width:100%;"><canvas id="overview-lunch-chart" style="display:block;"></canvas></div>';
+      return '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header">Stacking Lunches &amp; Breaks — Today<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">agents on lunch/break at once (15-min) · Onshore vs Offshore · SVL %/ACK on right axis</span></div>' + body + '</div>';
   }
   
   function renderWeather() {
@@ -1372,7 +1395,10 @@
           headerHtml += '<div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border); margin-right:12px;"><button class="nav-btn ' + (state.trackerRegion==='All'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'All\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">All</button><button class="nav-btn ' + (state.trackerRegion==='Onshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Onshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Onshore</button><button class="nav-btn ' + (state.trackerRegion==='Offshore'?'active':'') + '" style="height:32px; font-size:0.8rem;" onclick="state.trackerRegion=\'Offshore\'; ' + (isAbsences ? 'render()' : 'fetchTrackerData()') + ';">Offshore</button></div>';
       }
 
-      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\'||this.value===\'overtime\') state.trackerRegion=\'Onshore\'; if(this.value===\'safe\'){state.trackerRegion=\'All\'; state.safeSelectedAgent=null;} fetchTrackerData();"><option value="furlough" ' + (state.trackerMode==='furlough'?'selected':'') + '>Furlough Tracker</option><option value="coaching" ' + (state.trackerMode==='coaching'?'selected':'') + '>Coaching Tracker</option><option value="overtime" ' + (state.trackerMode==='overtime'?'selected':'') + '>Overtime Tracker</option><option value="safe" ' + (state.trackerMode==='safe'?'selected':'') + '>SAFE Tracker</option><option value="absences" ' + (state.trackerMode==='absences'?'selected':'') + '>Absence Tracker</option><option value="training" ' + (state.trackerMode==='training'?'selected':'') + '>Training Tracker</option></select>';
+      // Built from the shared TRACKERS registry — add a tracker there and it
+      // appears here AND in the Management View embed picker automatically.
+      var trackerOpts = TRACKERS.map(function(t) { return '<option value="' + t.id + '" ' + (state.trackerMode === t.id ? 'selected' : '') + '>' + escapeHTML(t.label) + '</option>'; }).join('');
+      headerHtml += '<select class="input-aether" style="width:auto; height:34px; font-weight:700; color:var(--accent-primary); border-color:var(--accent-primary);" onchange="state.trackerMode=this.value; if(this.value===\'furlough\'||this.value===\'overtime\') state.trackerRegion=\'Onshore\'; if(this.value===\'safe\'){state.trackerRegion=\'All\'; state.safeSelectedAgent=null;} fetchTrackerData();">' + trackerOpts + '</select>';
 
       if (isAbsences) {
           headerHtml += '<select class="input-aether" style="width:auto; height:34px;" onchange="state.trackerDate=this.value+\'-01-01\'; state.selectedAbsenceAgent=null; state.absenceMonthFilter=\'ALL\'; fetchTrackerData();"><option value="2026" ' + (state.trackerDate.substring(0,4)==='2026'?'selected':'') + '>Year: 2026</option><option value="2025" ' + (state.trackerDate.substring(0,4)==='2025'?'selected':'') + '>Year: 2025</option></select>';
@@ -1383,7 +1409,7 @@
 
       // Charts relocated out of the Management View now live here, scoped to the
       // current Sun–Sat management week (full-width, above the tracker's own UI).
-      if (isAbsences || state.trackerMode === 'furlough') headerHtml += relocatedAuxCard();
+      if (isAbsences) headerHtml += relocatedAuxCard();
 
       if (isTraining) return headerHtml + renderTrainingTracker();
 
@@ -2522,18 +2548,26 @@
       return state.mgmtLayout;
   }
 
-  // Real trackers that can be embedded into the Management View. Each pulls its
-  // OWN backend (the genuine tracker data), anchored on the management date.
-  // NOTE: the operational trackers run a Wed→Wed week, so an embed shows that
+  // ── SINGLE SOURCE OF TRUTH for trackers ─────────────────────────────────────
+  // Both the Tracker tab dropdown AND the Management View embed picker read this
+  // list. Add a tracker here once and it shows up in both — no other wiring.
+  // `embeddable` trackers can be dropped into the Management View as a card;
+  // `fetch` picks the backend (workforce trackers just pass their id as mode).
+  // NOTE: operational trackers run a Wed→Wed week, so an embed shows that
   // tracker's native week (its label is surfaced) — not the Sun–Sat window.
-  var MGMT_EMBEDS = {
-      overtime: { label: 'Overtime Tracker', color: '#818cf8' },
-      furlough: { label: 'Furlough Tracker', color: '#0ea5e9' },
-      coaching: { label: 'Coaching Tracker', color: '#f59e0b' },
-      safe:     { label: 'SAFE Tracker', color: '#10b981' }
-  };
+  var TRACKERS = [
+      { id: 'furlough', label: 'Furlough Tracker', color: '#0ea5e9', embeddable: true, fetch: 'workforce', region: 'Onshore' },
+      { id: 'coaching', label: 'Coaching Tracker', color: '#f59e0b', embeddable: true, fetch: 'workforce', region: 'All' },
+      { id: 'overtime', label: 'Overtime Tracker', color: '#818cf8', embeddable: true, fetch: 'overtime', region: 'All' },
+      { id: 'safe',     label: 'SAFE Tracker',     color: '#10b981', embeddable: true, fetch: 'safe', region: 'All' },
+      { id: 'absences', label: 'Absence Tracker',  color: '#ef4444', embeddable: false },
+      { id: 'training', label: 'Training Tracker', color: '#a78bfa', embeddable: false }
+  ];
+  function trackerById(id) { for (var i = 0; i < TRACKERS.length; i++) { if (TRACKERS[i].id === id) return TRACKERS[i]; } return null; }
+  function embeddableTrackers() { return TRACKERS.filter(function(t) { return t.embeddable; }); }
   function fetchMgmtEmbed(type) {
-      if (typeof google === 'undefined' || !MGMT_EMBEDS[type]) return;
+      var t = trackerById(type);
+      if (typeof google === 'undefined' || !t || !t.embeddable) return;
       var ref = state.mgmtDate;
       var key = type + '|' + ref;
       var E = state.mgmtEmbed;
@@ -2542,12 +2576,11 @@
       var ok = function(res) { try { E.data[type] = JSON.parse(res); } catch (e) { E.data[type] = { error: 'Could not parse tracker data.' }; } E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var fail = function(err) { E.data[type] = { error: (err && err.message) || 'Tracker backend error.' }; E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var r = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
-      if (type === 'overtime') r.getOvertimeAnalytics('week', ref, 'All', 'ALL');
-      else if (type === 'furlough') r.getWorkforceAnalytics('week', ref, 'furlough', 'Onshore', 'ALL');
-      else if (type === 'coaching') r.getWorkforceAnalytics('week', ref, 'coaching', 'All', 'ALL');
-      else if (type === 'safe') r.getSafeAnalytics('week', ref, 'All', 'ALL');
+      if (t.fetch === 'overtime') r.getOvertimeAnalytics('week', ref, t.region || 'All', 'ALL');
+      else if (t.fetch === 'safe') r.getSafeAnalytics('week', ref, t.region || 'All', 'ALL');
+      else r.getWorkforceAnalytics('week', ref, type, t.region || 'All', 'ALL'); // generic workforce tracker (mode = id)
   }
-  window.addMgmtEmbed = function(type) { var L = getMgmtLayout(); if (MGMT_EMBEDS[type] && L.embeds.indexOf(type) === -1) { L.embeds.push(type); saveMgmtLayout(); fetchMgmtEmbed(type); render(); } };
+  window.addMgmtEmbed = function(type) { var L = getMgmtLayout(); var t = trackerById(type); if (t && t.embeddable && L.embeds.indexOf(type) === -1) { L.embeds.push(type); saveMgmtLayout(); fetchMgmtEmbed(type); render(); } };
   window.removeMgmtEmbed = function(type) { var L = getMgmtLayout(); var i = L.embeds.indexOf(type); if (i > -1) { L.embeds.splice(i, 1); saveMgmtLayout(); render(); } };
   function saveMgmtLayout() { try { localStorage.setItem(MGMT_LAYOUT_KEY, JSON.stringify(getMgmtLayout())); } catch (e) {} }
   window.toggleMgmtCustomize = function() { state.mgmtCustomize = !state.mgmtCustomize; render(); };
@@ -2566,9 +2599,9 @@
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
       }).join('');
-      var embedChips = Object.keys(MGMT_EMBEDS).map(function(type) {
+      var embedChips = embeddableTrackers().map(function(e) {
+          var type = e.id;
           var added = L.embeds.indexOf(type) !== -1;
-          var e = MGMT_EMBEDS[type];
           return '<button onclick="' + (added ? 'removeMgmtEmbed' : 'addMgmtEmbed') + '(\'' + type + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid ' + e.color + '; background:' + (added ? e.color : 'transparent') + '; color:' + (added ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;"><span style="width:9px; height:9px; border-radius:2px; background:' + (added ? '#fff' : e.color) + ';"></span>' + (added ? e.label + ' ✕' : e.label) + '</button>';
       }).join('');
       var sectionChips = Object.keys(MGMT_SECTIONS).map(function(type) {
@@ -2595,7 +2628,7 @@
       var fmt = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
       var chip = function(lbl, val, c) { return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:0.7rem; font-weight:800; color:var(--text-secondary); background:rgba(0,0,0,0.04); padding:3px 10px; border-radius:99px;"><span style="width:7px; height:7px; border-radius:50%; background:' + (c || 'var(--text-muted)') + ';"></span>' + lbl + ' <b style="color:var(--text-main);">' + val + '</b></span>'; };
       return '<div class="grid-split" style="margin-bottom:24px;">' + L.embeds.map(function(type) {
-          var e = MGMT_EMBEDS[type];
+          var e = trackerById(type); if (!e) return '';
           var data = state.mgmtEmbed.data[type];
           var loading = state.mgmtEmbed.loading[type];
           var removeBtn = '<button onclick="removeMgmtEmbed(\'' + type + '\')" title="Remove tracker" style="background:transparent; border:none; color:var(--status-alert); font-weight:800; cursor:pointer; font-size:1rem; line-height:1;">✕</button>';
@@ -2890,14 +2923,13 @@
       // break down"). VFurlough = ACSU released time; E-learning has no feed yet
       // so it reads 0 and is flagged pending.
       var codedCats = [
-          { label: 'OT', v: cur.ot || 0, c: 'var(--accent-primary)' },
           { label: 'VFurlough', v: cur.acsu || 0, c: '#94a3b8' },
           { label: 'Reading', v: cur.reading || 0, c: '#a78bfa' },
           { label: 'E-learning', v: cur.elearn || 0, c: '#38bdf8', pending: (cur.elearn || 0) === 0 },
           { label: 'Tower', v: cur.tower || 0, c: '#0ea5e9' }
       ];
       var codedTotal = Math.round(codedCats.reduce(function(s, x) { return s + x.v; }, 0) * 10) / 10;
-      var prevCodedTotal = (prev.ot || 0) + (prev.acsu || 0) + (prev.reading || 0) + (prev.elearn || 0) + (prev.tower || 0);
+      var prevCodedTotal = (prev.acsu || 0) + (prev.reading || 0) + (prev.elearn || 0) + (prev.tower || 0);
       var codedBreak = codedCats.map(function(x) {
           return '<span style="white-space:nowrap;"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:' + x.c + '; margin-right:4px; vertical-align:middle;"></span>' + x.label + ' <b style="color:var(--text-main);">' + x.v + 'h</b>' + (x.pending ? ' <span style="color:var(--text-muted); font-style:italic;">(pending feed)</span>' : '') + '</span>';
       }).join(' &nbsp;·&nbsp; ');
@@ -2921,9 +2953,9 @@
       // Keyed cards so the personalized layout can hide any of them.
       var kpiCards = [
           { k: 'ot', html: kpi('Overtime', (cur.ot || 0) + 'h', delta(cur.ot, prev.ot, false, 'h'), '&times;1: ' + (cur.otX1 || 0) + 'h · &times;1.5: ' + (cur.otX15 || 0) + 'h · ' + (sel.otAgents || 0) + ' agents' + ((cur.preCodedOt || 0) > 0 ? ' · <b style="color:var(--accent-primary);">+' + cur.preCodedOt + 'h pre-coded (future)</b>' : '')) },
-          { k: 'coded', html: kpi('Offline / Coded Hours', codedTotal + 'h', delta(codedTotal, prevCodedTotal, false, 'h'), codedBreak) },
+          { k: 'coded', html: kpi('Offline Coded Time', codedTotal + 'h', delta(codedTotal, prevCodedTotal, false, 'h'), codedBreak) },
           { k: 'otcov', html: otCoverageCard },
-          { k: 'idp', html: kpi('IDP Deficit', (cur.idpDeficit || 0) + 'h', delta(cur.idpDeficit, prev.idpDeficit, false, 'h'), 'agent-hours short, incl. forecast' + (cur.idpNet != null ? ' · avg net ' + (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : ''), (cur.idpDeficit || 0) > 0 ? 'var(--status-alert)' : 'var(--status-active)') },
+          { k: 'idp', html: kpi('Staffing (IDP)', cur.idpNet != null ? (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' <span style="font-size:1rem;">seats</span>' : '—', delta(cur.idpNet, prev.idpNet, true), cur.idpReq != null ? 'avg net seats vs requirement · Req ' + cur.idpReq + ' / Open ' + cur.idpOpen + ' (incl. forecast)' : 'no IDP grid imported', (cur.idpNet != null && cur.idpNet < 0) ? 'var(--status-alert)' : 'var(--status-active)') },
           { k: 'coaching', html: kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') },
           { k: 'absence', html: kpi('Absence Hours', absHrs + 'h' + (weekPct != null ? ' <span style="font-size:1rem; font-weight:800; color:var(--text-muted);">(' + weekPct + '% of week)</span>' : ''), delta(cur.absHours, prev.absHours, false, 'h'), absShiftSub + '<br>' + (cur.absences || 0) + ' agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), absHrs > 0 ? 'var(--status-alert)' : 'var(--text-main)') },
           { k: 'sl', html: kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) }
@@ -2962,23 +2994,16 @@
       // Absence Mix (onshore/offshore) lives in the Absence tracker.
       return headerHtml + mgmtCustomizePanel() + mgmtEmbedsHtml() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Staffing — Requirement vs Open', 'mgmt-chart-idp', 'avg net seats per ' + (d.grain === 'day' ? 'hour' : 'day') + ' (green = surplus, red = short) · dashed = IDP hours short', (cur.idpDeficit || 0) + 'h short') +
-          chartCard('Stacking Lunches &amp; Breaks', 'mgmt-chart-lunch', 'agents on lunch/break at once (15-min) · Onshore vs Offshore · SVL %/ACK right axis' + lunchPeakSub(), (d.lunch && d.lunch.peakOff && d.lunch.peakOff.val ? 'peak ' + Math.max(d.lunch.peakOff.val, (d.lunch.peakOn ? d.lunch.peakOn.val : 0)) : null)) +
+          chartCard('Staffing — Requirement vs Open', 'mgmt-chart-idp', 'avg seats ' + (d.grain === 'day' ? 'per hour' : 'per day') + ' — Requirement (bars) vs Open/staffed (line)', (cur.idpNet != null ? (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : '—')) +
+          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? cur.slAvg + '%' : null) +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)', (cur.ot || 0) + 'h') +
           shrinkCard() +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
-          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? cur.slAvg + '%' : null) +
           chartCard('Absence Concentration by Shift', 'mgmt-chart-absshift', 'real-absence hours · Night 23–07 · Morning 07–15 · Evening 15–23' + (shiftTotal > 0 ? ' · explains where targets slip' : ' · none this ' + word), (cur.absHours || 0) + 'h') +
-          '</div>' +
           mgmtOfflineTableCard() +
-          '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:18px; padding-bottom:40px;">' +
-          topTable('Top Overtime — ' + escapeHTML(sel.label || ''), hrs(sel.topOt), 'var(--accent-primary)') +
-          topTable('Top SAFE', hrs(sel.topSafe), 'var(--status-active)') +
-          topTable('Top Tower', hrs(sel.topTower), 'var(--region-on)') +
-          topTable('Top Coaching', coachRows, 'var(--status-role)') +
           '</div>';
   }
 
@@ -3008,14 +3033,24 @@
   function renderShrinkChips() {
       return MGMT_SHRINK_CATS.map(function(c) {
           var on = !!state.mgmtShrinkCats[c.k];
-          return '<button onclick="toggleShrinkCat(\'' + c.k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid ' + c.color + '; background:' + (on ? c.color : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;"><span style="width:9px; height:9px; border-radius:2px; background:' + (on ? '#fff' : c.color) + ';"></span>' + c.label + '</button>';
+          // Quiet, consistent toggles: faint tint + colored border when on, muted
+          // when off — no full-bleed colored fills.
+          return '<button onclick="toggleShrinkCat(\'' + c.k + '\')" aria-pressed="' + on + '" style="display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:10px; cursor:pointer; font-size:0.74rem; font-weight:700; transition:0.15s; border:1px solid ' + (on ? c.color : 'var(--glass-border)') + '; background:' + (on ? c.color + '1f' : 'transparent') + '; color:' + (on ? 'var(--text-main)' : 'var(--text-muted)') + ';"><span style="width:10px; height:10px; border-radius:3px; background:' + c.color + '; opacity:' + (on ? '1' : '0.3') + ';"></span>' + c.label + (on ? ' <span style="color:' + c.color + '; font-weight:800;">✓</span>' : '') + '</button>';
       }).join('');
   }
   function shrinkCard() {
+      var cur = (state.mgmtData && state.mgmtData.totals && state.mgmtData.totals.sel) || {};
+      var num = MGMT_SHRINK_CATS.reduce(function(s, c) { return s + (state.mgmtShrinkCats[c.k] ? (cur[c.k] || 0) : 0); }, 0);
+      var pct = (cur.schedH > 0) ? Math.round((num / cur.schedH) * 1000) / 10 : null;
+      var pctColor = pct == null ? 'var(--text-muted)' : (pct >= 35 ? 'var(--status-alert)' : (pct >= 25 ? 'var(--status-warn)' : 'var(--status-active)'));
       return '<div class="aether-card" style="padding:24px; overflow:visible;">' +
-          '<div class="section-header">Shrinkage<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">selected off-phone ÷ scheduled hours · click chips to include/exclude · ICL/ULC FIRE are on-phone (excluded)</span></div>' +
-          '<div id="shrink-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + renderShrinkChips() + '</div>' +
-          '<div style="position:relative; height:340px; width:100%;"><canvas id="mgmt-chart-shrink" style="display:block;"></canvas></div></div>';
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">' +
+              '<span>Shrinkage<span style="display:block; font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none; margin-top:3px; white-space:normal;">share of scheduled time spent off-phone · tap a category to include it · ICL / ULC FIRE stay on-phone</span></span>' +
+              '<span style="font-size:1.5rem; font-weight:800; color:' + pctColor + '; font-variant-numeric:tabular-nums; line-height:1; white-space:nowrap;">' + (pct == null ? '—' : pct + '%') + '</span>' +
+          '</div>' +
+          '<div style="font-size:0.64rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">Counted as off-phone</div>' +
+          '<div id="shrink-chips" style="display:flex; flex-wrap:wrap; gap:7px; margin-bottom:16px;">' + renderShrinkChips() + '</div>' +
+          '<div style="position:relative; height:300px; width:100%;"><canvas id="mgmt-chart-shrink" style="display:block;"></canvas></div></div>';
   }
   function lunchPeakSub() {
       var l = state.mgmtData && state.mgmtData.lunch; if (!l) return '';
@@ -3026,8 +3061,7 @@
   }
   window.toggleShrinkCat = function(cat) {
       state.mgmtShrinkCats[cat] = !state.mgmtShrinkCats[cat];
-      var box = document.getElementById('shrink-chips'); if (box) box.innerHTML = renderShrinkChips();
-      buildShrinkChart();
+      render(); // refresh the headline % + chips + chart together
   };
   // Self-contained so the chip toggles can rebuild it without re-animating every chart.
   window.buildShrinkChart = function() {
@@ -3136,23 +3170,21 @@
       buildShrinkChart();   // dynamic shrinkage (replaces Off-Phone Hours)
       buildMgmtSectionCharts();   // personalized "quick metric" mini-charts
       buildMgmtEmbedCharts();     // embedded real-tracker charts
-      // Staffing — Requirement vs Open (IDP net seats per bucket + hours short).
+      // Staffing — Requirement vs Open, in SEATS (matches the IDP staffing
+      // grid: Required headcount vs Open/staffed seats). No hours here.
       var elIdp = document.getElementById('mgmt-chart-idp');
       if (elIdp) {
-          var netData = buckets.map(function(b) { return b.idpNet; });
-          var defData = buckets.map(function(b) { return b.idpDeficit || 0; });
+          var reqData = buckets.map(function(b) { return b.idpReq; });
+          var openData = buckets.map(function(b) { return b.idpOpen; });
           var idpOpts = baseOpts(false);
-          idpOpts.scales.y = { position: 'left', title: { display: true, text: 'avg net seats', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
-          idpOpts.scales.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'hours short', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { callback: function(v) { return v + 'h'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
-          idpOpts.plugins.tooltip.callbacks = { label: function(c2) { if (c2.dataset.yAxisID === 'y1') return ' Short: ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h'; var v = c2.parsed.y; return ' Net seats: ' + (v == null ? '—' : (v > 0 ? '+' : '') + (Math.round(v * 10) / 10)); } };
+          idpOpts.scales.y = { position: 'left', beginAtZero: true, title: { display: true, text: 'seats', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          idpOpts.plugins.tooltip.callbacks = { label: function(c2) { var v = c2.parsed.y; return ' ' + c2.dataset.label + ': ' + (v == null ? '—' : Math.round(v * 10) / 10 + ' seats'); }, footer: function(items) { var i = items[0].dataIndex; var r = buckets[i].idpReq, o = buckets[i].idpOpen; if (r == null || o == null) return ''; var net = Math.round((o - r) * 10) / 10; return net < 0 ? (Math.abs(net) + ' seats short') : ('+' + net + ' seats surplus'); } };
           var idpSets = [
-              { label: 'Net seats', data: netData, backgroundColor: netData.map(function(v) { return (v != null && v < 0) ? 'rgba(248,113,113,0.7)' : 'rgba(16,185,129,0.7)'; }), borderRadius: 4, maxBarThickness: bw, yAxisID: 'y' },
-              { type: 'line', label: 'IDP hours short', data: defData, borderColor: '#f87171', borderWidth: 2, borderDash: [6, 5], pointRadius: 0, pointHoverRadius: 4, tension: 0.35, yAxisID: 'y1', spanGaps: true, order: 0 }
+              { label: 'Requirement', data: reqData, backgroundColor: 'rgba(129,140,248,0.45)', borderColor: '#818cf8', borderWidth: 1, borderRadius: 4, maxBarThickness: bw, yAxisID: 'y' },
+              { type: 'line', label: 'Open / staffed', data: openData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#10b981', yAxisID: 'y', spanGaps: true, order: 0 }
           ];
           charts.mgmtIdp = new Chart(elIdp.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: idpSets }, options: idpOpts });
       }
-      // Stacking Lunches & Breaks — back in the dashboard (also in Furlough tracker).
-      if (d.lunch) buildLunchChartInto('mgmt-chart-lunch', 'mgmtLunch', d.lunch);
       // Service Level vs Absence BY SHIFT — SL% line (left) with real-absence
       // HOURS stacked Night/Morning/Evening (right) + ALU lates, so a dip in SL
       // can be read against which shift the absences land on.
@@ -3205,10 +3237,10 @@
   // Card shell rendered at the top of the Furlough / Absence trackers. Fed by
   // state.trackerAux (a management-week dashboard) so it follows Sun–Sat.
   function relocatedAuxCard() {
-      var mode = state.trackerMode, aux = state.trackerAux;
-      var title, canvasId, sub;
-      if (mode === 'furlough') { title = 'Stacking Lunches &amp; Breaks'; canvasId = 'tracker-lunch-chart'; sub = 'agents on lunch/break at once (15-min) · Onshore vs Offshore · SVL %/ACK on right axis'; }
-      else { title = 'Absence Mix — Onshore vs Offshore'; canvasId = 'tracker-absmix-chart'; sub = 'real-absence agent-days per type · solid = Onshore · translucent = Offshore'; }
+      // Absence Mix lives in the Absence tracker. (Stacking Lunches now lives on
+      // the Overview dashboard, daily-only — not here.)
+      var aux = state.trackerAux;
+      var title = 'Absence Mix — Onshore vs Offshore', canvasId = 'tracker-absmix-chart', sub = 'real-absence agent-days per type · solid = Onshore · translucent = Offshore';
       var weekLbl = (aux && aux.sel && aux.sel.label) ? aux.sel.label : '';
       var body;
       if (state.trackerAuxLoading || !aux) {

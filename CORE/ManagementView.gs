@@ -190,7 +190,7 @@ var ManagementView = {
                // Per-IEX-code hours for the "IEX Coding Compiled / Misc" card
                // (period to-date totals). Keyed by code, e.g. {'CE-HUDDLE':8.4}.
                codes: {},
-               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                preCodedOt: 0,
                // Shrinkage inputs: scheduled hours (denominator) + off-phone hour buckets.
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
@@ -199,7 +199,7 @@ var ManagementView = {
     var buckets = wins.map(function(w) {
       return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
                coach: 0, acsu: 0, elearn: 0, coachSessions: 0, slAvg: null, ackAvg: null,
-               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     });
     // Absence series: aligned with buckets for week/month/quarter; a single
@@ -406,11 +406,11 @@ var ManagementView = {
           // IDP is a forecast grid — the deficit for the rest of the period
           // is already known, so no to-date cap here.
           if (epoch >= pb.selStart && epoch < pb.selEnd) {
-            selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++;
+            selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++; selT._idpReq += req; selT._idpOpen += seats;
             var wi3 = self._windowIndex(wins, epoch);
-            if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; }
+            if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; buckets[wi3]._idpReq += req; buckets[wi3]._idpOpen += seats; }
           } else if (epoch >= pb.prevStart && epoch < pb.prevEnd) {
-            prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++;
+            prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++; prevT._idpReq += req; prevT._idpOpen += seats;
           }
         });
       }
@@ -612,7 +612,9 @@ var ManagementView = {
     var roundShift = function(s) { if (!s) return; s.Night = round1(s.Night); s.Morning = round1(s.Morning); s.Evening = round1(s.Evening); };
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
-      delete o._idpSum; delete o._idpN;
+      o.idpReq = o._idpN > 0 ? round1(o._idpReq / o._idpN) : null;   // avg required seats
+      o.idpOpen = o._idpN > 0 ? round1(o._idpOpen / o._idpN) : null; // avg staffed/open seats
+      delete o._idpSum; delete o._idpN; delete o._idpReq; delete o._idpOpen;
     };
     buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
     [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
