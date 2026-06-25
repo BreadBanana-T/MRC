@@ -67,6 +67,17 @@ flowchart TD
   GEM[("WF_GEM_DATA_V3")] --> UNI
 ```
 
+**Report pastes (Management View feeds).** Two IEX/BI exports are pasted into the
+same Import box and auto-detected (`JavaScript.html: runImportAction`), then parsed by
+`CORE/ReportImport.gs`:
+- **Activity loading hours** (`Exception Grp`/`Activity Name`/week-of-Sunday cols) →
+  `WF_ACTIVITY_WK` [WeekStart(Sun), ExceptionGrp, Code, ActivityName, Hours]. The
+  Management View overlays these authoritative weekly hours onto the IEX Coding card
+  (`getActivityCodes`) and renders an "Activity Loading" group card.
+- **Alarms by service type** (`Alarm Vol.`/`AHT Secs` by month) → `WF_ALARMS`
+  [Month, PrioRank, PrioGrp, Desc, ServId, Vol, AHT]; rendered as an "Alarms by Service
+  Type" card (`getAlarms`, months overlapping the selected period).
+
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:
 `WF_COACHING`, `WF_FURLOUGH`, `WF_ROLES`, `WF_ABSENCES`, `WF_IDP`) → `OvertimeTracker.importFromSchedule`

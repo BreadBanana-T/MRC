@@ -2535,7 +2535,7 @@
       idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
       absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
   };
-  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline'];
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline', 'activity', 'alarms'];
   function getMgmtLayout() {
       if (!state.mgmtLayout) {
           var def = { hidden: {}, sections: [], chart: {}, embeds: [] };
@@ -2593,7 +2593,7 @@
   function mgmtCustomizePanel() {
       if (!state.mgmtCustomize) return '';
       var L = getMgmtLayout();
-      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table' };
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table', activity: 'Activity Loading', alarms: 'Alarms by Type' };
       var cardChips = MGMT_KPI_KEYS.map(function(k) {
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
@@ -2751,6 +2751,48 @@
           '<div style="columns:2; column-gap:28px;">' + groupHtml + '</div>' +
           totalsStrip +
           '</div>';
+  }
+
+  // Activity Loading (imported) — exception-group totals from the pasted
+  // "Activity details loading hrs" report, for the selected period. Self-hides
+  // when no report covers the period.
+  function mgmtActivityCard() {
+      var L = getMgmtLayout(); if (L.hidden['activity']) return '';
+      var a = state.mgmtData && state.mgmtData.activity;
+      if (!a || !a.has) return '';
+      var GRP_COLORS = { 'Vacation': '#38bdf8', 'Absence': '#ef4444', 'Project': '#a78bfa', 'Meeting': '#f59e0b', 'Coaching': '#10b981', 'Training': '#6366f1', 'PC/Sys issue': '#94a3b8', 'Break': '#fbbf24', 'Lunch': '#fb923c' };
+      var grps = Object.keys(a.byGrp).sort(function(x, y) { return a.byGrp[y] - a.byGrp[x]; });
+      var max = grps.reduce(function(m, g) { return Math.max(m, a.byGrp[g]); }, 1);
+      var rows = grps.map(function(g) {
+          var v = a.byGrp[g] || 0; var pct = Math.round(v / max * 100);
+          var c = GRP_COLORS[g] || 'var(--text-muted)';
+          return '<div style="margin-bottom:10px;"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;"><span style="font-size:0.8rem; font-weight:700; color:var(--text-main);"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:' + c + '; margin-right:6px;"></span>' + escapeHTML(g) + '</span><span style="font-size:0.82rem; font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-main);">' + v + 'h</span></div><div style="height:7px; background:var(--bg-root); border-radius:99px; overflow:hidden;"><div style="height:100%; width:' + pct + '%; background:' + c + '; border-radius:99px;"></div></div></div>';
+      }).join('');
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'activity\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>Activity Loading <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· imported · ' + a.weeks + ' week(s) · hours by exception group</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + a.total + 'h</span>' + removeBtn + '</span></div>' +
+          rows + '</div>';
+  }
+
+  // Alarms by Service Type (imported) — volume + AHT for months overlapping the
+  // selected period. Self-hides when no report covers it.
+  function mgmtAlarmsCard() {
+      var L = getMgmtLayout(); if (L.hidden['alarms']) return '';
+      var al = state.mgmtData && state.mgmtData.alarms;
+      if (!al || !al.has) return '';
+      var fmtN = function(n) { return (n || 0).toLocaleString(); };
+      var body = al.rows.slice(0, 14).map(function(r) {
+          var name = r.desc || r.sid || '—';
+          return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);">' +
+              '<td style="padding:7px 10px; font-weight:700; color:var(--text-main);">' + escapeHTML(name) + (r.sid ? ' <span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(r.sid) + '</span>' : '') + '</td>' +
+              '<td style="padding:7px 10px; text-align:right; font-variant-numeric:tabular-nums; color:var(--text-main);">' + fmtN(r.vol) + '</td>' +
+              '<td style="padding:7px 10px; text-align:right; font-variant-numeric:tabular-nums; color:var(--text-muted);">' + (r.aht != null ? r.aht + 's' : '—') + '</td>' +
+              '</tr>';
+      }).join('');
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'alarms\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px; overflow-x:auto;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>Alarms by Service Type <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· imported · ' + escapeHTML(al.months.join(", ")) + ' · volume &amp; AHT</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + fmtN(al.totalVol) + '</span>' + removeBtn + '</span></div>' +
+          '<table style="width:100%; border-collapse:collapse; font-size:0.84rem;"><thead><tr style="border-bottom:1px solid var(--glass-border);"><th style="padding:8px 10px; text-align:left; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Service Type</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Volume</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">AHT</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
   // Offline Tasks, Absences & Furlough — per-bucket table mirroring the weekly
@@ -3003,6 +3045,10 @@
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Absence Concentration by Shift', 'mgmt-chart-absshift', 'real-absence hours · Night 23–07 · Morning 07–15 · Evening 15–23' + (shiftTotal > 0 ? ' · explains where targets slip' : ' · none this ' + word), (cur.absHours || 0) + 'h') +
           mgmtOfflineTableCard() +
+          '</div>' +
+          '<div class="grid-split" style="margin-bottom:24px;">' +
+          mgmtActivityCard() +
+          mgmtAlarmsCard() +
           '</div>';
   }
 
@@ -3527,7 +3573,10 @@
           || /^date\s*\t\s*start/i.test(trimmed)                                    // flattened table header
           || /^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed); // header-less table rows
       var isIdp = !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
-      var kind = isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched');
+      // IEX/BI report pastes that feed the Management View.
+      var isActivity = lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1);
+      var isAlarms = !isActivity && (lower.indexOf('aht secs') !== -1 || (lower.indexOf('alarm vol') !== -1 && lower.indexOf('servtype') !== -1));
+      var kind = isActivity ? 'activity' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched')));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -3570,9 +3619,10 @@
           fetchData(); fetchMetadata();
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
-          var notifMsg = isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.');
+          if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
+          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')));
           google.script.run.addGlobalNotification(notifMsg);
-          if (!isOtOpen) flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
+          if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
       var onFailure = function(err) {
           if (settled) return; settled = true; clearTimeout(backstop);
@@ -3581,6 +3631,16 @@
           showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
       };
 
+      if (kind === 'activity') {
+          showToast('Activity-loading report detected — ingesting…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importActivityLoading(t);
+          return;
+      }
+      if (kind === 'alarms') {
+          showToast('Alarms report detected — ingesting…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importAlarmsReport(t);
+          return;
+      }
       if (t.length > DIRECT_LIMIT) {
           console.log('[sync] paste is ' + Math.round(t.length / 1024) + ' KB — using chunked upload (' + kind + ')');
           showToast('Large paste (' + Math.round(t.length / 1024) + ' KB) — chunking…');

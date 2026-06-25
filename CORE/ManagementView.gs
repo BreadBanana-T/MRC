@@ -621,6 +621,25 @@ var ManagementView = {
     selT.codes.ACSU = selT.acsu; selT.codes.OT = selT.ot;
     Object.keys(selT.codes).forEach(function(c) { selT.codes[c] = round1(selT.codes[c]); });
 
+    // Imported reports (authoritative weekly activity hours + monthly alarms).
+    // When the Activity-loading report covers the selected period, its hours
+    // OVERRIDE the schedule-derived codes (so LFQI/CLASSROOM/VILT/etc. show real).
+    var activityImported = null, alarmsImported = null;
+    try {
+      if (typeof ReportImport !== 'undefined') {
+        var _startStr = this._fmt(pb.selStart, 'yyyy-MM-dd');
+        var _endStr = this._fmt(pb.selEnd - 86400000, 'yyyy-MM-dd');
+        var ai = ReportImport.getActivityCodes(_startStr, _endStr);
+        if (ai && ai.has) {
+          activityImported = ai;
+          var CODEMAP = { CE: 'CE-HUDDLE', QUAL: 'QUAL', ONE: 'ONE', SBYS: 'SBYS', READ: 'READ', LFQI: 'LFQI', WOFQT: 'WOFQT', VILT: 'VILT', CLASSROOM: 'CLASSROOM', TEAM: 'MEET' };
+          Object.keys(ai.byCode).forEach(function(c) { if (ai.byCode[c] > 0) selT.codes[CODEMAP[c] || c] = ai.byCode[c]; });
+        }
+        var al = ReportImport.getAlarms(this._fmt(pb.selStart, 'yyyy-MM-dd'), this._fmt(pb.selEnd - 86400000, 'yyyy-MM-dd'));
+        if (al && al.has) alarmsImported = al;
+      }
+    } catch (e) {}
+
     var topList = function(map) {
       return Object.keys(map)
         .map(function(n) { return { name: n, hours: round1(map[n]) }; })
@@ -648,6 +667,8 @@ var ManagementView = {
       buckets: buckets,
       abs: absSeries,
       lunch: lunchObj,
+      activity: activityImported,
+      alarms: alarmsImported,
       totals: { sel: selT, prev: prevT },
       sel: {
         label: periodLabel,
