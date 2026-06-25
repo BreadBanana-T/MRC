@@ -180,7 +180,7 @@ var ManagementView = {
     var prevCap = Math.min(pb.prevEnd, nowMs);
 
     var newTotals = function() {
-      return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
+      return { ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
                // Absence HOURS (not just agent-day counts) + shift concentration.
@@ -197,7 +197,7 @@ var ManagementView = {
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
-      return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
+      return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0,
                coach: 0, acsu: 0, elearn: 0, coachSessions: 0, slAvg: null, ackAvg: null,
                openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
@@ -296,9 +296,7 @@ var ManagementView = {
         else if (role.indexOf('TOWER') !== -1 || role.indexOf('WOFQT') !== -1 || role.indexOf('WOQFT') !== -1) key = 'tower';
         else if (role.indexOf('READING') !== -1 || role.indexOf('LECTURE') !== -1) key = 'reading';
         else if (role.indexOf('ELEARN') !== -1 || role.indexOf('E-LEARN') !== -1 || role.indexOf('VILT') !== -1 || role.indexOf('VIRTUAL') !== -1) key = 'elearn';
-        else if (role.indexOf('ICL') !== -1) key = 'icl';
-        else if (role.indexOf('ULC') !== -1 || role.indexOf('FIRE') !== -1) key = 'ulc';
-        if (!key) return;
+        if (!key) return; // ICL / ULC FIRE are no longer tracked (live Floor only)
         var selH = distribute(iv,
           function(t, h) { t[key] += h; },
           function(b, h) { b[key] += h; });
@@ -608,7 +606,7 @@ var ManagementView = {
                      svl: lunchSvl, ack: lunchAck, peakOn: peakOf(lunchAgg.onL), peakOff: peakOf(lunchAgg.offL), days: Object.keys(lunchDays).length };
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'elearn', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'tower', 'coach', 'acsu', 'elearn', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
     var roundShift = function(s) { if (!s) return; s.Night = round1(s.Night); s.Morning = round1(s.Morning); s.Evening = round1(s.Evening); };
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
