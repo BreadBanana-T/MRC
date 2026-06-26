@@ -403,8 +403,15 @@ var SafeTracker = {
       if (!best) return null;
       var p = best.split('|'); return { start: parseInt(p[0], 10), end: parseInt(p[1], 10) };
     };
+    var winEndStr = Utilities.formatDate(new Date(bounds.end), 'America/Toronto', 'yyyy-MM-dd');
+    // SAFE HOURS now come from the imported SAFE report (ACTIVE TIME) for this
+    // period, not the schedule, when a report covers it. The schedule still drives
+    // coverage / Compare / the timeline — only the per-agent hours TOTAL is swapped.
+    var safeMap = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(winStartStr, winEndStr) : { has: false, map: {} };
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
+      var schedH = self._r2(a.total);
+      var totalH = safeMap.has ? (safeMap.map[nk(n)] != null ? Math.round(safeMap.map[nk(n)] * 100) / 100 : 0) : schedH;
       var ash = shiftModeOf(nk(n));
       // Split SAFE-via-OT: hours on a day the agent was scheduled = extending their
       // shift; hours on a non-scheduled day = an OT agent brought in to do SAFE
@@ -412,7 +419,7 @@ var SafeTracker = {
       var _ak = nk(n), otShiftH = 0, otIncrH = 0;
       Object.keys(a.otByDay || {}).forEach(function (d) { if (schedDayByAgent[_ak + '|' + d]) otShiftH += a.otByDay[d]; else otIncrH += a.otByDay[d]; });
       otShiftH = self._r2(otShiftH); otIncrH = self._r2(otIncrH);
-      totals.all += a.total; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
+      totals.all += totalH; totals.morning += a.morning; totals.evening += a.evening; totals.night += a.night;
       totals.sched += a.srcSched; totals.ot += a.srcOt;
       totals.otShift += otShiftH; totals.otIncr += otIncrH;
       var dayKeys = Object.keys(a.days);
@@ -423,7 +430,6 @@ var SafeTracker = {
       Object.keys(overlapDays).forEach(function (k) { if (k.indexOf(n + '|') === 0) nOverlap++; });
 
       var pf = profileOf(n);
-      var totalH = self._r2(a.total);
       var monthEq = (mode === 'month') ? totalH : self._r2(totalH / winDays * 30.42);
       var band = bandOf(monthEq);
       if (band === 'RED') totals.bRed++; else if (band === 'WARN') totals.bWarn++; else if (band === 'LOW') totals.bLow++; else totals.bNormal++;
@@ -443,14 +449,14 @@ var SafeTracker = {
       return {
         name: n, region: a.region,
         level: pf.level, lang: pf.lang, skills: pf.skills, sup: pf.sup, canSafe: !!pf.canSafe, swLevel: (pf.swLevel != null ? pf.swLevel : null),
-        band: band, monthEq: monthEq,
+        band: band, monthEq: monthEq, safeFromReport: safeMap.has, schedHrs: schedH,
         total: totalH, morning: self._r2(a.morning), evening: self._r2(a.evening), night: self._r2(a.night),
         srcSched: self._r2(a.srcSched), srcOt: self._r2(a.srcOt), srcOtShift: otShiftH, srcOtIncr: otIncrH,
         days: dayKeys.length, segs: a.segs,
         byHour: byHour, thinShare: thinShare,
         shiftStartStr: ash ? WT._minsToTime(ash.start) : '', shiftEndStr: ash ? WT._minsToTime(ash.end) : '',
         shiftPattern: ash ? (Math.floor(ash.start / 60) + '–' + Math.floor((ash.end % 1440) / 60)) : '',
-        avgPerDay: dayKeys.length ? self._r2(a.total / dayKeys.length) : 0,
+        avgPerDay: dayKeys.length ? self._r2(totalH / dayKeys.length) : 0,
         maxDay: maxDay ? { date: maxDay, hours: a.days[maxDay] } : null,
         dayMap: a.days,
         doubleDays: nDouble, overlapDays: nOverlap,
@@ -478,6 +484,7 @@ var SafeTracker = {
     var __payload = JSON.stringify({
       mode: mode, trackerType: 'safe', label: bounds.label, cycle: bounds.cycle,
       grid: [], events: events, totals: totals, perAgent: perAgent,
+      safeFromReport: safeMap.has, safeReportLabel: safeMap.label || '',
       trendMonths: trendMonths.map(function (m) { return m.label + (m.label === 'Jan' ? " '" + String(m.year).slice(-2) : ''); }),
       hasMasterList: Object.keys(mlByKey).length > 0,
       winDays: winDays,

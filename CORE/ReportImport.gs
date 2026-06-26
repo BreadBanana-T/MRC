@@ -241,9 +241,15 @@ var ReportImport = {
     t = String(t || '').toLowerCase();
     return t.indexOf('active time') !== -1 && (t.indexOf('agent languages') !== -1 || t.indexOf('mobile sos') !== -1 || t.indexOf('volume act') !== -1);
   },
-  importSafe: function(text) {
+  // The SAFE export carries no dates, so the manager tags it with the period it
+  // covers (startStr/endStr yyyy-MM-dd + a label) at import time. Rows are stored
+  // period-scoped so monthly/weekly views read the matching report.
+  importSafe: function(text, startStr, endStr, label) {
     try {
       var self = this;
+      startStr = (startStr && String(startStr).length >= 10) ? startStr : Utilities.formatDate(new Date(), this.TZ, 'yyyy-MM-dd');
+      endStr = (endStr && String(endStr).length >= 10) ? endStr : startStr;
+      label = label || (startStr === endStr ? startStr : (startStr + ' → ' + endStr));
       var lines = String(text || '').split(/\r?\n/).filter(function(l) { return l.trim().length; });
       var hi = -1;
       for (var i = 0; i < lines.length; i++) { var L = lines[i].toLowerCase(); if (L.indexOf('active time') !== -1 && L.indexOf('agent') !== -1) { hi = i; break; } }
@@ -264,12 +270,18 @@ var ReportImport = {
         if (!name || /^total$/i.test(name) || /^grand\s*total$/i.test(name)) continue;
         var act = self._hms(c[iActive]);
         var lang = iLang >= 0 ? self._langCode(c[iLang]) : '';
-        rows.push([name, tid, lang, Math.round(act * 100) / 100]);
+        rows.push([startStr, endStr, label, name, tid, lang, Math.round(act * 100) / 100]);
         if (lang) langPairs.push([name, lang]);
       }
-      this._write('WF_SAFE_AGENT', ['Agent', 'TID', 'Lang', 'ActiveHrs'], rows);
+      // Period-scoped replace: keep other periods, swap in this one.
+      var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
+      var keep = [];
+      if (sh && sh.getLastRow() > 1) {
+        sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) { if (!(r[0] === startStr && r[1] === endStr)) keep.push(r.slice(0, 7)); });
+      }
+      this._write('WF_SAFE_AGENT', ['PeriodStart', 'PeriodEnd', 'Label', 'Agent', 'TID', 'Lang', 'ActiveHrs'], keep.concat(rows));
       var langN = this._mergeLangMap(langPairs);
-      return 'SAFE roster synced: ' + rows.length + ' agents (ACTIVE TIME) · ' + langN + ' languages mapped.';
+      return 'SAFE roster synced: ' + rows.length + ' agents for ' + label + ' · ' + langN + ' languages mapped.';
     } catch (e) { return 'SAFE import error: ' + e.message; }
   },
   // Bulk upsert into WF_LANG_MAP [Agent Key, Display Name, Lang] in ONE write.
@@ -294,38 +306,47 @@ var ReportImport = {
       return pairs.length;
     } catch (e) { return 0; }
   },
-  // Normalized-key → ACTIVE TIME hours, for overlaying SAFE hours onto the
-  // schedule-derived agents (report is the source of truth for SAFE hours).
-  getSafeHoursMap: function() {
-    var out = { has: false, map: {} };
+  // Pick the stored SAFE report period that best OVERLAPS the view window
+  // [viewStart, viewEnd] (yyyy-MM-dd). Robust to Wed–Wed vs Sun–Sat week edges.
+  // No overlap on a valid view → empty (that period has no SAFE report). When no
+  // view bounds are given, fall back to the latest stored period.
+  getSafeForPeriod: function(viewStart, viewEnd) {
+    var out = { has: false, periodStart: '', periodEnd: '', label: '', agents: [], totalHrs: 0, count: 0, map: {} };
     try {
       var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
       if (!sh || sh.getLastRow() < 2) return out;
+      var data = sh.getDataRange().getDisplayValues().slice(1);
+      var periods = {};
+      data.forEach(function(r) { var ps = r[0], pe = r[1]; if (!ps) return; var k = ps + '|' + pe; if (!periods[k]) periods[k] = { ps: ps, pe: pe || ps, label: r[2], rows: [] }; periods[k].rows.push(r); });
+      var dnum = function(s) { return s ? Date.parse(s + 'T00:00:00') : NaN; };
+      var haveView = viewStart && String(viewStart).length >= 10;
+      var vs = dnum(viewStart), ve = dnum(viewEnd || viewStart) + 86400000;
+      var best = null, bestOv = 0, latest = null;
+      Object.keys(periods).forEach(function(k) {
+        var p = periods[k];
+        if (!latest || p.ps > latest.ps) latest = p;
+        if (haveView) { var ps = dnum(p.ps), pe = dnum(p.pe) + 86400000; var ov = Math.min(pe, ve) - Math.max(ps, vs); if (ov > bestOv) { bestOv = ov; best = p; } }
+      });
+      if (!best) { if (haveView) return out; best = latest; }
+      if (!best) return out;
       var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
-      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
-        var h = parseFloat(r[3]) || 0;
-        if (r[0]) out.map[nk(r[0])] = h;
-      });
-      out.has = Object.keys(out.map).length > 0;
-    } catch (e) {}
-    return out;
-  },
-  getSafeAgents: function() {
-    var out = { has: false, agents: [], totalHrs: 0, count: 0 };
-    try {
-      var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
-      if (!sh || sh.getLastRow() < 2) return out;
-      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
-        var h = parseFloat(r[3]) || 0;
-        out.agents.push({ name: r[0], tid: r[1], lang: r[2], hrs: Math.round(h * 10) / 10 });
-        out.totalHrs += h;
-      });
+      best.rows.forEach(function(r) { var h = parseFloat(r[6]) || 0; out.agents.push({ name: r[3], tid: r[4], lang: r[5], hrs: Math.round(h * 10) / 10 }); out.totalHrs += h; out.map[nk(r[3])] = h; });
       out.agents.sort(function(a, b) { return b.hrs - a.hrs; });
       out.totalHrs = Math.round(out.totalHrs * 10) / 10;
       out.count = out.agents.length;
+      out.periodStart = best.ps; out.periodEnd = best.pe; out.label = best.label;
       out.has = out.count > 0;
     } catch (e) {}
     return out;
+  },
+  // Normalized-key → ACTIVE TIME hours for the view period (overlay source).
+  getSafeHoursMap: function(viewStart, viewEnd) {
+    var p = this.getSafeForPeriod(viewStart, viewEnd);
+    return { has: p.has, map: p.map, label: p.label };
+  },
+  getSafeAgents: function(viewStart, viewEnd) {
+    var p = this.getSafeForPeriod(viewStart, viewEnd);
+    return { has: p.has, agents: p.agents, totalHrs: p.totalHrs, count: p.count, label: p.label, periodStart: p.periodStart, periodEnd: p.periodEnd };
   },
 
   // Activity hours per CODE / per GRP within [startStr, endStr] (week-start Sundays).

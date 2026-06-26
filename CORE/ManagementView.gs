@@ -641,7 +641,7 @@ var ManagementView = {
         var fGrain = (grain === 'month' || grain === 'quarter' || grain === 'ytd') ? 'month' : 'day';
         var fc = ReportImport.getForecast(fGrain, _startStr, _endStr);
         if (fc && fc.has) forecastImported = fc;
-        var sa = ReportImport.getSafeAgents();
+        var sa = ReportImport.getSafeAgents(_startStr, _endStr);
         if (sa && sa.has) safeAgentsImported = sa;
       }
     } catch (e) {}

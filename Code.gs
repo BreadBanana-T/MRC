@@ -133,8 +133,8 @@ function importAlarmsReport(t) {
 function importForecastReport(t) {
   return (typeof ReportImport !== 'undefined') ? ReportImport.importForecast(t) : 'Error';
 }
-function importSafeReport(t) {
-  return (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t) : 'Error';
+function importSafeReport(t, startStr, endStr, label) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
 }
 
 // --- WORKFORCE TRACKER EXPORTS ---

@@ -483,7 +483,7 @@
   window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
   window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
-  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); };
+  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
@@ -2826,7 +2826,7 @@
       }).join('');
       var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'safeagents\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
       return '<div class="aether-card" style="padding:24px; overflow-x:auto;">' +
-          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>SAFE Hours by Agent <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· imported snapshot · ' + sa.count + ' agents · ACTIVE TIME</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + sa.totalHrs + 'h</span>' + removeBtn + '</span></div>' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>SAFE Hours by Agent <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + escapeHTML(sa.label || 'imported') + '· ' + sa.count + ' agents · ACTIVE TIME</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + sa.totalHrs + 'h</span>' + removeBtn + '</span></div>' +
           '<table style="width:100%; border-collapse:collapse; font-size:0.84rem;"><thead><tr style="border-bottom:1px solid var(--glass-border);"><th style="padding:8px 10px; text-align:left; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Agent</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">SAFE (active)</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
@@ -3617,6 +3617,26 @@
       next();
   }
 
+  // Period the pasted SAFE roster covers (the export has no dates) — from the
+  // Import modal's grain + date picker. Calendar bounds (month = calendar month,
+  // week = Sun–Sat), returned as yyyy-MM-dd + a label.
+  function safePeriodBounds() {
+      var g = document.getElementById('safe-period-grain');
+      var d = document.getElementById('safe-period-date');
+      var grain = (g && g.value) || 'month';
+      var dstr = (d && d.value) || localDateStr(new Date());
+      var dt = new Date(dstr + 'T12:00:00');
+      var y = dt.getFullYear(), m = dt.getMonth(), day = dt.getDate();
+      var MN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      var s, e, label;
+      if (grain === 'day') { s = new Date(y, m, day); e = new Date(y, m, day); label = localDateStr(s); }
+      else if (grain === 'week') { var ws = new Date(y, m, day); ws.setDate(ws.getDate() - ws.getDay()); var we = new Date(ws); we.setDate(we.getDate() + 6); s = ws; e = we; label = 'Week of ' + localDateStr(ws); }
+      else if (grain === 'quarter') { var q = Math.floor(m / 3) * 3; s = new Date(y, q, 1); e = new Date(y, q + 3, 0); label = 'Q' + (Math.floor(m / 3) + 1) + ' ' + y; }
+      else if (grain === 'ytd') { s = new Date(y, 0, 1); e = new Date(y, m, day); label = 'YTD ' + y; }
+      else { s = new Date(y, m, 1); e = new Date(y, m + 1, 0); label = MN[m] + ' ' + y; }
+      return { start: localDateStr(s), end: localDateStr(e), label: label };
+  }
+
   window.runImportAction = function() {
       console.log('[sync] click');
       var t = document.getElementById('import-text').value; if(!t) { console.warn('[sync] empty text'); return; }
@@ -3722,8 +3742,9 @@
           return;
       }
       if (kind === 'safe') {
-          showToast('SAFE roster detected — ingesting…');
-          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importSafeReport(t);
+          var sp = safePeriodBounds();
+          showToast('SAFE roster detected — tagging ' + sp.label + '…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importSafeReport(t, sp.start, sp.end, sp.label);
           return;
       }
       if (t.length > DIRECT_LIMIT) {

@@ -84,17 +84,20 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
   (`getForecast`: daily rows for day/week views, monthly for month/quarter/ytd).
   Detected BEFORE alarms (it also carries "AHT Secs" but has no service-type column).
 - **SAFE / SmartWear per-agent** (`ACTIVE TIME` + `EMPLOYEE ID` + `AGENT LANGUAGES`,
-  columns located by header name) → `WF_SAFE_AGENT` [Agent, TID, Lang, ActiveHrs];
-  ACTIVE TIME (hh:mm:ss) = per-agent SAFE hours. Languages are bulk-merged into
-  `WF_LANG_MAP` (one write) so the SAFE board shows EN/FR/BL. Rendered as the
-  "SAFE Hours by Agent" card (`getSafeAgents`, latest-paste snapshot).
-  **SAFE hours are now sourced from this report, not schedule codes:** the unified
-  engine (`WorkforceTracker.getAnalytics`) overlays `agent.safe` from
-  `ReportImport.getSafeHoursMap()` (normalized-name match; absent → 0), so the
-  Insights SAFE column reflects the report. The Management View dropped its
-  schedule-derived SAFE quick-metric + shrinkage chip. Schedule SAFE classification
-  is kept ONLY for the SAFE Tracker coverage/Compare and the live Floor (which the
-  report can't provide — it has no dates/hourly detail).
+  columns located by header name). The export has **no dates**, so the manager tags
+  the paste with the period it covers via the Import modal's grain+date picker
+  (`safePeriodBounds`) → `WF_SAFE_AGENT` [PeriodStart, PeriodEnd, Label, Agent, TID,
+  Lang, ActiveHrs], period-scoped replace. ACTIVE TIME (hh:mm:ss) = per-agent SAFE
+  hours. Languages bulk-merged into `WF_LANG_MAP` (one write) for EN/FR/BL chips.
+  `getSafeForPeriod(viewStart,viewEnd)` picks the stored report with the largest
+  **overlap** with the view window (no overlap on a valid view → empty).
+  **SAFE HOURS are sourced from this report, not schedule codes, everywhere:**
+  the SAFE Tracker per-agent `total`/bands/`totals.all` (`safeFromReport` flag;
+  `schedHrs` retained), the unified engine / Insights `agent.safe`
+  (`getSafeHoursMap`), and the Management "SAFE Hours by Agent" card. The schedule
+  still drives **coverage / Compare / capability** and the live Floor (the report
+  has no scheduling/hourly detail). Management dropped its schedule-derived SAFE
+  quick-metric + shrinkage chip.
 
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:

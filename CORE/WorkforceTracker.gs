@@ -998,7 +998,8 @@ var WorkforceTracker = {
         // SAFE hours are now sourced from the imported SAFE report (ACTIVE TIME),
         // not the schedule codes. Overlay by normalized name; agents absent from
         // the report read 0. `total` is adjusted by the swap so off-phone math stays consistent.
-        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeHoursMap) ? ReportImport.getSafeHoursMap() : { has: false, map: {} };
+        var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
+        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeHoursMap) ? ReportImport.getSafeHoursMap(_safeStartStr, eStr) : { has: false, map: {} };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
             if (_safeRpt.has) {

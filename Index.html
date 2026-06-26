@@ -95,7 +95,19 @@
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data <span id="import-build" style="font-size:0.62rem; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.05); padding:3px 10px; border-radius:99px; vertical-align:middle; margin-left:8px;">stale build — redeploy needed</span></h2>
-          <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 24px;" placeholder="Paste WFM schedule text here... (Also accepts IDP paste, and the WFM open-OT slots JSON for the Overtime tracker)"></textarea>
+          <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 16px;" placeholder="Paste WFM schedule text here... (Also accepts IDP, the open-OT slots JSON, and the IEX/BI reports: Activity loading, Alarms, Forecast, and the SAFE roster)"></textarea>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:20px; padding:10px 14px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px;">
+             <span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">SAFE report period</span>
+             <select id="safe-period-grain" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;">
+                <option value="day">Day</option>
+                <option value="week">Week (Sun–Sat)</option>
+                <option value="month" selected>Month</option>
+                <option value="quarter">Quarter</option>
+                <option value="ytd">YTD</option>
+             </select>
+             <input type="date" id="safe-period-date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;">
+             <span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">used only when pasting a SAFE roster (it has no dates)</span>
+          </div>
           <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
              <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
