@@ -999,11 +999,12 @@ var WorkforceTracker = {
         // not the schedule codes. Overlay by normalized name; agents absent from
         // the report read 0. `total` is adjusted by the swap so off-phone math stays consistent.
         var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
-        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeHoursMap) ? ReportImport.getSafeHoursMap(_safeStartStr, eStr) : { has: false, map: {} };
+        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(_safeStartStr, eStr) : { has: false };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
             if (_safeRpt.has) {
-                var rptSafe = _safeRpt.map[aKey] != null ? _safeRpt.map[aKey] : 0;
+                var _m = ReportImport.matchSafeHours(a.name, _safeRpt);
+                var rptSafe = (_m != null) ? _m : 0;
                 a.total = (a.total || 0) - (a.safe || 0) + rptSafe;
                 a.safe = rptSafe;
                 a.safeFromReport = true;

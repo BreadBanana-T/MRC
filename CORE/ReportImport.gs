@@ -311,7 +311,7 @@ var ReportImport = {
   // No overlap on a valid view → empty (that period has no SAFE report). When no
   // view bounds are given, fall back to the latest stored period.
   getSafeForPeriod: function(viewStart, viewEnd) {
-    var out = { has: false, periodStart: '', periodEnd: '', label: '', agents: [], totalHrs: 0, count: 0, map: {} };
+    var out = { has: false, periodStart: '', periodEnd: '', label: '', agents: [], totalHrs: 0, count: 0, map: {}, idx: [] };
     try {
       var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
       if (!sh || sh.getLastRow() < 2) return out;
@@ -330,7 +330,12 @@ var ReportImport = {
       if (!best) { if (haveView) return out; best = latest; }
       if (!best) return out;
       var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
-      best.rows.forEach(function(r) { var h = parseFloat(r[6]) || 0; out.agents.push({ name: r[3], tid: r[4], lang: r[5], hrs: Math.round(h * 10) / 10 }); out.totalHrs += h; out.map[nk(r[3])] = h; });
+      best.rows.forEach(function(r) {
+        var h = parseFloat(r[6]) || 0; var k = nk(r[3]);
+        out.agents.push({ name: r[3], tid: r[4], lang: r[5], hrs: Math.round(h * 10) / 10 });
+        out.totalHrs += h; out.map[k] = h;
+        out.idx.push({ toks: k.split(' ').filter(function(t) { return t.length > 1; }), hrs: h });
+      });
       out.agents.sort(function(a, b) { return b.hrs - a.hrs; });
       out.totalHrs = Math.round(out.totalHrs * 10) / 10;
       out.count = out.agents.length;
@@ -338,6 +343,32 @@ var ReportImport = {
       out.has = out.count > 0;
     } catch (e) {}
     return out;
+  },
+  // Resolve a schedule agent name to SAFE hours for a getSafeForPeriod() result.
+  // 1) exact token-sorted key; 2) conservative fuzzy: token overlap (handles
+  // middle names / initials / extra tokens). Multi-token names need ≥2 shared
+  // tokens (first+last); single-token only matches when it's the lone candidate,
+  // so we never silently mis-assign hours.
+  matchSafeHours: function(name, period) {
+    if (!period || !period.has) return null;
+    var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
+    var key = nk(name);
+    if (period.map[key] != null) return period.map[key];
+    var aToks = key.split(' ').filter(function(t) { return t.length > 1; });
+    if (!aToks.length) return null;
+    var cands = [];
+    (period.idx || []).forEach(function(r) {
+      var rToks = r.toks; if (!rToks.length) return;
+      var shared = 0; aToks.forEach(function(t) { if (rToks.indexOf(t) !== -1) shared++; });
+      if (!shared) return;
+      var minLen = Math.min(aToks.length, rToks.length);
+      var ok = (shared >= 2) || (shared >= 1 && minLen === 1) || (shared === minLen);
+      if (ok) cands.push({ shared: shared, diff: Math.abs(aToks.length - rToks.length), hrs: r.hrs });
+    });
+    if (!cands.length) return null;
+    cands.sort(function(a, b) { return (b.shared - a.shared) || (a.diff - b.diff); });
+    if (cands[0].shared >= 2) return cands[0].hrs;     // first+last (or more) matched
+    return cands.length === 1 ? cands[0].hrs : null;   // single shared token → only if unambiguous
   },
   // Normalized-key → ACTIVE TIME hours for the view period (overlay source).
   getSafeHoursMap: function(viewStart, viewEnd) {

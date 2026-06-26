@@ -411,7 +411,8 @@ var SafeTracker = {
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       var schedH = self._r2(a.total);
-      var totalH = safeMap.has ? (safeMap.map[nk(n)] != null ? Math.round(safeMap.map[nk(n)] * 100) / 100 : 0) : schedH;
+      var _rptH = safeMap.has ? ReportImport.matchSafeHours(n, safeMap) : null;
+      var totalH = safeMap.has ? (_rptH != null ? Math.round(_rptH * 100) / 100 : 0) : schedH;
       var ash = shiftModeOf(nk(n));
       // Split SAFE-via-OT: hours on a day the agent was scheduled = extending their
       // shift; hours on a non-scheduled day = an OT agent brought in to do SAFE
