@@ -1723,7 +1723,7 @@
               var boardFocusShade = '';   // dim-outside overlay for the hour-focus window
               // Distinct, high-contrast palette (SAFE pops; breaks/lunch are
               // subordinate). White block text stays legible on every hue.
-              var TYPEC = { SAFE: '#10b981', ICL: '#a855f7', ULC: '#f97316', TOWER: '#0ea5e9', COACH: '#f59e0b', ACSU: '#64748b', OT: '#ec4899', BREAK: '#94a3b8', LUNCH: '#78716c', ABS: '#ef4444', OTHER: '#6b7280' };
+              var TYPEC = { SAFE: '#10b981', TOWER: '#0ea5e9', COACH: '#f59e0b', ACSU: '#64748b', OT: '#ec4899', BREAK: '#94a3b8', LUNCH: '#78716c', ABS: '#ef4444', OTHER: '#6b7280' };
 
               // hour axis 0..24 (labels align with the 2-hour gridlines below)
               var axis = '<div style="display:flex; align-items:center; gap:10px; margin:2px 0 10px;"><div style="width:170px; flex-shrink:0;"></div><div style="flex:1; display:flex; justify-content:space-between; font-size:0.58rem; font-weight:800; color:var(--text-muted); letter-spacing:0.3px;">';
@@ -1755,7 +1755,7 @@
                   return out;
               };
 
-              var SHORT = { LUNCH: 'LUNCH', BREAK: 'BRK', TRAINING: 'COACH', COACH: 'COACH', ACSU: 'ACSU', SAFE: 'SAFE', ICL: 'ICL', ULC: 'ULC', TOWER: 'TWR', OT: 'OT', ABS: 'ABS', OTHER: 'ACT' };
+              var SHORT = { LUNCH: 'LUNCH', BREAK: 'BRK', TRAINING: 'COACH', COACH: 'COACH', ACSU: 'ACSU', SAFE: 'SAFE', TOWER: 'TWR', OT: 'OT', ABS: 'ABS', OTHER: 'ACT' };
               var blk = function(seg) {
                   var c = TYPEC[seg.type] || TYPEC.OTHER;
                   var isBreak = (seg.type === 'BREAK'), isLunch = (seg.type === 'LUNCH');
@@ -1784,7 +1784,8 @@
                           return '<div style="position:absolute; left:' + el + '%; width:' + ew + '%; top:0; bottom:0; background:rgba(99,102,241,0.08); border-top:1px solid rgba(99,102,241,0.30); border-bottom:1px solid rgba(99,102,241,0.30); border-left:2px solid rgba(99,102,241,0.45); border-right:2px solid rgba(99,102,241,0.45); border-radius:4px; z-index:1;"></div>';
                       }).join('');
                   }
-                  var blocks = (a3.segments || []).map(blk).join('');
+                  // ICL / ULC FIRE are not tracked — drop those segments from the board entirely.
+                  var blocks = (a3.segments || []).filter(function(s) { var ty = String(s.type || '').toUpperCase(); return ty.indexOf('ICL') === -1 && ty.indexOf('ULC') === -1 && ty.indexOf('FIRE') === -1; }).map(blk).join('');
                   var crossesNight = (a3.shiftEnd != null && a3.shiftEnd > 1440);
                   var shiftTxt = a3.shiftStartStr
                       ? '<b style="color:var(--text-secondary);">' + a3.shiftStartStr + '–' + a3.shiftEndStr + '</b>' + (crossesNight ? ' <span style="color:var(--accent-primary);">+1d</span>' : '') + (a3.hasFull ? '' : ' · activities only')
@@ -1804,7 +1805,7 @@
               var datalist = '<datalist id="board-roster">' + (state.boardRoster || []).map(function(r) { return '<option value="' + escapeHTML(r.name) + '">L' + r.level + ' ' + r.lang + (r.swLevel != null ? ' · SW' + r.swLevel : '') + '</option>'; }).join('') + '</datalist>';
 
               var legend = '<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:0.62rem; font-weight:700; color:var(--text-muted);">' +
-                  ['SAFE','ICL','ULC','TOWER','COACH','ACSU','OT'].map(function(t) { return '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC[t] + ';"></span>' + t + '</span>'; }).join('') +
+                  ['SAFE','TOWER','COACH','ACSU','OT'].map(function(t) { return '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC[t] + ';"></span>' + t + '</span>'; }).join('') +
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:' + TYPEC.LUNCH + '; opacity:0.6;"></span>Break/Lunch</span>' +
                   '<span style="display:flex; align-items:center; gap:4px;"><span style="width:14px;height:9px;border-radius:2px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.4);"></span>Shift window</span></div>';
 
