@@ -2708,7 +2708,11 @@
       var cur = (d.totals || {}).sel || {};
       var codes = cur.codes || {};
       var periodLbl = (d.sel && d.sel.label) ? d.sel.label : '';
-      var PENDING = { 'LFQI': 1, 'CLASSROOM': 1, 'AUTH': 1, 'SME': 1, 'E Learning': 1 };
+      // "pending feed" means we have NO source for that code. Once the Activity
+      // report is loaded, the feed EXISTS — codes simply absent from it are a real
+      // 0h for the period, not pending.
+      var hasActivityReport = !!(d.activity && d.activity.has);
+      var PENDING = hasActivityReport ? {} : { 'LFQI': 1, 'CLASSROOM': 1, 'AUTH': 1, 'SME': 1, 'E Learning': 1 };
       var GROUPS = [
           { key: 'acsu', title: 'ACSU', rows: [['ACSU', 'Company Solicited Time Off']] },
           { key: 'coaching', title: 'Coaching', rows: [['CE-HUDDLE', ''], ['QUAL', 'Quality Session'], ['ONE', 'Meeting: One on One'], ['SBYS', 'SidexSide Coaching']] },
