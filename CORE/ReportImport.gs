@@ -294,6 +294,22 @@ var ReportImport = {
       return pairs.length;
     } catch (e) { return 0; }
   },
+  // Normalized-key → ACTIVE TIME hours, for overlaying SAFE hours onto the
+  // schedule-derived agents (report is the source of truth for SAFE hours).
+  getSafeHoursMap: function() {
+    var out = { has: false, map: {} };
+    try {
+      var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
+      if (!sh || sh.getLastRow() < 2) return out;
+      var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
+      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+        var h = parseFloat(r[3]) || 0;
+        if (r[0]) out.map[nk(r[0])] = h;
+      });
+      out.has = Object.keys(out.map).length > 0;
+    } catch (e) {}
+    return out;
+  },
   getSafeAgents: function() {
     var out = { has: false, agents: [], totalHrs: 0, count: 0 };
     try {

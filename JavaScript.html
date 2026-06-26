@@ -2529,7 +2529,8 @@
   var MGMT_SECTIONS = {
       overtime: { label: 'Overtime', color: '#818cf8', unit: 'h', total: function(c) { return c.ot || 0; }, series: function(b) { return b.ot || 0; } },
       coaching: { label: 'Coaching', color: '#f59e0b', unit: 'h', total: function(c) { return c.coach || 0; }, series: function(b) { return b.coach || 0; } },
-      safe:     { label: 'SAFE', color: '#10b981', unit: 'h', total: function(c) { return c.safe || 0; }, series: function(b) { return b.safe || 0; } },
+      // SAFE hours now come from the SAFE report ("SAFE Hours by Agent" card), not
+      // schedule codes — so it is not a schedule-derived quick-metric here.
       tower:    { label: 'Tower', color: '#0ea5e9', unit: 'h', total: function(c) { return c.tower || 0; }, series: function(b) { return b.tower || 0; } },
       reading:  { label: 'Reading', color: '#a78bfa', unit: 'h', total: function(c) { return c.reading || 0; }, series: function(b) { return b.reading || 0; } },
       acsu:     { label: 'VFurlough (ACSU)', color: '#94a3b8', unit: 'h', total: function(c) { return c.acsu || 0; }, series: function(b) { return b.acsu || 0; } },
@@ -3110,7 +3111,6 @@
       { k: 'reading', label: 'Reading', color: '#a78bfa' },
       { k: 'breakH', label: 'Breaks', color: '#fbbf24' },
       { k: 'lunchH', label: 'Lunch', color: '#fb923c' },
-      { k: 'safe', label: 'SAFE', color: '#34d399' },
       { k: 'coach', label: 'Coaching', color: '#f472b6' }
   ];
   function renderShrinkChips() {

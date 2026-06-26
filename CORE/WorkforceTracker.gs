@@ -995,8 +995,18 @@ var WorkforceTracker = {
         gemKeys.forEach(g => { gemByKey[_normalizeAgentKey(g)] = gemData[g]; });
 
         let finalArr = Object.values(agentsByKey);
+        // SAFE hours are now sourced from the imported SAFE report (ACTIVE TIME),
+        // not the schedule codes. Overlay by normalized name; agents absent from
+        // the report read 0. `total` is adjusted by the swap so off-phone math stays consistent.
+        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeHoursMap) ? ReportImport.getSafeHoursMap() : { has: false, map: {} };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
+            if (_safeRpt.has) {
+                var rptSafe = _safeRpt.map[aKey] != null ? _safeRpt.map[aKey] : 0;
+                a.total = (a.total || 0) - (a.safe || 0) + rptSafe;
+                a.safe = rptSafe;
+                a.safeFromReport = true;
+            }
             let ml = mlData[aKey];
             if (ml) {
                 a.level = ml.level;

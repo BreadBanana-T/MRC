@@ -88,6 +88,13 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
   ACTIVE TIME (hh:mm:ss) = per-agent SAFE hours. Languages are bulk-merged into
   `WF_LANG_MAP` (one write) so the SAFE board shows EN/FR/BL. Rendered as the
   "SAFE Hours by Agent" card (`getSafeAgents`, latest-paste snapshot).
+  **SAFE hours are now sourced from this report, not schedule codes:** the unified
+  engine (`WorkforceTracker.getAnalytics`) overlays `agent.safe` from
+  `ReportImport.getSafeHoursMap()` (normalized-name match; absent → 0), so the
+  Insights SAFE column reflects the report. The Management View dropped its
+  schedule-derived SAFE quick-metric + shrinkage chip. Schedule SAFE classification
+  is kept ONLY for the SAFE Tracker coverage/Compare and the live Floor (which the
+  report can't provide — it has no dates/hourly detail).
 
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:
