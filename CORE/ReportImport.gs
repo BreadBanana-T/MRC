@@ -49,12 +49,18 @@ var ReportImport = {
     return Utilities.formatDate(cand, this.TZ, 'yyyy-MM-dd');
   },
 
+  // Accepts "January 2026", "Jan-26", "Jan 26", "Jan-2026", "2026-01", etc.
   _monthKey: function(lbl) {
-    var m = String(lbl).match(/([A-Za-z]{3,})\s+(20\d\d)/);
+    var s = String(lbl).trim();
+    var iso = s.match(/^(20\d\d)[-\/](\d{1,2})$/);              // 2026-01
+    if (iso) { var mmi = ('0' + iso[2]).slice(-2); return iso[1] + '-' + mmi; }
+    var m = s.match(/([A-Za-z]{3,})\s*[-\/ ]\s*(\d{2,4})/);     // Jan-26 / January 2026
     if (!m) return '';
     var MO = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
     var mm = MO[m[1].substring(0, 3).toLowerCase()];
-    return mm ? (m[2] + '-' + mm) : '';
+    if (!mm) return '';
+    var yr = m[2]; if (yr.length === 2) yr = '20' + yr;
+    return yr + '-' + mm;
   },
 
   // Leading token of the activity name is the IEX code; Break/Lunch keyed by group.
@@ -83,13 +89,21 @@ var ReportImport = {
     return (t.indexOf('fcst alarm') !== -1 || t.indexOf('fcst acc') !== -1) && t.indexOf('servtype') === -1;
   },
   _num: function(s) { s = String(s == null ? '' : s).replace(/[, %]/g, '').trim(); var n = parseFloat(s); return isFinite(n) ? n : null; },
+  // Accepts "21 June 2026", "21-Jun-26", "Jun 21 2026", "2026-06-21", etc.
   _dayDate: function(lbl) {
-    var m = String(lbl).match(/(\d{1,2})\s+([A-Za-z]{3,})\s+(20\d\d)/);
-    if (!m) return '';
+    var s = String(lbl).trim();
     var MO = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
-    var mo = MO[m[2].substring(0, 3).toLowerCase()];
-    if (mo == null) return '';
-    return Utilities.formatDate(new Date(parseInt(m[3], 10), mo, parseInt(m[1], 10)), this.TZ, 'yyyy-MM-dd');
+    var iso = s.match(/^(20\d\d)[-\/](\d{1,2})[-\/](\d{1,2})$/);
+    if (iso) return Utilities.formatDate(new Date(+iso[1], +iso[2] - 1, +iso[3]), this.TZ, 'yyyy-MM-dd');
+    var day, mo, yr;
+    var m = s.match(/(\d{1,2})\s*[-\/ ]\s*([A-Za-z]{3,})\s*[-\/ ]?\s*(\d{2,4})?/);   // 21 June 2026 / 21-Jun-26
+    if (m) { day = parseInt(m[1], 10); mo = MO[m[2].substring(0, 3).toLowerCase()]; yr = m[3]; }
+    else { var m2 = s.match(/([A-Za-z]{3,})\s*[-\/ ]\s*(\d{1,2})\s*[-\/ ]?\s*(\d{2,4})?/); if (m2) { mo = MO[m2[1].substring(0, 3).toLowerCase()]; day = parseInt(m2[2], 10); yr = m2[3]; } }
+    if (mo == null || !day) return '';
+    if (yr) { yr = parseInt(yr, 10); if (yr < 100) yr += 2000; return Utilities.formatDate(new Date(yr, mo, day), this.TZ, 'yyyy-MM-dd'); }
+    var now = new Date(), cand = new Date(now.getFullYear(), mo, day);   // no year → most recent occurrence ≤ ~today
+    if (cand.getTime() > now.getTime() + 10 * 86400000) cand = new Date(now.getFullYear() - 1, mo, day);
+    return Utilities.formatDate(cand, this.TZ, 'yyyy-MM-dd');
   },
 
   importActivity: function(text) {
