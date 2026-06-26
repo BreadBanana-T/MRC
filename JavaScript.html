@@ -3067,7 +3067,7 @@
       var hrs = function(list) { return (list || []).map(function(a) { return { name: a.name, value: a.hours + 'h' }; }); };
       var coachRows = (sel.topCoach || []).map(function(a) { return { name: a.name, value: a.sessions + '× · ' + a.hours + 'h' }; });
 
-      var slSub = d.grain === 'day' ? 'hourly avg SL — absences are on the KPI card for single days' : 'avg SL (line) · absence hours stacked by shift (right) · ALU lates';
+      var slSub = d.grain === 'day' ? 'hourly avg SL — absences are on the KPI card for single days' : 'avg SL % (line, left) · agents absent by shift (right) · ALU lates';
       var shiftTotal = aSh.Night + aSh.Morning + aSh.Evening;
 
       // Stacking Lunches is shown here (dashboard) AND in the Furlough tracker.
@@ -3075,7 +3075,7 @@
       return headerHtml + mgmtCustomizePanel() + mgmtEmbedsHtml() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Staffing — Requirement vs Open', 'mgmt-chart-idp', 'avg seats ' + (d.grain === 'day' ? 'per hour' : 'per day') + ' — Requirement (bars) vs Open/staffed (line)', (cur.idpNet != null ? (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : '—')) +
-          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? cur.slAvg + '%' : null) +
+          chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? '<span style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">avg SL</span> ' + cur.slAvg + '%' : null) +
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Overtime vs Demand — ' + escapeHTML(sel.label || ''), 'mgmt-chart-ot', 'outline = OT posted (incl. upcoming) · solid = OT in schedules (&times;1/&times;1.5) · dashed = IDP hours short (incl. forecast)', (cur.ot || 0) + 'h') +
@@ -3296,23 +3296,24 @@
       var elSl = document.getElementById('mgmt-chart-sl');
       if (elSl) {
           var hasAbsShift = d.grain !== 'day' && absSeries.length === buckets.length;
+          var scn = function(a) { return a.absShiftCount || { Night: 0, Morning: 0, Evening: 0 }; };
           var maxRight = 0;
-          if (hasAbsShift) absSeries.forEach(function(a) { var sh = a.absShift || {}; maxRight = Math.max(maxRight, (sh.Night || 0) + (sh.Morning || 0) + (sh.Evening || 0), a.lates || 0); });
+          if (hasAbsShift) absSeries.forEach(function(a) { var sh = scn(a); maxRight = Math.max(maxRight, (sh.Night || 0) + (sh.Morning || 0) + (sh.Evening || 0), a.lates || 0); });
           var opts = baseOpts(false);
           opts.scales.x.stacked = true;
           opts.scales.y = { position: 'left', min: 0, max: 100, title: { display: true, text: 'service level %', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { callback: function(v) { return v + '%'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
-          opts.scales.y1 = { stacked: true, position: 'right', beginAtZero: true, suggestedMax: Math.max(4, Math.ceil(maxRight * 1.3)), title: { display: true, text: 'absence hrs by shift · late count', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          opts.scales.y1 = { stacked: true, position: 'right', beginAtZero: true, suggestedMax: Math.max(4, Math.ceil(maxRight * 1.3)), title: { display: true, text: 'agents absent (by shift) · ALU lates', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { precision: 0, stepSize: 1, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
           opts.plugins.tooltip.callbacks = {
-              label: function(c2) { var v = c2.parsed.y; if (v == null) return ' ' + c2.dataset.label + ': —'; if (c2.dataset.yAxisID === 'y') return ' ' + c2.dataset.label + ': ' + (Math.round(v * 10) / 10) + '%'; if (c2.dataset.label === 'Lates (ALU)') return ' Lates: ' + v + (v === 1 ? ' agent' : ' agents'); return ' ' + c2.dataset.label + ' absence: ' + (Math.round(v * 10) / 10) + 'h'; }
+              label: function(c2) { var v = c2.parsed.y; if (v == null) return ' ' + c2.dataset.label + ': —'; if (c2.dataset.yAxisID === 'y') return ' ' + c2.dataset.label + ': ' + (Math.round(v * 10) / 10) + '%'; if (c2.dataset.label === 'Lates (ALU)') return ' Lates: ' + v + (v === 1 ? ' agent' : ' agents'); return ' ' + c2.dataset.label + ' absent: ' + v + (v === 1 ? ' agent' : ' agents'); }
           };
           var slSets = [
               { type: 'line', label: 'Avg SL %', data: buckets.map(function(b) { return b.slAvg; }), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#38bdf8', yAxisID: 'y', spanGaps: true, order: 0 }
           ];
-          // Hourly absence bars are meaningless for a single day — KPI carries it.
+          // Per-shift agent COUNTS (not hours). A single-day view has no per-day bars — KPI carries it.
           if (hasAbsShift) {
-              slSets.push({ label: 'Night', data: absSeries.map(function(a) { return (a.absShift || {}).Night || 0; }), backgroundColor: 'rgba(99,102,241,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
-              slSets.push({ label: 'Morning', data: absSeries.map(function(a) { return (a.absShift || {}).Morning || 0; }), backgroundColor: 'rgba(56,189,248,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
-              slSets.push({ label: 'Evening', data: absSeries.map(function(a) { return (a.absShift || {}).Evening || 0; }), backgroundColor: 'rgba(251,146,60,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
+              slSets.push({ label: 'Night', data: absSeries.map(function(a) { return scn(a).Night || 0; }), backgroundColor: 'rgba(99,102,241,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
+              slSets.push({ label: 'Morning', data: absSeries.map(function(a) { return scn(a).Morning || 0; }), backgroundColor: 'rgba(56,189,248,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
+              slSets.push({ label: 'Evening', data: absSeries.map(function(a) { return scn(a).Evening || 0; }), backgroundColor: 'rgba(251,146,60,0.6)', stack: 'abs', borderRadius: 3, maxBarThickness: bw, yAxisID: 'y1' });
               slSets.push({ type: 'line', label: 'Lates (ALU)', data: absSeries.map(function(a) { return a.lates || 0; }), borderColor: '#fbbf24', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 1 });
           }
           charts.mgmtSl = new Chart(elSl.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: slSets }, options: opts });

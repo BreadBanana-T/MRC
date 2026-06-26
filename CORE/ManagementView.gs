@@ -187,6 +187,9 @@ var ManagementView = {
                // absShift is real-absence hours split Night/Morning/Evening; the
                // "% of week" is derived on the client as absHours ÷ schedH.
                absHours: 0, absHoursOff: 0, absShift: { Night: 0, Morning: 0, Evening: 0 },
+               // Per-shift AGENT counts (a real-absence agent-day counted in each
+               // shift it touches) — for the SL-vs-absence chart (agents, not hours).
+               absShiftCount: { Night: 0, Morning: 0, Evening: 0 },
                // Per-IEX-code hours for the "IEX Coding Compiled / Misc" card
                // (period to-date totals). Keyed by code, e.g. {'CE-HUDDLE':8.4}.
                codes: {},
@@ -207,7 +210,7 @@ var ManagementView = {
     // absHours + absShift power the per-shift concentration + SL-vs-absence-by-shift charts.
     var newAbsEntry = function(label) {
       return { label: label, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
-               absTypes: {}, absTypesOff: {}, absHours: 0, absShift: { Night: 0, Morning: 0, Evening: 0 } };
+               absTypes: {}, absTypesOff: {}, absHours: 0, absShift: { Night: 0, Morning: 0, Evening: 0 }, absShiftCount: { Night: 0, Morning: 0, Evening: 0 } };
     };
     var absSeries = (grain === 'day')
       ? [newAbsEntry(wins.length ? this._fmt(pb.selStart, 'MMM d') : '')]
@@ -465,6 +468,7 @@ var ManagementView = {
             t.absHours += di.hrs;
             if (di.region === 'Offshore') t.absHoursOff += di.hrs;
             t.absShift.Night += di.shift.Night; t.absShift.Morning += di.shift.Morning; t.absShift.Evening += di.shift.Evening;
+            if (di.shift.Night > 0) t.absShiftCount.Night++; if (di.shift.Morning > 0) t.absShiftCount.Morning++; if (di.shift.Evening > 0) t.absShiftCount.Evening++;
             realTypes.forEach(function(ty) {
               t.absTypes[ty] = (t.absTypes[ty] || 0) + 1;
               if (di.region === 'Offshore') t.absTypesOff[ty] = (t.absTypesOff[ty] || 0) + 1;
@@ -483,6 +487,7 @@ var ManagementView = {
               if (di.region === 'Offshore') srs.absOff += 1; else srs.absOn += 1;
               srs.absHours += di.hrs;
               srs.absShift.Night += di.shift.Night; srs.absShift.Morning += di.shift.Morning; srs.absShift.Evening += di.shift.Evening;
+              if (di.shift.Night > 0) srs.absShiftCount.Night++; if (di.shift.Morning > 0) srs.absShiftCount.Morning++; if (di.shift.Evening > 0) srs.absShiftCount.Evening++;
               realTypes.forEach(function(ty) {
                 srs.absTypes[ty] = (srs.absTypes[ty] || 0) + 1;
                 if (di.region === 'Offshore') srs.absTypesOff[ty] = (srs.absTypesOff[ty] || 0) + 1;
