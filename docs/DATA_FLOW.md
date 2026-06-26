@@ -83,6 +83,11 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
   replace (day & month coexist). Rendered as the "Volume vs Forecast" card
   (`getForecast`: daily rows for day/week views, monthly for month/quarter/ytd).
   Detected BEFORE alarms (it also carries "AHT Secs" but has no service-type column).
+- **SAFE / SmartWear per-agent** (`ACTIVE TIME` + `EMPLOYEE ID` + `AGENT LANGUAGES`,
+  columns located by header name) → `WF_SAFE_AGENT` [Agent, TID, Lang, ActiveHrs];
+  ACTIVE TIME (hh:mm:ss) = per-agent SAFE hours. Languages are bulk-merged into
+  `WF_LANG_MAP` (one write) so the SAFE board shows EN/FR/BL. Rendered as the
+  "SAFE Hours by Agent" card (`getSafeAgents`, latest-paste snapshot).
 
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:

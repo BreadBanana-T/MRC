@@ -223,6 +223,95 @@ var ReportImport = {
     return out;
   },
 
+  // ── SAFE / SmartWear per-agent export ───────────────────────────────────────
+  // ACTIVE TIME = per-agent SAFE hours. Also carries EMPLOYEE ID (TID) and
+  // AGENT LANGUAGES, which we fold into WF_LANG_MAP for the SAFE board.
+  _hms: function(s) {
+    s = String(s == null ? '' : s).trim();
+    if (/^\d+:\d{1,2}:\d{1,2}$/.test(s)) { var p = s.split(':'); return (+p[0]) + (+p[1]) / 60 + (+p[2]) / 3600; }
+    if (/^\d+:\d{1,2}$/.test(s)) { var q = s.split(':'); return (+q[0]) + (+q[1]) / 60; }
+    var n = parseFloat(s.replace(/[, ]/g, '')); return isFinite(n) ? n : 0;
+  },
+  _langCode: function(s) {
+    s = String(s || '').toLowerCase();
+    var en = /english|anglais/.test(s) || /\ben\b/.test(s), fr = /french|fran[cç]ais|fran[cç]/.test(s) || /\bfr\b/.test(s);
+    if (en && fr) return 'BL'; if (fr) return 'FR'; if (en) return 'EN'; return '';
+  },
+  looksLikeSafe: function(t) {
+    t = String(t || '').toLowerCase();
+    return t.indexOf('active time') !== -1 && (t.indexOf('agent languages') !== -1 || t.indexOf('mobile sos') !== -1 || t.indexOf('volume act') !== -1);
+  },
+  importSafe: function(text) {
+    try {
+      var self = this;
+      var lines = String(text || '').split(/\r?\n/).filter(function(l) { return l.trim().length; });
+      var hi = -1;
+      for (var i = 0; i < lines.length; i++) { var L = lines[i].toLowerCase(); if (L.indexOf('active time') !== -1 && L.indexOf('agent') !== -1) { hi = i; break; } }
+      if (hi < 0) return 'SAFE import: header (ACTIVE TIME) not found.';
+      var H = lines[hi].split('\t').map(function(c) { return c.trim(); });
+      var exact = function(name) { for (var k = 0; k < H.length; k++) if (H[k].toLowerCase() === name) return k; return -1; };
+      var incl = function(name) { for (var k = 0; k < H.length; k++) if (H[k].toLowerCase().indexOf(name) !== -1) return k; return -1; };
+      var iTid = exact('employee id'); if (iTid < 0) iTid = incl('employee id'); if (iTid < 0) iTid = incl('emp id');
+      var iAgent = exact('agent'); if (iAgent < 0) iAgent = (iTid >= 0 ? iTid + 1 : 1);
+      var iActive = exact('active time'); if (iActive < 0) iActive = incl('active time');
+      var iLang = exact('agent languages'); if (iLang < 0) iLang = incl('languages');
+      if (iActive < 0) return 'SAFE import: ACTIVE TIME column not found.';
+      var rows = [], langPairs = [];
+      for (var j = hi + 1; j < lines.length; j++) {
+        var c = lines[j].split('\t');
+        var name = (c[iAgent] || '').trim();
+        var tid = iTid >= 0 ? (c[iTid] || '').trim() : '';
+        if (!name || /^total$/i.test(name) || /^grand\s*total$/i.test(name)) continue;
+        var act = self._hms(c[iActive]);
+        var lang = iLang >= 0 ? self._langCode(c[iLang]) : '';
+        rows.push([name, tid, lang, Math.round(act * 100) / 100]);
+        if (lang) langPairs.push([name, lang]);
+      }
+      this._write('WF_SAFE_AGENT', ['Agent', 'TID', 'Lang', 'ActiveHrs'], rows);
+      var langN = this._mergeLangMap(langPairs);
+      return 'SAFE roster synced: ' + rows.length + ' agents (ACTIVE TIME) · ' + langN + ' languages mapped.';
+    } catch (e) { return 'SAFE import error: ' + e.message; }
+  },
+  // Bulk upsert into WF_LANG_MAP [Agent Key, Display Name, Lang] in ONE write.
+  _mergeLangMap: function(pairs) {
+    if (!pairs || !pairs.length) return 0;
+    try {
+      var ss = this._ss();
+      var sh = ss.getSheetByName('WF_LANG_MAP') || ss.insertSheet('WF_LANG_MAP');
+      var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
+      var vals = sh.getLastRow() > 0 ? sh.getDataRange().getValues() : [];
+      var hasHdr = vals.length && String(vals[0][0]).toLowerCase().indexOf('agent key') !== -1;
+      var body = hasHdr ? vals.slice(1) : vals;
+      var idx = {};
+      body.forEach(function(r, i) { idx[String(r[0])] = i; });
+      pairs.forEach(function(p) {
+        var key = nk(p[0]);
+        if (idx[key] != null) { body[idx[key]][1] = p[0]; body[idx[key]][2] = p[1]; }
+        else { body.push([key, p[0], p[1]]); idx[key] = body.length - 1; }
+      });
+      var out = [['Agent Key', 'Display Name', 'Lang']].concat(body.map(function(r) { return [r[0], r[1], r[2]]; }));
+      sh.getRange(1, 1, out.length, 3).setValues(out);
+      return pairs.length;
+    } catch (e) { return 0; }
+  },
+  getSafeAgents: function() {
+    var out = { has: false, agents: [], totalHrs: 0, count: 0 };
+    try {
+      var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
+      if (!sh || sh.getLastRow() < 2) return out;
+      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+        var h = parseFloat(r[3]) || 0;
+        out.agents.push({ name: r[0], tid: r[1], lang: r[2], hrs: Math.round(h * 10) / 10 });
+        out.totalHrs += h;
+      });
+      out.agents.sort(function(a, b) { return b.hrs - a.hrs; });
+      out.totalHrs = Math.round(out.totalHrs * 10) / 10;
+      out.count = out.agents.length;
+      out.has = out.count > 0;
+    } catch (e) {}
+    return out;
+  },
+
   // Activity hours per CODE / per GRP within [startStr, endStr] (week-start Sundays).
   getActivityCodes: function(startStr, endStr) {
     var out = { byCode: {}, byGrp: {}, total: 0, weeks: 0, has: false };

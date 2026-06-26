@@ -133,6 +133,9 @@ function importAlarmsReport(t) {
 function importForecastReport(t) {
   return (typeof ReportImport !== 'undefined') ? ReportImport.importForecast(t) : 'Error';
 }
+function importSafeReport(t) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t) : 'Error';
+}
 
 // --- WORKFORCE TRACKER EXPORTS ---
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 

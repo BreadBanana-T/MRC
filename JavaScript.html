@@ -2536,7 +2536,7 @@
       idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
       absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
   };
-  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline', 'activity', 'alarms', 'forecast'];
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline', 'activity', 'alarms', 'forecast', 'safeagents'];
   function getMgmtLayout() {
       if (!state.mgmtLayout) {
           var def = { hidden: {}, sections: [], chart: {}, embeds: [] };
@@ -2594,7 +2594,7 @@
   function mgmtCustomizePanel() {
       if (!state.mgmtCustomize) return '';
       var L = getMgmtLayout();
-      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table', activity: 'Activity Loading', alarms: 'Alarms by Type', forecast: 'Volume vs Forecast' };
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table', activity: 'Activity Loading', alarms: 'Alarms by Type', forecast: 'Volume vs Forecast', safeagents: 'SAFE Hours by Agent' };
       var cardChips = MGMT_KPI_KEYS.map(function(k) {
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
@@ -2808,6 +2808,25 @@
       return '<div class="aether-card" style="padding:24px; overflow:visible; margin-bottom:24px;">' +
           '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>Volume vs Forecast <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + sub + '</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;" title="avg forecast accuracy">' + acc + '</span>' + removeBtn + '</span></div>' +
           '<div style="position:relative; height:320px; width:100%;"><canvas id="mgmt-chart-forecast" style="display:block;"></canvas></div></div>';
+  }
+
+  // SAFE Hours by Agent (imported) — per-agent ACTIVE TIME from the SmartWear/SOS
+  // export, with language + TID. Snapshot from the latest paste (not period-scoped).
+  function mgmtSafeAgentsCard() {
+      var L = getMgmtLayout(); if (L.hidden['safeagents']) return '';
+      var sa = state.mgmtData && state.mgmtData.safeAgents;
+      if (!sa || !sa.has) return '';
+      var langChip = function(l) { if (!l) return ''; var c = l === 'BL' ? '#7c3aed' : (l === 'FR' ? '#0ea5e9' : '#64748b'); return '<span style="font-size:0.58rem; font-weight:800; color:#fff; background:' + c + '; padding:1px 6px; border-radius:99px; margin-left:6px;">' + l + '</span>'; };
+      var body = sa.agents.filter(function(a) { return a.hrs > 0; }).slice(0, 15).map(function(a) {
+          return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);">' +
+              '<td style="padding:7px 10px; font-weight:700; color:var(--text-main);">' + escapeHTML(a.name) + langChip(a.lang) + (a.tid ? ' <span style="font-size:0.66rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(a.tid) + '</span>' : '') + '</td>' +
+              '<td style="padding:7px 10px; text-align:right; font-variant-numeric:tabular-nums; font-weight:800; color:var(--status-active);">' + a.hrs + 'h</td>' +
+              '</tr>';
+      }).join('');
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'safeagents\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px; overflow-x:auto;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>SAFE Hours by Agent <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· imported snapshot · ' + sa.count + ' agents · ACTIVE TIME</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + sa.totalHrs + 'h</span>' + removeBtn + '</span></div>' +
+          '<table style="width:100%; border-collapse:collapse; font-size:0.84rem;"><thead><tr style="border-bottom:1px solid var(--glass-border);"><th style="padding:8px 10px; text-align:left; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Agent</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">SAFE (active)</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
   // Offline Tasks, Absences & Furlough — per-bucket table mirroring the weekly
@@ -3065,6 +3084,9 @@
           '<div class="grid-split" style="margin-bottom:24px;">' +
           mgmtActivityCard() +
           mgmtAlarmsCard() +
+          '</div>' +
+          '<div class="grid-split" style="margin-bottom:24px;">' +
+          mgmtSafeAgentsCard() +
           '</div>';
   }
 
@@ -3627,7 +3649,9 @@
       // be tested BEFORE alarms because it also carries "AHT Secs".
       var isForecast = !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
       var isAlarms = !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
-      var kind = isActivity ? 'activity' : (isForecast ? 'forecast' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))));
+      // SAFE / SmartWear per-agent export (ACTIVE TIME + AGENT LANGUAGES / SOS volume).
+      var isSafe = !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
+      var kind = isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched')))));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -3671,7 +3695,7 @@
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
           if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
-          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.'))));
+          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')))));
           google.script.run.addGlobalNotification(notifMsg);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
@@ -3695,6 +3719,11 @@
       if (kind === 'forecast') {
           showToast('Forecast report detected — ingesting…');
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importForecastReport(t);
+          return;
+      }
+      if (kind === 'safe') {
+          showToast('SAFE roster detected — ingesting…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importSafeReport(t);
           return;
       }
       if (t.length > DIRECT_LIMIT) {

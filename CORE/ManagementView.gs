@@ -624,7 +624,7 @@ var ManagementView = {
     // Imported reports (authoritative weekly activity hours + monthly alarms).
     // When the Activity-loading report covers the selected period, its hours
     // OVERRIDE the schedule-derived codes (so LFQI/CLASSROOM/VILT/etc. show real).
-    var activityImported = null, alarmsImported = null, forecastImported = null;
+    var activityImported = null, alarmsImported = null, forecastImported = null, safeAgentsImported = null;
     try {
       if (typeof ReportImport !== 'undefined') {
         var _startStr = this._fmt(pb.selStart, 'yyyy-MM-dd');
@@ -641,6 +641,8 @@ var ManagementView = {
         var fGrain = (grain === 'month' || grain === 'quarter' || grain === 'ytd') ? 'month' : 'day';
         var fc = ReportImport.getForecast(fGrain, _startStr, _endStr);
         if (fc && fc.has) forecastImported = fc;
+        var sa = ReportImport.getSafeAgents();
+        if (sa && sa.has) safeAgentsImported = sa;
       }
     } catch (e) {}
 
@@ -674,6 +676,7 @@ var ManagementView = {
       activity: activityImported,
       alarms: alarmsImported,
       forecast: forecastImported,
+      safeAgents: safeAgentsImported,
       totals: { sel: selT, prev: prevT },
       sel: {
         label: periodLabel,
