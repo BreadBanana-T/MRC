@@ -75,6 +75,22 @@ var ReportImport = {
     t = String(t || '').toLowerCase();
     return t.indexOf('aht secs') !== -1 || t.indexOf('servicetype') !== -1 || (t.indexOf('alarm vol') !== -1 && t.indexOf('servtype') !== -1);
   },
+  // Forecast report (weekly "Day of Ref Date" or monthly "Month of Ref Date"):
+  // forecast vs actual alarm volume, AHT, SVL%, category mix. Distinct from the
+  // alarms-by-service-type report by its "Fcst Alarm"/"Fcst Acc" columns.
+  looksLikeForecast: function(t) {
+    t = String(t || '').toLowerCase();
+    return (t.indexOf('fcst alarm') !== -1 || t.indexOf('fcst acc') !== -1) && t.indexOf('servtype') === -1;
+  },
+  _num: function(s) { s = String(s == null ? '' : s).replace(/[, %]/g, '').trim(); var n = parseFloat(s); return isFinite(n) ? n : null; },
+  _dayDate: function(lbl) {
+    var m = String(lbl).match(/(\d{1,2})\s+([A-Za-z]{3,})\s+(20\d\d)/);
+    if (!m) return '';
+    var MO = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    var mo = MO[m[2].substring(0, 3).toLowerCase()];
+    if (mo == null) return '';
+    return Utilities.formatDate(new Date(parseInt(m[3], 10), mo, parseInt(m[1], 10)), this.TZ, 'yyyy-MM-dd');
+  },
 
   importActivity: function(text) {
     try {
@@ -144,6 +160,67 @@ var ReportImport = {
       this._write('WF_ALARMS', ['Month', 'PrioRank', 'PrioGrp', 'Desc', 'ServId', 'Vol', 'AHT'], rows);
       return 'Alarms synced: ' + rows.length + ' rows across ' + months.length + ' month(s).';
     } catch (e) { return 'Alarms import error: ' + e.message; }
+  },
+
+  // Forecast vs actuals — daily ("Day of Ref Date") or monthly ("Month of Ref
+  // Date"). Stored together in WF_FORECAST, keyed by Grain+Period; importing one
+  // grain leaves the other intact.
+  FCAST_HEADERS: ['Grain', 'Period', 'FcstAcc', 'FcstAlarm', 'AlarmVol', 'InSvlVol', 'FcstAht', 'ActAht', 'Svl', 'PctHigh', 'PctMed', 'PctLow', 'PctMas', 'PctMix', 'PctOperator'],
+  importForecast: function(text) {
+    try {
+      var self = this;
+      var lines = String(text || '').split(/\r?\n/).filter(function(l) { return l.trim().length; });
+      var hi = -1;
+      for (var i = 0; i < lines.length; i++) { var L = lines[i].toLowerCase(); if (L.indexOf('fcst alarm') !== -1 || L.indexOf('fcst acc') !== -1) { hi = i; break; } }
+      if (hi < 0) return 'Forecast import: header (Fcst Alarm) not found.';
+      var h0 = lines[hi].split('\t')[0].toLowerCase();
+      var grain = h0.indexOf('month') !== -1 ? 'month' : 'day';
+      var rows = [];
+      for (var j = hi + 1; j < lines.length; j++) {
+        var c = lines[j].split('\t');
+        var lbl = (c[0] || '').trim();
+        if (!lbl || /grand\s*total/i.test(lbl)) continue;
+        var period = grain === 'month' ? self._monthKey(lbl) : self._dayDate(lbl);
+        if (!period) continue;
+        rows.push([grain, period, self._num(c[1]), self._num(c[2]), self._num(c[3]), self._num(c[4]),
+                   self._num(c[5]), self._num(c[6]), self._num(c[7]), self._num(c[8]), self._num(c[9]),
+                   self._num(c[10]), self._num(c[11]), self._num(c[12]), self._num(c[13])]);
+      }
+      // Grain-scoped replace: keep rows of the OTHER grain, swap in this grain's.
+      var sh = this._ss().getSheetByName('WF_FORECAST');
+      var keep = [];
+      if (sh && sh.getLastRow() > 1) {
+        sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) { if (r[0] && r[0] !== grain) keep.push(r.slice(0, 15)); });
+      }
+      this._write('WF_FORECAST', this.FCAST_HEADERS, keep.concat(rows));
+      return 'Forecast synced: ' + rows.length + ' ' + grain + ' row(s).';
+    } catch (e) { return 'Forecast import error: ' + e.message; }
+  },
+
+  // Forecast rows for the period. grainWanted 'day' (for week/day views) or
+  // 'month' (month/quarter/ytd). startStr/endStr are yyyy-MM-dd.
+  getForecast: function(grainWanted, startStr, endStr) {
+    var out = { has: false, grain: grainWanted, rows: [], fcstAlarm: 0, alarmVol: 0, accAvg: null };
+    try {
+      var sh = this._ss().getSheetByName('WF_FORECAST');
+      if (!sh || sh.getLastRow() < 2) return out;
+      var sKey = grainWanted === 'month' ? startStr.substring(0, 7) : startStr;
+      var eKey = grainWanted === 'month' ? endStr.substring(0, 7) : endStr;
+      var nf = function(v) { var n = parseFloat(v); return isFinite(n) ? n : null; };
+      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+        if (r[0] !== grainWanted) return;
+        var p = r[1]; if (!p || p < sKey || p > eKey) return;
+        out.rows.push({ period: p, fcstAcc: nf(r[2]), fcstAlarm: nf(r[3]), alarmVol: nf(r[4]), inSvl: nf(r[5]),
+                        fcstAht: nf(r[6]), actAht: nf(r[7]), svl: nf(r[8]),
+                        pctHigh: nf(r[9]), pctMed: nf(r[10]), pctLow: nf(r[11]), pctMas: nf(r[12]), pctMix: nf(r[13]), pctOperator: nf(r[14]) });
+      });
+      out.rows.sort(function(a, b) { return a.period < b.period ? -1 : 1; });
+      var accSum = 0, accN = 0;
+      out.rows.forEach(function(r) { out.fcstAlarm += r.fcstAlarm || 0; out.alarmVol += r.alarmVol || 0; if (r.fcstAcc != null && r.alarmVol) { accSum += r.fcstAcc; accN++; } });
+      out.accAvg = accN ? Math.round(accSum / accN) : null;
+      out.has = out.rows.length > 0;
+    } catch (e) {}
+    return out;
   },
 
   // Activity hours per CODE / per GRP within [startStr, endStr] (week-start Sundays).

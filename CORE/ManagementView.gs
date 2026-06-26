@@ -624,7 +624,7 @@ var ManagementView = {
     // Imported reports (authoritative weekly activity hours + monthly alarms).
     // When the Activity-loading report covers the selected period, its hours
     // OVERRIDE the schedule-derived codes (so LFQI/CLASSROOM/VILT/etc. show real).
-    var activityImported = null, alarmsImported = null;
+    var activityImported = null, alarmsImported = null, forecastImported = null;
     try {
       if (typeof ReportImport !== 'undefined') {
         var _startStr = this._fmt(pb.selStart, 'yyyy-MM-dd');
@@ -635,8 +635,12 @@ var ManagementView = {
           var CODEMAP = { CE: 'CE-HUDDLE', QUAL: 'QUAL', ONE: 'ONE', SBYS: 'SBYS', READ: 'READ', LFQI: 'LFQI', WOFQT: 'WOFQT', VILT: 'VILT', CLASSROOM: 'CLASSROOM', TEAM: 'MEET' };
           Object.keys(ai.byCode).forEach(function(c) { if (ai.byCode[c] > 0) selT.codes[CODEMAP[c] || c] = ai.byCode[c]; });
         }
-        var al = ReportImport.getAlarms(this._fmt(pb.selStart, 'yyyy-MM-dd'), this._fmt(pb.selEnd - 86400000, 'yyyy-MM-dd'));
+        var al = ReportImport.getAlarms(_startStr, _endStr);
         if (al && al.has) alarmsImported = al;
+        // Forecast: daily rows for day/week views, monthly rows for month+ views.
+        var fGrain = (grain === 'month' || grain === 'quarter' || grain === 'ytd') ? 'month' : 'day';
+        var fc = ReportImport.getForecast(fGrain, _startStr, _endStr);
+        if (fc && fc.has) forecastImported = fc;
       }
     } catch (e) {}
 
@@ -669,6 +673,7 @@ var ManagementView = {
       lunch: lunchObj,
       activity: activityImported,
       alarms: alarmsImported,
+      forecast: forecastImported,
       totals: { sel: selT, prev: prevT },
       sel: {
         label: periodLabel,

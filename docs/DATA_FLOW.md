@@ -77,6 +77,12 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 - **Alarms by service type** (`Alarm Vol.`/`AHT Secs` by month) → `WF_ALARMS`
   [Month, PrioRank, PrioGrp, Desc, ServId, Vol, AHT]; rendered as an "Alarms by Service
   Type" card (`getAlarms`, months overlapping the selected period).
+- **Forecast vs actuals** (`Fcst Alarm`/`Fcst Acc`; daily "Day of Ref Date" or monthly
+  "Month of Ref Date") → `WF_FORECAST` [Grain, Period, FcstAcc, FcstAlarm, AlarmVol,
+  InSvlVol, FcstAht, ActAht, Svl, Pct{High,Med,Low,MAS,MIX,Operator}]. Grain-scoped
+  replace (day & month coexist). Rendered as the "Volume vs Forecast" card
+  (`getForecast`: daily rows for day/week views, monthly for month/quarter/ytd).
+  Detected BEFORE alarms (it also carries "AHT Secs" but has no service-type column).
 
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:

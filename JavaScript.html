@@ -2536,7 +2536,7 @@
       idp:      { label: 'IDP Deficit', color: '#f87171', unit: 'h', total: function(c) { return c.idpDeficit || 0; }, series: function(b) { return b.idpDeficit || 0; } },
       absence:  { label: 'Absence Hours', color: '#ef4444', unit: 'h', total: function(c) { return c.absHours || 0; }, fromAbs: true }
   };
-  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline', 'activity', 'alarms'];
+  var MGMT_KPI_KEYS = ['ot', 'coded', 'otcov', 'idp', 'coaching', 'absence', 'sl', 'iex', 'offline', 'activity', 'alarms', 'forecast'];
   function getMgmtLayout() {
       if (!state.mgmtLayout) {
           var def = { hidden: {}, sections: [], chart: {}, embeds: [] };
@@ -2594,7 +2594,7 @@
   function mgmtCustomizePanel() {
       if (!state.mgmtCustomize) return '';
       var L = getMgmtLayout();
-      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table', activity: 'Activity Loading', alarms: 'Alarms by Type' };
+      var kpiMeta = { ot: 'Overtime', coded: 'Coded Hours', otcov: 'OT Coverage', idp: 'IDP Deficit', coaching: 'Coaching', absence: 'Absence Hours', sl: 'Service Level', iex: 'IEX Coding table', offline: 'Offline Tasks table', activity: 'Activity Loading', alarms: 'Alarms by Type', forecast: 'Volume vs Forecast' };
       var cardChips = MGMT_KPI_KEYS.map(function(k) {
           var on = !L.hidden[k];
           return '<button onclick="toggleMgmtCard(\'' + k + '\')" style="display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; cursor:pointer; font-size:0.72rem; font-weight:800; border:1.5px solid var(--accent-primary); background:' + (on ? 'var(--accent-primary)' : 'transparent') + '; color:' + (on ? '#fff' : 'var(--text-muted)') + '; transition:0.15s;">' + (on ? '✓ ' : '+ ') + kpiMeta[k] + '</button>';
@@ -2794,6 +2794,20 @@
       return '<div class="aether-card" style="padding:24px; overflow-x:auto;">' +
           '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>Alarms by Service Type <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· imported · ' + escapeHTML(al.months.join(", ")) + ' · volume &amp; AHT</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;">' + fmtN(al.totalVol) + '</span>' + removeBtn + '</span></div>' +
           '<table style="width:100%; border-collapse:collapse; font-size:0.84rem;"><thead><tr style="border-bottom:1px solid var(--glass-border);"><th style="padding:8px 10px; text-align:left; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Service Type</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">Volume</th><th style="padding:8px 10px; text-align:right; font-size:0.66rem; font-weight:800; text-transform:uppercase; color:var(--text-muted);">AHT</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  // Volume vs Forecast (imported) — forecast vs actual alarm volume per day
+  // (week/day views) or per month (month+ views), with SVL% + forecast accuracy.
+  function mgmtForecastCard() {
+      var L = getMgmtLayout(); if (L.hidden['forecast']) return '';
+      var f = state.mgmtData && state.mgmtData.forecast;
+      if (!f || !f.has) return '';
+      var acc = f.accAvg != null ? f.accAvg + '%' : '—';
+      var sub = 'imported · forecast vs actual alarm volume · ' + (f.grain === 'month' ? 'monthly' : 'daily') + (f.fcstAlarm ? ' · ' + Math.round(f.alarmVol).toLocaleString() + ' actual / ' + Math.round(f.fcstAlarm).toLocaleString() + ' fcst' : '');
+      var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'forecast\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      return '<div class="aether-card" style="padding:24px; overflow:visible; margin-bottom:24px;">' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;"><span>Volume vs Forecast <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + sub + '</span></span><span style="display:flex; gap:8px; align-items:center;"><span style="font-size:1.3rem; font-weight:800; color:var(--text-main); font-variant-numeric:tabular-nums;" title="avg forecast accuracy">' + acc + '</span>' + removeBtn + '</span></div>' +
+          '<div style="position:relative; height:320px; width:100%;"><canvas id="mgmt-chart-forecast" style="display:block;"></canvas></div></div>';
   }
 
   // Offline Tasks, Absences & Furlough — per-bucket table mirroring the weekly
@@ -3047,6 +3061,7 @@
           chartCard('Absence Concentration by Shift', 'mgmt-chart-absshift', 'real-absence hours · Night 23–07 · Morning 07–15 · Evening 15–23' + (shiftTotal > 0 ? ' · explains where targets slip' : ' · none this ' + word), (cur.absHours || 0) + 'h') +
           mgmtOfflineTableCard() +
           '</div>' +
+          mgmtForecastCard() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           mgmtActivityCard() +
           mgmtAlarmsCard() +
@@ -3189,7 +3204,7 @@
       };
       var bw = manyBars ? 22 : 46;
 
-      ['mgmtOt', 'mgmtRoles', 'mgmtShrink', 'mgmtLunch', 'mgmtSl', 'mgmtAbs', 'mgmtAbsShift', 'mgmtIdp'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
+      ['mgmtOt', 'mgmtRoles', 'mgmtShrink', 'mgmtLunch', 'mgmtSl', 'mgmtAbs', 'mgmtAbsShift', 'mgmtIdp', 'mgmtForecast'].forEach(function(k) { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
 
       var elOt = document.getElementById('mgmt-chart-ot');
       if (elOt) {
@@ -3230,6 +3245,24 @@
               { type: 'line', label: 'Open / staffed', data: openData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#10b981', yAxisID: 'y', spanGaps: true, order: 0 }
           ];
           charts.mgmtIdp = new Chart(elIdp.getContext('2d'), { type: 'bar', data: { labels: labels, datasets: idpSets }, options: idpOpts });
+      }
+      // Volume vs Forecast — forecast vs actual alarm volume (bars) + SVL% &
+      // forecast-accuracy lines (right axis), from the imported forecast report.
+      var elFc = document.getElementById('mgmt-chart-forecast');
+      if (elFc && d.forecast && d.forecast.has) {
+          var fr = d.forecast.rows;
+          var fLabels = fr.map(function(r) { return d.forecast.grain === 'month' ? r.period : r.period.substring(5); });
+          var fOpts = baseOpts(false);
+          fOpts.scales.y = { position: 'left', beginAtZero: true, title: { display: true, text: 'alarm volume', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { color: gridColor }, ticks: { callback: function(v) { return v >= 1000 ? (v / 1000) + 'k' : v; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          fOpts.scales.y1 = { position: 'right', beginAtZero: true, suggestedMax: 110, title: { display: true, text: 'SVL % / Fcst Acc %', font: { family: "'Outfit', sans-serif", weight: '700', size: 10 }, color: textColor }, grid: { display: false }, ticks: { callback: function(v) { return v + '%'; }, font: { family: "'Outfit', sans-serif", weight: '600', size: 11 }, color: textColor } };
+          fOpts.plugins.tooltip.callbacks = { label: function(c2) { var v = c2.parsed.y; if (c2.dataset.yAxisID === 'y1') return ' ' + c2.dataset.label + ': ' + (v == null ? '—' : v + '%'); return ' ' + c2.dataset.label + ': ' + (v == null ? '—' : Math.round(v).toLocaleString()); } };
+          var fSets = [
+              { label: 'Forecast', data: fr.map(function(r) { return r.fcstAlarm; }), backgroundColor: 'rgba(129,140,248,0.30)', borderColor: '#818cf8', borderWidth: 1.5, borderRadius: 4, maxBarThickness: bw, yAxisID: 'y' },
+              { label: 'Actual', data: fr.map(function(r) { return r.alarmVol; }), backgroundColor: '#10b981', borderRadius: 4, maxBarThickness: bw, yAxisID: 'y' },
+              { type: 'line', label: 'SVL %', data: fr.map(function(r) { return r.svl; }), borderColor: '#38bdf8', borderWidth: 2.5, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#38bdf8', yAxisID: 'y1', spanGaps: true, order: 0 },
+              { type: 'line', label: 'Fcst Acc %', data: fr.map(function(r) { return r.fcstAcc; }), borderColor: '#f59e0b', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 0 }
+          ];
+          charts.mgmtForecast = new Chart(elFc.getContext('2d'), { type: 'bar', data: { labels: fLabels, datasets: fSets }, options: fOpts });
       }
       // Service Level vs Absence BY SHIFT — SL% line (left) with real-absence
       // HOURS stacked Night/Morning/Evening (right) + ALU lates, so a dip in SL
@@ -3414,18 +3447,32 @@
       var stat = function(label, value, color) {
           return '<div style="flex:1; min-width:140px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 16px;"><div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + label + '</div><div style="font-size:1.5rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; font-variant-numeric:tabular-nums; margin-top:4px;">' + value + '</div></div>';
       };
+      // `target` is really the upper STRESS LIMIT (e.g. 30s): at or above it we
+      // can't release furlough / off-queue. It is NOT a goal to reach. `required`
+      // = the average ACK the REST of the day can run before the day-end ACK
+      // crosses that limit.
+      var wrap = function(bg, bd, col, icon, txt) {
+          return '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:' + bg + '; border:1px solid ' + bd + '; color:' + col + '; font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="' + icon + '" width="20"></i> ' + txt + '</div>';
+      };
+      var reqTxt = r.required > 600 ? 'far above the limit' : ('≈ ' + r.required.toFixed(1) + 's');
       var banner;
-      if (r.required < 0) {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(220,38,38,0.10); border:1px solid var(--status-alert); color:var(--status-alert); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-octagon" width="20"></i> POINT OF NO RETURN — even instant ACKs land the day at ' + r.floor.toFixed(1) + 's (target ' + target + 's).</div>';
-      } else if (r.required < target * 0.5) {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(217,119,6,0.10); border:1px solid var(--status-warn); color:var(--status-warn); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="alert-triangle" width="20"></i> Tight — the rest of the day must average ≤ ' + r.required.toFixed(1) + 's to finish at ' + target + 's.</div>';
+      if (r.floor > target || r.required < 0) {
+          banner = wrap('rgba(220,38,38,0.10)', 'var(--status-alert)', 'var(--status-alert)', 'alert-octagon',
+              'OVER THE ' + target + 's LIMIT — even instant ACKs land the day at ' + r.floor.toFixed(1) + 's. At/above ' + target + 's, furlough &amp; off-queue come off the table.');
+      } else if (r.required < target) {
+          // Must run TIGHTER than the limit for the rest of the day to stay under.
+          var warn = r.required < target * 0.6;
+          banner = wrap(warn ? 'rgba(217,119,6,0.10)' : 'rgba(5,150,105,0.10)', warn ? 'var(--status-warn)' : 'var(--status-active)', warn ? 'var(--status-warn)' : 'var(--status-active)', warn ? 'alert-triangle' : 'check-circle',
+              (warn ? 'Tight — ' : 'On track — ') + 'keep the rest of the day averaging ≤ ' + r.required.toFixed(1) + 's to finish under the ' + target + 's limit.');
       } else {
-          banner = '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:rgba(5,150,105,0.10); border:1px solid var(--status-active); color:var(--status-active); font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="check-circle" width="20"></i> Recoverable — averaging ≤ ' + r.required.toFixed(1) + 's for the rest of the day hits the ' + target + 's target.</div>';
+          // required ≥ limit → comfortable headroom.
+          banner = wrap('rgba(5,150,105,0.10)', 'var(--status-active)', 'var(--status-active)', 'check-circle',
+              'Comfortable — well under the ' + target + 's limit. The rest of the day would have to average ' + reqTxt + ' to breach it.');
       }
       if (!withStats) return banner;
       return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">' +
           stat('Remaining Alarms (proj.)', Math.round(r.remaining * 100) / 100) +
-          stat('Required ACK / interval', r.required.toFixed(1) + 's', r.required < 0 ? 'var(--status-alert)' : (r.required < target * 0.5 ? 'var(--status-warn)' : 'var(--status-active)')) +
+          stat('Breach threshold (rest-of-day avg)', r.required < 0 ? 'past' : (r.required > 600 ? '>600s' : r.required.toFixed(1) + 's'), r.floor > target ? 'var(--status-alert)' : (r.required < target ? 'var(--status-warn)' : 'var(--status-active)')) +
           stat('Best possible day-end', r.floor.toFixed(1) + 's', r.floor > target ? 'var(--status-alert)' : 'var(--text-main)') +
           '</div>' + banner;
   }
@@ -3451,14 +3498,14 @@
               input('ponr-ack', 'Current ACK (s)', ackPre, 'e.g. 50') +
               input('ponr-alarms', 'BURG Alarms Received', alarmsPre, 'e.g. 540') +
               input('ponr-time', 'Time (decimal)', timePre, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
-              input('ponr-target', 'Target ACK (s)', target, '30') +
+              input('ponr-target', 'Stress limit (s)', target, '30') +
               '</div><div id="ponr-result"></div></div>';
       }
 
       // Automatic mode: nothing to fill in. Before the first calculation,
       // just a one-line hint; after, the verdict banner.
       var headRight = '<span style="display:flex; align-items:center; gap:10px;">' +
-          '<label style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Target</label>' +
+          '<label style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;" title="Upper stress limit — at/above this we can\'t release furlough or off-queue. Not a goal to hit.">Limit (s)</label>' +
           '<input type="number" step="any" class="input-aether" style="width:70px; height:28px; font-size:0.8rem; font-weight:800; text-align:center;" value="' + target + '" onchange="setPonrTarget(this.value)">' +
           '<button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="togglePonrWhatIf()">What-if</button></span>';
 
@@ -3469,7 +3516,7 @@
       }
 
       var r = computePonr(lc.burgAckSec, lc.burgActual, lc.updateHour, target);
-      var detail = '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:10px;">From your paste: <b style="color:var(--text-main);">' + Number(lc.burgActual).toLocaleString() + '</b> BURG alarms · ACK <b style="color:var(--text-main);">' + lc.burgAckSec + 's</b> · snapshot at <b style="color:var(--text-main);">' + lc.updateHour.toFixed(2) + 'h</b>' + (r ? ' · projected remaining <b style="color:var(--text-main);">' + Math.round(r.remaining) + '</b>' + (r.required >= 0 ? ' · need ≤ <b style="color:var(--text-main);">' + r.required.toFixed(1) + 's</b> rest of day' : '') : '') + '</div>';
+      var detail = '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:10px;">From your paste: <b style="color:var(--text-main);">' + Number(lc.burgActual).toLocaleString() + '</b> BURG alarms · ACK <b style="color:var(--text-main);">' + lc.burgAckSec + 's</b> · snapshot at <b style="color:var(--text-main);">' + lc.updateHour.toFixed(2) + 'h</b>' + (r ? ' · projected remaining <b style="color:var(--text-main);">' + Math.round(r.remaining) + '</b>' + ((r.required >= 0 && r.floor <= target && r.required < target) ? ' · keep rest ≤ <b style="color:var(--text-main);">' + r.required.toFixed(1) + 's</b> to stay under ' + target + 's' : (r.floor > target ? ' · <b style="color:var(--status-alert);">over the ' + target + 's limit</b>' : ' · comfortable headroom under ' + target + 's')) : '') + '</div>';
       return '<div class="aether-card" style="margin-bottom:24px; padding:18px 24px;">' +
           '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
           '<span style="display:flex; align-items:center; gap:10px; font-weight:800; font-size:0.95rem;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> Point of No Return <span style="font-size:0.62rem; font-weight:800; color:var(--status-active); background:rgba(5,150,105,0.1); padding:2px 8px; border-radius:99px; letter-spacing:1px;">AUTO</span></span>' +
@@ -3576,8 +3623,11 @@
       var isIdp = !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
       // IEX/BI report pastes that feed the Management View.
       var isActivity = lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1);
-      var isAlarms = !isActivity && (lower.indexOf('aht secs') !== -1 || (lower.indexOf('alarm vol') !== -1 && lower.indexOf('servtype') !== -1));
-      var kind = isActivity ? 'activity' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched')));
+      // Forecast report ("Fcst Alarm"/"Fcst Acc", no service-type column) — must
+      // be tested BEFORE alarms because it also carries "AHT Secs".
+      var isForecast = !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
+      var isAlarms = !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
+      var kind = isActivity ? 'activity' : (isForecast ? 'forecast' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -3621,7 +3671,7 @@
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
           if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
-          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')));
+          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.'))));
           google.script.run.addGlobalNotification(notifMsg);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
@@ -3640,6 +3690,11 @@
       if (kind === 'alarms') {
           showToast('Alarms report detected — ingesting…');
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importAlarmsReport(t);
+          return;
+      }
+      if (kind === 'forecast') {
+          showToast('Forecast report detected — ingesting…');
+          google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importForecastReport(t);
           return;
       }
       if (t.length > DIRECT_LIMIT) {
