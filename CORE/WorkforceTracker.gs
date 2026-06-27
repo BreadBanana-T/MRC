@@ -738,43 +738,58 @@ var WorkforceTracker = {
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
             this._getShiftSplits(startMins, endMins).forEach(split => {
-                let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(split.startMins/60), split.startMins%60, 0, 0).getTime();
+                // A shift split can still straddle midnight (e.g. a Night chunk
+                // that runs 23:00 -> 00:30). Break it at each midnight so every
+                // piece lands wholly inside one calendar day and is credited to
+                // the day it actually occurs in -- not the day the chunk started.
+                // Without this, the post-midnight minutes of a cross-day furlough
+                // were attributed to the start day and went missing on the day
+                // they really belonged to.
+                let pieceStart = split.startMins;
+                while (pieceStart < split.endMins) {
+                    let nextMidnight = (Math.floor(pieceStart / 1440) + 1) * 1440;
+                    let pieceEnd = Math.min(split.endMins, nextMidnight);
+                    let piece = { shift: split.shift, startMins: pieceStart, endMins: pieceEnd, hours: (pieceEnd - pieceStart) / 60 };
+                    pieceStart = pieceEnd;
 
-                if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
-                    if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
-                        if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) return;
-                    }
-                    
-                    let effDateStr = Utilities.formatDate(new Date(splitStartEpoch), "America/Toronto", "yyyy-MM-dd");
+                    let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(piece.startMins/60), piece.startMins%60, 0, 0).getTime();
 
-                    if (trackerType === 'furlough' && mode === 'day') {
-                        for (let min = split.startMins; min < split.endMins; min += 15) {
-                            let blockTime = new Date(rY, rM-1, rD, Math.floor(min/60), min%60, 0, 0).getTime();
-                            if (blockTime >= bounds.start && blockTime <= bounds.end) {
-                                let idx = Math.floor((min % 1440) / 15);
-                                if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
+                    if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
+                        if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
+                            if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) continue;
+                        }
+
+                        let effDateStr = Utilities.formatDate(new Date(splitStartEpoch), "America/Toronto", "yyyy-MM-dd");
+
+                        if (trackerType === 'furlough' && mode === 'day') {
+                            for (let min = piece.startMins; min < piece.endMins; min += 15) {
+                                let blockTime = new Date(rY, rM-1, rD, Math.floor(min/60), min%60, 0, 0).getTime();
+                                if (blockTime >= bounds.start && blockTime <= bounds.end) {
+                                    let idx = Math.floor((min % 1440) / 15);
+                                    if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
+                                }
                             }
                         }
-                    }
 
-                    let rawStartStr = String(row[3]).trim();
-                    let groupKey = `${agent}_${effDateStr}_${split.shift}_${rawStartStr}`;
-                    
-                    let actName = "Time Off";
-                    if (trackerType === 'coaching' || trackerType === 'roles') actName = row[2];
-                    groupKey += `_${actName}`;
+                        let rawStartStr = String(row[3]).trim();
+                        let groupKey = `${agent}_${effDateStr}_${piece.shift}_${rawStartStr}`;
 
-                    if (!groupedLogs[groupKey]) {
-                        groupedLogs[groupKey] = { 
-                            date: effDateStr, agent: agent, 
-                            activityName: actName, 
-                            shift: split.shift, hours: split.hours, 
-                            timeStart: this._minsToTime(split.startMins), 
-                            timeEnd: this._minsToTime(split.endMins) 
-                        };
-                    } else {
-                        groupedLogs[groupKey].hours += split.hours;
-                        groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
+                        let actName = "Time Off";
+                        if (trackerType === 'coaching' || trackerType === 'roles') actName = row[2];
+                        groupKey += `_${actName}`;
+
+                        if (!groupedLogs[groupKey]) {
+                            groupedLogs[groupKey] = {
+                                date: effDateStr, agent: agent,
+                                activityName: actName,
+                                shift: piece.shift, hours: piece.hours,
+                                timeStart: this._minsToTime(piece.startMins),
+                                timeEnd: this._minsToTime(piece.endMins)
+                            };
+                        } else {
+                            groupedLogs[groupKey].hours += piece.hours;
+                            groupedLogs[groupKey].timeEnd = this._minsToTime(piece.endMins);
+                        }
                     }
                 }
             });
