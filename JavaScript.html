@@ -229,8 +229,8 @@
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance(); fetchCurrentUser();
-    fetchPresence(); fetchLastActions();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
+    fetchPresenceBootstrap();
     setInterval(fetchOutages, 300000); // 5 min
     setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
     setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
@@ -510,6 +510,20 @@
       return '<div title="' + escapeHTML(title) + '" style="position:relative; width:' + size + 'px; height:' + size + 'px; border-radius:50%; overflow:hidden; background:' + color + '; border:2px solid var(--bg-root); ' + ring + ' flex-shrink:0;">' + inner + img + '</div>';
   }
 
+  // One round-trip at load: identity + active users + last-action attribution.
+  function fetchPresenceBootstrap() {
+      if (typeof google === 'undefined') { fetchCurrentUser(); fetchPresence(); return; }
+      google.script.run.withSuccessHandler(function(res) {
+          var d = {}; try { d = JSON.parse(res) || {}; } catch (e) {}
+          state.currentUser = d.me || { email: '', name: '', photo: '' };
+          state.presence = d.active || [];
+          state.lastActions = d.actions || {};
+          renderPresenceRow();
+          var who = document.getElementById('feedback-whoami');
+          if (who && document.getElementById('feedback-modal') && document.getElementById('feedback-modal').classList.contains('open')) who.innerHTML = feedbackWhoamiText();
+          if (state.view === 'tracker') { var el = document.getElementById('tracker-last-import'); if (el) el.innerHTML = lastActionInline('import'); }
+      }).withFailureHandler(function() {}).getPresenceBootstrap();
+  }
   function fetchPresence() {
       if (typeof google === 'undefined') {
           var u = state.currentUser || {};

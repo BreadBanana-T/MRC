@@ -282,6 +282,9 @@ function getFeedbackList(limit) {
 function heartbeat() {
   return (typeof Presence !== 'undefined') ? Presence.heartbeat() : "[]";
 }
+function getPresenceBootstrap() {
+  return (typeof Presence !== 'undefined') ? Presence.bootstrap() : JSON.stringify({ me: {}, active: [], actions: {} });
+}
 function getLastActions() {
   return (typeof Presence !== 'undefined') ? Presence.getLastActions() : "{}";
 }

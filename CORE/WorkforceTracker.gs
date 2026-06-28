@@ -678,6 +678,16 @@ var WorkforceTracker = {
   },
 
   getAnalytics: function(mode, refDate, trackerType, regionFilter = 'All', cycleFilter = 'ALL') {
+    // Cache the whole payload per (type·mode·date·region·cycle), invalidated by
+    // the WF_CACHE_VER stamp the import bumps. The common manager action —
+    // flipping dates/modes — re-read the full sheet + recomputed the trend every
+    // time; now repeat views are served from cache (gzip+base64, same scheme as
+    // SafeTracker).
+    var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
+    var _ck = 'wfAn|' + mode + '|' + refDate + '|' + trackerType + '|' + regionFilter + '|' + (cycleFilter || 'ALL') + '|' + _ver;
+    var _cache = null; try { _cache = CacheService.getScriptCache(); } catch (e) {}
+    if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
+
     const dbIDP = this._getDB('WF_IDP');
     let dbSched;
     if (trackerType === 'coaching') dbSched = this._getDB('WF_COACHING');
@@ -828,7 +838,9 @@ var WorkforceTracker = {
         pCur.setDate(1); pCur.setMonth(pCur.getMonth() + 1);
     }
 
-    return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals, trend: trend, periodKeys: periodKeys });
+    var __payload = JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals, trend: trend, periodKeys: periodKeys });
+    if (_cache) { try { var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, 21600); } catch (e) {} }
+    return __payload;
   },
 
   // Monthly hours across the full schedule DB, split by WEEK A / WEEK B cycle.

@@ -166,6 +166,17 @@ var Presence = {
     } catch (e) { Logger.log('[Presence] recordAction failed: ' + e); }
   },
 
+  // One round-trip for the whole presence layer at page load: my identity,
+  // who's active, and the last-action attribution map. Saves 2 cold-start
+  // server calls vs fetching them separately.
+  bootstrap: function() {
+    return JSON.stringify({
+      me: JSON.parse(this.me()),
+      active: JSON.parse(this.heartbeat()),
+      actions: JSON.parse(this.getLastActions())
+    });
+  },
+
   getLastActions: function() {
     var sh = this._sheet(this.ACTIONS, this.ACTIONS_HEADERS);
     var last = sh.getLastRow();
