@@ -96,7 +96,7 @@ var WorkforceTracker = {
       // Word-aware role matcher. Bare substring checks turned words like
       // "vehicle"/"article" (icl) and "feuille" (feu) into role hours.
       // Leading-only boundaries on icl/ulc keep variants like "ICL2" matching.
-      const ROLE_RGX = /safe onqueue|safe en ligne|\bicl|\bincident|\bulc|\bfire\b|\bfeu\b|wofqt|woqft|\btower\b|\breading\b|\blecture\b/;
+      const ROLE_RGX = /safe onqueue|safe en ligne|wofqt|woqft|\btower\b|\breading\b|\blecture\b/; // ICL/ULC FIRE intentionally excluded — not tracked (live Floor only)
       
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
@@ -149,8 +149,6 @@ var WorkforceTracker = {
               let roleType = "";
               if (isRole) {
                   if (actLower.includes('safe')) roleType = "SAFE";
-                  else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
-                  else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
                   else if (actLower.includes('reading') || actLower.includes('lecture')) roleType = "READING";
               }
@@ -208,8 +206,6 @@ var WorkforceTracker = {
               let roleType = "";
               if (isRole) {
                   if (actLower.includes('safe')) roleType = "SAFE";
-                  else if (/\bicl|\bincident/.test(actLower)) roleType = "ICL";
-                  else if (/\bulc|\bfire\b|\bfeu\b/.test(actLower)) roleType = "ULC FIRE";
                   else if (actLower.includes('wofqt') || actLower.includes('woqft') || actLower.includes('tower')) roleType = "TOWER";
                   else if (actLower.includes('reading') || actLower.includes('lecture')) roleType = "READING";
               }
@@ -642,6 +638,20 @@ var WorkforceTracker = {
           cycle = this._getCycleForEpoch(tStart);
           label = `${Utilities.formatDate(wStart, "America/Toronto", "MMM dd, HH:mm")} to ${Utilities.formatDate(wEnd, "America/Toronto", "MMM dd, HH:mm")}`;
       } 
+      else if (mode === 'week_sun') {
+          // Sunday → Saturday CALENDAR week (matches the Management View). No
+          // Week A/B cycle — calendar weeks don't rotate; cycle filtering is
+          // skipped in week modes anyway.
+          let wStart = new Date(rY, rM-1, rD, 0, 0, 0, 0);
+          wStart.setDate(wStart.getDate() - wStart.getDay()); // back to Sunday 00:00
+          let wEnd = new Date(wStart);
+          wEnd.setDate(wStart.getDate() + 6);
+          wEnd.setHours(23, 59, 59, 999); // Saturday 23:59:59
+          tStart = wStart.getTime();
+          tEnd = wEnd.getTime();
+          cycle = "WEEK";
+          label = `${Utilities.formatDate(wStart, "America/Toronto", "MMM dd")} to ${Utilities.formatDate(wEnd, "America/Toronto", "MMM dd")}`;
+      }
       else if (mode === 'ytd') {
           // Year-to-date: Jan 1 of the reference year through the reference day.
           let sDate = new Date(rY, 0, 1, 0, 0, 0, 0);
@@ -828,7 +838,7 @@ var WorkforceTracker = {
             if (!agentsByKey[key]) {
                 // Prefer MasterList's display name when we have one.
                 let displayName = (mlData[key] && mlData[key].name) ? mlData[key].name : String(name).trim();
-                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, icl: 0, ulc: 0, tower: 0, total: 0, ot: 0 };
+                agentsByKey[key] = { name: displayName, region: reg || 'Onshore', acsu: 0, coach: 0, safe: 0, tower: 0, total: 0, ot: 0 };
             }
             if (reg && String(reg).includes('Offshore')) agentsByKey[key].region = 'Offshore';
             // Registry is authoritative. Overrides both the row-level region and any MasterList inference.
@@ -906,30 +916,14 @@ var WorkforceTracker = {
 
                             if (roleType.includes('SAFE')) { getAg(agent, region).safe += s.hours; getAg(agent, region).total += s.hours; }
                             else if (roleType.includes('TOWER') || roleType.includes('WOFQT') || roleType.includes('WOQFT')) { getAg(agent, region).tower += s.hours; getAg(agent, region).total += s.hours; }
-                            else if (roleType.includes('ICL')) { getAg(agent, region).icl += s.hours; getAg(agent, region).total += s.hours; }
-                            else if (roleType.includes('ULC') || roleType.includes('FIRE')) { getAg(agent, region).ulc += s.hours; getAg(agent, region).total += s.hours; }
                         }
                      });
                 }
             });
         }
 
-        const dbSess = this._getDB('DB_Sessions');
-        if (dbSess && dbSess.getLastRow() > 1) {
-            dbSess.getDataRange().getDisplayValues().slice(1).forEach(row => {
-                let sessionEpoch = new Date(row[3]).getTime();
-                if (sessionEpoch >= bounds.start && sessionEpoch <= bounds.end && sessionEpoch <= nowEpoch) {
-                    if (targetCycle !== 'ALL' && this._getCycleForEpoch(sessionEpoch) !== targetCycle) return;
-        
-                    let agentName = String(row[1]).trim();
-                    let role = String(row[2]).toUpperCase(); 
-                    let h = Number(row[6]) || 0; 
-                    
-                    if (role.includes('ICL')) { getAg(agentName).icl += h; getAg(agentName).total += h; }
-                    else if (role.includes('ULC') || role.includes('FIRE')) { getAg(agentName).ulc += h; getAg(agentName).total += h; }
-                }
-            });
-        }
+        // DB_Sessions previously fed ICL / ULC FIRE session hours — no longer
+        // tracked (those roles are live-Floor only), so the block was removed.
 
         // Overtime (Overtime_Tracking): worked OT hours, kept SEPARATE from `total`
         // (total = off-phone hours; OT is extra time on the phones). Columns:
@@ -1001,8 +995,20 @@ var WorkforceTracker = {
         gemKeys.forEach(g => { gemByKey[_normalizeAgentKey(g)] = gemData[g]; });
 
         let finalArr = Object.values(agentsByKey);
+        // SAFE hours are now sourced from the imported SAFE report (ACTIVE TIME),
+        // not the schedule codes. Overlay by normalized name; agents absent from
+        // the report read 0. `total` is adjusted by the swap so off-phone math stays consistent.
+        var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
+        var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(_safeStartStr, eStr) : { has: false };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
+            if (_safeRpt.has) {
+                var _m = ReportImport.matchSafeHours(a.name, _safeRpt);
+                var rptSafe = (_m != null) ? _m : 0;
+                a.total = (a.total || 0) - (a.safe || 0) + rptSafe;
+                a.safe = rptSafe;
+                a.safeFromReport = true;
+            }
             let ml = mlData[aKey];
             if (ml) {
                 a.level = ml.level;
@@ -1012,7 +1018,7 @@ var WorkforceTracker = {
                 if (ml.isOffshore) a.region = "Offshore";
             }
 
-            ['acsu','coach','safe','icl','ulc','tower','total','ot'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
+            ['acsu','coach','safe','tower','total','ot'].forEach(k => a[k] = parseFloat(a[k].toFixed(2)));
             let matchedGem = gemData[a.name] || gemByKey[aKey];
             if (!matchedGem) {
                 let aWords = aKey.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);

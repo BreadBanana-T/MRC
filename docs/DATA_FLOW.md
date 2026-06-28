@@ -67,6 +67,38 @@ flowchart TD
   GEM[("WF_GEM_DATA_V3")] --> UNI
 ```
 
+**Report pastes (Management View feeds).** Two IEX/BI exports are pasted into the
+same Import box and auto-detected (`JavaScript.html: runImportAction`), then parsed by
+`CORE/ReportImport.gs`:
+- **Activity loading hours** (`Exception Grp`/`Activity Name`/week-of-Sunday cols) →
+  `WF_ACTIVITY_WK` [WeekStart(Sun), ExceptionGrp, Code, ActivityName, Hours]. The
+  Management View overlays these authoritative weekly hours onto the IEX Coding card
+  (`getActivityCodes`) and renders an "Activity Loading" group card.
+- **Alarms by service type** (`Alarm Vol.`/`AHT Secs` by month) → `WF_ALARMS`
+  [Month, PrioRank, PrioGrp, Desc, ServId, Vol, AHT]; rendered as an "Alarms by Service
+  Type" card (`getAlarms`, months overlapping the selected period).
+- **Forecast vs actuals** (`Fcst Alarm`/`Fcst Acc`; daily "Day of Ref Date" or monthly
+  "Month of Ref Date") → `WF_FORECAST` [Grain, Period, FcstAcc, FcstAlarm, AlarmVol,
+  InSvlVol, FcstAht, ActAht, Svl, Pct{High,Med,Low,MAS,MIX,Operator}]. Grain-scoped
+  replace (day & month coexist). Rendered as the "Volume vs Forecast" card
+  (`getForecast`: daily rows for day/week views, monthly for month/quarter/ytd).
+  Detected BEFORE alarms (it also carries "AHT Secs" but has no service-type column).
+- **SAFE / SmartWear per-agent** (`ACTIVE TIME` + `EMPLOYEE ID` + `AGENT LANGUAGES`,
+  columns located by header name). The export has **no dates**, so the manager tags
+  the paste with the period it covers via the Import modal's grain+date picker
+  (`safePeriodBounds`) → `WF_SAFE_AGENT` [PeriodStart, PeriodEnd, Label, Agent, TID,
+  Lang, ActiveHrs], period-scoped replace. ACTIVE TIME (hh:mm:ss) = per-agent SAFE
+  hours. Languages bulk-merged into `WF_LANG_MAP` (one write) for EN/FR/BL chips.
+  `getSafeForPeriod(viewStart,viewEnd)` picks the stored report with the largest
+  **overlap** with the view window (no overlap on a valid view → empty).
+  **SAFE HOURS are sourced from this report, not schedule codes, everywhere:**
+  the SAFE Tracker per-agent `total`/bands/`totals.all` (`safeFromReport` flag;
+  `schedHrs` retained), the unified engine / Insights `agent.safe`
+  (`getSafeHoursMap`), and the Management "SAFE Hours by Agent" card. The schedule
+  still drives **coverage / Compare / capability** and the live Floor (the report
+  has no scheduling/hourly detail). Management dropped its schedule-derived SAFE
+  quick-metric + shrinkage chip.
+
 **Order inside one schedule import** (`Code.gs:processChunkedImport`): `ImportHandler.processWFMImport`
 (writes `Raw Schedule` + `Schedule_History`) → `WorkforceTracker.importData` (5 destructive upserts:
 `WF_COACHING`, `WF_FURLOUGH`, `WF_ROLES`, `WF_ABSENCES`, `WF_IDP`) → `OvertimeTracker.importFromSchedule`
@@ -135,6 +167,8 @@ used by the SAFE board where the epoch columns exist.
 | **SAFE board/range/pin** (`:615/746/544`) | Schedule_History, Raw Schedule (+activity fallback) | `[2]`→`_formatDate` | **`_shiftFromRow` (epoch‑first)** + `_safeTime` | `_normKey`+`_coreKey` | single date / ≤31‑day range | no | agent+date (history wins) | n/a |
 | **OT `getAnalytics`** (`OvertimeTracker.gs:508`) | WF_OVERTIME, WF_OT_OPEN | `[1]`→`_formatDate` | **`_timeToMins` (text only — no epochs)** | **raw name (no normalize)** | `_calculateEpochBoundaries` | no | `agent+date+code+start+end` | yes |
 | **Mgmt `getDashboard`** (`ManagementView.gs:136`) | WF_OVERTIME, WF_ROLES, WF_COACHING, WF_FURLOUGH, WF_ABSENCES, WF_IDP, WF_OT_OPEN, Stats History | `[1]`→`_dayStartEpoch`/`_formatDate` | `_timeToMins` via `_segInterval` | raw (no agent join) | `_periodBounds` (calendar) | **YES for actuals**; plan data (IDP, open OT, preCodedOT) uncapped | `agent+date+activity+start+end` | **no (calendar only)** |
+
+> **Mgmt View extras (this build).** `getDashboard` also emits real-absence **hours** (`totals.*.absHours/absHoursOff`) and a Night/Morning/Evening **shift split** (`absShift`, via `WorkforceTracker._getShiftSplits`) on both the period totals and each `absSeries[]` bucket; the client shows absence hours, "% of the Sun–Sat week" (`absHours ÷ schedH`), a concentration-by-shift doughnut, and an SL-vs-absence-by-shift chart. A coded-hours **total** beside its breakdown sums `ot + acsu(VFurlough) + reading + elearn + tower`; `elearn` is a WF_ROLES role match (`ELEARN/E-LEARN/VILT/VIRTUAL`), **0 until a feed exists**. It also emits `totals.sel.codes` — per-IEX-code period hours for the **IEX Coding Compiled & Misc** card (ACSU from WF_FURLOUGH; CE-HUDDLE/QUAL/ONE/SBYS/MEET from WF_COACHING activity strings via `_coachCode`; READ/WOFQT/VILT from WF_ROLES; OT from WF_OVERTIME). Codes not captured at import (LFQI/CLASSROOM/AUTH/SME/E-Learning) render as **"pending feed"** until the schedule importer is extended to store them. The `lunch` (stacking concurrency) and `abs` (per-type onshore/offshore mix) payloads are unchanged but now render in the **Furlough / Absence trackers** (fed by a `getManagementDashboard('week', ref)` call), not in the Mgmt View.
 | **Absence `getAbsenceProfiles`** (`WorkforceTracker.gs:396`) | WF_ABSENCES, WF_MASTERLIST | `[1]`→`_formatDate`, **then `dStr.startsWith(year)`** | `_timeToMins` | `_normalizeAgentKey` | **whole YEAR** (param) | yes (`dayMid<now`) | `agent+date+type+start+end`, then merge same‑day+type | no |
 | **WFM engine `getAnalytics`/`getUnifiedReport`** (`:646/767`) | WF_COACHING/FURLOUGH/ROLES/OVERTIME, WF_MASTERLIST, DB_Sessions, WF_GEM_DATA_V3 | `[1]`→`_formatDate` | `_timeToMins` | `_normalizeAgentKey` (+ GEM fuzzy fallback) | bounds ±1d / month | **yes (`epoch<=now`)** | `agent+date+start+end+actSlice` | yes |
 

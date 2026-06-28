@@ -81,7 +81,7 @@ var DailyDigest = {
         active: (floor.active || []).length,
         unplanned: (floor.unplanned || []).map(function(a) { return { name: a.name || '', reason: a.subStatus || '' }; }),
         planned: (floor.vacation || []).length + (floor.planned || []).length + (floor.training || []).length,
-        safe: (floor.safe || []).length, icl: (floor.icl || []).length, ulc: (floor.ulc || []).length,
+        safe: (floor.safe || []).length,
         startingSoon: (floor.startingSoon || []).length
       };
     } catch (e) {}
@@ -200,7 +200,7 @@ var DailyDigest = {
       html += section('Floor',
         '<div style="font-size:13px; color:#475569; line-height:1.8;">' +
         '<b>' + d.floor.active + '</b> active &middot; <b>' + d.floor.startingSoon + '</b> starting soon &middot; <b>' + d.floor.planned + '</b> planned off' +
-        '<br>Roles: SAFE <b>' + d.floor.safe + '</b> &middot; ICL <b>' + d.floor.icl + '</b> &middot; ULC <b>' + d.floor.ulc + '</b>' +
+        '<br>Roles: SAFE <b>' + d.floor.safe + '</b>' +
         (d.ot ? '<br>Overtime today: <b>' + d.ot.all.toFixed(2) + 'h</b> (&times;1: ' + d.ot.x1.toFixed(1) + 'h &middot; &times;1.5: ' + d.ot.x15.toFixed(1) + 'h)' : '') +
         '</div>');
     }

@@ -123,6 +123,20 @@ function importOtOpenSlots(t) {
   return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(t) : 'Error';
 }
 
+// --- REPORT IMPORTS (IEX/BI pastes that fill the Management View) ---
+function importActivityLoading(t) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importActivity(t) : 'Error';
+}
+function importAlarmsReport(t) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importAlarms(t) : 'Error';
+}
+function importForecastReport(t) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importForecast(t) : 'Error';
+}
+function importSafeReport(t, startStr, endStr, label) {
+  return (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
+}
+
 // --- WORKFORCE TRACKER EXPORTS ---
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 

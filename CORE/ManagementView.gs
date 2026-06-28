@@ -29,6 +29,16 @@
  *     leave (excluded). Day priority: real > late > approved.
  *   - UNAB (and every type) carries an offshore count so "most UNABs are
  *     offshore" is visible directly in the graphs.
+ *   - ABSENCE HOURS: real-absence hours are also summed (absHours/absHoursOff)
+ *     and split Night/Morning/Evening (absShift, via _getShiftSplits) per the
+ *     totals AND per bucket (absSeries[].absShift). The client renders "% of
+ *     the Sun–Sat week" as absHours ÷ schedH and a concentration-by-shift view.
+ *   - CODED/OFFLINE TOTAL: the client sums ot + acsu(VFurlough) + reading +
+ *     elearn + tower into one figure shown beside its breakdown. `elearn` reads
+ *     WF_ROLES roles matching ELEARN/E-LEARN/VILT/VIRTUAL — 0 until a feed exists.
+ *   - lunch (stacking concurrency) and abs (per-type onshore/offshore mix) are
+ *     still emitted but are now rendered in the operational Furlough / Absence
+ *     trackers, not here (decluttered per management direction).
  */
 
 var ManagementView = {
@@ -133,6 +143,25 @@ var ManagementView = {
     return o > 0 ? o / 3600000 : 0;
   },
 
+  // Map a raw WF_COACHING activity string to its IEX code (matches the manager's
+  // "IEX Coding Compiled" + "Misc" tables). Returns null when it isn't one of
+  // the tracked codes, so we don't invent buckets.
+  _coachCode: function(act) {
+    act = String(act || '').toLowerCase();
+    if (/huddle/.test(act)) return 'CE-HUDDLE';
+    if (/qual|quality/.test(act)) return 'QUAL';
+    if (/one on one|one-on-one|individuelle/.test(act)) return 'ONE';
+    if (/sbys|side ?by ?side|sidexside/.test(act)) return 'SBYS';
+    if (/vilt|virtual/.test(act)) return 'VILT';
+    if (/e[- ]?learning|elearn/.test(act)) return 'E Learning';
+    if (/classroom/.test(act)) return 'CLASSROOM';
+    if (/roadshow|\bmeet\b|réunion/.test(act)) return 'MEET';
+    if (/lfqi|on loan|off ?q|opex/.test(act)) return 'LFQI';
+    if (/\bauth\b|authorized/.test(act)) return 'AUTH';
+    if (/\bsme\b/.test(act)) return 'SME';
+    return null;
+  },
+
   getDashboard: function(grain, refDateStr) {
     grain = (grain === 'day' || grain === 'month' || grain === 'quarter' || grain === 'ytd') ? grain : 'week';
     var WT = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker : null;
@@ -151,26 +180,41 @@ var ManagementView = {
     var prevCap = Math.min(pb.prevEnd, nowMs);
 
     var newTotals = function() {
-      return { ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0, coach: 0, acsu: 0,
+      return { ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
-               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+               // Absence HOURS (not just agent-day counts) + shift concentration.
+               // absShift is real-absence hours split Night/Morning/Evening; the
+               // "% of week" is derived on the client as absHours ÷ schedH.
+               absHours: 0, absHoursOff: 0, absShift: { Night: 0, Morning: 0, Evening: 0 },
+               // Per-shift AGENT counts (a real-absence agent-day counted in each
+               // shift it touches) — for the SL-vs-absence chart (agents, not hours).
+               absShiftCount: { Night: 0, Morning: 0, Evening: 0 },
+               // Per-IEX-code hours for the "IEX Coding Compiled / Misc" card
+               // (period to-date totals). Keyed by code, e.g. {'CE-HUDDLE':8.4}.
+               codes: {},
+               openOt: 0, openOtToDate: 0, openSlots: 0, openSkills: {}, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                preCodedOt: 0,
                // Shrinkage inputs: scheduled hours (denominator) + off-phone hour buckets.
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
-      return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, icl: 0, ulc: 0, tower: 0,
-               coach: 0, acsu: 0, coachSessions: 0, slAvg: null, ackAvg: null,
-               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, _idpSum: 0, _idpN: 0,
+      return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0,
+               coach: 0, acsu: 0, elearn: 0, coachSessions: 0, slAvg: null, ackAvg: null,
+               openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     });
     // Absence series: aligned with buckets for week/month/quarter; a single
     // whole-period entry for day grain (hourly absence bars are meaningless).
+    // absHours + absShift power the per-shift concentration + SL-vs-absence-by-shift charts.
+    var newAbsEntry = function(label) {
+      return { label: label, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
+               absTypes: {}, absTypesOff: {}, absHours: 0, absShift: { Night: 0, Morning: 0, Evening: 0 }, absShiftCount: { Night: 0, Morning: 0, Evening: 0 } };
+    };
     var absSeries = (grain === 'day')
-      ? [{ label: wins.length ? this._fmt(pb.selStart, 'MMM d') : '', absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0, absTypes: {}, absTypesOff: {} }]
-      : wins.map(function(w) { return { label: w.label, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0, absTypes: {}, absTypesOff: {} }; });
+      ? [newAbsEntry(wins.length ? this._fmt(pb.selStart, 'MMM d') : '')]
+      : wins.map(function(w) { return newAbsEntry(w.label); });
 
     var topOt = {}, topSafe = {}, topTower = {}, topCoach = {};
 
@@ -254,9 +298,8 @@ var ManagementView = {
         if (role.indexOf('SAFE') !== -1) key = 'safe';
         else if (role.indexOf('TOWER') !== -1 || role.indexOf('WOFQT') !== -1 || role.indexOf('WOQFT') !== -1) key = 'tower';
         else if (role.indexOf('READING') !== -1 || role.indexOf('LECTURE') !== -1) key = 'reading';
-        else if (role.indexOf('ICL') !== -1) key = 'icl';
-        else if (role.indexOf('ULC') !== -1 || role.indexOf('FIRE') !== -1) key = 'ulc';
-        if (!key) return;
+        else if (role.indexOf('ELEARN') !== -1 || role.indexOf('E-LEARN') !== -1 || role.indexOf('VILT') !== -1 || role.indexOf('VIRTUAL') !== -1) key = 'elearn';
+        if (!key) return; // ICL / ULC FIRE are no longer tracked (live Floor only)
         var selH = distribute(iv,
           function(t, h) { t[key] += h; },
           function(b, h) { b[key] += h; });
@@ -264,6 +307,9 @@ var ManagementView = {
           var nm = String(row[0]).trim();
           if (key === 'safe') topSafe[nm] = (topSafe[nm] || 0) + selH;
           else if (key === 'tower') topTower[nm] = (topTower[nm] || 0) + selH;
+          // IEX coding rows derived from roles (offtask group).
+          var rcode = (key === 'reading') ? 'READ' : (key === 'tower') ? 'WOFQT' : (key === 'elearn') ? 'VILT' : null;
+          if (rcode) selT.codes[rcode] = (selT.codes[rcode] || 0) + selH;
         }
       });
     } catch (e) {}
@@ -286,6 +332,8 @@ var ManagementView = {
         if (selH > 0) {
           if (!topCoach[nm]) topCoach[nm] = { sessions: 0, hours: 0 };
           topCoach[nm].hours += selH;
+          var ccode = self._coachCode(row[2]);
+          if (ccode) selT.codes[ccode] = (selT.codes[ccode] || 0) + selH;
         }
       });
     } catch (e) {}
@@ -359,11 +407,11 @@ var ManagementView = {
           // IDP is a forecast grid — the deficit for the rest of the period
           // is already known, so no to-date cap here.
           if (epoch >= pb.selStart && epoch < pb.selEnd) {
-            selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++;
+            selT.idpDeficit += defH; selT._idpSum += net; selT._idpN++; selT._idpReq += req; selT._idpOpen += seats;
             var wi3 = self._windowIndex(wins, epoch);
-            if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; }
+            if (wi3 !== -1) { buckets[wi3].idpDeficit += defH; buckets[wi3]._idpSum += net; buckets[wi3]._idpN++; buckets[wi3]._idpReq += req; buckets[wi3]._idpOpen += seats; }
           } else if (epoch >= pb.prevStart && epoch < pb.prevEnd) {
-            prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++;
+            prevT.idpDeficit += defH; prevT._idpSum += net; prevT._idpN++; prevT._idpReq += req; prevT._idpOpen += seats;
           }
         });
       }
@@ -391,11 +439,24 @@ var ManagementView = {
           if (!dayInfo[k]) {
             dayInfo[k] = { dayMid: dayMid, inSel: inSel,
                            region: String(row[5] || '').indexOf('Offshore') !== -1 ? 'Offshore' : 'Onshore',
-                           real: {}, late: false, appr: false };
+                           real: {}, late: false, appr: false,
+                           hrs: 0, shift: { Night: 0, Morning: 0, Evening: 0 } };
           }
           if (apprRgx.test(type)) dayInfo[k].appr = true;
           else if (lateRgx.test(type)) dayInfo[k].late = true;
-          else dayInfo[k].real[type] = true;
+          else {
+            dayInfo[k].real[type] = true;
+            // Real-absence HOURS, split across the Night/Morning/Evening shift
+            // windows (07-15 / 15-23 / 23-07) so concentration-by-shift is exact.
+            var sMin = WT._timeToMins(row[3]), eMin = WT._timeToMins(row[4]);
+            if (sMin >= 0 && eMin >= 0 && eMin !== sMin) {
+              if (eMin <= sMin) eMin += 1440;
+              WT._getShiftSplits(sMin, eMin).forEach(function(sp) {
+                dayInfo[k].hrs += sp.hours;
+                if (dayInfo[k].shift[sp.shift] != null) dayInfo[k].shift[sp.shift] += sp.hours;
+              });
+            }
+          }
         });
         Object.keys(dayInfo).forEach(function(k) {
           var di = dayInfo[k];
@@ -404,6 +465,10 @@ var ManagementView = {
           if (realTypes.length) {
             t.absences += 1;
             if (di.region === 'Offshore') t.absOff += 1; else t.absOn += 1;
+            t.absHours += di.hrs;
+            if (di.region === 'Offshore') t.absHoursOff += di.hrs;
+            t.absShift.Night += di.shift.Night; t.absShift.Morning += di.shift.Morning; t.absShift.Evening += di.shift.Evening;
+            if (di.shift.Night > 0) t.absShiftCount.Night++; if (di.shift.Morning > 0) t.absShiftCount.Morning++; if (di.shift.Evening > 0) t.absShiftCount.Evening++;
             realTypes.forEach(function(ty) {
               t.absTypes[ty] = (t.absTypes[ty] || 0) + 1;
               if (di.region === 'Offshore') t.absTypesOff[ty] = (t.absTypesOff[ty] || 0) + 1;
@@ -420,6 +485,9 @@ var ManagementView = {
             if (realTypes.length) {
               srs.absences += 1;
               if (di.region === 'Offshore') srs.absOff += 1; else srs.absOn += 1;
+              srs.absHours += di.hrs;
+              srs.absShift.Night += di.shift.Night; srs.absShift.Morning += di.shift.Morning; srs.absShift.Evening += di.shift.Evening;
+              if (di.shift.Night > 0) srs.absShiftCount.Night++; if (di.shift.Morning > 0) srs.absShiftCount.Morning++; if (di.shift.Evening > 0) srs.absShiftCount.Evening++;
               realTypes.forEach(function(ty) {
                 srs.absTypes[ty] = (srs.absTypes[ty] || 0) + 1;
                 if (di.region === 'Offshore') srs.absTypesOff[ty] = (srs.absTypesOff[ty] || 0) + 1;
@@ -543,13 +611,45 @@ var ManagementView = {
                      svl: lunchSvl, ack: lunchAck, peakOn: peakOf(lunchAgg.onL), peakOff: peakOf(lunchAgg.offL), days: Object.keys(lunchDays).length };
 
     var round1 = function(v) { return Math.round(v * 10) / 10; };
-    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'icl', 'ulc', 'tower', 'coach', 'acsu', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
+    var HOUR_KEYS = ['ot', 'otX1', 'otX15', 'safe', 'tower', 'coach', 'acsu', 'elearn', 'openOt', 'openOtToDate', 'idpDeficit', 'preCodedOt', 'reading', 'breakH', 'lunchH', 'schedH'];
+    var roundShift = function(s) { if (!s) return; s.Night = round1(s.Night); s.Morning = round1(s.Morning); s.Evening = round1(s.Evening); };
     var finIdp = function(o) {
       o.idpNet = o._idpN > 0 ? round1(o._idpSum / o._idpN) : null;
-      delete o._idpSum; delete o._idpN;
+      o.idpReq = o._idpN > 0 ? round1(o._idpReq / o._idpN) : null;   // avg required seats
+      o.idpOpen = o._idpN > 0 ? round1(o._idpOpen / o._idpN) : null; // avg staffed/open seats
+      delete o._idpSum; delete o._idpN; delete o._idpReq; delete o._idpOpen;
     };
     buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
-    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); finIdp(t); });
+    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
+    absSeries.forEach(function(a) { a.absHours = round1(a.absHours); roundShift(a.absShift); });
+    // Codes derived directly from category totals, then round everything.
+    selT.codes.ACSU = selT.acsu; selT.codes.OT = selT.ot;
+    Object.keys(selT.codes).forEach(function(c) { selT.codes[c] = round1(selT.codes[c]); });
+
+    // Imported reports (authoritative weekly activity hours + monthly alarms).
+    // When the Activity-loading report covers the selected period, its hours
+    // OVERRIDE the schedule-derived codes (so LFQI/CLASSROOM/VILT/etc. show real).
+    var activityImported = null, alarmsImported = null, forecastImported = null, safeAgentsImported = null;
+    try {
+      if (typeof ReportImport !== 'undefined') {
+        var _startStr = this._fmt(pb.selStart, 'yyyy-MM-dd');
+        var _endStr = this._fmt(pb.selEnd - 86400000, 'yyyy-MM-dd');
+        var ai = ReportImport.getActivityCodes(_startStr, _endStr);
+        if (ai && ai.has) {
+          activityImported = ai;
+          var CODEMAP = { CE: 'CE-HUDDLE', QUAL: 'QUAL', ONE: 'ONE', SBYS: 'SBYS', READ: 'READ', LFQI: 'LFQI', WOFQT: 'WOFQT', VILT: 'VILT', CLASSROOM: 'CLASSROOM', TEAM: 'MEET' };
+          Object.keys(ai.byCode).forEach(function(c) { if (ai.byCode[c] > 0) selT.codes[CODEMAP[c] || c] = ai.byCode[c]; });
+        }
+        var al = ReportImport.getAlarms(_startStr, _endStr);
+        if (al && al.has) alarmsImported = al;
+        // Forecast: daily rows for day/week views, monthly rows for month+ views.
+        var fGrain = (grain === 'month' || grain === 'quarter' || grain === 'ytd') ? 'month' : 'day';
+        var fc = ReportImport.getForecast(fGrain, _startStr, _endStr);
+        if (fc && fc.has) forecastImported = fc;
+        var sa = ReportImport.getSafeAgents(_startStr, _endStr);
+        if (sa && sa.has) safeAgentsImported = sa;
+      }
+    } catch (e) {}
 
     var topList = function(map) {
       return Object.keys(map)
@@ -578,6 +678,10 @@ var ManagementView = {
       buckets: buckets,
       abs: absSeries,
       lunch: lunchObj,
+      activity: activityImported,
+      alarms: alarmsImported,
+      forecast: forecastImported,
+      safeAgents: safeAgentsImported,
       totals: { sel: selT, prev: prevT },
       sel: {
         label: periodLabel,
