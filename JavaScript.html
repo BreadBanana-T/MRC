@@ -3053,9 +3053,9 @@
   }
 
   // IEX Coding Compiled + Misc — mirrors the manager's weekly sheet: each code
-  // with its hours, a group subtotal ("Total" column), the Coaching+Offtasks
-  // grand total, all scoped to the selected period. Codes the import pipeline
-  // does not capture yet are flagged "pending feed".
+  // with its hours in HH:MM:SS, a group subtotal, and the Coaching+Offtasks
+  // grand total, scoped to the selected period. The Activity report is the
+  // source of truth; codes absent from it read 0:00:00 (not "pending").
   function mgmtCodingCard() {
       var L = getMgmtLayout();
       if (L.hidden['iex']) return '';
@@ -3063,27 +3063,35 @@
       var cur = (d.totals || {}).sel || {};
       var codes = cur.codes || {};
       var periodLbl = (d.sel && d.sel.label) ? d.sel.label : '';
-      // "pending feed" means we have NO source for that code. Once the Activity
-      // report is loaded, the feed EXISTS — codes simply absent from it are a real
-      // 0h for the period, not pending.
+      // The Activity report is the source of truth. When it covers the period,
+      // every code's hours come from it (0:00:00 if absent). When it doesn't,
+      // we say so once, at the card level, instead of per-row "pending feed".
       var hasActivityReport = !!(d.activity && d.activity.has);
-      var PENDING = hasActivityReport ? {} : { 'LFQI': 1, 'CLASSROOM': 1, 'AUTH': 1, 'SME': 1, 'E Learning': 1 };
       var GROUPS = [
           { key: 'acsu', title: 'ACSU', rows: [['ACSU', 'Company Solicited Time Off']] },
           { key: 'coaching', title: 'Coaching', rows: [['CE-HUDDLE', ''], ['QUAL', 'Quality Session'], ['ONE', 'Meeting: One on One'], ['SBYS', 'SidexSide Coaching']] },
           { key: 'offtask', title: 'Offtasks', rows: [['READ', ''], ['LFQI', 'On Loan, OffQ, OPEX'], ['WOFQT', 'Team Lead Ofq Work'], ['VILT', 'Virtual Training']] },
           { key: 'misc', title: 'Misc', rows: [['CLASSROOM', ''], ['MEET', 'Dir / Roadshows'], ['AUTH', 'Authorized time off'], ['SME', 'Loan Off Queue'], ['E Learning', '(Check)'], ['OT', 'Overtime']] }
       ];
-      var fmt = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
+      // Match the corporate sheet: HH:MM:SS (hours can exceed 24, e.g. 144:11:00).
+      var fmt = function(h) {
+          var totalSec = Math.round((h || 0) * 3600);
+          var hh = Math.floor(totalSec / 3600);
+          var mm = Math.floor((totalSec % 3600) / 60);
+          var ss = totalSec % 60;
+          return hh + ':' + ('0' + mm).slice(-2) + ':' + ('0' + ss).slice(-2);
+      };
       var groupSum = function(g) { return g.rows.reduce(function(s, r) { return s + (codes[r[0]] || 0); }, 0); };
       var sumKeys = function(arr) { return arr.reduce(function(s, k) { return s + (codes[k] || 0); }, 0); };
 
+      // The Activity report is the source of truth: every code shows its real
+      // value, 0:00:00 when the feed has none for the period (no more "pending
+      // feed"). When NO report covers the period, flag it once at the card level.
       var rowHtml = function(code, label) {
-          var pending = PENDING[code];
           var v = codes[code] || 0;
           return '<tr style="border-bottom:1px solid var(--glass-border);">' +
               '<td style="padding:6px 10px; font-weight:800; color:var(--text-main); white-space:nowrap;">' + escapeHTML(code) + (label ? ' <span style="font-weight:600; color:var(--text-muted);">' + escapeHTML(label) + '</span>' : '') + '</td>' +
-              '<td style="padding:6px 10px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums; color:' + (pending ? 'var(--text-muted)' : 'var(--text-main)') + ';">' + (pending && v === 0 ? '<span style="font-style:italic; font-weight:600;">pending feed</span>' : fmt(v)) + '</td>' +
+              '<td style="padding:6px 10px; text-align:right; font-weight:800; font-variant-numeric:tabular-nums; color:var(--text-main);">' + fmt(v) + '</td>' +
               '</tr>';
       };
       var groupHtml = GROUPS.map(function(g) {
@@ -3107,8 +3115,11 @@
           '</div>';
 
       var removeBtn = state.mgmtCustomize ? '<button onclick="toggleMgmtCard(\'iex\')" title="Hide card" style="width:22px; height:22px; border-radius:50%; border:none; background:var(--status-alert); color:#fff; font-weight:800; cursor:pointer; line-height:1;">✕</button>' : '';
+      var srcNote = hasActivityReport
+          ? '· <span style="color:var(--status-active, #10b981);">Source: Activity report</span>'
+          : '· <span style="color:var(--status-warn);">Activity report not loaded for this period — showing 0:00:00</span>';
       return '<div class="aether-card" style="padding:24px; margin-bottom:24px;">' +
-          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:center;"><span>IEX Coding Compiled &amp; Misc' + (periodLbl ? ' <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + escapeHTML(periodLbl) + ' · coded hours by type, with group totals</span>' : '') + '</span>' + removeBtn + '</div>' +
+          '<div class="section-header" style="display:flex; justify-content:space-between; align-items:center;"><span>IEX Coding Compiled (On Week Completion)' + (periodLbl ? ' <span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">· ' + escapeHTML(periodLbl) + ' ' + srcNote + '</span>' : '') + '</span>' + removeBtn + '</div>' +
           '<div style="columns:2; column-gap:28px;">' + groupHtml + '</div>' +
           totalsStrip +
           '</div>';
