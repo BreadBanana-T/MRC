@@ -118,23 +118,33 @@ function setSafeAgentLang(name, lang) {
   return (typeof SafeTracker !== 'undefined') ? SafeTracker.setAgentLang(name, lang) : 'Error';
 }
 
+// Bump the analytics/dashboard cache version so the next view recomputes on
+// fresh data. Any import that feeds the Management View / trackers must call
+// this, or cached payloads (e.g. "pending feed") linger until their TTL.
+function _bustWfCache() { try { PropertiesService.getScriptProperties().setProperty('WF_CACHE_VER', String(Date.now())); } catch (e) {} }
+
 // --- OT OPEN SLOTS (WFM JSON export) ---
 function importOtOpenSlots(t) {
-  return (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(t) : 'Error';
+  var r = (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(t) : 'Error';
+  _bustWfCache(); return r;
 }
 
 // --- REPORT IMPORTS (IEX/BI pastes that fill the Management View) ---
 function importActivityLoading(t) {
-  return (typeof ReportImport !== 'undefined') ? ReportImport.importActivity(t) : 'Error';
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importActivity(t) : 'Error';
+  _bustWfCache(); return r;
 }
 function importAlarmsReport(t) {
-  return (typeof ReportImport !== 'undefined') ? ReportImport.importAlarms(t) : 'Error';
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importAlarms(t) : 'Error';
+  _bustWfCache(); return r;
 }
 function importForecastReport(t) {
-  return (typeof ReportImport !== 'undefined') ? ReportImport.importForecast(t) : 'Error';
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importForecast(t) : 'Error';
+  _bustWfCache(); return r;
 }
 function importSafeReport(t, startStr, endStr, label) {
-  return (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
+  _bustWfCache(); return r;
 }
 
 // --- WORKFORCE TRACKER EXPORTS ---
@@ -221,6 +231,7 @@ function processChunkedImport(token, total, kind) {
     result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(fullText, '') : 'Error';
   }
   Logger.log('[chunkedImport] done at +' + (new Date().getTime() - t0) + 'ms; result=' + result);
+  _bustWfCache();  // any chunked import (WFM/IDP/OT) changes data the cache depends on
   return result;
 }
 
