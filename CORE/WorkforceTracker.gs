@@ -61,6 +61,53 @@ var WorkforceTracker = {
       return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
+  // Read several sheets in ONE Sheets API round-trip instead of one
+  // getDataRange() call per sheet. Returns { sheetName: rows-incl-header },
+  // formatted values padded rectangular so it's a drop-in for
+  // getDataRange().getDisplayValues(). Falls back to per-sheet SpreadsheetApp
+  // reads if the Sheets advanced service isn't enabled — so it degrades
+  // gracefully and never hard-fails.
+  _batchDisplayValues: function(names) {
+      var out = {};
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var existing = names.filter(function(n) { return ss.getSheetByName(n); });
+      names.forEach(function(n) { out[n] = []; });
+      if (existing.length) {
+          try {
+              if (typeof Sheets !== 'undefined' && Sheets.Spreadsheets && Sheets.Spreadsheets.Values) {
+                  var resp = Sheets.Spreadsheets.Values.batchGet(ss.getId(), {
+                      ranges: existing,
+                      valueRenderOption: 'FORMATTED_VALUE',
+                      dateTimeRenderOption: 'FORMATTED_STRING'
+                  });
+                  var vr = (resp && resp.valueRanges) || [];
+                  for (var i = 0; i < existing.length; i++) {
+                      out[existing[i]] = this._rectangular((vr[i] && vr[i].values) ? vr[i].values : []);
+                  }
+                  return out;
+              }
+          } catch (e) { Logger.log('[WT] batchGet failed, falling back to per-sheet reads: ' + e); }
+          // Fallback: original per-sheet behavior.
+          existing.forEach(function(n) {
+              var sh = ss.getSheetByName(n);
+              out[n] = (sh && sh.getLastRow() > 0) ? sh.getDataRange().getDisplayValues() : [];
+          });
+      }
+      return out;
+  },
+
+  // batchGet omits trailing empty cells (ragged rows); pad to a rectangle so
+  // row[i] matches getDisplayValues (which returns '' for blanks, not undefined).
+  _rectangular: function(rows) {
+      var w = 0, i;
+      for (i = 0; i < rows.length; i++) if (rows[i].length > w) w = rows[i].length;
+      for (i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          for (var k = 0; k < w; k++) if (r[k] == null) r[k] = '';
+      }
+      return rows;
+  },
+
   importData: function(schedRaw, idpRaw) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ['WF_COACHING', 'WF_FURLOUGH', 'WF_ROLES', 'WF_IDP', 'WF_ABSENCES'].forEach(n => {

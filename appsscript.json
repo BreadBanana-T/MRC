@@ -6,6 +6,11 @@
         "userSymbol": "People",
         "serviceId": "peopleapi",
         "version": "v1"
+      },
+      {
+        "userSymbol": "Sheets",
+        "serviceId": "sheets",
+        "version": "v4"
       }
     ]
   },

@@ -172,6 +172,15 @@ var ManagementView = {
       var n0 = new Date(); ry = n0.getFullYear(); rm = n0.getMonth() + 1; rd = n0.getDate();
     }
 
+    // Payload cache, keyed per grain·date and invalidated by the WF_CACHE_VER
+    // stamp the import bumps. Past periods (static data) cache long; the current
+    // period caches briefly so live SL/IDP stay fresh. Big repeat-load win on
+    // the dashboard the manager opens over and over.
+    var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
+    var _ck = 'mgmtDash|' + grain + '|' + refDateStr + '|' + _ver;
+    var _cache = null; try { _cache = CacheService.getScriptCache(); } catch (e) {}
+    if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
+
     var self = this;
     var nowMs = Date.now();
     var pb = this._periodBounds(grain, ry, rm, rd);
@@ -218,6 +227,13 @@ var ManagementView = {
 
     var topOt = {}, topSafe = {}, topTower = {}, topCoach = {};
 
+    // Cold-load speedup: pull every display-value sheet this dashboard reads in
+    // ONE Sheets API round-trip, instead of a separate getDataRange() per sheet.
+    // (Stats History stays on its own typed read below.) rowsOf() returns the
+    // full rows incl. header, so call sites keep their .slice(1).
+    var MVROWS = WT._batchDisplayValues(['WF_OVERTIME', 'WF_ROLES', 'WF_COACHING', 'WF_FURLOUGH', 'WF_OT_OPEN', 'WF_IDP', 'WF_ABSENCES', 'Schedule_History', 'Raw Schedule']);
+    var rowsOf = function(n) { return MVROWS[n] || []; };
+
     // Distribute one segment's hours into sub-buckets + sel/prev totals.
     // addFn(target, hours) writes into whichever totals object.
     // uncapped=true is for PLAN data (posted OT slots, IDP forecast): a
@@ -242,10 +258,10 @@ var ManagementView = {
 
     // Generic hour-segment walker: [Agent, Date, <kind>, Start, End, Region]
     var walkHours = function(sheetName, onSeg) {
-      var db = WT._getDB(sheetName);
-      if (!db || db.getLastRow() < 2) return;
+      var rows = rowsOf(sheetName);
+      if (rows.length < 2) return;
       var seen = {};
-      db.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+      rows.slice(1).forEach(function(row) {
         var dStr = WT._formatDate(row[1]);
         var dayMs = self._dayStartEpoch(dStr);
         if (dayMs < 0) return;
@@ -261,10 +277,10 @@ var ManagementView = {
 
     // Overtime — WF_OVERTIME: [Agent, Date, Code, Rate, Bucket, IsBreak, Start, End, Region]
     try {
-      var dbOt = WT._getDB('WF_OVERTIME');
-      if (dbOt && dbOt.getLastRow() > 1) {
+      var otRows = rowsOf('WF_OVERTIME');
+      if (otRows.length > 1) {
         var seenOt = {};
-        dbOt.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+        otRows.slice(1).forEach(function(row) {
           var dStr = WT._formatDate(row[1]);
           var dayMs = self._dayStartEpoch(dStr);
           if (dayMs < 0) return;
@@ -347,10 +363,10 @@ var ManagementView = {
     // is NOT overtime); hidden postings excluded; hours = window overlap ×
     // slot count, to-date capped like the rest of the view.
     try {
-      var dbOpen = WT._getDB('WF_OT_OPEN');
-      if (dbOpen && dbOpen.getLastRow() > 1) {
+      var openRows = rowsOf('WF_OT_OPEN');
+      if (openRows.length > 1) {
         var seenOp = {};
-        dbOpen.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+        openRows.slice(1).forEach(function(row) {
           if (String(row[8]) !== 'OT') return;
           if (String(row[13]) === 'N') return;
           var dStr = WT._formatDate(row[0]);
@@ -387,10 +403,10 @@ var ManagementView = {
     // idpDeficit = Σ max(0, required − open) × 0.25 = agent-hours short.
     // idpNet = average net seats over the bucket's intervals.
     try {
-      var dbIdp = WT._getDB('WF_IDP');
-      if (dbIdp && dbIdp.getLastRow() > 1) {
+      var idpRows = rowsOf('WF_IDP');
+      if (idpRows.length > 1) {
         var seenIdp = {};
-        dbIdp.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+        idpRows.slice(1).forEach(function(row) {
           var dStr = WT._formatDate(row[0]);
           var dayMs = self._dayStartEpoch(dStr);
           if (dayMs < 0) return;
@@ -420,12 +436,12 @@ var ManagementView = {
     // Absences — distinct AGENT-DAYS. real > late > approved priority per day.
     // Every type tracks an offshore count so e.g. "UNAB 12 (9 Off)" is direct.
     try {
-      var dbAbs = WT._getDB('WF_ABSENCES');
-      if (dbAbs && dbAbs.getLastRow() > 1) {
+      var absRows = rowsOf('WF_ABSENCES');
+      if (absRows.length > 1) {
         var apprRgx = (typeof APPROVED_LEAVE_RGX !== 'undefined') ? APPROVED_LEAVE_RGX : /\b(asclu|slu|furlough|acsu)\b/i;
         var lateRgx = (typeof LATE_RGX !== 'undefined') ? LATE_RGX : /\balu\b/i;
         var dayInfo = {};  // agent|date → { dayMid, region, real:{}, late, appr }
-        dbAbs.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+        absRows.slice(1).forEach(function(row) {
           var dStr = WT._formatDate(row[1]);
           var dayMs = self._dayStartEpoch(dStr);
           if (dayMs < 0 || dayMs > nowMs) return;
@@ -549,9 +565,9 @@ var ManagementView = {
         for (var m = sMin; m < eMin; m += 15) { arr[Math.floor((m % 1440) / 15)] += 1; }
       };
       ['Schedule_History', 'Raw Schedule'].forEach(function(shName) {
-        var db = WT._getDB(shName);
-        if (!db || db.getLastRow() < 2) return;
-        db.getDataRange().getDisplayValues().slice(1).forEach(function(row) {
+        var rows = rowsOf(shName);
+        if (rows.length < 2) return;
+        rows.slice(1).forEach(function(row) {
           var nm = String(row[0]).trim(); if (!nm) return;
           var dStr = WT._formatDate(row[2]); if (!dStr) return;
           var dayMs = self._dayStartEpoch(dStr); if (dayMs < 0) return;
@@ -671,7 +687,7 @@ var ManagementView = {
     else if (grain === 'ytd') periodLabel = 'YTD ' + new Date(pb.selStart).getFullYear() + ' · Jan 1 – ' + this._fmt(Math.min(pb.selEnd, nowMs) - 86400000, 'MMM d');
     else periodLabel = this._fmt(pb.selStart, 'MMM d') + ' – ' + this._fmt(pb.selEnd - 86400000, 'MMM d');
 
-    return JSON.stringify({
+    var __payload = JSON.stringify({
       grain: grain,
       refDate: refDateStr,
       generated: Utilities.formatDate(new Date(), this.TZ, 'yyyy-MM-dd HH:mm'),
@@ -694,5 +710,9 @@ var ManagementView = {
         otAgents: topList(topOt).length ? Object.keys(topOt).filter(function(n) { return topOt[n] > 0; }).length : 0
       }
     });
+    // Past periods are static → cache long; current period → short TTL so live
+    // SL/IDP stay fresh. Invalidated immediately on import via WF_CACHE_VER.
+    if (_cache) { try { var _ttl = (pb.selEnd < nowMs - 86400000) ? 21600 : 180; var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, _ttl); } catch (e) {} }
+    return __payload;
   }
 };
