@@ -172,18 +172,23 @@ var ManagementView = {
       var n0 = new Date(); ry = n0.getFullYear(); rm = n0.getMonth() + 1; rd = n0.getDate();
     }
 
-    // Payload cache, keyed per grain·date and invalidated by the WF_CACHE_VER
-    // stamp the import bumps. Past periods (static data) cache long; the current
-    // period caches briefly so live SL/IDP stay fresh. Big repeat-load win on
-    // the dashboard the manager opens over and over.
-    var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
-    var _ck = 'mgmtDash|' + grain + '|' + refDateStr + '|' + _ver;
-    var _cache = null; try { _cache = CacheService.getScriptCache(); } catch (e) {}
-    if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
-
     var self = this;
     var nowMs = Date.now();
     var pb = this._periodBounds(grain, ry, rm, rd);
+
+    // Payload cache — ONLY for fully-past periods (static data). The current /
+    // in-progress period is never cached, because its SL/IDP and imported
+    // Activity-report data change live and must always show fresh (this is what
+    // caused stale "pending feed" after an import). Past periods still get a
+    // fast cache, invalidated by WF_CACHE_VER (bumped on every import).
+    var _isPast = pb.selEnd < nowMs - 86400000;
+    var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
+    var _ck = 'mgmtDash|' + grain + '|' + refDateStr + '|' + _ver;
+    var _cache = null;
+    if (_isPast) {
+      try { _cache = CacheService.getScriptCache(); } catch (e) {}
+      if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
+    }
     var wins = this._subWindows(grain, pb.selStart, pb.selEnd);
     var selCap = Math.min(pb.selEnd, nowMs);   // to-date cap
     var prevCap = Math.min(pb.prevEnd, nowMs);
@@ -710,9 +715,9 @@ var ManagementView = {
         otAgents: topList(topOt).length ? Object.keys(topOt).filter(function(n) { return topOt[n] > 0; }).length : 0
       }
     });
-    // Past periods are static → cache long; current period → short TTL so live
-    // SL/IDP stay fresh. Invalidated immediately on import via WF_CACHE_VER.
-    if (_cache) { try { var _ttl = (pb.selEnd < nowMs - 86400000) ? 21600 : 180; var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, _ttl); } catch (e) {} }
+    // _cache is non-null only for fully-past periods (set above), so this writes
+    // a long-lived cache for history and never for the live period.
+    if (_cache) { try { var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, 21600); } catch (e) {} }
     return __payload;
   }
 };
