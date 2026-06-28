@@ -186,6 +186,7 @@
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false,
+      presence: [], lastActions: {},
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true
   };
 
@@ -216,8 +217,11 @@
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance(); fetchCurrentUser();
+    fetchPresence(); fetchLastActions();
     setInterval(fetchOutages, 300000); // 5 min
     setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
+    setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
+    setInterval(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
   }
 
   function fetchStaffingBalance() {
@@ -468,6 +472,85 @@
       document.body.removeChild(textArea);
   }
 
+  // ───────────────────────────── Presence & avatars ─────────────────────────────
+  function colorFromString(s) { s = String(s || ''); var h = 0; for (var i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h); return 'hsl(' + (Math.abs(h) % 360) + ', 52%, 45%)'; }
+  function timeAgo(epoch) {
+      if (!epoch) return '';
+      var s = Math.max(0, Math.floor((Date.now() - epoch) / 1000));
+      if (s < 60) return 'just now';
+      var m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+      var h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+  }
+  // Avatar: real Google photo on top of an initials fallback. If the photo 404s
+  // (no directory photo / API disabled), the img hides and the initials show.
+  function avatarHtml(p, size) {
+      size = size || 30;
+      var nm = (p && (p.name || nameFromEmail(p.email))) || '?';
+      var initials = nm.split(/\s+/).map(function(w) { return w.charAt(0); }).slice(0, 2).join('').toUpperCase() || '?';
+      var color = colorFromString((p && (p.email || nm)) || '?');
+      var ring = (p && p.isMe) ? 'box-shadow:0 0 0 2px var(--accent-primary), 0 0 0 4px var(--bg-root);' : '';
+      var title = nm + (p && p.email ? ' · ' + p.email : '') + (p && p.ago ? ' · active ' + p.ago : '');
+      var fs = Math.round(size * 0.4);
+      var inner = '<span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:' + fs + 'px;">' + escapeHTML(initials) + '</span>';
+      var img = (p && p.photo) ? '<img src="' + escapeHTML(p.photo) + '" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;">' : '';
+      return '<div title="' + escapeHTML(title) + '" style="position:relative; width:' + size + 'px; height:' + size + 'px; border-radius:50%; overflow:hidden; background:' + color + '; border:2px solid var(--bg-root); ' + ring + ' flex-shrink:0;">' + inner + img + '</div>';
+  }
+
+  function fetchPresence() {
+      if (typeof google === 'undefined') {
+          var u = state.currentUser || {};
+          state.presence = u.email ? [{ email: u.email, name: u.name, photo: u.photo, isMe: true, lastSeen: Date.now() }] : [];
+          renderPresenceRow(); return;
+      }
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.presence = JSON.parse(res) || []; } catch (e) { state.presence = []; }
+          renderPresenceRow();
+      }).withFailureHandler(function() {}).heartbeat();
+  }
+  function fetchLastActions() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.lastActions = JSON.parse(res) || {}; } catch (e) { state.lastActions = {}; }
+          renderPresenceRow();
+          if (state.view === 'tracker') { var el = document.getElementById('tracker-last-import'); if (el) el.innerHTML = lastActionInline('import'); }
+      }).withFailureHandler(function() {}).getLastActions();
+  }
+  function mostRecentAction() {
+      var m = state.lastActions || {}, best = null;
+      Object.keys(m).forEach(function(k) { var a = m[k]; if (a && a.epoch && (!best || a.epoch > best.epoch)) best = a; });
+      return best;
+  }
+  // Compact "by Name · time" with a small avatar, for inline attribution.
+  function lastActionInline(key) {
+      var a = (state.lastActions || {})[key];
+      if (!a || !a.email) return '';
+      var first = (a.name || nameFromEmail(a.email) || '').split(' ')[0];
+      return '<span style="display:inline-flex; align-items:center; gap:5px; vertical-align:-4px;">' +
+          avatarHtml({ email: a.email, name: a.name, photo: a.photo }, 16) +
+          '<span style="color:var(--text-secondary); font-weight:700;">' + escapeHTML(first) + '</span>' +
+          '<span style="color:var(--text-muted);">· ' + escapeHTML(timeAgo(a.epoch)) + '</span></span>';
+  }
+  function renderPresenceRow() {
+      var el = document.getElementById('presence-row'); if (!el) return;
+      var list = state.presence || [];
+      var max = 5, shown = list.slice(0, max), extra = list.length - shown.length;
+      var avatars = shown.map(function(p, i) {
+          var pp = { email: p.email, name: p.name, photo: p.photo, isMe: p.isMe, ago: timeAgo(p.lastSeen) };
+          return '<div style="margin-left:' + (i === 0 ? 0 : -8) + 'px; position:relative; z-index:' + (max - i) + ';">' + avatarHtml(pp, 30) + '</div>';
+      }).join('');
+      if (extra > 0) avatars += '<div title="' + extra + ' more active" style="margin-left:-8px; width:30px; height:30px; border-radius:50%; background:var(--card-bg); border:2px solid var(--bg-root); display:flex; align-items:center; justify-content:center; font-size:0.68rem; font-weight:800; color:var(--text-muted);">+' + extra + '</div>';
+      var best = mostRecentAction();
+      var lastTxt = '';
+      if (best && best.email) {
+          var first = (best.name || nameFromEmail(best.email) || '').split(' ')[0];
+          lastTxt = '<div title="' + escapeHTML((best.name || '') + ' — ' + (best.label || 'update') + ' · ' + (best.ts || '')) + '" style="font-size:0.66rem; font-weight:700; color:var(--text-muted); line-height:1.15; max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' +
+              '<span style="opacity:0.7;">last:</span> ' + escapeHTML(best.label || 'update') + '<br><span style="color:var(--text-secondary);">' + escapeHTML(first) + ' · ' + escapeHTML(timeAgo(best.epoch)) + '</span></div>';
+      }
+      el.innerHTML = (list.length ? '<div style="display:flex; align-items:center;" title="Active now">' + avatars + '</div>' : '') +
+          (lastTxt ? '<div style="margin-left:10px;">' + lastTxt + '</div>' : '');
+  }
+
   // ───────────────────────────── Manager feedback ─────────────────────────────
   var FEEDBACK_TYPES = [
       { key: 'suggestion', label: 'Suggestion', icon: 'lightbulb',           color: '#6366f1' },
@@ -498,7 +581,7 @@
   function feedbackWhoamiText() {
       var u = state.currentUser;
       if (!u) return 'Identifying you…';
-      if (u.email) return 'Submitting as <b style="color:var(--text-secondary);">' + escapeHTML(u.name || nameFromEmail(u.email)) + '</b> · ' + escapeHTML(u.email);
+      if (u.email) return '<span style="display:inline-flex; align-items:center; gap:7px; vertical-align:-5px;">' + avatarHtml({ email: u.email, name: u.name, photo: u.photo }, 18) + '<span>Submitting as <b style="color:var(--text-secondary);">' + escapeHTML(u.name || nameFromEmail(u.email)) + '</b> · ' + escapeHTML(u.email) + '</span></span>';
       return 'Couldn\'t detect your account — your submission will still be logged.';
   }
 
@@ -1448,7 +1531,7 @@
       }
 
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center; margin-bottom: ' + (isAbsences ? '24px' : '0') + ';">' +
-                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;"><span><i data-lucide="calendar-check" width="10"></i> ' + schedText + '</span></div></div>';
+                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;"><span><i data-lucide="calendar-check" width="10"></i> ' + schedText + '</span><span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
 
       if (!isAbsences && !isTraining) {
           headerHtml += '<div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">';

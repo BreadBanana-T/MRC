@@ -77,7 +77,7 @@ function fetchLogs(filterFn) {
 }
 
 // --- ACTIONS ---
-function updateAgentStatus(n, t, v) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(n, t, v); }
+function updateAgentStatus(n, t, v) { _stampAction('agent_status', 'Agent status update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(n, t, v); }
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
@@ -87,7 +87,7 @@ function fetchScripts() { return (typeof ScriptHandler!=='undefined') ? JSON.str
 // shadow each other based on file load order.
 function fillWindsToSheet() { if(typeof WeatherService!=='undefined') return LogSync.fillWinds(WeatherService.fetch()); }
 function runImport(t) { if(typeof ImportHandler!=='undefined') return ImportHandler.run(t); }
-function submitIdpValue(v) { if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
+function submitIdpValue(v) { _stampAction('idp', 'IDP update'); if(typeof StatsTracker!=='undefined') return StatsTracker.logIdp(v); }
 
 // --- SAFE TRACKER (forensic per-agent SAFE hours) ---
 function getSafeAnalytics(mode, refDate, region, cycle) {
@@ -128,6 +128,7 @@ function getWorkforceAnalytics(mode, date, type, region, cycleFilter) {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getAnalytics(mode, date, type, region, cycleFilter) : "{}"; 
 }
 function importWorkforceData(sched, idp) {
+  _stampAction('import', 'WFM data import');
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData(sched, idp) : "Error";
 }
 // Drains the deferred per-month unified-report archive queue (called by the client
@@ -174,6 +175,7 @@ function uploadChunk(token, index, total, chunk) {
 
 function processChunkedImport(token, total, kind) {
   Logger.log('[chunkedImport] start: token=' + token + ' total=' + total + ' kind=' + kind);
+  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : 'WFM data import')));
   var cache = CacheService.getScriptCache();
   var keys = [];
   for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
@@ -249,11 +251,26 @@ function fetchCoachingCadence(thresholdDays) {
 
 // --- MANAGER FEEDBACK (suggestions / ideas / bug reports) ---
 function getCurrentUser() {
-  return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.whoAmI() : JSON.stringify({ email: '', name: '' });
+  if (typeof Presence !== 'undefined') return Presence.me();              // email + name + photo
+  if (typeof FeedbackTracker !== 'undefined') return FeedbackTracker.whoAmI();
+  return JSON.stringify({ email: '', name: '', photo: '' });
 }
 function submitFeedback(type, message, page) {
   return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.submit(type, message, page) : JSON.stringify({ ok: false, error: 'FeedbackTracker not loaded.' });
 }
 function getFeedbackList(limit) {
   return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.getList(limit) : "[]";
+}
+
+// --- PRESENCE & ATTRIBUTION (who's active now, who did the last update) ---
+// heartbeat: client pings on a timer; stamps the viewer present + returns the
+// active-now list in one round-trip.
+function heartbeat() {
+  return (typeof Presence !== 'undefined') ? Presence.heartbeat() : "[]";
+}
+function getLastActions() {
+  return (typeof Presence !== 'undefined') ? Presence.getLastActions() : "{}";
+}
+function _stampAction(key, label) {
+  try { if (typeof Presence !== 'undefined') Presence.recordAction(key, label); } catch (e) {}
 }
