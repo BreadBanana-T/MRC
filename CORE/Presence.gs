@@ -56,35 +56,56 @@ var Presence = {
     var ckey = 'pfp_' + email.toLowerCase();
     var hit = cache.get(ckey);
     if (hit != null) return hit === '_none_' ? '' : hit;
-    var url = '';
-    try {
-      var token = ScriptApp.getOAuthToken();
-      var endpoint = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
-        + '?query=' + encodeURIComponent(email)
-        + '&readMask=' + encodeURIComponent('photos,emailAddresses,names')
-        + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
-        + '&pageSize=10';
-      var resp = UrlFetchApp.fetch(endpoint, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-      if (resp.getResponseCode() === 200) {
-        var data = JSON.parse(resp.getContentText());
-        var people = data.people || [];
-        var match = null;
-        for (var i = 0; i < people.length; i++) {
-          var emails = (people[i].emailAddresses || []).map(function(e) { return String(e.value || '').toLowerCase(); });
-          if (emails.indexOf(email.toLowerCase()) !== -1) { match = people[i]; break; }
-        }
-        if (!match && people.length === 1) match = people[0];
-        if (match && match.photos && match.photos.length) {
-          url = match.photos[0].url || '';
-          // Normalize size for a crisp small avatar.
-          if (url) url = url.replace(/=s\d+(-c)?$/, '') + '=s96-c';
-        }
-      } else {
-        Logger.log('[Presence] directory lookup ' + resp.getResponseCode() + ': ' + resp.getContentText().substring(0, 200));
-      }
-    } catch (e) { Logger.log('[Presence] photo lookup failed: ' + e); }
+    var url = this._lookupPhoto(email);
     cache.put(ckey, url || '_none_', 21600);
     return url;
+  },
+
+  // Preferred path is the People *advanced service* — it works with the default
+  // Apps-Script-managed GCP project once "People API" is added under Services,
+  // so there's no need to switch to a standard Cloud project. Falls back to a
+  // raw REST call, then to no photo (the UI then draws an initials avatar).
+  _lookupPhoto: function(email) {
+    var people = null;
+    try {
+      if (typeof People !== 'undefined' && People.People && People.People.searchDirectoryPeople) {
+        var r = People.People.searchDirectoryPeople({
+          query: email,
+          readMask: 'photos,emailAddresses,names',
+          sources: ['DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'],
+          pageSize: 10
+        });
+        people = r && r.people;
+      }
+    } catch (e) { Logger.log('[Presence] advanced People failed: ' + e); }
+
+    if (!people) {
+      try {
+        var token = ScriptApp.getOAuthToken();
+        var endpoint = 'https://people.googleapis.com/v1/people:searchDirectoryPeople'
+          + '?query=' + encodeURIComponent(email)
+          + '&readMask=' + encodeURIComponent('photos,emailAddresses,names')
+          + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
+          + '&pageSize=10';
+        var resp = UrlFetchApp.fetch(endpoint, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+        if (resp.getResponseCode() === 200) people = (JSON.parse(resp.getContentText()) || {}).people;
+        else Logger.log('[Presence] REST lookup ' + resp.getResponseCode() + ': ' + resp.getContentText().substring(0, 200));
+      } catch (e2) { Logger.log('[Presence] REST People failed: ' + e2); }
+    }
+
+    if (!people || !people.length) return '';
+    var match = null;
+    for (var i = 0; i < people.length; i++) {
+      var emails = (people[i].emailAddresses || []).map(function(e) { return String(e.value || '').toLowerCase(); });
+      if (emails.indexOf(email.toLowerCase()) !== -1) { match = people[i]; break; }
+    }
+    if (!match && people.length === 1) match = people[0];
+    if (match && match.photos && match.photos.length) {
+      var url = match.photos[0].url || '';
+      if (url) url = url.replace(/=s\d+(-c)?$/, '') + '=s96-c';  // crisp small avatar
+      return url;
+    }
+    return '';
   },
 
   // My identity + photo (for the feedback modal etc.).
