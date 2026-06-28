@@ -748,43 +748,59 @@ var WorkforceTracker = {
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
             this._getShiftSplits(startMins, endMins).forEach(split => {
-                let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(split.startMins/60), split.startMins%60, 0, 0).getTime();
+                // A shift split can still straddle midnight (e.g. a Night chunk
+                // that runs 23:00 -> 00:30). Break it at each midnight so every
+                // piece lands wholly inside one calendar day and is credited to
+                // the day it actually occurs in -- not the day the chunk started.
+                // Without this, the post-midnight minutes of a cross-day furlough
+                // were attributed to the start day and went missing on the day
+                // they really belonged to.
+                let pieceStart = split.startMins;
+                while (pieceStart < split.endMins) {
+                    let nextMidnight = (Math.floor(pieceStart / 1440) + 1) * 1440;
+                    let pieceEnd = Math.min(split.endMins, nextMidnight);
+                    let piece = { shift: split.shift, startMins: pieceStart, endMins: pieceEnd, hours: (pieceEnd - pieceStart) / 60 };
+                    pieceStart = pieceEnd;
 
-                if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
-                    if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
-                        if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) return;
-                    }
-                    
-                    let effDateStr = Utilities.formatDate(new Date(splitStartEpoch), "America/Toronto", "yyyy-MM-dd");
+                    let splitStartEpoch = new Date(rY, rM-1, rD, Math.floor(piece.startMins/60), piece.startMins%60, 0, 0).getTime();
 
-                    if (trackerType === 'furlough' && mode === 'day') {
-                        for (let min = split.startMins; min < split.endMins; min += 15) {
-                            let blockTime = new Date(rY, rM-1, rD, Math.floor(min/60), min%60, 0, 0).getTime();
-                            if (blockTime >= bounds.start && blockTime <= bounds.end) {
-                                let idx = Math.floor((min % 1440) / 15);
-                                if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
+                    if (splitStartEpoch >= bounds.start && splitStartEpoch <= bounds.end) {
+                        if ((mode === 'month' || mode === 'quarter') && cycleFilter !== 'ALL') {
+                            if (this._getCycleForEpoch(splitStartEpoch) !== cycleFilter) continue;
+                        }
+
+                        let effDateStr = Utilities.formatDate(new Date(splitStartEpoch), "America/Toronto", "yyyy-MM-dd");
+
+                        if (trackerType === 'furlough' && mode === 'day') {
+                            for (let min = piece.startMins; min < piece.endMins; min += 15) {
+                                let blockTime = new Date(rY, rM-1, rD, Math.floor(min/60), min%60, 0, 0).getTime();
+                                if (blockTime >= bounds.start && blockTime <= bounds.end) {
+                                    let idx = Math.floor((min % 1440) / 15);
+                                    if (idx >= 0 && idx < 96) buckets[idx].supply = Math.max(0, buckets[idx].supply - 1);
+                                }
                             }
                         }
-                    }
 
-                    let rawStartStr = String(row[3]).trim();
-                    let groupKey = `${agent}_${effDateStr}_${split.shift}_${rawStartStr}`;
-                    
-                    let actName = "Time Off";
-                    if (trackerType === 'coaching' || trackerType === 'roles') actName = row[2];
-                    groupKey += `_${actName}`;
+                        let rawStartStr = String(row[3]).trim();
+                        let groupKey = `${agent}_${effDateStr}_${piece.shift}_${rawStartStr}`;
 
-                    if (!groupedLogs[groupKey]) {
-                        groupedLogs[groupKey] = { 
-                            date: effDateStr, agent: agent, 
-                            activityName: actName, 
-                            shift: split.shift, hours: split.hours, 
-                            timeStart: this._minsToTime(split.startMins), 
-                            timeEnd: this._minsToTime(split.endMins) 
-                        };
-                    } else {
-                        groupedLogs[groupKey].hours += split.hours;
-                        groupedLogs[groupKey].timeEnd = this._minsToTime(split.endMins);
+                        let actName = "Time Off";
+                        if (trackerType === 'coaching' || trackerType === 'roles') actName = row[2];
+                        groupKey += `_${actName}`;
+
+                        if (!groupedLogs[groupKey]) {
+                            groupedLogs[groupKey] = {
+                                date: effDateStr, agent: agent,
+                                activityName: actName,
+                                shift: piece.shift, hours: piece.hours,
+                                cycle: this._getCycleForEpoch(splitStartEpoch),
+                                timeStart: this._minsToTime(piece.startMins),
+                                timeEnd: this._minsToTime(piece.endMins)
+                            };
+                        } else {
+                            groupedLogs[groupKey].hours += piece.hours;
+                            groupedLogs[groupKey].timeEnd = this._minsToTime(piece.endMins);
+                        }
                     }
                 }
             });
@@ -792,10 +808,75 @@ var WorkforceTracker = {
     });
 
     if (mode === 'day' && trackerType === 'furlough') buckets.forEach(b => { b.net = parseFloat((b.supply - b.demand).toFixed(2)); });
-    combinedEvents = Object.values(groupedLogs).map(g => ({ date: g.date, agent: g.agent, activityName: g.activityName, shift: g.shift, hours: parseFloat(g.hours.toFixed(2)), time: `${g.timeStart} - ${g.timeEnd}` }));
+    combinedEvents = Object.values(groupedLogs).map(g => ({ date: g.date, agent: g.agent, activityName: g.activityName, shift: g.shift, cycle: g.cycle || '', hours: parseFloat(g.hours.toFixed(2)), time: `${g.timeStart} - ${g.timeEnd}` }));
     let totals = { all: 0, morning: 0, evening: 0, night: 0, count: combinedEvents.length };
     combinedEvents.forEach(f => { totals.all += f.hours; if (f.shift === 'Morning') totals.morning += f.hours; else if (f.shift === 'Evening') totals.evening += f.hours; else totals.night += f.hours; });
-    return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals });
+
+    // Month-over-month trend (whole DB, region-aware, cycle-aware) so the UI can
+    // show whether furlough is trending up or down and compare WEEK A vs WEEK B.
+    // Computed from the already-loaded schedData — no extra sheet read.
+    let trend = (mode === 'month' || mode === 'quarter' || mode === 'ytd') ? this._computeTrendMonthly(schedData, regionFilter) : [];
+    // Which month keys the currently-selected period spans (used to highlight
+    // the trend and to sum the A-vs-B split for this period).
+    let periodKeys = [];
+    let pCur = new Date(bounds.start);
+    let pEndKey = Utilities.formatDate(new Date(bounds.end), "America/Toronto", "yyyy-MM");
+    for (let guard = 0; guard < 24; guard++) {
+        let k = Utilities.formatDate(pCur, "America/Toronto", "yyyy-MM");
+        if (periodKeys.indexOf(k) === -1) periodKeys.push(k);
+        if (k === pEndKey) break;
+        pCur.setDate(1); pCur.setMonth(pCur.getMonth() + 1);
+    }
+
+    return JSON.stringify({ mode: mode, trackerType: trackerType, label: bounds.label, cycle: bounds.cycle, grid: buckets, events: combinedEvents, totals: totals, trend: trend, periodKeys: periodKeys });
+  },
+
+  // Monthly hours across the full schedule DB, split by WEEK A / WEEK B cycle.
+  // Mirrors the day-view attribution: shift-split, then split again at midnight
+  // so every slice is credited to the month (and cycle) it actually occurs in.
+  _computeTrendMonthly: function(schedData, regionFilter) {
+      const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      let months = {};
+      let processed = new Set();
+      (schedData || []).forEach(row => {
+          let dStr = this._formatDate(row[1]);
+          if (!dStr) return;
+          let reg = row[5] ? String(row[5]).trim() : 'Onshore';
+          if (regionFilter && regionFilter !== 'All' && reg !== regionFilter) return;
+          let rY = parseInt(dStr.substring(0,4)), rM = parseInt(dStr.substring(5,7)), rD = parseInt(dStr.substring(8,10));
+          if (isNaN(rY) || isNaN(rM) || isNaN(rD)) return;
+          let agent = String(row[0]).trim();
+          let sM = this._timeToMins(row[3]), eMr = this._timeToMins(row[4]);
+          let actSlice = String(row[2]).trim().substring(0, 10);
+          let hash = `${agent}_${dStr}_${sM}_${eMr}_${actSlice}`;
+          if (processed.has(hash)) return; processed.add(hash);
+          let eM = eMr < sM ? eMr + 1440 : eMr;
+          this._getShiftSplits(sM, eM).forEach(split => {
+              let ps = split.startMins;
+              while (ps < split.endMins) {
+                  let nm = (Math.floor(ps / 1440) + 1) * 1440;
+                  let pe = Math.min(split.endMins, nm);
+                  let hrs = (pe - ps) / 60;
+                  let epoch = new Date(rY, rM-1, rD, Math.floor(ps/60), ps%60, 0, 0).getTime();
+                  let mKey = Utilities.formatDate(new Date(epoch), "America/Toronto", "yyyy-MM");
+                  let cyc = this._getCycleForEpoch(epoch);
+                  if (!months[mKey]) months[mKey] = { hours: 0, weekA: 0, weekB: 0 };
+                  months[mKey].hours += hrs;
+                  if (cyc === 'WEEK A') months[mKey].weekA += hrs; else months[mKey].weekB += hrs;
+                  ps = pe;
+              }
+          });
+      });
+      return Object.keys(months).sort().map(k => {
+          let mm = parseInt(k.substring(5,7));
+          return {
+              key: k,
+              label: MN[mm-1] + " '" + k.substring(2,4),
+              hours: parseFloat(months[k].hours.toFixed(2)),
+              weekA: parseFloat(months[k].weekA.toFixed(2)),
+              weekB: parseFloat(months[k].weekB.toFixed(2))
+          };
+      });
   },
 
   getUnifiedReport: function(refDateStr, cycleFilter) {
