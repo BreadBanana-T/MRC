@@ -246,3 +246,14 @@ function getManagementDashboard(grain, refDate) {
 function fetchCoachingCadence(thresholdDays) {
   return (typeof getCoachingCadenceFlags === 'function') ? getCoachingCadenceFlags(thresholdDays) : "{\"flags\":[]}";
 }
+
+// --- MANAGER FEEDBACK (suggestions / ideas / bug reports) ---
+function getCurrentUser() {
+  return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.whoAmI() : JSON.stringify({ email: '', name: '' });
+}
+function submitFeedback(type, message, page) {
+  return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.submit(type, message, page) : JSON.stringify({ ok: false, error: 'FeedbackTracker not loaded.' });
+}
+function getFeedbackList(limit) {
+  return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.getList(limit) : "[]";
+}

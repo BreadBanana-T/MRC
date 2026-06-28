@@ -57,6 +57,7 @@
                     </div>
                 </div>
 
+                <button class="action-btn" id="btn-feedback" onclick="openFeedback()" title="Send Feedback — suggestions, ideas, bug reports"><i data-lucide="message-square-plus" width="20"></i></button>
                 <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()" title="Notifications"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
                 <button class="action-btn" id="btn-insights" onclick="setView('insights')" title="Insights"><i data-lucide="bar-chart-2" width="20"></i></button>
                 <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags">
@@ -279,6 +280,22 @@
              <button class="btn-icon-sm" onclick="closeOutageAdmin()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
           </div>
           <div id="outage-admin-body" style="padding:20px 24px; max-height:560px; overflow-y:auto;" class="custom-scrollbar"></div>
+       </div>
+    </div>
+
+    <div id="feedback-modal" class="modal-blur" onclick="closeFeedback()">
+       <div class="modal-window" onclick="event.stopPropagation()" style="width:640px; max-width:95%; padding:0; overflow:hidden;">
+          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
+             <div style="display:flex; align-items:center; gap:12px;">
+                <div style="width:40px; height:40px; border-radius:12px; background:rgba(99,102,241,0.12); display:flex; align-items:center; justify-content:center;"><i data-lucide="message-square-plus" width="20" style="color:var(--accent-primary);"></i></div>
+                <div>
+                   <h2 style="margin:0 0 2px 0; font-size:1.25rem;">Send Feedback</h2>
+                   <div id="feedback-whoami" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Identifying you…</div>
+                </div>
+             </div>
+             <button class="btn-icon-sm" onclick="closeFeedback()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+          </div>
+          <div id="feedback-body" style="padding:22px 24px; max-height:600px; overflow-y:auto;" class="custom-scrollbar"></div>
        </div>
     </div>
 

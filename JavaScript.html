@@ -185,6 +185,7 @@
 
   var state = { 
       view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true
   };
 
@@ -214,7 +215,7 @@
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance(); fetchCurrentUser();
     setInterval(fetchOutages, 300000); // 5 min
     setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
   }
@@ -465,6 +466,140 @@
       textArea.focus(); textArea.select();
       try { document.execCommand('copy'); showToast(successMsg || "Copied"); } catch (err) { showToast("Copy Failed"); }
       document.body.removeChild(textArea);
+  }
+
+  // ───────────────────────────── Manager feedback ─────────────────────────────
+  var FEEDBACK_TYPES = [
+      { key: 'suggestion', label: 'Suggestion', icon: 'lightbulb',           color: '#6366f1' },
+      { key: 'idea',       label: 'Idea',       icon: 'sparkles',            color: '#0ea5e9' },
+      { key: 'bug',        label: 'Bug',        icon: 'bug',                 color: '#dc2626' }
+  ];
+  function feedbackTypeMeta(k) { for (var i=0;i<FEEDBACK_TYPES.length;i++) if (FEEDBACK_TYPES[i].key===k) return FEEDBACK_TYPES[i]; return FEEDBACK_TYPES[0]; }
+  function nameFromEmail(email) {
+      if (!email) return '';
+      var local = String(email).split('@')[0];
+      return local.split(/[._]/).filter(function(p){return p;}).map(function(p){ return p.charAt(0).toUpperCase()+p.slice(1); }).join(' ');
+  }
+  function currentPageLabel() {
+      var map = { overview:'Dashboard', agents:'Floor', scripts:'Scripts', weather:'Weather', calc:'Calculator', insights:'Insights', analyzer:'Red Flags', mgmt:'MGMT', tracker:'Tracker' };
+      var base = map[state.view] || state.view || 'App';
+      if (state.view === 'tracker' && state.trackerMode) base += ' · ' + state.trackerMode.charAt(0).toUpperCase() + state.trackerMode.slice(1);
+      return base;
+  }
+
+  function fetchCurrentUser() {
+      if (typeof google === 'undefined') { state.currentUser = { email: '', name: '' }; return; }
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.currentUser = JSON.parse(res); } catch(e) { state.currentUser = { email: '', name: '' }; }
+          var el = document.getElementById('feedback-whoami');
+          if (el && document.getElementById('feedback-modal').classList.contains('open')) el.innerHTML = feedbackWhoamiText();
+      }).getCurrentUser();
+  }
+  function feedbackWhoamiText() {
+      var u = state.currentUser;
+      if (!u) return 'Identifying you…';
+      if (u.email) return 'Submitting as <b style="color:var(--text-secondary);">' + escapeHTML(u.name || nameFromEmail(u.email)) + '</b> · ' + escapeHTML(u.email);
+      return 'Couldn\'t detect your account — your submission will still be logged.';
+  }
+
+  window.openFeedback = function() {
+      var modal = document.getElementById('feedback-modal'); if (!modal) return;
+      modal.classList.add('open');
+      state.feedbackType = 'suggestion';
+      state._feedbackDraft = '';
+      state._feedbackPage = currentPageLabel();
+      state.feedbackList = null;
+      var who = document.getElementById('feedback-whoami'); if (who) who.innerHTML = feedbackWhoamiText();
+      if (!state.currentUser) fetchCurrentUser();
+      renderFeedbackBody(true);
+      if (typeof google !== 'undefined') {
+          google.script.run.withSuccessHandler(function(res) {
+              try { state.feedbackList = JSON.parse(res); } catch(e) { state.feedbackList = []; }
+              if (document.getElementById('feedback-modal').classList.contains('open')) renderFeedbackBody(false);
+          }).withFailureHandler(function(){ state.feedbackList = []; renderFeedbackBody(false); }).getFeedbackList(25);
+      } else { state.feedbackList = []; }
+  };
+  window.closeFeedback = function() { var m = document.getElementById('feedback-modal'); if (m) m.classList.remove('open'); };
+  window.setFeedbackType = function(t) { state.feedbackType = t; renderFeedbackBody(false); };
+
+  window.sendFeedback = function() {
+      var ta = document.getElementById('feedback-msg');
+      var msg = ta ? ta.value.trim() : '';
+      if (!msg) { showToast('Please write a message first.'); if (ta) ta.focus(); return; }
+      if (state.feedbackSubmitting) return;
+      state.feedbackSubmitting = true; state._feedbackDraft = msg;
+      renderFeedbackBody(false);
+      if (typeof google === 'undefined') { showToast('Preview mode — not submitted.'); state.feedbackSubmitting = false; renderFeedbackBody(false); return; }
+      google.script.run.withSuccessHandler(function(res) {
+          state.feedbackSubmitting = false;
+          var r = {}; try { r = JSON.parse(res); } catch(e) {}
+          if (r.ok) {
+              showToast('Thanks! Your ' + feedbackTypeMeta(state.feedbackType).label.toLowerCase() + ' was sent.');
+              state._feedbackDraft = '';
+              google.script.run.withSuccessHandler(function(res2){ try { state.feedbackList = JSON.parse(res2); } catch(e){} renderFeedbackBody(false); }).getFeedbackList(25);
+          } else {
+              showToast('Could not send: ' + (r.error || 'unknown error'));
+              renderFeedbackBody(false);
+          }
+      }).withFailureHandler(function(err) {
+          state.feedbackSubmitting = false;
+          showToast('Send failed: ' + ((err && err.message) || 'backend error'));
+          renderFeedbackBody(false);
+      }).submitFeedback(state.feedbackType, msg, state._feedbackPage);
+  };
+
+  function renderFeedbackBody(focus) {
+      var body = document.getElementById('feedback-body'); if (!body) return;
+      var typeBtns = FEEDBACK_TYPES.map(function(t) {
+          var on = state.feedbackType === t.key;
+          return '<button onclick="setFeedbackType(\'' + t.key + '\')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:10px 8px; border-radius:12px; cursor:pointer; font-weight:800; font-size:0.85rem; transition:0.15s; ' +
+              (on ? 'background:' + t.color + '; color:#fff; border:1px solid ' + t.color + '; box-shadow:0 4px 12px ' + t.color + '40;' : 'background:var(--card-bg); color:var(--text-muted); border:1px solid var(--glass-border);') + '">' +
+              '<i data-lucide="' + t.icon + '" width="16"></i> ' + t.label + '</button>';
+      }).join('');
+      var meta = feedbackTypeMeta(state.feedbackType);
+      var placeholder = state.feedbackType === 'bug'
+          ? 'What went wrong? What were you doing, what did you expect, and what happened instead?'
+          : (state.feedbackType === 'idea' ? 'Describe your idea — what would it do and who would it help?' : 'Your suggestion to improve the portal…');
+      var sending = state.feedbackSubmitting;
+
+      var listHtml;
+      if (state.feedbackList === null) {
+          listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">Loading recent submissions…</div>';
+      } else if (!state.feedbackList.length) {
+          listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">No submissions yet — be the first.</div>';
+      } else {
+          listHtml = state.feedbackList.map(function(f) {
+              var m = feedbackTypeMeta(String(f.type||'').toLowerCase());
+              var nm = nameFromEmail(f.user) || f.user || 'Unknown';
+              var statusColor = /done|fixed|closed|resolved/i.test(f.status) ? 'var(--status-active, #10b981)' : (/progress|working/i.test(f.status) ? 'var(--status-warn)' : 'var(--text-muted)');
+              return '<div style="padding:12px 14px; border-bottom:1px solid var(--glass-border);">' +
+                  '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">' +
+                      '<span style="font-size:0.6rem; font-weight:800; color:#fff; background:' + m.color + '; padding:2px 8px; border-radius:99px; text-transform:uppercase; letter-spacing:0.4px;">' + escapeHTML(f.type||'') + '</span>' +
+                      '<span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">' + escapeHTML(nm) + '</span>' +
+                      '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(f.page||'') + '</span>' +
+                      '<span style="margin-left:auto; font-size:0.66rem; font-weight:800; color:' + statusColor + '; text-transform:uppercase;">' + escapeHTML(f.status||'New') + '</span>' +
+                  '</div>' +
+                  '<div style="font-size:0.82rem; color:var(--text-secondary); line-height:1.4; white-space:pre-wrap; word-break:break-word;">' + escapeHTML(f.message||'') + '</div>' +
+                  '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(f.ts||'') + '</div>' +
+              '</div>';
+          }).join('');
+      }
+
+      body.innerHTML =
+          '<div style="display:flex; gap:8px; margin-bottom:14px;">' + typeBtns + '</div>' +
+          '<div style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">On page: <span style="color:var(--text-secondary);">' + escapeHTML(state._feedbackPage || currentPageLabel()) + '</span></div>' +
+          '<textarea id="feedback-msg" class="input-aether custom-scrollbar" oninput="state._feedbackDraft=this.value" placeholder="' + escapeHTML(placeholder) + '" style="width:100%; height:130px; resize:vertical; padding:12px 14px; font-size:0.9rem; line-height:1.5;">' + escapeHTML(state._feedbackDraft || '') + '</textarea>' +
+          '<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">' +
+              '<button class="btn btn-glass" onclick="closeFeedback()" style="height:40px;">Cancel</button>' +
+              '<button class="btn btn-primary" onclick="sendFeedback()" ' + (sending ? 'disabled' : '') + ' style="height:40px; background:' + meta.color + '; border-color:' + meta.color + '; opacity:' + (sending ? '0.6' : '1') + ';"><i data-lucide="' + (sending ? 'loader' : 'send') + '" width="16"></i> ' + (sending ? 'Sending…' : 'Send ' + meta.label) + '</button>' +
+          '</div>' +
+          '<div style="margin-top:22px; border-top:1px solid var(--glass-border); padding-top:14px;">' +
+              '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">Recent submissions</div>' +
+              '<div style="border:1px solid var(--glass-border); border-radius:12px; overflow:hidden; max-height:230px; overflow-y:auto;" class="custom-scrollbar">' + listHtml + '</div>' +
+          '</div>';
+
+      if (window.lucide) lucide.createIcons();
+      if (focus) { var ta = document.getElementById('feedback-msg'); if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e) {} } }
   }
 
   window.setView = function(v) { state.view = v; if(v==='scripts') fetchScripts(); if(v==='insights') fetchInsightData(); if(v==='tracker') fetchTrackerData(); if(v==='analyzer') getAnalyzerHistory(null); if(v==='mgmt' && !state.mgmtData) fetchMgmtData(); render(); };
