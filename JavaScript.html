@@ -1785,12 +1785,23 @@
           var byDate = {};
           filteredEvents.forEach(function(e) { var k = e.date || '—'; (byDate[k] = byDate[k] || []).push(e); });
           var dateKeys = Object.keys(byDate).sort(function(a, b) { return b.localeCompare(a); });
+          // Per-day shift split chips (Morning / Evening / Night) so the heaviest
+          // shift on each day is visible without opening the daily tab or adding up.
+          var r2 = function(n) { return Math.round(n * 100) / 100; };
+          var shiftChips = function(sh) {
+              return [['Morning', sh.Morning], ['Evening', sh.Evening], ['Night', sh.Night]].map(function(p) {
+                  var c = SHIFT_C[p[0]], on = p[1] > 0;
+                  return '<span title="' + p[0] + '" style="font-size:0.66rem; font-weight:800; padding:1px 7px; border-radius:99px; ' + (on ? 'color:#fff; background:' + c + ';' : 'color:var(--text-muted); background:rgba(0,0,0,0.05);') + '">' + p[0].charAt(0) + ' ' + r2(p[1]) + '</span>';
+              }).join(' ');
+          };
           eventLogs = dateKeys.map(function(dk) {
               var evs = byDate[dk].slice().sort(function(x, y) { return (x.time || '').localeCompare(y.time || ''); });
               var dayTotal = evs.reduce(function(s, e) { return s + (parseFloat(e.hours) || 0); }, 0);
-              var header = '<div style="position:sticky; top:0; z-index:4; display:flex; justify-content:space-between; align-items:center; padding:8px 16px; background:var(--bg-root); border-bottom:1px solid var(--glass-border);">' +
+              var dsh = { Morning: 0, Evening: 0, Night: 0 };
+              evs.forEach(function(e) { if (dsh[e.shift] != null) dsh[e.shift] += (parseFloat(e.hours) || 0); });
+              var header = '<div style="position:sticky; top:0; z-index:4; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 16px; background:var(--bg-root); border-bottom:1px solid var(--glass-border);">' +
                   '<span style="font-size:0.74rem; font-weight:800; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px;">' + prettyDate(dk) + '</span>' +
-                  '<span style="font-size:0.72rem; font-weight:700; color:var(--text-muted);">' + evs.length + ' · ' + (Math.round(dayTotal * 100) / 100) + 'h</span></div>';
+                  '<span style="display:flex; align-items:center; gap:5px;">' + shiftChips(dsh) + '<span style="font-size:0.72rem; font-weight:800; color:var(--text-main); margin-left:4px;">' + r2(dayTotal) + 'h</span></span></div>';
               return header + evs.map(logRow).join('');
           }).join('');
       }
@@ -2445,7 +2456,40 @@
               '</div>';
       }
 
-      return headerHtml + gridHtml + insightsHtml + '<div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;"><div style="display:flex; flex-direction:column; gap:24px;"><div class="aether-card" style="padding:24px;"><div style="text-align:center; margin-bottom:20px;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + (d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0) + '</div></div><div class="chart-3d-container" style="height:260px; width:100%; padding: 10px;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div><div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;"><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0) + 'h</div></div></div>' + otSummaryHtml + '</div><div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;"><div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span>' + searchBox('tracker-search', 'Search agent or type...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:200px;', 'height:30px; font-size:0.8rem;') + '</div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div></div>';
+      // ── Per-shift breakdown by sub-period (Morning/Evening/Night) ──────────────
+      // Rolls the shift totals up automatically: by day (week view), by Sun–Sat
+      // week (month view), by month (quarter/YTD). Lets managers read the
+      // heaviest shifts and compute weekly/monthly/quarterly goals without
+      // switching to the daily tab or adding by hand.
+      var shiftHtml = '';
+      if (d.mode && d.mode !== 'day') {
+          var MN3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          var lk = function(dt) { var y = dt.getFullYear(), m = dt.getMonth() + 1, da = dt.getDate(); return y + '-' + (m < 10 ? '0' + m : m) + '-' + (da < 10 ? '0' + da : da); };
+          var subTitle, subKey, subLabel;
+          if (d.mode === 'week') {
+              subTitle = 'by day'; subKey = function(ds) { return ds; }; subLabel = function(k) { return prettyDate(k); };
+          } else if (d.mode === 'month') {
+              subTitle = 'by week'; subKey = function(ds) { var p = ds.split('-'); var dt = new Date(+p[0], +p[1] - 1, +p[2], 12); dt.setDate(dt.getDate() - dt.getDay()); return lk(dt); }; subLabel = function(k) { return 'Wk of ' + prettyDate(k); };
+          } else {
+              subTitle = 'by month'; subKey = function(ds) { return ds.substring(0, 7); }; subLabel = function(k) { var p = k.split('-'); return MN3[(+p[1]) - 1] + " '" + k.substring(2, 4); };
+          }
+          var sAgg = {}, sGrand = { Morning: 0, Evening: 0, Night: 0, total: 0 };
+          (d.events || []).forEach(function(e) { if (!e.date) return; var k = subKey(e.date); if (!sAgg[k]) sAgg[k] = { Morning: 0, Evening: 0, Night: 0, total: 0 }; var h = parseFloat(e.hours) || 0; if (sAgg[k][e.shift] != null) sAgg[k][e.shift] += h; sAgg[k].total += h; if (sGrand[e.shift] != null) sGrand[e.shift] += h; sGrand.total += h; });
+          var sKeys = Object.keys(sAgg).sort();
+          if (sKeys.length) {
+              var r2c = function(v) { return Math.round(v * 100) / 100; };
+              var cell = function(v, c) { return '<td style="padding:6px 12px; text-align:right; font-variant-numeric:tabular-nums; font-weight:' + (v > 0 ? '800' : '600') + '; color:' + (v > 0 ? (c || 'var(--text-main)') : 'var(--text-muted)') + ';">' + r2c(v) + 'h</td>'; };
+              var hdr = '<th style="padding:6px 12px; text-align:left; font-size:0.62rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);">' + subTitle.replace('by ', '') + '</th>' +
+                  ['Morning', 'Evening', 'Night', 'Total'].map(function(s) { var c = SHIFT_C[s] || 'var(--text-main)'; return '<th style="padding:6px 12px; text-align:right; font-size:0.62rem; text-transform:uppercase; letter-spacing:0.5px; color:' + (s === 'Total' ? 'var(--text-muted)' : c) + ';">' + s + '</th>'; }).join('');
+              var bodyRows = sKeys.map(function(k) { var a = sAgg[k]; return '<tr class="hover-bg" style="border-bottom:1px solid var(--glass-border);"><td style="padding:6px 12px; font-weight:700; font-size:0.82rem; white-space:nowrap;">' + escapeHTML(subLabel(k)) + '</td>' + cell(a.Morning, SHIFT_C.Morning) + cell(a.Evening, SHIFT_C.Evening) + cell(a.Night, SHIFT_C.Night) + cell(a.total) + '</tr>'; }).join('');
+              var totRow = '<tr style="border-top:2px solid var(--glass-border); background:var(--bg-root);"><td style="padding:8px 12px; font-weight:800;">Total</td>' + cell(sGrand.Morning, SHIFT_C.Morning) + cell(sGrand.Evening, SHIFT_C.Evening) + cell(sGrand.Night, SHIFT_C.Night) + cell(sGrand.total) + '</tr>';
+              shiftHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;">' +
+                  '<div class="section-header" style="margin:0 0 12px 0;">' + (isCoach ? 'Coaching' : 'Furlough') + ' by shift <span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + subTitle + ' · Morning 07–15 · Evening 15–23 · Night 23–07</span></div>' +
+                  '<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.84rem;"><thead><tr>' + hdr + '</tr></thead><tbody>' + bodyRows + totRow + '</tbody></table></div></div>';
+          }
+      }
+
+      return headerHtml + gridHtml + insightsHtml + shiftHtml + '<div class="grid-split" style="grid-template-columns: 350px 1fr; gap:24px; align-items:start;"><div style="display:flex; flex-direction:column; gap:24px;"><div class="aether-card" style="padding:24px;"><div style="text-align:center; margin-bottom:20px;"><div style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Total Hours Logged</div><div style="font-size:3.5rem; font-weight:800; color:var(--text-main); line-height:1;">' + (d.totals && d.totals.all ? escapeHTML(d.totals.all.toFixed(2)) : 0) + '</div></div><div class="chart-3d-container" style="height:260px; width:100%; padding: 10px;"><canvas id="tracker-chart" style="display:block;"></canvas></div></div><div class="aether-card" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; padding:20px;"><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Morning</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.morning ? escapeHTML(d.totals.morning.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Evening</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.evening ? escapeHTML(d.totals.evening.toFixed(1)) : 0) + 'h</div></div><div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Night</div><div style="font-size:1.5rem; font-weight:800; color:var(--text-main);">' + (d.totals && d.totals.night ? escapeHTML(d.totals.night.toFixed(1)) : 0) + 'h</div></div></div>' + otSummaryHtml + '</div><div class="aether-card" style="padding:0; display:flex; flex-direction:column; height:600px;"><div class="section-header" style="padding:20px; border-bottom:1px solid var(--glass-border); margin:0;"><div style="display:flex; align-items:center; justify-content:space-between; width:100%;"><span>Detailed Log ' + (state.trackerCycleFilter !== 'ALL' ? '<span style="font-size:0.75rem; background:var(--accent-primary); color:white; padding:2px 8px; border-radius:12px; margin-left:8px;">' + escapeHTML(state.trackerCycleFilter) + '</span>' : '') + '</span>' + searchBox('tracker-search', 'Search agent or type...', escapeHTML(state.trackerSearch), 'handleTrackerSearch(this.value)', 'width:200px;', 'height:30px; font-size:0.8rem;') + '</div></div><div style="flex:1; overflow-y:auto; padding:0 10px;" class="custom-scrollbar">' + eventLogs + '</div></div></div>';
   }
 
   var TRAINING_EMP_OPTS = ['Active', 'Long Term Disability', 'Maternity/Paternity Leave', 'Short Term Disability', 'Personal Leave'];
