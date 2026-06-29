@@ -115,6 +115,32 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 > All time columns are also written as **plain text** so Sheets cannot coerce `"9:00 AM"` into a date
 > serial (`12/30/1899`).
 
+### Caching & performance (this build)
+- **Payload cache.** `WorkforceTracker.getAnalytics` and `ManagementView.getDashboard`
+  gzip+base64 their JSON into `CacheService`, keyed per type·mode·date·region·cycle plus a
+  version stamp `WF_CACHE_VER` (Script Property). Mgmt caches **only fully-past periods** —
+  the live/in-progress period always recomputes, so SL/IDP and freshly-imported Activity
+  hours are never stale.
+- **Cache invalidation.** Every import bumps `WF_CACHE_VER`: WFM/IDP/chunked imports
+  (`WorkforceTracker.importData` / `Code.gs:processChunkedImport`), OT-slot imports, and the
+  four report imports (`importActivityLoading/Alarms/Forecast/Safe` → `Code.gs:_bustWfCache`).
+- **Batched reads.** `getDashboard` pulls its 9 display-value sheets in ONE Sheets API call
+  (`WorkforceTracker._batchDisplayValues`; advanced service `Sheets` v4), falling back to
+  per-sheet `getDataRange()` if the service is disabled. `Stats History` stays on its own
+  typed read.
+
+### Presence, attribution & feedback (this build)
+- **Identity.** `Session.getActiveUser().getEmail()` (domain web app + `userinfo.email`).
+  Profile photos resolved by email via the **People Directory API** (advanced service
+  `People` v1, scope `directory.readonly`), cached 6h; UI falls back to coloured initials.
+  Runs under `USER_DEPLOYING`, so the owner's token reads the domain directory while the
+  viewer is still identified by `getActiveUser`.
+- **WF_PRESENCE** — `Presence.heartbeat` (client pings ~60s; "active now" = seen ≤3 min).
+- **WF_ACTIONS** — `Presence.recordAction`, one upserted row per action type
+  (`idp` / `import` / `agent_status`); powers the header "last update by".
+- **WF_FEEDBACK** — `FeedbackTracker.submit` (suggestion/idea/bug), best-effort email to
+  Script Property `FEEDBACK_NOTIFY_EMAIL` (falls back to the deploying owner).
+
 ---
 
 ## 2. Sheet schema (column index → meaning)
@@ -132,6 +158,13 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
 | **Stats History** | 0 DateTime, 1 SVL%, 2 Ack | external/digest |
 | **DB_Sessions** | 1 Agent, 2 Role, 3 Start, 4 End, 6 Hours | external |
+| **WF_ACTIVITY_WK** | 0 WeekStart(Sun), 1 ExceptionGrp, 2 Code, 3 ActivityName, 4 Hours | `ReportImport.importActivity` |
+| **WF_ALARMS** | 0 Month, 1 PrioRank, 2 PrioGrp, 3 Desc, 4 ServId, 5 Vol, 6 AHT | `ReportImport.importAlarms` |
+| **WF_FORECAST** | 0 Grain, 1 Period, 2 FcstAcc, 3 FcstAlarm, 4 AlarmVol, 5 InSvlVol, 6 FcstAht, 7 ActAht, 8 Svl, 9–14 Pct{High,Med,Low,MAS,MIX,Operator} | `ReportImport.importForecast` |
+| **WF_SAFE_AGENT** | 0 PeriodStart, 1 PeriodEnd, 2 Label, 3 Agent, 4 TID, 5 Lang, 6 ActiveHrs | `ReportImport.importSafe` |
+| **WF_PRESENCE** | 0 Email, 1 Name, 2 Photo, 3 LastSeen | `Presence.heartbeat` |
+| **WF_ACTIONS** | 0 Action, 1 Label, 2 Email, 3 Name, 4 Timestamp | `Presence.recordAction` |
+| **WF_FEEDBACK** | 0 Timestamp, 1 User, 2 Type, 3 Message, 4 Page, 5 Status | `FeedbackTracker.submit` |
 
 ---
 
@@ -148,6 +181,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | `_getCycleForEpoch` (`:585`) | — | Week A/B (anchor 2026‑01‑29) |
 | `_calculateEpochBoundaries` (`:593`) | — | day/week/month/quarter/ytd window for the **trackers** |
 | `ManagementView._periodBounds` (`:48`) | — | **separate** calendar window for Mgmt View (Sun–Sat weeks) |
+| `_batchDisplayValues` | `{}` / per-sheet fallback | Mgmt `getDashboard` — reads N sheets in one Sheets-API `batchGet`, padded rectangular to match `getDisplayValues` |
 
 **The big parser split (NARROWED, SAFE21):** `_timeToMins` now parses fr‑CA `"13 h 30"`, meridian‑anywhere
 (`"9:00:00 p.m."`→21:00), and day‑fractions, and rejects date serials — matching `_safeTime` except it
@@ -168,9 +202,17 @@ used by the SAFE board where the epoch columns exist.
 | **OT `getAnalytics`** (`OvertimeTracker.gs:508`) | WF_OVERTIME, WF_OT_OPEN | `[1]`→`_formatDate` | **`_timeToMins` (text only — no epochs)** | **raw name (no normalize)** | `_calculateEpochBoundaries` | no | `agent+date+code+start+end` | yes |
 | **Mgmt `getDashboard`** (`ManagementView.gs:136`) | WF_OVERTIME, WF_ROLES, WF_COACHING, WF_FURLOUGH, WF_ABSENCES, WF_IDP, WF_OT_OPEN, Stats History | `[1]`→`_dayStartEpoch`/`_formatDate` | `_timeToMins` via `_segInterval` | raw (no agent join) | `_periodBounds` (calendar) | **YES for actuals**; plan data (IDP, open OT, preCodedOT) uncapped | `agent+date+activity+start+end` | **no (calendar only)** |
 
-> **Mgmt View extras (this build).** `getDashboard` also emits real-absence **hours** (`totals.*.absHours/absHoursOff`) and a Night/Morning/Evening **shift split** (`absShift`, via `WorkforceTracker._getShiftSplits`) on both the period totals and each `absSeries[]` bucket; the client shows absence hours, "% of the Sun–Sat week" (`absHours ÷ schedH`), a concentration-by-shift doughnut, and an SL-vs-absence-by-shift chart. A coded-hours **total** beside its breakdown sums `ot + acsu(VFurlough) + reading + elearn + tower`; `elearn` is a WF_ROLES role match (`ELEARN/E-LEARN/VILT/VIRTUAL`), **0 until a feed exists**. It also emits `totals.sel.codes` — per-IEX-code period hours for the **IEX Coding Compiled & Misc** card (ACSU from WF_FURLOUGH; CE-HUDDLE/QUAL/ONE/SBYS/MEET from WF_COACHING activity strings via `_coachCode`; READ/WOFQT/VILT from WF_ROLES; OT from WF_OVERTIME). Codes not captured at import (LFQI/CLASSROOM/AUTH/SME/E-Learning) render as **"pending feed"** until the schedule importer is extended to store them. The `lunch` (stacking concurrency) and `abs` (per-type onshore/offshore mix) payloads are unchanged but now render in the **Furlough / Absence trackers** (fed by a `getManagementDashboard('week', ref)` call), not in the Mgmt View.
+> **Mgmt View extras (this build).** `getDashboard` also emits real-absence **hours** (`totals.*.absHours/absHoursOff`) and a Night/Morning/Evening **shift split** (`absShift`, via `WorkforceTracker._getShiftSplits`) on both the period totals and each `absSeries[]` bucket; the client shows absence hours, "% of the Sun–Sat week" (`absHours ÷ schedH`), a concentration-by-shift doughnut, and an SL-vs-absence-by-shift chart. A coded-hours **total** beside its breakdown sums `ot + acsu(VFurlough) + reading + elearn + tower`; `elearn` is a WF_ROLES role match (`ELEARN/E-LEARN/VILT/VIRTUAL`), **0 until a feed exists**. It also emits `totals.sel.codes` — per-IEX-code period hours for the **IEX Coding Compiled (On Week Completion)** card. **The Activity report is the source of truth** for that card: when one covers the period (`getActivityCodes.has`), its hours override the schedule-coded values for every code and render in **HH:MM:SS**; codes absent from the feed read **0:00:00** (no more per-row "pending feed" — the card states the source once, or "Activity report not loaded for this period"). ACSU stays sourced from WF_FURLOUGH and OT from WF_OVERTIME; the schedule-coded values (CE-HUDDLE/QUAL/SBYS/READ/WOFQT/VILT via `_coachCode`/WF_ROLES) are only a fallback for attribution, never authoritative when the report exists. The `lunch` (stacking concurrency) and `abs` (per-type onshore/offshore mix) payloads are unchanged but now render in the **Furlough / Absence trackers** (fed by a `getManagementDashboard('week', ref)` call), not in the Mgmt View.
 | **Absence `getAbsenceProfiles`** (`WorkforceTracker.gs:396`) | WF_ABSENCES, WF_MASTERLIST | `[1]`→`_formatDate`, **then `dStr.startsWith(year)`** | `_timeToMins` | `_normalizeAgentKey` | **whole YEAR** (param) | yes (`dayMid<now`) | `agent+date+type+start+end`, then merge same‑day+type | no |
 | **WFM engine `getAnalytics`/`getUnifiedReport`** (`:646/767`) | WF_COACHING/FURLOUGH/ROLES/OVERTIME, WF_MASTERLIST, DB_Sessions, WF_GEM_DATA_V3 | `[1]`→`_formatDate` | `_timeToMins` | `_normalizeAgentKey` (+ GEM fuzzy fallback) | bounds ±1d / month | **yes (`epoch<=now`)** | `agent+date+start+end+actSlice` | yes |
+
+> **Furlough day attribution (this build, FIXED).** `getAnalytics` splits each shift-chunk
+> **again at midnight**, so a furlough crossing e.g. 23:00→00:30 credits each portion to the
+> calendar day it actually falls in — previously the whole Night chunk was credited to the
+> **start** day, so post-midnight minutes went missing from the next day (and the grid). It
+> also returns a monthly `trend` (hours + `weekA`/`weekB`) + `periodKeys` for the tracker's
+> month-over-month and Week A·B views, and a per-event `cycle`. Helper:
+> `_computeTrendMonthly`.
 
 ---
 
