@@ -408,10 +408,13 @@ var SafeTracker = {
     // period, not the schedule, when a report covers it. The schedule still drives
     // coverage / Compare / the timeline — only the per-agent hours TOTAL is swapped.
     var safeMap = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(winStartStr, winEndStr) : { has: false, map: {} };
+    var _tidMap = (typeof WorkforceTracker !== 'undefined' && WorkforceTracker._agentTidMap) ? WorkforceTracker._agentTidMap() : {};
     var perAgent = Object.keys(agents).map(function (n) {
       var a = agents[n];
       var schedH = self._r2(a.total);
-      var _rptH = safeMap.has ? ReportImport.matchSafeHours(n, safeMap) : null;
+      // Employee-ID match first (exact), name-fuzzy fallback.
+      var _tid = _tidMap[nk(n)];
+      var _rptH = safeMap.has ? ((_tid && safeMap.byTid && safeMap.byTid[_tid] != null) ? safeMap.byTid[_tid] : ReportImport.matchSafeHours(n, safeMap)) : null;
       var totalH = safeMap.has ? (_rptH != null ? Math.round(_rptH * 100) / 100 : 0) : schedH;
       var ash = shiftModeOf(nk(n));
       // Split SAFE-via-OT: hours on a day the agent was scheduled = extending their

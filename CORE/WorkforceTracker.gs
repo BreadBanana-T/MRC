@@ -61,6 +61,22 @@ var WorkforceTracker = {
       return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
+  // normalized-name-key → WFM agent ID (TID), from WF_AGENT_IDS (written at
+  // import). Lets SAFE hours match on Employee ID exactly. Empty if never built.
+  _agentTidMap: function() {
+      var out = {};
+      try {
+          var sh = this._getDB('WF_AGENT_IDS');
+          if (sh && sh.getLastRow() > 1) {
+              sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function(r) {
+                  var k = String(r[0] || ''), tid = String(r[2] || '').trim();
+                  if (k && tid) out[k] = tid;
+              });
+          }
+      } catch (e) {}
+      return out;
+  },
+
   // Read several sheets in ONE Sheets API round-trip instead of one
   // getDataRange() call per sheet. Returns { sheetName: rows-incl-header },
   // formatted values padded rectangular so it's a drop-in for
@@ -129,7 +145,8 @@ var WorkforceTracker = {
       let cleanFurlough = [];
       let cleanRoles = [];
       let cleanAbsences = [];
-      
+      let agentIds = {};   // normalized key → { id (WFM Agent: NNNNN), name } for ID-exact SAFE matching
+
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let currentAgent = "", currentID = "", currentDateStr = "";
       let currentY = 0, currentM = 0, currentD = 0;
@@ -147,6 +164,9 @@ var WorkforceTracker = {
       
       const flushAgentBuffer = () => {
           if (agentBuffer.length === 0) return;
+          // Capture the WFM agent ID (the "Agent: NNNNN" number) keyed by name, so
+          // SAFE-report hours can be matched on Employee ID (exact) instead of name.
+          if (currentID && currentAgent) agentIds[_normalizeAgentKey(currentAgent)] = { id: String(currentID).trim(), name: currentAgent };
           let isOffshore = false;
           let detectedBy = null;
           if (currentID && String(currentID).startsWith("3")) { isOffshore = true; detectedBy = 'auto-wfm-id'; }
@@ -319,6 +339,25 @@ var WorkforceTracker = {
         this._executeDestructiveUpsert('WF_ABSENCES', cleanAbsences, ['Agent Name', 'Date', 'Type', 'Start Time', 'End Time', 'Region']);
         msg.push(`Absences`);
       }
+
+      // Persist the WFM agent-ID map (MERGE — IDs survive partial imports), so
+      // SAFE-report hours can be matched on Employee ID instead of name.
+      try {
+        var idKeys = Object.keys(agentIds);
+        if (idKeys.length) {
+          var ssIds = SpreadsheetApp.getActiveSpreadsheet();
+          var idSh = ssIds.getSheetByName('WF_AGENT_IDS') || ssIds.insertSheet('WF_AGENT_IDS');
+          var prevRows = idSh.getLastRow();
+          var existing = {};
+          if (prevRows > 1) {
+            idSh.getRange(2, 1, prevRows - 1, 3).getValues().forEach(function(r) { var k = String(r[0]); if (k) existing[k] = { name: String(r[1] || ''), id: String(r[2] || '') }; });
+          }
+          idKeys.forEach(function(k) { existing[k] = { name: agentIds[k].name, id: agentIds[k].id }; });
+          var outIds = [['Key', 'Name', 'TID']].concat(Object.keys(existing).map(function(k) { return [k, existing[k].name, existing[k].id]; }));
+          idSh.getRange(1, 1, outIds.length, 3).setValues(outIds);
+          if (prevRows > outIds.length) idSh.getRange(outIds.length + 1, 1, prevRows - outIds.length, 3).clearContent();
+        }
+      } catch (idErr) { Logger.log('[AgentIDs] map skipped: ' + idErr); }
 
       // Overtime is parsed in its own isolated module (WF_OVERTIME sheet).
       // Wrapped so any OT parse error can never break the core import above.
@@ -1140,10 +1179,15 @@ var WorkforceTracker = {
         // the report read 0. `total` is adjusted by the swap so off-phone math stays consistent.
         var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
         var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(_safeStartStr, eStr) : { has: false };
+        var _tidMap = this._agentTidMap();   // normalized name → WFM Employee ID
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
             if (_safeRpt.has) {
-                var _m = ReportImport.matchSafeHours(a.name, _safeRpt);
+                // Match on Employee ID first (exact), then fall back to name.
+                var _tid = _tidMap[aKey];
+                var _m = (_tid && _safeRpt.byTid && _safeRpt.byTid[_tid] != null)
+                    ? _safeRpt.byTid[_tid]
+                    : ReportImport.matchSafeHours(a.name, _safeRpt);
                 var rptSafe = (_m != null) ? _m : 0;
                 a.total = (a.total || 0) - (a.safe || 0) + rptSafe;
                 a.safe = rptSafe;

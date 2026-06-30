@@ -165,6 +165,14 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_PRESENCE** | 0 Email, 1 Name, 2 Photo, 3 LastSeen | `Presence.heartbeat` |
 | **WF_ACTIONS** | 0 Action, 1 Label, 2 Email, 3 Name, 4 Timestamp | `Presence.recordAction` |
 | **WF_FEEDBACK** | 0 Timestamp, 1 User, 2 Type, 3 Message, 4 Page, 5 Status | `FeedbackTracker.submit` |
+| **WF_AGENT_IDS** | 0 Key (normalized), 1 Name, 2 TID (WFM `Agent: NNNNN`) | `WorkforceTracker.importData` (merge-upsert) |
+
+> **SAFE matching on Employee ID (this build).** The schedule import now stores the
+> WFM agent ID (`Agent: NNNNN`) in `WF_AGENT_IDS`. SAFE-report hours match on
+> **Employee ID first** (`getSafeForPeriod().byTid` ↔ `WorkforceTracker._agentTidMap`)
+> in both the Master Operations Tracker (`getUnifiedReport`) and the SAFE Tracker,
+> falling back to the existing name-fuzzy (`matchSafeHours`) when an ID is missing —
+> so it's never worse than name matching, only more exact.
 
 ---
 

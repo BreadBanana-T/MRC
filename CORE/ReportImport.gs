@@ -325,7 +325,7 @@ var ReportImport = {
   // No overlap on a valid view → empty (that period has no SAFE report). When no
   // view bounds are given, fall back to the latest stored period.
   getSafeForPeriod: function(viewStart, viewEnd) {
-    var out = { has: false, periodStart: '', periodEnd: '', label: '', agents: [], totalHrs: 0, count: 0, map: {}, idx: [] };
+    var out = { has: false, periodStart: '', periodEnd: '', label: '', agents: [], totalHrs: 0, count: 0, map: {}, idx: [], byTid: {} };
     try {
       var sh = this._ss().getSheetByName('WF_SAFE_AGENT');
       if (!sh || sh.getLastRow() < 2) return out;
@@ -346,8 +346,10 @@ var ReportImport = {
       var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
       best.rows.forEach(function(r) {
         var h = parseFloat(r[6]) || 0; var k = nk(r[3]);
-        out.agents.push({ name: r[3], tid: r[4], lang: r[5], hrs: Math.round(h * 10) / 10 });
+        var tid = String(r[4] || '').trim();
+        out.agents.push({ name: r[3], tid: tid, lang: r[5], hrs: Math.round(h * 10) / 10 });
         out.totalHrs += h; out.map[k] = h;
+        if (tid) out.byTid[tid] = (out.byTid[tid] || 0) + h;   // Employee-ID-keyed for exact matching
         out.idx.push({ toks: k.split(' ').filter(function(t) { return t.length > 1; }), hrs: h });
       });
       out.agents.sort(function(a, b) { return b.hrs - a.hrs; });
