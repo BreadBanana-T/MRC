@@ -808,12 +808,15 @@
       var visibleNotifs = state.notifications.filter(function(n) { return !state.dismissedNotifs.has(String(n.id)); });
       var html = '';
       if (visibleNotifs.length > 0) {
-          html = visibleNotifs.map(function(n) {
-              return '<div style="padding:16px; background:var(--card-bg); backdrop-filter:blur(20px); border:1px solid var(--glass-border); border-radius:16px; margin-bottom:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); position:relative; overflow:hidden; transition: 0.2s;">' +
-                     '<div style="position:absolute; top:0; left:0; width:4px; height:100%; background:var(--accent-primary);"></div>' +
-                     '<div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; margin-left:8px; font-weight:700;">' + escapeHTML(n.time) + '</div>' +
-                     '<div style="font-weight:700; font-size:0.9rem; margin-bottom:12px; margin-left:8px;">' + escapeHTML(n.text) + '</div>' +
-                     '<div style="display:flex; justify-content:flex-end;"><button class="btn btn-glass" style="font-size:0.75rem; padding:4px 16px; height:28px;" onclick="dismissNotif(\'' + escapeHTML(n.id) + '\')">Dismiss</button></div>' +
+          // Clean neutral cards — no accent "lip", no per-item backdrop-filter blur.
+          var clearAll = visibleNotifs.length > 1
+              ? '<div style="display:flex; justify-content:flex-end; margin-bottom:10px;"><button class="btn btn-glass" style="font-size:0.7rem; padding:3px 12px; height:26px;" onclick="dismissAllNotifs(event)">Dismiss all (' + visibleNotifs.length + ')</button></div>'
+              : '';
+          html = clearAll + visibleNotifs.map(function(n) {
+              return '<div style="padding:14px 16px; background:var(--card-bg); border:1px solid var(--glass-border); border-radius:12px; margin-bottom:10px; box-shadow:0 2px 8px rgba(0,0,0,0.04);">' +
+                     '<div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:4px; font-weight:700;">' + escapeHTML(n.time) + '</div>' +
+                     '<div style="font-weight:600; font-size:0.88rem; margin-bottom:10px; color:var(--text-main); line-height:1.4;">' + escapeHTML(n.text) + '</div>' +
+                     '<div style="display:flex; justify-content:flex-end;"><button class="btn btn-glass" style="font-size:0.72rem; padding:4px 14px; height:26px;" onclick="dismissNotif(event, \'' + escapeHTML(n.id) + '\')">Dismiss</button></div>' +
                      '</div>';
           }).join('');
       } else {
@@ -821,8 +824,25 @@
       }
       list.innerHTML = html;
   };
-            
-  window.dismissNotif = function(id) { state.dismissedNotifs.add(String(id)); renderNotifList(); if(typeof google !== 'undefined') google.script.run.dismissSystemNotification(id); var dot = document.getElementById('notif-dot'); var count = state.notifications.filter(function(n){return !state.dismissedNotifs.has(String(n.id));}).length; if(dot) dot.style.display = count ? 'block' : 'none'; };
+
+  // stopPropagation: without it, re-rendering the list detaches the clicked
+  // button, the document click-handler then sees the click as "outside the
+  // panel" and closes the whole panel — so you could only ever dismiss one.
+  window.dismissNotif = function(ev, id) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      state.dismissedNotifs.add(String(id));
+      renderNotifList();
+      if (typeof google !== 'undefined') google.script.run.dismissSystemNotification(id);
+      var dot = document.getElementById('notif-dot'); var count = state.notifications.filter(function(n){return !state.dismissedNotifs.has(String(n.id));}).length; if(dot) dot.style.display = count ? 'block' : 'none';
+  };
+  window.dismissAllNotifs = function(ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      state.notifications.forEach(function(n) {
+          if (!state.dismissedNotifs.has(String(n.id))) { state.dismissedNotifs.add(String(n.id)); if (typeof google !== 'undefined') google.script.run.dismissSystemNotification(n.id); }
+      });
+      renderNotifList();
+      var dot = document.getElementById('notif-dot'); if (dot) dot.style.display = 'none';
+  };
 
   function fetchCalendar() {
       if(typeof google==='undefined') return;
