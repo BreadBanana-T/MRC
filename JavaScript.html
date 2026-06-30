@@ -716,7 +716,7 @@
   window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
   window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
-  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); };
+  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
@@ -4038,6 +4038,7 @@
   function safePeriodBounds() {
       var g = document.getElementById('safe-period-grain');
       var d = document.getElementById('safe-period-date');
+      var de = document.getElementById('safe-period-end');
       var grain = (g && g.value) || 'month';
       var dstr = (d && d.value) || localDateStr(new Date());
       var dt = new Date(dstr + 'T12:00:00');
@@ -4045,12 +4046,31 @@
       var MN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
       var s, e, label;
       if (grain === 'day') { s = new Date(y, m, day); e = new Date(y, m, day); label = localDateStr(s); }
-      else if (grain === 'week') { var ws = new Date(y, m, day); ws.setDate(ws.getDate() - ws.getDay()); var we = new Date(ws); we.setDate(we.getDate() + 6); s = ws; e = we; label = 'Week of ' + localDateStr(ws); }
+      else if (grain === 'week' || grain === 'custom') {
+          // Explicit start + end — the SAFE report's week is whatever range the
+          // manager picks (not forced Sun–Sat). End defaults to start if blank.
+          var estr = (de && de.value) || dstr;
+          var et = new Date(estr + 'T12:00:00');
+          if (et < dt) et = dt;   // guard: end can't precede start
+          s = dt; e = et;
+          label = (grain === 'week' ? 'Week ' : '') + localDateStr(s) + ' → ' + localDateStr(e);
+      }
       else if (grain === 'quarter') { var q = Math.floor(m / 3) * 3; s = new Date(y, q, 1); e = new Date(y, q + 3, 0); label = 'Q' + (Math.floor(m / 3) + 1) + ' ' + y; }
       else if (grain === 'ytd') { s = new Date(y, 0, 1); e = new Date(y, m, day); label = 'YTD ' + y; }
       else { s = new Date(y, m, 1); e = new Date(y, m + 1, 0); label = MN[m] + ' ' + y; }
       return { start: localDateStr(s), end: localDateStr(e), label: label };
   }
+  // Show the end-date field only when the SAFE period is a picked range.
+  window.onSafeGrainChange = function() {
+      var g = document.getElementById('safe-period-grain');
+      var de = document.getElementById('safe-period-end');
+      var to = document.getElementById('safe-period-to');
+      var hint = document.getElementById('safe-period-hint');
+      var range = g && (g.value === 'week' || g.value === 'custom');
+      if (de) { de.style.display = range ? '' : 'none'; if (range && !de.value) de.value = localDateStr(new Date()); }
+      if (to) to.style.display = range ? '' : 'none';
+      if (hint) hint.textContent = range ? 'pick the report’s start and end dates' : 'used only when pasting a SAFE roster (it has no dates)';
+  };
 
   window.runImportAction = function() {
       console.log('[sync] click');

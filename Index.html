@@ -100,15 +100,18 @@
           <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 16px;" placeholder="Paste WFM schedule text here... (Also accepts IDP, the open-OT slots JSON, and the IEX/BI reports: Activity loading, Alarms, Forecast, and the SAFE roster)"></textarea>
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:20px; padding:10px 14px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px;">
              <span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">SAFE report period</span>
-             <select id="safe-period-grain" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;">
+             <select id="safe-period-grain" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;" onchange="onSafeGrainChange()">
                 <option value="day">Day</option>
-                <option value="week">Week (Sun–Sat)</option>
+                <option value="week">Week (pick dates)</option>
                 <option value="month" selected>Month</option>
                 <option value="quarter">Quarter</option>
                 <option value="ytd">YTD</option>
+                <option value="custom">Custom range</option>
              </select>
              <input type="date" id="safe-period-date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;">
-             <span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">used only when pasting a SAFE roster (it has no dates)</span>
+             <span id="safe-period-to" style="display:none; font-size:0.75rem; font-weight:700; color:var(--text-muted);">→</span>
+             <input type="date" id="safe-period-end" class="input-aether" style="display:none; width:auto; height:32px; font-size:0.8rem; font-weight:700;">
+             <span id="safe-period-hint" style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">used only when pasting a SAFE roster (it has no dates)</span>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:16px;">
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
