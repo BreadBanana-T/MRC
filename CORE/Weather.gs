@@ -275,6 +275,59 @@ var WeatherService = {
         return "";
     };
 
+    // The GeoMet feed often carries only alert_type="warning" with no clean event
+    // string, so we sniff the hazard from ALL text on the feature. Order matters:
+    // more specific phrases must come before generic ones.
+    var HAZARD_MAP = [
+        ["tornado", "Tornado warning"], ["hurricane", "Hurricane warning"],
+        ["tsunami", "Tsunami warning"], ["storm surge", "Storm surge warning"],
+        ["blizzard", "Blizzard warning"], ["winter storm", "Winter storm warning"],
+        ["snow squall", "Snow squall warning"], ["snowfall", "Snowfall warning"],
+        ["flash freeze", "Flash freeze warning"], ["freezing rain", "Freezing rain warning"],
+        ["freezing drizzle", "Freezing drizzle warning"],
+        ["severe thunderstorm", "Severe thunderstorm warning"], ["thunderstorm", "Thunderstorm warning"],
+        ["rainfall", "Rainfall warning"], ["heavy rain", "Rainfall warning"],
+        ["wind", "Wind warning"], ["les suetes", "Wind warning"], ["arctic outflow", "Arctic outflow warning"],
+        ["extreme cold", "Extreme cold warning"], ["cold", "Extreme cold warning"],
+        ["heat", "Heat warning"], ["frost", "Frost warning"],
+        ["fog", "Fog warning"], ["dust", "Dust storm warning"],
+        ["squall", "Squall warning"], ["weather", "Weather warning"]
+    ];
+    var classifyHazard = function(text) {
+        var t = String(text || "").toLowerCase();
+        for (var i = 0; i < HAZARD_MAP.length; i++) { if (t.indexOf(HAZARD_MAP[i][0]) !== -1) return HAZARD_MAP[i][1]; }
+        return "Warning";
+    };
+    // Severity rank drives sort order and colour intensity (higher = more dangerous).
+    var hazardRank = function(name) {
+        var t = String(name || "").toLowerCase();
+        if (t.indexOf("tornado") !== -1) return 100;
+        if (t.indexOf("hurricane") !== -1 || t.indexOf("tsunami") !== -1) return 90;
+        if (t.indexOf("blizzard") !== -1 || t.indexOf("winter storm") !== -1 || t.indexOf("storm surge") !== -1) return 80;
+        if (t.indexOf("severe thunderstorm") !== -1 || t.indexOf("snow squall") !== -1) return 70;
+        if (t.indexOf("wind") !== -1 || t.indexOf("freezing") !== -1 || t.indexOf("flash freeze") !== -1) return 60;
+        if (t.indexOf("snowfall") !== -1 || t.indexOf("rainfall") !== -1 || t.indexOf("thunderstorm") !== -1) return 50;
+        if (t.indexOf("extreme cold") !== -1 || t.indexOf("heat") !== -1 || t.indexOf("arctic") !== -1) return 40;
+        return 30;
+    };
+    // Harvest every text value on a feature's properties (incl. description arrays).
+    var harvestText = function(props) {
+        var out = "";
+        for (var key in props) {
+            if (!props.hasOwnProperty(key)) continue;
+            var val = props[key];
+            if (typeof val === "string") { out += " " + val; }
+            else if (val && typeof val === "object" && typeof val.length === "number") {
+                for (var d = 0; d < val.length; d++) {
+                    var it = val[d];
+                    if (typeof it === "string") out += " " + it;
+                    else if (it && typeof it === "object") { if (it.text) out += " " + it.text; if (it.event) out += " " + it.event; if (it.headline) out += " " + it.headline; }
+                }
+            }
+        }
+        return out;
+    };
+
     try {
         // limit=1000 pulls all currently active records; default limit is 10.
         var alertUrl = "https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=1000";
@@ -282,36 +335,34 @@ var WeatherService = {
         var alertData = (alertRes.getResponseCode() === 200) ? JSON.parse(alertRes.getContentText()) : null;
         var features = (alertData && alertData.features) ? alertData.features : [];
 
-        // Bucket = province + hazard type -> { hazard, areas:Set, count, weight }
-        var buckets = {};
+        // Aggregate per province -> { hazards: {name:{count,areas:Set}}, ids:Set, zoneCount }
+        // Grouping by province (not per-zone) keeps the banner readable: one row per
+        // province listing the distinct hazard TYPES, instead of hundreds of "cities".
+        var provAgg = {};
 
         for (var j = 0; j < features.length; j++) {
             var feat = features[j] || {};
             var props = feat.properties || {};
 
             // --- Robust field reads (ECCC field names vary across the API) ---
-            var headline = String(pick(props, ["headline", "event", "summary", "title"]));
-            if (!headline) {
-                var descs = props.descriptions || props.description;
-                if (descs && descs.length) headline = String(descs[0].text || descs[0].headline || descs[0] || "");
-            }
             var alertType = String(pick(props, ["alert_type", "type", "msg_type", "category"])).toLowerCase();
-            var areaText  = String(pick(props, ["area", "areas", "zone", "location", "region"]));
-            var blob = (headline + " " + alertType + " " + String(props.status || "")).toLowerCase();
+            var areaText  = String(pick(props, ["area", "areas", "zone", "location", "region", "name"]));
+            var headline  = String(pick(props, ["headline", "event", "summary", "title"]));
+            var ident     = String(pick(props, ["identifier", "id", "alert_id", "reference"]) || "");
+            var harvest   = harvestText(props);
+            var harvestLower = harvest.toLowerCase();
 
-            // Skip ended / cancelled alerts.
-            if (alertType === "ended" || alertType === "cancel" || /\b(ended|cancel(l)?ed|expired)\b/.test(blob)) continue;
+            // Skip ended / cancelled / expired alerts.
+            if (alertType === "ended" || alertType === "cancel" ||
+                /\b(ended|cancel(l)?ed|expired|no longer in effect)\b/.test(harvestLower)) continue;
 
             // RED-only: keep WARNINGS, drop watches / advisories / statements.
-            var isWarning = alertType ? (alertType.indexOf("warning") !== -1) : /\bwarning\b/.test(blob);
+            var isWarning = alertType ? (alertType.indexOf("warning") !== -1) : /\bwarning\b/.test(harvestLower);
             if (!isWarning) continue;
+            if (alertType && (alertType.indexOf("watch") !== -1 || alertType.indexOf("advisory") !== -1 || alertType.indexOf("statement") !== -1)) continue;
 
-            // Hazard label: strip trailing status words ("in effect", "issued"...).
-            var hazard = headline || (alertType ? alertType : "Weather Warning");
-            var cut = hazard.toLowerCase().search(/\s+(in effect|issued|ended|continued|updated|has ended)/);
-            if (cut !== -1) hazard = hazard.substring(0, cut).trim();
-            hazard = hazard.replace(/\s+/g, " ").trim();
-            if (hazard) hazard = hazard.charAt(0).toUpperCase() + hazard.slice(1);
+            // Classify the specific hazard (Wind / Tornado / Snowfall / ...).
+            var hazard = classifyHazard(harvest || headline || alertType);
 
             // --- Attribute to a province ---
             var upperBlob = (areaText + " " + headline).toUpperCase();
@@ -325,16 +376,14 @@ var WeatherService = {
                 }
                 if (provCode) break;
             }
-            // 2. A known major city in the area or headline. Always scanned (even
-            //    if the province is already known) so we can weight impact by city.
-            var matchedCityWeight = 1;
-            for (var pc2 in alertRadar) {
-                var cityList = alertRadar[pc2];
-                for (var ci = 0; ci < cityList.length; ci++) {
-                    if (upperBlob.indexOf(cityList[ci]) !== -1) {
-                        if (!provCode) provCode = pc2;
-                        matchedCityWeight = Math.max(matchedCityWeight, cityWeights[cityList[ci]] || 1);
+            // 2. A known major city in the area or headline.
+            if (!provCode) {
+                for (var pc2 in alertRadar) {
+                    var cityList = alertRadar[pc2];
+                    for (var ci = 0; ci < cityList.length; ci++) {
+                        if (upperBlob.indexOf(cityList[ci]) !== -1) { provCode = pc2; break; }
                     }
+                    if (provCode) break;
                 }
             }
             // 3. Geometry centroid -> province bounding box (the reliable fallback).
@@ -344,39 +393,37 @@ var WeatherService = {
             }
             if (!provCode) continue; // unattributable — skip rather than mislabel
 
-            var bucketKey = provCode + "|" + hazard;
-            if (!buckets[bucketKey]) buckets[bucketKey] = { province: provCode, hazard: hazard, areas: {}, count: 0, weight: 0 };
-            var bk = buckets[bucketKey];
+            if (!provAgg[provCode]) provAgg[provCode] = { hazards: {}, ids: {}, zoneCount: 0 };
+            var pa = provAgg[provCode];
+            if (!pa.hazards[hazard]) pa.hazards[hazard] = { count: 0, areas: {} };
+
+            // Dedup: the same alert (identifier) can arrive as several polygon
+            // features; count it once per province. Fall back to the area label,
+            // then the feature index, when no identifier is present.
+            var dkey = hazard + "|" + (ident || areaText || ("_" + j));
+            if (!pa.ids[dkey]) { pa.ids[dkey] = true; pa.hazards[hazard].count += 1; pa.zoneCount += 1; }
             var areaLabel = areaText ? areaText.replace(/\s+/g, " ").trim() : "";
-            if (areaLabel && !bk.areas[areaLabel]) bk.areas[areaLabel] = true;
-            bk.count += 1;
-            bk.weight += matchedCityWeight;
+            if (areaLabel) pa.hazards[hazard].areas[areaLabel] = true;
         }
 
-        // Materialize and sort (tornado first, then by impact weight).
-        Object.keys(buckets).forEach(function(k) {
-            var b = buckets[k];
-            var areaNames = Object.keys(b.areas);
-            var shown = areaNames.slice(0, 3).join(", ");
-            if (areaNames.length > 3) shown += " + " + (areaNames.length - 3) + " more";
-            var cnt = areaNames.length || b.count;
+        // Materialize: one entry per province, hazards sorted most-dangerous first.
+        Object.keys(provAgg).forEach(function(prov) {
+            var pa = provAgg[prov];
+            var hazList = Object.keys(pa.hazards).map(function(name) {
+                var h = pa.hazards[name];
+                return { type: name, count: h.count, areas: Object.keys(h.areas), rank: hazardRank(name) };
+            });
+            hazList.sort(function(a, b) { return (b.rank - a.rank) || (b.count - a.count); });
             activeAlerts.push({
-                province: b.province,
-                type: b.hazard,
-                cities: areaNames,        // affected region names (key kept for UI compat)
-                cityCount: cnt,
-                weight: b.weight,
-                displayCities: shown
+                province: prov,
+                hazards: hazList,
+                zoneCount: pa.zoneCount,
+                topRank: hazList.length ? hazList[0].rank : 0,
+                summary: hazList.map(function(h) { return h.type; }).join(" · ")
             });
         });
-        activeAlerts.sort(function(a, b) {
-            var pa = /tornado/i.test(a.type) ? 1 : 0;
-            var pb = /tornado/i.test(b.type) ? 1 : 0;
-            if (pa !== pb) return pb - pa;
-            return b.weight - a.weight;
-        });
-        // Cap so a flood of alerts can't take over the banner.
-        if (activeAlerts.length > 12) activeAlerts = activeAlerts.slice(0, 12);
+        // Most-dangerous province first, then by number of affected zones.
+        activeAlerts.sort(function(a, b) { return (b.topRank - a.topRank) || (b.zoneCount - a.zoneCount); });
     } catch (e) {
         console.error("ECCC Alerts Error: " + e.toString());
     }

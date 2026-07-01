@@ -1359,26 +1359,41 @@
       var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       
       if (state.alerts && state.alerts.length > 0) {
-         html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level only)</div><div style="display:flex; flex-direction:column; gap:10px;">';
+         html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level) — tap a province to expand</div><div style="display:flex; flex-direction:column; gap:8px;">';
          state.alerts.forEach(function(a) {
-             var hazard = escapeHTML(a.type || '');
              var prov = escapeHTML(a.province || '—');
-             var cities = escapeHTML(a.displayCities || '');
-             var count = a.cityCount || 0;
-             var weight = a.weight || 0;
-             // Weight-band heat: >=20 deep red, >=10 medium, else light.
-             var intensity = weight >= 20 ? 'rgba(220,38,38,0.2)' : (weight >= 10 ? 'rgba(220,38,38,0.12)' : 'rgba(220,38,38,0.06)');
-             html += '<div style="background:var(--bg-root); border:1px solid var(--status-alert); color:var(--status-alert); padding:10px 14px; border-radius:10px; font-size:0.85rem; font-weight:700; box-shadow:0 2px 10px rgba(220,38,38,0.1); display:flex; justify-content:space-between; align-items:center; gap:16px;">' +
-                     '<div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">' +
-                       '<span style="background:' + intensity + '; padding:3px 8px; border-radius:6px; font-size:0.7rem; letter-spacing:1px;">' + prov + '</span>' +
-                       '<span style="color:var(--text-main); font-weight:800;">' + hazard + '</span>' +
-                       (cities ? '<span style="color:var(--text-muted); font-weight:600; font-size:0.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">— ' + cities + '</span>' : '') +
-                     '</div>' +
-                     '<div style="display:flex; gap:8px; align-items:center; flex-shrink:0;">' +
-                       '<span title="Regions affected" style="background:rgba(0,0,0,0.04); color:var(--text-main); padding:2px 8px; border-radius:6px; font-size:0.7rem;">' + count + (count !== 1 ? ' regions' : ' region') + '</span>' +
-                       '<span title="Impact weight" style="background:rgba(220,38,38,0.12); padding:2px 8px; border-radius:6px; font-size:0.7rem;">w ' + weight + '</span>' +
-                     '</div>' +
-                   '</div>';
+             var hazards = a.hazards || [];
+             var zones = a.zoneCount || 0;
+             var severe = (a.topRank || 0) >= 80;               // tornado / blizzard / winter storm / surge
+             var provBg = severe ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.07)';
+
+             // Hazard chips (each: "Wind warning ×12").
+             var chips = hazards.map(function(h) {
+                 var hot = (h.rank || 0) >= 70;
+                 return '<span style="background:' + (hot ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.08)') + '; color:var(--status-alert); padding:2px 8px; border-radius:6px; font-size:0.72rem; font-weight:700; white-space:nowrap;">' +
+                        escapeHTML(h.type || 'Warning') + (h.count ? ' <span style="opacity:0.7;">×' + h.count + '</span>' : '') + '</span>';
+             }).join('');
+
+             // Expanded detail: per hazard, the actual affected region names (or an
+             // honest note when the feed doesn't provide them).
+             var details = hazards.map(function(h) {
+                 var areas = h.areas || [];
+                 var body = areas.length
+                     ? areas.map(function(x){ return escapeHTML(x); }).join(', ')
+                     : (h.count || 0) + ' affected ' + ((h.count === 1) ? 'zone' : 'zones') + ' (specific region names not provided by the alert feed)';
+                 return '<div style="padding:6px 0; border-top:1px solid var(--glass-border);">' +
+                        '<span style="font-weight:800; color:var(--status-alert); font-size:0.8rem;">' + escapeHTML(h.type || 'Warning') + '</span>' +
+                        '<div style="color:var(--text-muted); font-size:0.78rem; margin-top:3px; line-height:1.4;">' + body + '</div></div>';
+             }).join('');
+
+             html += '<details style="background:var(--bg-root); border:1px solid var(--status-alert); border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(220,38,38,0.08);">' +
+                       '<summary style="list-style:none; cursor:pointer; padding:10px 14px; display:flex; align-items:center; gap:12px;">' +
+                         '<span style="background:' + provBg + '; color:var(--status-alert); padding:3px 10px; border-radius:6px; font-weight:800; font-size:0.8rem; letter-spacing:1px; flex-shrink:0;">' + prov + '</span>' +
+                         '<span style="display:flex; gap:6px; flex-wrap:wrap; flex:1; min-width:0;">' + chips + '</span>' +
+                         '<span title="Distinct affected zones" style="color:var(--text-muted); font-weight:700; font-size:0.74rem; white-space:nowrap; flex-shrink:0;">' + zones + (zones !== 1 ? ' zones' : ' zone') + '</span>' +
+                       '</summary>' +
+                       '<div style="padding:2px 14px 12px 14px;">' + details + '</div>' +
+                     '</details>';
          });
          html += '</div></div>';
       } else {
