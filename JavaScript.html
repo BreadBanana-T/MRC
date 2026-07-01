@@ -1136,15 +1136,42 @@
   }
   
   function renderFloorLayout(upMap) {
+     // Upcoming shifts (later today). The startingSoon bucket holds EVERY agent
+     // whose shift starts after "now", so we group them by shift-start time into
+     // collapsible blocks — a preview of the next shift(s) coming in. Blocks
+     // starting within 30m auto-expand; each block can be copied on its own.
      var startingHtml = '';
-     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) { 
-         // Compact chips instead of full rows — a busy shift start was
-         // swallowing the whole screen.
-         var soonChips = state.agents.startingSoon.map(function(a) {
-             var dotCls = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
-             return '<div class="soon-chip" title="' + escapeHTML(a.name || '') + ' — ' + escapeHTML(a.shift || '') + '"><span class="status-dot ' + dotCls + '"></span><span class="soon-name">' + escapeHTML(a.name || '') + '</span><span class="soon-when">' + escapeHTML(a.subStatus || '') + '</span></div>';
+     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
+         var groupsMap = {};
+         state.agents.startingSoon.forEach(function(a) {
+             var st = (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : (a.subStatus || 'Soon');
+             if (!groupsMap[st]) groupsMap[st] = { start: st, epoch: a.startEpoch || 0, agents: [] };
+             if (a.startEpoch && (!groupsMap[st].epoch || a.startEpoch < groupsMap[st].epoch)) groupsMap[st].epoch = a.startEpoch;
+             groupsMap[st].agents.push(a);
+         });
+         var groupList = Object.keys(groupsMap).map(function(k){ return groupsMap[k]; });
+         groupList.sort(function(x, y){ return (x.epoch || 0) - (y.epoch || 0); });
+         var blocks = groupList.map(function(g) {
+             var mins = g.epoch ? Math.max(0, Math.round((g.epoch - Date.now()) / 60000)) : null;
+             var imminent = (mins !== null && mins <= 30);
+             var whenLabel = (mins === null) ? '' : (mins <= 0 ? 'now' : (mins >= 60 ? ('in ' + Math.floor(mins/60) + 'h' + (mins%60 ? ' ' + (mins%60) + 'm' : '')) : ('in ' + mins + 'm')));
+             var accent = imminent ? 'var(--accent-primary)' : 'var(--text-main)';
+             var chips = g.agents.map(function(a) {
+                 var dotCls = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
+                 return '<div class="soon-chip" title="' + escapeHTML(a.name || '') + ' — ' + escapeHTML(a.shift || '') + '"><span class="status-dot ' + dotCls + '"></span><span class="soon-name">' + escapeHTML(a.name || '') + '</span><span class="soon-when" style="font-family:monospace;">' + escapeHTML(fmtAgentId(a)) + '</span></div>';
+             }).join('');
+             return '<details class="upcoming-block"' + (imminent ? ' open' : '') + ' style="border:1px solid var(--glass-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">' +
+                    '<summary style="list-style:none; cursor:pointer; padding:10px 14px; display:flex; align-items:center; gap:12px;">' +
+                      '<span style="font-weight:800; font-family:monospace; font-size:0.95rem; color:' + accent + ';">' + escapeHTML(g.start) + '</span>' +
+                      (whenLabel ? '<span style="font-size:0.68rem; font-weight:700; color:' + (imminent ? 'var(--accent-primary)' : 'var(--text-muted)') + '; text-transform:uppercase; letter-spacing:1px;">' + whenLabel + '</span>' : '') +
+                      '<span style="flex:1;"></span>' +
+                      '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted);">' + g.agents.length + ' agent' + (g.agents.length === 1 ? '' : 's') + '</span>' +
+                      '<button class="btn-popout" title="Copy this shift block (ID + name)" onclick="event.stopPropagation(); event.preventDefault(); copyShiftBlock(\'' + escapeHTML(g.start).replace(/'/g, "\\'") + '\')"><i data-lucide="copy" width="13"></i></button>' +
+                    '</summary>' +
+                    '<div class="soon-grid custom-scrollbar" style="padding:0 14px 14px 14px;">' + chips + '</div>' +
+                    '</details>';
          }).join('');
-         startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Starting Soon (Next 30m)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + '</span></div><div class="soon-grid custom-scrollbar">' + soonChips + '</div></div>'; 
+         startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Upcoming Shifts (later today)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + ' · tap a block to expand</span></div>' + blocks + '</div>';
      }
      var offHtml = '';
      if (state.searchTerm && state.searchTerm.trim() !== '') { 
@@ -1154,7 +1181,7 @@
      
      var html = startingHtml + 
          '<div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div><div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-role);">ICL</div><div class="agent-list-view">' + renderGroup(state.agents.icl||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-active);">SAFE</div><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div><div class="agent-list-view">' + renderGroup(state.agents.ulc||[], upMap) + '</div></div></div>' +
-         '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
+         '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
          '<div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div><div class="agent-list-view" style="margin-bottom:30px;">' + (renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>') + '</div>' + offHtml;
      return html;
@@ -1166,6 +1193,36 @@
       if(!filtered.length) return '';
       return filtered.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('');
   }
+
+  // Agent ID as shown on the floor: T-prefix for Onshore (TID), x for Offshore (XID).
+  function fmtAgentId(a) { var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T'; return prefix + (a.id || ''); }
+  // Human status incl. the live break/lunch window when the agent is out.
+  function agentStatusLabel(a) {
+      var s = a.subStatus || 'Active';
+      if (a.onBreakNow && a.currentBreakStr) s = (a.subStatus || 'Break') + ' (' + a.currentBreakStr + ')';
+      return s;
+  }
+  // Tab-separated roster: pastes cleanly into Excel/Sheets, readable in chat too.
+  function buildRosterText(list) {
+      var lines = ['ID\tName\tStatus\tShift'];
+      list.forEach(function(a) { lines.push(fmtAgentId(a) + '\t' + (a.name || '') + '\t' + agentStatusLabel(a) + '\t' + (a.shift || '')); });
+      return lines.join('\n');
+  }
+  // Copy everyone currently on shift in a unit (any status — working, break,
+  // lunch, role), each tagged with status + TID (Onshore) / XID (Offshore).
+  window.copyUnitRoster = function(region) {
+      var list = (state.agents.active || []).filter(function(a){ return (a.region || '').indexOf(region) !== -1; });
+      if (!list.length) { showToast('No ' + region + ' agents on shift'); return; }
+      list = list.slice().sort(function(a, b){ return (a.name || '').localeCompare(b.name || ''); });
+      fallbackCopyTextToClipboard(buildRosterText(list), 'Copied ' + list.length + ' ' + region + ' agent' + (list.length === 1 ? '' : 's'));
+  };
+  // Copy one upcoming shift block (agents whose shift starts at startStr).
+  window.copyShiftBlock = function(startStr) {
+      var list = (state.agents.startingSoon || []).filter(function(a){ var s = (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : ''; return s === startStr; });
+      if (!list.length) { showToast('No agents in that block'); return; }
+      list = list.slice().sort(function(a, b){ return (a.name || '').localeCompare(b.name || ''); });
+      fallbackCopyTextToClipboard(buildRosterText(list), 'Copied ' + list.length + ' agent' + (list.length === 1 ? '' : 's') + ' (' + startStr + ')');
+  };
 
   function renderAgentRow(a, upInfo) {
      var start = "00:00", end = "00:00";
