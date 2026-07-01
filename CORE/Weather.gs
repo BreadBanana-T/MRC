@@ -177,13 +177,20 @@ var WeatherService = {
     }
 
     // --- 2. FETCH OFFICIAL ALERTS FROM ECCC GEOMET API ---
-    // Only RED-level alerts (WARNING + severity Severe/Extreme). WATCHES, ADVISORIES,
-    // STATEMENTS are dropped. Alerts are aggregated per-province by hazard type and
-    // weighted by the population of the cities they touch, so Toronto + Mississauga +
-    // Brampton under one freezing-rain warning produces a single heavy row instead of
-    // three duplicate banner entries.
+    // RED-level = anything ECCC classifies as a WARNING (that's what shows red on
+    // weather.gc.ca). WATCHES / ADVISORIES / STATEMENTS / ENDED alerts are dropped.
+    // We do NOT additionally require CAP severity Severe/Extreme — plenty of real
+    // red warnings (e.g. snowfall) are tagged "Moderate", and dropping them was
+    // causing red provinces to show "no warnings".
     //
-    // City weights: Major metros (>=1M) = 10, Mid (>=250k) = 5, others = 1.
+    // Each alert is attributed to a province primarily by GEOMETRY (polygon centroid
+    // -> province bounding box) so region warnings whose zone names don't contain a
+    // major-city string ("R.M. of Portage la Prairie", "southern Manitoba", a rural
+    // tornado warning) are no longer silently dropped. Province-name and known-city
+    // text are used as extra/faster signals. Alerts are aggregated per province +
+    // hazard, and the ACTUAL affected region names from the API are shown.
+    //
+    // City weights (impact heat only): Major metros (>=1M) = 10, Mid (>=250k) = 5.
     var cityWeights = {
         // Major
         "TORONTO": 10, "MONTREAL": 10, "VANCOUVER": 10, "CALGARY": 10, "OTTAWA": 10, "EDMONTON": 10,
@@ -209,6 +216,65 @@ var WeatherService = {
         return str.replace(/\w\S*/g, function(t){ return t.charAt(0).toUpperCase() + t.substr(1).toLowerCase(); });
     };
 
+    // Full province/territory names (+ common variants) for text attribution.
+    var provNames = {
+        "ON": ["ONTARIO"], "QC": ["QUEBEC", "QUÉBEC"], "BC": ["BRITISH COLUMBIA"],
+        "AB": ["ALBERTA"], "SK": ["SASKATCHEWAN"], "MB": ["MANITOBA"],
+        "NS": ["NOVA SCOTIA"], "NB": ["NEW BRUNSWICK"], "PE": ["PRINCE EDWARD ISLAND"],
+        "NL": ["NEWFOUNDLAND", "LABRADOR"], "YT": ["YUKON"],
+        "NT": ["NORTHWEST TERRITORIES"], "NU": ["NUNAVUT"]
+    };
+
+    // Rough province bounding boxes: [minLon, minLat, maxLon, maxLat]. Boxes over
+    // non-rectangular provinces overlap near borders; when a point falls in more
+    // than one we keep the province whose box centre is closest.
+    var provBBox = {
+        "BC": [-139.1, 48.2, -114.0, 60.0], "AB": [-120.0, 48.9, -110.0, 60.0],
+        "SK": [-110.0, 48.9, -101.3, 60.0], "MB": [-102.1, 48.9, -88.9, 60.0],
+        "ON": [-95.2, 41.6, -74.3, 56.9],   "QC": [-79.8, 44.9, -57.1, 62.6],
+        "NB": [-69.1, 44.5, -63.7, 48.1],   "NS": [-66.4, 43.3, -59.7, 47.1],
+        "PE": [-64.5, 45.9, -61.9, 47.1],   "NL": [-67.9, 46.5, -52.5, 60.4],
+        "YT": [-141.1, 60.0, -123.8, 69.7], "NT": [-136.5, 60.0, -101.9, 78.8],
+        "NU": [-120.0, 60.0, -61.0, 83.2]
+    };
+
+    // Flatten any GeoJSON geometry down to [lon,lat] pairs and average -> centroid.
+    var geomCentroid = function(g) {
+        if (!g || !g.coordinates) return null;
+        var pts = [];
+        var walk = function(a) {
+            if (!a || !a.length) return;
+            if (typeof a[0] === "number") { pts.push(a); return; }
+            for (var i = 0; i < a.length; i++) walk(a[i]);
+        };
+        walk(g.coordinates);
+        if (!pts.length) return null;
+        var sx = 0, sy = 0;
+        for (var i = 0; i < pts.length; i++) { sx += pts[i][0]; sy += pts[i][1]; }
+        return { lon: sx / pts.length, lat: sy / pts.length };
+    };
+    var provinceForPoint = function(lon, lat) {
+        var best = null, bestD = Infinity;
+        for (var pc in provBBox) {
+            var b = provBBox[pc];
+            if (lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3]) {
+                var cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+                var d = (lon - cx) * (lon - cx) + (lat - cy) * (lat - cy);
+                if (d < bestD) { bestD = d; best = pc; }
+            }
+        }
+        return best;
+    };
+
+    // Read a field from a properties object trying several possible names.
+    var pick = function(obj, names) {
+        for (var i = 0; i < names.length; i++) {
+            var v = obj[names[i]];
+            if (v !== undefined && v !== null && v !== "") return v;
+        }
+        return "";
+    };
+
     try {
         // limit=1000 pulls all currently active records; default limit is 10.
         var alertUrl = "https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=1000";
@@ -216,62 +282,101 @@ var WeatherService = {
         var alertData = (alertRes.getResponseCode() === 200) ? JSON.parse(alertRes.getContentText()) : null;
         var features = (alertData && alertData.features) ? alertData.features : [];
 
-        // Bucket = province + hazard type -> { weight, cities:Set }
+        // Bucket = province + hazard type -> { hazard, areas:Set, count, weight }
         var buckets = {};
 
         for (var j = 0; j < features.length; j++) {
-            var props = features[j].properties || {};
-            var headline = props.headline || props.event || "";
-            if (!headline) continue;
+            var feat = features[j] || {};
+            var props = feat.properties || {};
 
-            // RED-only filter: must be a WARNING (not watch/advisory/statement) AND
-            // severity must be Severe or Extreme when present.
-            var headUp = headline.toUpperCase();
-            if (headUp.indexOf("WARNING") === -1) continue;
-            var severity = String(props.severity || "").toLowerCase();
-            if (severity && severity !== "severe" && severity !== "extreme") continue;
+            // --- Robust field reads (ECCC field names vary across the API) ---
+            var headline = String(pick(props, ["headline", "event", "summary", "title"]));
+            if (!headline) {
+                var descs = props.descriptions || props.description;
+                if (descs && descs.length) headline = String(descs[0].text || descs[0].headline || descs[0] || "");
+            }
+            var alertType = String(pick(props, ["alert_type", "type", "msg_type", "category"])).toLowerCase();
+            var areaText  = String(pick(props, ["area", "areas", "zone", "location", "region"]));
+            var blob = (headline + " " + alertType + " " + String(props.status || "")).toLowerCase();
 
-            var areas = String(props.areas || "").toUpperCase();
+            // Skip ended / cancelled alerts.
+            if (alertType === "ended" || alertType === "cancel" || /\b(ended|cancel(l)?ed|expired)\b/.test(blob)) continue;
 
-            // Extract the hazard name (strip trailing " in effect", " issued", etc.)
-            var hazard = headline;
-            var cut = hazard.toLowerCase().search(/\s+(in effect|issued|ended)/);
+            // RED-only: keep WARNINGS, drop watches / advisories / statements.
+            var isWarning = alertType ? (alertType.indexOf("warning") !== -1) : /\bwarning\b/.test(blob);
+            if (!isWarning) continue;
+
+            // Hazard label: strip trailing status words ("in effect", "issued"...).
+            var hazard = headline || (alertType ? alertType : "Weather Warning");
+            var cut = hazard.toLowerCase().search(/\s+(in effect|issued|ended|continued|updated|has ended)/);
             if (cut !== -1) hazard = hazard.substring(0, cut).trim();
+            hazard = hazard.replace(/\s+/g, " ").trim();
+            if (hazard) hazard = hazard.charAt(0).toUpperCase() + hazard.slice(1);
 
-            for (var provCode in alertRadar) {
-                var cityList = alertRadar[provCode];
-                for (var c = 0; c < cityList.length; c++) {
-                    var city = cityList[c];
-                    if (areas.indexOf(city) === -1 && headUp.indexOf(city) === -1) continue;
+            // --- Attribute to a province ---
+            var upperBlob = (areaText + " " + headline).toUpperCase();
+            var provCode = null;
 
-                    var bucketKey = provCode + "|" + hazard;
-                    if (!buckets[bucketKey]) buckets[bucketKey] = { province: provCode, hazard: hazard, cities: {}, weight: 0 };
-                    if (!buckets[bucketKey].cities[city]) {
-                        buckets[bucketKey].cities[city] = true;
-                        buckets[bucketKey].weight += (cityWeights[city] || 1);
+            // 1. Explicit province/territory name in the area or headline.
+            for (var pc in provNames) {
+                var variants = provNames[pc];
+                for (var v = 0; v < variants.length; v++) {
+                    if (upperBlob.indexOf(variants[v]) !== -1) { provCode = pc; break; }
+                }
+                if (provCode) break;
+            }
+            // 2. A known major city in the area or headline. Always scanned (even
+            //    if the province is already known) so we can weight impact by city.
+            var matchedCityWeight = 1;
+            for (var pc2 in alertRadar) {
+                var cityList = alertRadar[pc2];
+                for (var ci = 0; ci < cityList.length; ci++) {
+                    if (upperBlob.indexOf(cityList[ci]) !== -1) {
+                        if (!provCode) provCode = pc2;
+                        matchedCityWeight = Math.max(matchedCityWeight, cityWeights[cityList[ci]] || 1);
                     }
                 }
             }
+            // 3. Geometry centroid -> province bounding box (the reliable fallback).
+            if (!provCode) {
+                var ctr = geomCentroid(feat.geometry);
+                if (ctr) provCode = provinceForPoint(ctr.lon, ctr.lat);
+            }
+            if (!provCode) continue; // unattributable — skip rather than mislabel
+
+            var bucketKey = provCode + "|" + hazard;
+            if (!buckets[bucketKey]) buckets[bucketKey] = { province: provCode, hazard: hazard, areas: {}, count: 0, weight: 0 };
+            var bk = buckets[bucketKey];
+            var areaLabel = areaText ? areaText.replace(/\s+/g, " ").trim() : "";
+            if (areaLabel && !bk.areas[areaLabel]) bk.areas[areaLabel] = true;
+            bk.count += 1;
+            bk.weight += matchedCityWeight;
         }
 
-        // Materialize and sort by weight (most-impactful first)
+        // Materialize and sort (tornado first, then by impact weight).
         Object.keys(buckets).forEach(function(k) {
             var b = buckets[k];
-            var cityNames = Object.keys(b.cities).map(toTitleCase);
-            var shown = cityNames.slice(0, 3).join(", ");
-            if (cityNames.length > 3) shown += " + " + (cityNames.length - 3) + " more";
+            var areaNames = Object.keys(b.areas);
+            var shown = areaNames.slice(0, 3).join(", ");
+            if (areaNames.length > 3) shown += " + " + (areaNames.length - 3) + " more";
+            var cnt = areaNames.length || b.count;
             activeAlerts.push({
                 province: b.province,
                 type: b.hazard,
-                cities: cityNames,
-                cityCount: cityNames.length,
+                cities: areaNames,        // affected region names (key kept for UI compat)
+                cityCount: cnt,
                 weight: b.weight,
                 displayCities: shown
             });
         });
-        activeAlerts.sort(function(a, b) { return b.weight - a.weight; });
+        activeAlerts.sort(function(a, b) {
+            var pa = /tornado/i.test(a.type) ? 1 : 0;
+            var pb = /tornado/i.test(b.type) ? 1 : 0;
+            if (pa !== pb) return pb - pa;
+            return b.weight - a.weight;
+        });
         // Cap so a flood of alerts can't take over the banner.
-        if (activeAlerts.length > 8) activeAlerts = activeAlerts.slice(0, 8);
+        if (activeAlerts.length > 12) activeAlerts = activeAlerts.slice(0, 12);
     } catch (e) {
         console.error("ECCC Alerts Error: " + e.toString());
     }
