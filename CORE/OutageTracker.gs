@@ -145,6 +145,51 @@ var OutageTracker = {
     return isNaN(n) ? 0 : n;
   },
 
+  // Utility outage layers name the "customers affected" column inconsistently
+  // (NumCustomersAffected, CUST_QTY, customersaffected, ...). Try the known
+  // names, then fall back to sniffing any attribute key that looks like a
+  // customer count — so an unexpected field name can't silently zero the total.
+  _CUST_FIELDS: [
+    'NumCustomersAffected', 'CustomersAffected', 'CUSTOMERS_AFFECTED', 'CUSTOMERSAFFECTED',
+    'customersAffected', 'customersaffected', 'customers', 'Customers', 'CUSTOMERS',
+    'CUST_QTY', 'CustQty', 'custQty', 'CUST_AFF', 'CustAffected', 'CUSTOMERS_OUT',
+    'TOTAL_CUST', 'TOTALCUST', 'totalCustomersAffected', 'AffectedCustomers', 'affectedCustomers',
+    'numCustomersOut', 'NumCustomersOut', 'customersOut', 'CustomersOut', 'customerCount',
+    'CustomerCount', 'cust_a', 'CustomersImpacted', 'customersImpacted', 'nbClientInterrompu'
+  ],
+  _extractCustomers: function(attrs) {
+    if (!attrs) return 0;
+    for (var i = 0; i < this._CUST_FIELDS.length; i++) {
+      var k = this._CUST_FIELDS[i];
+      if (attrs[k] !== undefined && attrs[k] !== null && attrs[k] !== '') return this._safeInt(attrs[k]);
+    }
+    var keys = Object.keys(attrs);
+    // Prefer keys that mention customers AND an affected/count-ish token.
+    for (var a = 0; a < keys.length; a++) {
+      if (/cust|client/i.test(keys[a]) && /(out|aff|num|qty|total|impact|interru|count)/i.test(keys[a])) {
+        var v = this._safeInt(attrs[keys[a]]); if (v) return v;
+      }
+    }
+    for (var b = 0; b < keys.length; b++) {
+      if (/cust|client/i.test(keys[b])) { var v2 = this._safeInt(attrs[keys[b]]); if (v2) return v2; }
+    }
+    return 0;
+  },
+
+  _REGION_FIELDS: [
+    'MunicipalityName', 'Municipality', 'MUNICIPALITY', 'LocationDescription', 'Location',
+    'Town', 'TOWNSHIP', 'Township', 'Community', 'COMMUNITY', 'City', 'CITY',
+    'area', 'Area', 'AREA', 'region', 'Region', 'REGION', 'name', 'NAME', '_regionName', 'regionName'
+  ],
+  _extractRegion: function(attrs) {
+    if (!attrs) return 'Unknown';
+    for (var i = 0; i < this._REGION_FIELDS.length; i++) {
+      var k = this._REGION_FIELDS[i];
+      if (attrs[k] !== undefined && attrs[k] !== null && String(attrs[k]).trim() !== '') return String(attrs[k]).trim();
+    }
+    return 'Unknown';
+  },
+
   // ETAs come as Unix epoch in milliseconds (BC Hydro), pre-formatted strings
   // (Hydro One), or null. Normalize to a short human-readable string.
   _fmtEta: function(v) {
@@ -221,42 +266,71 @@ var OutageTracker = {
     try {
       var url = this._getUrl('HYDRO_ONE_URL', this._DEFAULT_HYDRO_ONE_URL);
       if (!url) return { skipped: true };
-      // If the URL points at an ArcGIS FeatureServer without /query, append it.
-      // Kubra URLs (kubra.io/.../data.json) need no rewriting.
       var isKubra = /kubra\.io|\/data\.json(\?|$)/i.test(url);
-      if (!isKubra && !/\/query(\?|$)/i.test(url)) {
-        url += (url.indexOf('?') === -1 ? '?' : '&') + 'where=1%3D1&outFields=*&returnGeometry=false&f=json&resultRecordCount=1000';
-        if (!/\/query/i.test(url)) url = url.replace(/(FeatureServer\/\d+)(\?)/i, '$1/query$2');
-      }
-      var res = UrlFetchApp.fetch(url, this._commonHeaders());
-      if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
-      var body = JSON.parse(res.getContentText());
-      if (body.error) throw new Error('ArcGIS: ' + (body.error.message || 'unknown'));
 
-      // Kubra "summary-1/data.json" — totals only, no per-outage detail.
-      if (body.summaryFileData && Array.isArray(body.summaryFileData.totals) && body.summaryFileData.totals.length) {
-        var t = body.summaryFileData.totals[0] || {};
-        var total = this._safeInt(t.total_cust_a && t.total_cust_a.val);
-        var outages = this._safeInt(t.total_outages);
-        return { data: { outages: outages, customers: total, top: [], source: 'Hydro One' } };
+      // ---- Kubra / self-hosted summary JSON (totals only, no /query) ----
+      if (isKubra) {
+        var resK = UrlFetchApp.fetch(url, this._commonHeaders());
+        if (resK.getResponseCode() !== 200) throw new Error('HTTP ' + resK.getResponseCode());
+        var bodyK = JSON.parse(resK.getContentText());
+        if (bodyK.summaryFileData && Array.isArray(bodyK.summaryFileData.totals) && bodyK.summaryFileData.totals.length) {
+          var t = bodyK.summaryFileData.totals[0] || {};
+          var custK = (t.total_cust_a && t.total_cust_a.val != null) ? t.total_cust_a.val : (t.total_cust_s && t.total_cust_s.val);
+          return { data: { outages: this._safeInt(t.total_outages), customers: this._safeInt(custK), top: [], source: 'Hydro One' } };
+        }
+        throw new Error('Unrecognized Kubra summary shape');
       }
 
-      // ArcGIS FeatureServer — per-outage detail.
-      var features = body.features || [];
-      var total = 0;
-      var top = [];
+      // ---- ArcGIS FeatureServer / MapServer /query, WITH PAGINATION ----
+      // The old code fetched a single page capped at 1000 records, so a large
+      // storm (thousands of outages) was silently truncated — the likely cause
+      // of "437 customers" when the true total is tens of thousands. We now page
+      // through every record via resultOffset until the server stops returning
+      // a full page.
+      var base = url;
+      if (!/\/query(\?|$)/i.test(base)) base = base.replace(/(FeatureServer\/\d+|MapServer\/\d+)(\/query)?/i, '$1/query');
+      base = base.replace(/[?&]result(Offset|RecordCount)=\d+/gi, '');
+      var addParam = function(u, k, v) { return (new RegExp('[?&]' + k + '=', 'i').test(u)) ? u : (u + (u.indexOf('?') === -1 ? '?' : '&') + k + '=' + v); };
+      base = addParam(base, 'where', '1%3D1');
+      base = addParam(base, 'outFields', '*');
+      base = addParam(base, 'returnGeometry', 'false');
+      base = addParam(base, 'f', 'json');
+
+      var features = [];
+      var offset = 0, pageSize = 2000, guard = 0;
+      while (guard++ < 30) {
+        var pageUrl = base + '&resultOffset=' + offset + '&resultRecordCount=' + pageSize;
+        var res = UrlFetchApp.fetch(pageUrl, this._commonHeaders());
+        if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
+        var body = JSON.parse(res.getContentText());
+        if (body.error) throw new Error('ArcGIS: ' + (body.error.message || 'unknown'));
+
+        // Some Hydro One deployments answer the /query with a Kubra-style summary.
+        if (body.summaryFileData && Array.isArray(body.summaryFileData.totals) && body.summaryFileData.totals.length) {
+          var ts = body.summaryFileData.totals[0] || {};
+          return { data: { outages: this._safeInt(ts.total_outages), customers: this._safeInt(ts.total_cust_a && ts.total_cust_a.val), top: [], source: 'Hydro One' } };
+        }
+
+        var page = body.features || [];
+        features = features.concat(page);
+        var more = (body.exceededTransferLimit === true) || (page.length === pageSize);
+        if (!more || page.length === 0) break;
+        offset += page.length;
+      }
+
+      var total = 0, top = [];
       for (var i = 0; i < features.length; i++) {
-        var a = features[i].attributes || {};
-        var n = this._safeInt(a.NumCustomersAffected || a.CUSTOMERS_AFFECTED || a.customersAffected || a.customers);
+        var a = features[i].attributes || features[i].properties || {};
+        var n = this._extractCustomers(a);
         total += n;
         top.push({
-          region: a.MunicipalityName || a.Municipality || a.LocationDescription || a.Town || a.region || 'Unknown',
+          region: this._extractRegion(a),
           customers: n,
-          cause: a.Cause || a.CauseDescription || a.CauseCategory || '—',
-          eta: this._fmtEta(a.EstimatedRestoration || a.ETR || a.etr || null)
+          cause: a.Cause || a.CauseDescription || a.CauseCategory || a.cause || '—',
+          eta: this._fmtEta(a.EstimatedRestoration || a.ETR || a.etr || a.CrewEta || a.CrewEtr || null)
         });
       }
-      top.sort(function(a, b) { return b.customers - a.customers; });
+      top.sort(function(x, y) { return y.customers - x.customers; });
       return { data: { outages: features.length, customers: total, top: top.slice(0, 10), source: 'Hydro One' } };
     } catch (e) {
       return { error: e.message };
@@ -364,6 +438,56 @@ function setOutageUrl(provinceCode, url) {
   else props.setProperty(key, String(url));
   try { CacheService.getScriptCache().remove('MRC_OUTAGES_V1'); } catch (e) {}
   return (url === null || url === undefined) ? ('Cleared ' + key) : ('Set ' + key + ' = ' + url);
+}
+
+/**
+ * DIAGNOSTIC — run from the Apps Script editor (Run > debugOutages), then open
+ * View > Logs. For each configured province it prints the HTTP status, the raw
+ * response shape (top-level keys, feature count, whether the server capped the
+ * result), and a SAMPLE feature's attribute keys + values. Paste the ON block
+ * back and we can lock the customer-count field and confirm pagination against
+ * the real Hydro One schema (same approach that fixed the weather feed).
+ * Safe / read-only.
+ */
+function debugOutages() {
+  var urls = {
+    BC: OutageTracker._getUrl('BC_HYDRO_URL', OutageTracker._DEFAULT_BC_URL),
+    ON: OutageTracker._getUrl('HYDRO_ONE_URL', OutageTracker._DEFAULT_HYDRO_ONE_URL),
+    QC: OutageTracker._getUrl('HYDRO_QUEBEC_URL', OutageTracker._DEFAULT_HQ_URL)
+  };
+  var out = {};
+  Object.keys(urls).forEach(function(prov) {
+    var url = urls[prov];
+    var info = { url: url || '(not set)' };
+    if (url) {
+      try {
+        var res = UrlFetchApp.fetch(url, OutageTracker._commonHeaders());
+        info.httpStatus = res.getResponseCode();
+        var text = res.getContentText();
+        info.bytes = text.length;
+        var body = JSON.parse(text);
+        info.topLevelType = Array.isArray(body) ? 'array' : typeof body;
+        if (Array.isArray(body)) { info.arrayLength = body.length; info.sampleItem = body[0]; }
+        else if (body && typeof body === 'object') {
+          info.topLevelKeys = Object.keys(body).slice(0, 40);
+          if (body.features) {
+            info.featureCount = body.features.length;
+            info.exceededTransferLimit = body.exceededTransferLimit || false;
+            var attrs = (body.features[0] || {}).attributes || (body.features[0] || {}).properties || {};
+            info.sampleAttributeKeys = Object.keys(attrs);
+            info.sampleAttributes = attrs;
+            info.detectedCustomers = OutageTracker._extractCustomers(attrs);
+            info.detectedRegion = OutageTracker._extractRegion(attrs);
+          }
+          if (body.summaryFileData) info.summaryFileData = body.summaryFileData;
+        }
+      } catch (e) { info.error = e.message; }
+    }
+    out[prov] = info;
+  });
+  var s = JSON.stringify(out, null, 2);
+  Logger.log(s);
+  return s;
 }
 
 function getOutageUrls() {
