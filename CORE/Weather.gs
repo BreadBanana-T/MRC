@@ -275,28 +275,31 @@ var WeatherService = {
         return "";
     };
 
-    // The GeoMet feed often carries only alert_type="warning" with no clean event
-    // string, so we sniff the hazard from ALL text on the feature. Order matters:
-    // more specific phrases must come before generic ones.
+    // ECCC names every warning as "<hazard> warning" (e.g. "wind warning",
+    // "snowfall warning"). We MUST anchor on that exact phrase — matching a bare
+    // keyword like "wind" anywhere in the description body mis-classifies almost
+    // everything as a wind warning, because nearly every alert description mentions
+    // wind ("blowing snow due to strong winds", "gusty winds", etc.).
+    // Order matters: more specific phrases first.
     var HAZARD_MAP = [
-        ["tornado", "Tornado warning"], ["hurricane", "Hurricane warning"],
-        ["tsunami", "Tsunami warning"], ["storm surge", "Storm surge warning"],
-        ["blizzard", "Blizzard warning"], ["winter storm", "Winter storm warning"],
-        ["snow squall", "Snow squall warning"], ["snowfall", "Snowfall warning"],
-        ["flash freeze", "Flash freeze warning"], ["freezing rain", "Freezing rain warning"],
-        ["freezing drizzle", "Freezing drizzle warning"],
-        ["severe thunderstorm", "Severe thunderstorm warning"], ["thunderstorm", "Thunderstorm warning"],
-        ["rainfall", "Rainfall warning"], ["heavy rain", "Rainfall warning"],
-        ["wind", "Wind warning"], ["les suetes", "Wind warning"], ["arctic outflow", "Arctic outflow warning"],
-        ["extreme cold", "Extreme cold warning"], ["cold", "Extreme cold warning"],
-        ["heat", "Heat warning"], ["frost", "Frost warning"],
-        ["fog", "Fog warning"], ["dust", "Dust storm warning"],
-        ["squall", "Squall warning"], ["weather", "Weather warning"]
+        ["tornado warning", "Tornado warning"], ["hurricane warning", "Hurricane warning"],
+        ["tropical storm warning", "Tropical storm warning"], ["tsunami warning", "Tsunami warning"],
+        ["storm surge warning", "Storm surge warning"], ["blizzard warning", "Blizzard warning"],
+        ["winter storm warning", "Winter storm warning"], ["snow squall warning", "Snow squall warning"],
+        ["snowfall warning", "Snowfall warning"], ["flash freeze warning", "Flash freeze warning"],
+        ["freezing rain warning", "Freezing rain warning"], ["freezing drizzle warning", "Freezing drizzle warning"],
+        ["severe thunderstorm warning", "Severe thunderstorm warning"], ["thunderstorm warning", "Thunderstorm warning"],
+        ["rainfall warning", "Rainfall warning"], ["arctic outflow warning", "Arctic outflow warning"],
+        ["les suetes wind warning", "Wind warning"], ["wind warning", "Wind warning"],
+        ["extreme cold warning", "Extreme cold warning"], ["cold warning", "Extreme cold warning"],
+        ["heat warning", "Heat warning"], ["frost warning", "Frost warning"],
+        ["coastal flooding warning", "Coastal flooding warning"], ["fog warning", "Fog warning"],
+        ["dust storm warning", "Dust storm warning"], ["squall warning", "Squall warning"]
     ];
     var classifyHazard = function(text) {
         var t = String(text || "").toLowerCase();
         for (var i = 0; i < HAZARD_MAP.length; i++) { if (t.indexOf(HAZARD_MAP[i][0]) !== -1) return HAZARD_MAP[i][1]; }
-        return "Warning";
+        return "Warning"; // couldn't identify a specific hazard phrase
     };
     // Severity rank drives sort order and colour intensity (higher = more dangerous).
     var hazardRank = function(name) {
@@ -346,11 +349,26 @@ var WeatherService = {
 
             // --- Robust field reads (ECCC field names vary across the API) ---
             var alertType = String(pick(props, ["alert_type", "type", "msg_type", "category"])).toLowerCase();
-            var areaText  = String(pick(props, ["area", "areas", "zone", "location", "region", "name"]));
+            var areaText  = String(pick(props, ["area", "areas", "zone", "zones", "location", "region", "name", "areaDesc", "area_desc"]));
             var headline  = String(pick(props, ["headline", "event", "summary", "title"]));
-            var ident     = String(pick(props, ["identifier", "id", "alert_id", "reference"]) || "");
+            var ident     = String(pick(props, ["identifier", "id", "alert_id", "alertId", "reference", "references"]) || "");
             var harvest   = harvestText(props);
             var harvestLower = harvest.toLowerCase();
+
+            // If the region name isn't a top-level field, ECCC often nests it inside
+            // the descriptions array (per-language) as .areas / .area.
+            if (!areaText) {
+                var dd = props.descriptions || props.description;
+                if (dd && dd.length) {
+                    for (var di = 0; di < dd.length && !areaText; di++) {
+                        var da = dd[di];
+                        if (da && typeof da === "object") {
+                            if (da.areas) areaText = (typeof da.areas === "string") ? da.areas : (da.areas.length ? da.areas.join(", ") : "");
+                            else if (da.area) areaText = String(da.area);
+                        }
+                    }
+                }
+            }
 
             // Skip ended / cancelled / expired alerts.
             if (alertType === "ended" || alertType === "cancel" ||
@@ -431,3 +449,35 @@ var WeatherService = {
     return { weather: weatherData, alerts: activeAlerts };
   }
 };
+
+/**
+ * DIAGNOSTIC — run this from the Apps Script editor (Run > debugWeatherAlerts)
+ * then open View > Logs. It prints the ACTUAL property field names ECCC returns
+ * for a warning feature, so we can wire the exact fields for region names /
+ * hazard type. Paste the log output back and we can lock the parser to the real
+ * schema instead of guessing. Safe / read-only.
+ */
+function debugWeatherAlerts() {
+  var url = "https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=1000";
+  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { "User-Agent": "MRC-Ops-Dashboard/1.0" } });
+  if (res.getResponseCode() !== 200) { Logger.log("HTTP " + res.getResponseCode()); return "HTTP " + res.getResponseCode(); }
+  var data = JSON.parse(res.getContentText());
+  var feats = data.features || [];
+  // Prefer a feature that looks like a warning so we see a populated example.
+  var sample = null;
+  for (var i = 0; i < feats.length; i++) {
+    var p = feats[i].properties || {};
+    var blob = JSON.stringify(p).toLowerCase();
+    if (blob.indexOf("warning") !== -1) { sample = feats[i]; break; }
+  }
+  if (!sample) sample = feats[0];
+  var out = {
+    totalFeatures: feats.length,
+    propertyKeys: sample ? Object.keys(sample.properties || {}) : [],
+    geometryType: sample && sample.geometry ? sample.geometry.type : null,
+    sampleProperties: sample ? sample.properties : null
+  };
+  var s = JSON.stringify(out, null, 2);
+  Logger.log(s);
+  return s;
+}
