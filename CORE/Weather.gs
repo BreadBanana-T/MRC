@@ -177,20 +177,20 @@ var WeatherService = {
     }
 
     // --- 2. FETCH OFFICIAL ALERTS FROM ECCC GEOMET API ---
-    // RED-level = anything ECCC classifies as a WARNING (that's what shows red on
-    // weather.gc.ca). WATCHES / ADVISORIES / STATEMENTS / ENDED alerts are dropped.
-    // We do NOT additionally require CAP severity Severe/Extreme — plenty of real
-    // red warnings (e.g. snowfall) are tagged "Moderate", and dropping them was
-    // causing red provinces to show "no warnings".
+    // The GeoMet weather-alerts feature schema (confirmed live) gives us everything
+    // directly, no guessing needed:
+    //   province        -> "QC" / "ON" / ...        (province attribution)
+    //   alert_name_en   -> "wind warning"           (exact hazard type)
+    //   feature_name_en -> "Alma - Desbiens area"   (real affected region name)
+    //   risk_colour_en  -> "yellow" / "red"         (severity — RED = most severe)
+    //   status_en       -> "continued" / "ended"    (lifecycle)
     //
-    // Each alert is attributed to a province primarily by GEOMETRY (polygon centroid
-    // -> province bounding box) so region warnings whose zone names don't contain a
-    // major-city string ("R.M. of Portage la Prairie", "southern Manitoba", a rural
-    // tornado warning) are no longer silently dropped. Province-name and known-city
-    // text are used as extra/faster signals. Alerts are aggregated per province +
-    // hazard, and the ACTUAL affected region names from the API are shown.
-    //
-    // City weights (impact heat only): Major metros (>=1M) = 10, Mid (>=250k) = 5.
+    // "RED-level" filters on risk_colour_en === "red". This is important: many
+    // items are alert_type="warning" yet only YELLOW (e.g. heat warnings), so
+    // filtering by type alone flooded the banner. Watches/advisories/statements
+    // and ended alerts are dropped. Alerts are aggregated per province + hazard,
+    // counting DISTINCT affected regions. Geometry / city-text remain only as a
+    // fallback for the rare feature missing a province code.
     var cityWeights = {
         // Major
         "TORONTO": 10, "MONTREAL": 10, "VANCOUVER": 10, "CALGARY": 10, "OTTAWA": 10, "EDMONTON": 10,
@@ -301,6 +301,9 @@ var WeatherService = {
         for (var i = 0; i < HAZARD_MAP.length; i++) { if (t.indexOf(HAZARD_MAP[i][0]) !== -1) return HAZARD_MAP[i][1]; }
         return "Warning"; // couldn't identify a specific hazard phrase
     };
+    // ECCC risk-based colours: yellow / orange / red. "RED-level" = the most severe.
+    // Set to { red:true, orange:true } if you ever want to include amber alerts too.
+    var RED_COLOURS = { "red": true };
     // Severity rank drives sort order and colour intensity (higher = more dangerous).
     var hazardRank = function(name) {
         var t = String(name || "").toLowerCase();
@@ -347,64 +350,34 @@ var WeatherService = {
             var feat = features[j] || {};
             var props = feat.properties || {};
 
-            // --- Robust field reads (ECCC field names vary across the API) ---
-            var alertType = String(pick(props, ["alert_type", "type", "msg_type", "category"])).toLowerCase();
-            var areaText  = String(pick(props, ["area", "areas", "zone", "zones", "location", "region", "name", "areaDesc", "area_desc"]));
-            var headline  = String(pick(props, ["headline", "event", "summary", "title"]));
-            var ident     = String(pick(props, ["identifier", "id", "alert_id", "alertId", "reference", "references"]) || "");
-            var harvest   = harvestText(props);
-            var harvestLower = harvest.toLowerCase();
+            // --- Real ECCC GeoMet schema (confirmed via debugWeatherAlerts) ---
+            var alertType = String(pick(props, ["alert_type", "type"])).toLowerCase();
+            var status    = String(pick(props, ["status_en", "status"])).toLowerCase();
+            var colour    = String(pick(props, ["risk_colour_en", "risk_colour", "risk_color_en"])).toLowerCase();
+            var name      = String(pick(props, ["alert_name_en", "alert_short_name_en", "headline", "event"]));
+            var region    = String(pick(props, ["feature_name_en", "area", "areas", "zone", "location"]));
+            var prov      = String(pick(props, ["province"])).toUpperCase();
 
-            // If the region name isn't a top-level field, ECCC often nests it inside
-            // the descriptions array (per-language) as .areas / .area.
-            if (!areaText) {
-                var dd = props.descriptions || props.description;
-                if (dd && dd.length) {
-                    for (var di = 0; di < dd.length && !areaText; di++) {
-                        var da = dd[di];
-                        if (da && typeof da === "object") {
-                            if (da.areas) areaText = (typeof da.areas === "string") ? da.areas : (da.areas.length ? da.areas.join(", ") : "");
-                            else if (da.area) areaText = String(da.area);
-                        }
-                    }
-                }
-            }
+            // Skip ended / expired alerts.
+            if (status === "ended" || status === "expired" || alertType === "ended") continue;
 
-            // Skip ended / cancelled / expired alerts.
-            if (alertType === "ended" || alertType === "cancel" ||
-                /\b(ended|cancel(l)?ed|expired|no longer in effect)\b/.test(harvestLower)) continue;
+            // RED-LEVEL ONLY — filter on ECCC's official risk colour. This is what
+            // drops the flood of yellow/orange alerts (e.g. heat warnings), which
+            // are "warnings" by type but not red. Fall back to alert_type only when
+            // the feed omits the colour.
+            var isRed = RED_COLOURS[colour] === true;
+            if (!colour && alertType.indexOf("warning") !== -1) isRed = true;
+            if (!isRed) continue;
+            // Never surface watches / advisories / statements.
+            if (alertType.indexOf("watch") !== -1 || alertType.indexOf("advisory") !== -1 || alertType.indexOf("statement") !== -1) continue;
 
-            // RED-only: keep WARNINGS, drop watches / advisories / statements.
-            var isWarning = alertType ? (alertType.indexOf("warning") !== -1) : /\bwarning\b/.test(harvestLower);
-            if (!isWarning) continue;
-            if (alertType && (alertType.indexOf("watch") !== -1 || alertType.indexOf("advisory") !== -1 || alertType.indexOf("statement") !== -1)) continue;
+            // Hazard name straight from the feed ("wind warning" -> "Wind warning");
+            // fall back to text sniffing only if the field is missing.
+            var hazard = name ? name.replace(/\s+/g, " ").trim() : classifyHazard(harvestText(props));
+            if (hazard) hazard = hazard.charAt(0).toUpperCase() + hazard.slice(1);
 
-            // Classify the specific hazard (Wind / Tornado / Snowfall / ...).
-            var hazard = classifyHazard(harvest || headline || alertType);
-
-            // --- Attribute to a province ---
-            var upperBlob = (areaText + " " + headline).toUpperCase();
-            var provCode = null;
-
-            // 1. Explicit province/territory name in the area or headline.
-            for (var pc in provNames) {
-                var variants = provNames[pc];
-                for (var v = 0; v < variants.length; v++) {
-                    if (upperBlob.indexOf(variants[v]) !== -1) { provCode = pc; break; }
-                }
-                if (provCode) break;
-            }
-            // 2. A known major city in the area or headline.
-            if (!provCode) {
-                for (var pc2 in alertRadar) {
-                    var cityList = alertRadar[pc2];
-                    for (var ci = 0; ci < cityList.length; ci++) {
-                        if (upperBlob.indexOf(cityList[ci]) !== -1) { provCode = pc2; break; }
-                    }
-                    if (provCode) break;
-                }
-            }
-            // 3. Geometry centroid -> province bounding box (the reliable fallback).
+            // Province comes straight from the feed; geometry is only a fallback.
+            var provCode = (prov && prov.length === 2) ? prov : null;
             if (!provCode) {
                 var ctr = geomCentroid(feat.geometry);
                 if (ctr) provCode = provinceForPoint(ctr.lon, ctr.lat);
@@ -415,12 +388,12 @@ var WeatherService = {
             var pa = provAgg[provCode];
             if (!pa.hazards[hazard]) pa.hazards[hazard] = { count: 0, areas: {} };
 
-            // Dedup: the same alert (identifier) can arrive as several polygon
-            // features; count it once per province. Fall back to the area label,
-            // then the feature index, when no identifier is present.
-            var dkey = hazard + "|" + (ident || areaText || ("_" + j));
+            // Count DISTINCT affected regions per hazard (feature_name_en is the
+            // region, e.g. "Alma - Desbiens area"), so the same region under the
+            // same hazard is never double-counted.
+            var areaLabel = region ? region.replace(/\s+/g, " ").trim() : "";
+            var dkey = hazard + "|" + (areaLabel || ("_" + j));
             if (!pa.ids[dkey]) { pa.ids[dkey] = true; pa.hazards[hazard].count += 1; pa.zoneCount += 1; }
-            var areaLabel = areaText ? areaText.replace(/\s+/g, " ").trim() : "";
             if (areaLabel) pa.hazards[hazard].areas[areaLabel] = true;
         }
 
