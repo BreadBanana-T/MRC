@@ -1196,16 +1196,17 @@
 
   // Agent ID as shown on the floor: T-prefix for Onshore (TID), x for Offshore (XID).
   function fmtAgentId(a) { var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T'; return prefix + (a.id || ''); }
-  // Human status incl. the live break/lunch window when the agent is out.
-  function agentStatusLabel(a) {
-      var s = a.subStatus || 'Active';
-      if (a.onBreakNow && a.currentBreakStr) s = (a.subStatus || 'Break') + ' (' + a.currentBreakStr + ')';
-      return s;
-  }
-  // Tab-separated roster: pastes cleanly into Excel/Sheets, readable in chat too.
+  // Tab-separated roster: Name + ID (TID/XID) + shift start/end. No "Active"
+  // noise — the Break column is only filled when the agent is actually out on
+  // a break/lunch (with its window). Pastes cleanly into Sheets/Excel.
   function buildRosterText(list) {
-      var lines = ['ID\tName\tStatus\tShift'];
-      list.forEach(function(a) { lines.push(fmtAgentId(a) + '\t' + (a.name || '') + '\t' + agentStatusLabel(a) + '\t' + (a.shift || '')); });
+      var lines = ['Name\tID\tStart\tEnd\tBreak'];
+      list.forEach(function(a) {
+          var start = '', end = '';
+          if (a.shift && a.shift.indexOf(' - ') !== -1) { var p = a.shift.split(' - '); start = p[0]; end = p[1]; }
+          var brk = a.onBreakNow ? ((a.subStatus || 'Break') + (a.currentBreakStr ? ' ' + a.currentBreakStr : '')) : '';
+          lines.push((a.name || '') + '\t' + fmtAgentId(a) + '\t' + start + '\t' + end + '\t' + brk);
+      });
       return lines.join('\n');
   }
   // Copy everyone currently on shift in a unit (any status — working, break,
