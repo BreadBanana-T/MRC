@@ -275,15 +275,23 @@ var OutageTracker = {
   // Deep-scan a Kubra JSON blob for a deployment-folder value: either a bare
   // GUID or a "data/<guid>" path (that's how the summary data folder is named).
   _findKubraFolder: function(obj) {
-    var guidRe = /^(data\/)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
-    var found = null;
-    var walk = function(o) {
-      if (found) return;
-      if (typeof o === 'string') { if (guidRe.test(o)) found = o; return; }
-      if (o && typeof o === 'object') { for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { walk(o[k]); if (found) return; } } }
+    // Prefer a "data/<guid>" path (the summary folder). Only if none exists do
+    // we fall back to a bare GUID — and even then NOT a deployment-id, since
+    // several unrelated deployment ids (alert/settings/stormcenter) also appear.
+    var dataRe = /^data\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
+    var bareRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    var dataHit = null, bareHit = null;
+    var walk = function(o, key) {
+      if (dataHit) return;
+      if (typeof o === 'string') {
+        if (dataRe.test(o)) { dataHit = o; return; }
+        if (!bareHit && bareRe.test(o) && !/deploymentid$/i.test(String(key || ''))) bareHit = o;
+        return;
+      }
+      if (o && typeof o === 'object') { for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { walk(o[k], k); if (dataHit) return; } } }
     };
-    walk(obj);
-    return found;
+    walk(obj, '');
+    return dataHit || bareHit;
   },
 
   // Kubra publishes each data generation under a NEW folder id, so a hard-coded
