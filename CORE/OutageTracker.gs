@@ -311,6 +311,62 @@ var OutageTracker = {
     return 'https://kubra.io/' + folder + '/public/summary-1/data.json';
   },
 
+  // Pull a number out of a Kubra value that may be a number, a "1,234" string,
+  // or a { val, type } object.
+  _kubraNum: function(o) {
+    if (o == null) return null;
+    if (typeof o === 'number') return o;
+    if (typeof o === 'string') { var n = parseInt(o.replace(/[^\d-]/g, ''), 10); return isNaN(n) ? null : n; }
+    if (typeof o === 'object' && o.val != null) return this._kubraNum(o.val);
+    return null;
+  },
+
+  // Robustly read customers/outages from a Kubra summary body. Kubra shifts the
+  // exact field between deployments and storm mode, so we try total_cust_a /
+  // total_cust_s, then any cust-ish key, take the MAX across totals entries, and
+  // finally sum the per-area file_data if the summary total came back empty.
+  // This is what prevents the "0 outages" collapse after a folder rotation.
+  // Only "customers AFFECTED" counts, never "served" (_s = the whole customer
+  // base, ~1.5M for Hydro One). Matches total_cust_a / cust_a / *affected* /
+  // *_out, and explicitly rejects served/*_s.
+  _isAffectedKey: function(k) {
+    if (/serv|_s\b|_s$|cust_s/i.test(k)) return false;
+    return /cust/i.test(k) && /(cust_a\b|_cust_a|^cust_a|aff|_out\b|out$|interrupt|impact)/i.test(k);
+  },
+  _affectedCust: function(obj) {
+    var c = this._kubraNum(obj.total_cust_a);
+    if (c == null) c = this._kubraNum(obj.cust_a);
+    if (c == null) c = this._kubraNum(obj.customersAffected);
+    if (c == null) { for (var k in obj) { if (this._isAffectedKey(k)) { c = this._kubraNum(obj[k]); if (c != null) break; } } }
+    return c;
+  },
+  _parseKubraSummary: function(body) {
+    var self = this, cust = 0, outg = 0, ok = false;
+    var sfd = body && body.summaryFileData;
+    if (sfd && Array.isArray(sfd.totals)) {
+      sfd.totals.forEach(function(t) {
+        if (!t || typeof t !== 'object') return;
+        ok = true;
+        var c = self._affectedCust(t);
+        if (c != null && c > cust) cust = c;
+        var o = self._kubraNum(t.total_outages);
+        if (o == null) { for (var k2 in t) { if (/outage|n_out|numout/i.test(k2)) { o = self._kubraNum(t[k2]); if (o != null) break; } } }
+        if (o != null && o > outg) outg = o;
+      });
+    }
+    // Storm-mode fallback: summary total blank -> sum per-area affected counts.
+    if (!cust && body && Array.isArray(body.file_data)) {
+      var sumC = 0, cnt = 0;
+      body.file_data.forEach(function(fd) {
+        var d = (fd && fd.desc) ? fd.desc : fd; if (!d || typeof d !== 'object') return;
+        var cc = self._affectedCust(d);
+        if (cc != null) { sumC += cc; cnt++; }
+      });
+      if (sumC) { cust = sumC; if (!outg) outg = cnt; ok = true; }
+    }
+    return { ok: ok, customers: cust, outages: outg };
+  },
+
   _fetchHydroOne: function() {
     try {
       var url = this._getUrl('HYDRO_ONE_URL', this._DEFAULT_HYDRO_ONE_URL);
@@ -325,11 +381,8 @@ var OutageTracker = {
         var resK = UrlFetchApp.fetch(dataUrl, this._commonHeaders());
         if (resK.getResponseCode() !== 200) throw new Error('HTTP ' + resK.getResponseCode());
         var bodyK = JSON.parse(resK.getContentText());
-        if (bodyK.summaryFileData && Array.isArray(bodyK.summaryFileData.totals) && bodyK.summaryFileData.totals.length) {
-          var t = bodyK.summaryFileData.totals[0] || {};
-          var custK = (t.total_cust_a && t.total_cust_a.val != null) ? t.total_cust_a.val : (t.total_cust_s && t.total_cust_s.val);
-          return { data: { outages: this._safeInt(t.total_outages), customers: this._safeInt(custK), top: [], source: 'Hydro One' } };
-        }
+        var parsed = this._parseKubraSummary(bodyK);
+        if (parsed.ok) return { data: { outages: parsed.outages, customers: parsed.customers, top: [], source: 'Hydro One' } };
         throw new Error('Unrecognized Kubra summary shape @ ' + dataUrl);
       }
 
@@ -516,6 +569,13 @@ function debugOutages() {
         // Follow a Kubra currentState URL to the live data.json so the dump
         // shows the actual totals, not just the discovery response.
         if (/currentState/i.test(url)) {
+          try {
+            var csRes = UrlFetchApp.fetch(url, OutageTracker._commonHeaders());
+            info.currentStateStatus = csRes.getResponseCode();
+            var csBody = JSON.parse(csRes.getContentText());
+            info.currentStateData = csBody.data || null;   // interval_generation_data etc.
+            info.stormMode = csBody.stormMode || csBody.storm_mode || (csBody.data && csBody.data.storm_mode) || null;
+          } catch (cse) { info.currentStateError = cse.message; }
           try { info.resolvedDataUrl = OutageTracker._resolveKubraDataUrl(url); url = info.resolvedDataUrl; }
           catch (rk) { info.resolveError = rk.message; }
         }
@@ -538,6 +598,9 @@ function debugOutages() {
             info.detectedRegion = OutageTracker._extractRegion(attrs);
           }
           if (body.summaryFileData) info.summaryFileData = body.summaryFileData;
+          if (body.file_data) { info.fileDataCount = body.file_data.length; info.fileDataSample = body.file_data[0]; }
+          // What the live parser actually extracts from this body:
+          info.parsedSummary = OutageTracker._parseKubraSummary(body);
         }
       } catch (e) { info.error = e.message; }
     }
