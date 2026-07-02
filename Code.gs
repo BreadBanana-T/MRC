@@ -286,6 +286,9 @@ function submitFeedback(type, message, page) {
 function getFeedbackList(limit) {
   return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.getList(limit) : "[]";
 }
+function setFeedbackStatus(row, status) {
+  return (typeof FeedbackTracker !== 'undefined') ? FeedbackTracker.setStatus(row, status) : JSON.stringify({ ok: false, error: 'FeedbackTracker not loaded.' });
+}
 
 // --- PRESENCE & ATTRIBUTION (who's active now, who did the last update) ---
 // heartbeat: client pings on a timer; stamps the viewer present + returns the

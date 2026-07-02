@@ -199,7 +199,7 @@
       // Today's stacking-lunch concurrency for the Overview dashboard (daily only).
       overviewLunch: null, overviewLunchLoading: false,
       // Manager feedback + presence/attribution layer.
-      currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false,
+      currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false, feedbackShowArchive: false,
       presence: [], lastActions: {}
   };
 
@@ -619,18 +619,41 @@
       state._feedbackDraft = '';
       state._feedbackPage = currentPageLabel();
       state.feedbackList = null;
+      state.feedbackShowArchive = false;
       var who = document.getElementById('feedback-whoami'); if (who) who.innerHTML = feedbackWhoamiText();
       if (!state.currentUser) fetchCurrentUser();
       renderFeedbackBody(true);
       if (typeof google !== 'undefined') {
           google.script.run.withSuccessHandler(function(res) {
-              try { state.feedbackList = JSON.parse(res); } catch(e) { state.feedbackList = []; }
+              try { state.feedbackList = normalizeFeedback(JSON.parse(res)); } catch(e) { state.feedbackList = normalizeFeedback(null); }
               if (document.getElementById('feedback-modal').classList.contains('open')) renderFeedbackBody(false);
-          }).withFailureHandler(function(){ state.feedbackList = []; renderFeedbackBody(false); }).getFeedbackList(25);
-      } else { state.feedbackList = []; }
+          }).withFailureHandler(function(){ state.feedbackList = normalizeFeedback(null); renderFeedbackBody(false); }).getFeedbackList(50);
+      } else { state.feedbackList = normalizeFeedback(null); }
   };
   window.closeFeedback = function() { var m = document.getElementById('feedback-modal'); if (m) m.classList.remove('open'); };
   window.setFeedbackType = function(t) { state.feedbackType = t; renderFeedbackBody(false); };
+  window.toggleFeedbackArchive = function() { state.feedbackShowArchive = !state.feedbackShowArchive; renderFeedbackBody(false); };
+
+  // Backend getFeedbackList now returns {items, archived, isAdmin, statuses,...}.
+  // Tolerate the old array shape (and nulls) so nothing breaks mid-deploy.
+  function normalizeFeedback(d) {
+      if (Array.isArray(d)) return { items: d, archived: [], isAdmin: false, statuses: [], activeCount: d.length, archivedCount: 0 };
+      if (d && typeof d === 'object') return { items: d.items || [], archived: d.archived || [], isAdmin: !!d.isAdmin, statuses: d.statuses || [], activeCount: d.activeCount || (d.items ? d.items.length : 0), archivedCount: d.archivedCount || (d.archived ? d.archived.length : 0) };
+      return { items: [], archived: [], isAdmin: false, statuses: [], activeCount: 0, archivedCount: 0 };
+  }
+
+  // Admin-only: change an item's status (New / Understood / In Progress /
+  // Completed / Declined / Archived) so managers see it's handled.
+  window.setFeedbackStatus = function(row, status) {
+      if (typeof google === 'undefined') { showToast('Preview mode — not saved.'); return; }
+      google.script.run.withSuccessHandler(function(res) {
+          var r = {}; try { r = JSON.parse(res); } catch(e) {}
+          if (r.ok) {
+              showToast('Marked ' + (r.status || status));
+              google.script.run.withSuccessHandler(function(res2){ try { state.feedbackList = normalizeFeedback(JSON.parse(res2)); } catch(e){} renderFeedbackBody(false); }).getFeedbackList(50);
+          } else { showToast('Could not update: ' + (r.error || 'error')); }
+      }).withFailureHandler(function(err){ showToast('Update failed: ' + ((err && err.message) || 'backend error')); }).setFeedbackStatus(row, status);
+  };
 
   window.sendFeedback = function() {
       var ta = document.getElementById('feedback-msg');
@@ -646,7 +669,7 @@
           if (r.ok) {
               showToast('Thanks! Your ' + feedbackTypeMeta(state.feedbackType).label.toLowerCase() + ' was sent.');
               state._feedbackDraft = '';
-              google.script.run.withSuccessHandler(function(res2){ try { state.feedbackList = JSON.parse(res2); } catch(e){} renderFeedbackBody(false); }).getFeedbackList(25);
+              google.script.run.withSuccessHandler(function(res2){ try { state.feedbackList = normalizeFeedback(JSON.parse(res2)); } catch(e){} renderFeedbackBody(false); }).getFeedbackList(50);
           } else {
               showToast('Could not send: ' + (r.error || 'unknown error'));
               renderFeedbackBody(false);
@@ -657,6 +680,39 @@
           renderFeedbackBody(false);
       }).submitFeedback(state.feedbackType, msg, state._feedbackPage);
   };
+
+  function feedbackStatusColor(s) {
+      s = String(s || '').toLowerCase();
+      if (/completed/.test(s)) return 'var(--status-active, #10b981)';
+      if (/progress/.test(s)) return 'var(--status-warn)';
+      if (/understood/.test(s)) return 'var(--accent-primary)';
+      if (/declined/.test(s)) return 'var(--status-alert)';
+      return 'var(--text-muted)';
+  }
+  function fbItemHtml(f, data) {
+      var m = feedbackTypeMeta(String(f.type||'').toLowerCase());
+      var nm = nameFromEmail(f.user) || f.user || 'Unknown';
+      var sc = feedbackStatusColor(f.status);
+      var right;
+      if (data.isAdmin) {
+          var opts = (data.statuses||[]).map(function(s){ return '<option value="' + escapeHTML(s) + '"' + (String(f.status).toLowerCase() === s.toLowerCase() ? ' selected' : '') + '>' + escapeHTML(s) + '</option>'; }).join('');
+          right = '<select title="Set status" onchange="setFeedbackStatus(' + f.row + ', this.value)" onclick="event.stopPropagation()" style="margin-left:auto; font-size:0.64rem; font-weight:800; color:' + sc + '; background:var(--card-bg); border:1px solid var(--glass-border); border-radius:8px; padding:3px 6px; cursor:pointer;">' + opts + '</select>';
+      } else {
+          right = '<span style="margin-left:auto; font-size:0.66rem; font-weight:800; color:' + sc + '; text-transform:uppercase;">' + escapeHTML(f.status||'New') + '</span>';
+      }
+      var footer = escapeHTML(f.ts||'');
+      if (f.updatedBy) footer += ' · ' + escapeHTML(f.status) + ' by ' + escapeHTML(nameFromEmail(f.updatedBy) || f.updatedBy);
+      return '<div style="padding:12px 14px; border-bottom:1px solid var(--glass-border);">' +
+          '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">' +
+              '<span style="font-size:0.6rem; font-weight:800; color:#fff; background:' + m.color + '; padding:2px 8px; border-radius:99px; text-transform:uppercase; letter-spacing:0.4px;">' + escapeHTML(f.type||'') + '</span>' +
+              '<span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">' + escapeHTML(nm) + '</span>' +
+              '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(f.page||'') + '</span>' +
+              right +
+          '</div>' +
+          '<div style="font-size:0.82rem; color:var(--text-secondary); line-height:1.4; white-space:pre-wrap; word-break:break-word;">' + escapeHTML(f.message||'') + '</div>' +
+          '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + footer + '</div>' +
+      '</div>';
+  }
 
   function renderFeedbackBody(focus) {
       var body = document.getElementById('feedback-body'); if (!body) return;
@@ -673,27 +729,25 @@
       var sending = state.feedbackSubmitting;
 
       var listHtml;
-      if (state.feedbackList === null) {
+      var data = state.feedbackList;
+      var showArch = state.feedbackShowArchive;
+      var activeCount = data ? (data.activeCount || 0) : 0;
+      var archCount = data ? (data.archivedCount || 0) : 0;
+      if (data === null) {
           listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">Loading recent submissions…</div>';
-      } else if (!state.feedbackList.length) {
-          listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">No submissions yet — be the first.</div>';
       } else {
-          listHtml = state.feedbackList.map(function(f) {
-              var m = feedbackTypeMeta(String(f.type||'').toLowerCase());
-              var nm = nameFromEmail(f.user) || f.user || 'Unknown';
-              var statusColor = /done|fixed|closed|resolved/i.test(f.status) ? 'var(--status-active, #10b981)' : (/progress|working/i.test(f.status) ? 'var(--status-warn)' : 'var(--text-muted)');
-              return '<div style="padding:12px 14px; border-bottom:1px solid var(--glass-border);">' +
-                  '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">' +
-                      '<span style="font-size:0.6rem; font-weight:800; color:#fff; background:' + m.color + '; padding:2px 8px; border-radius:99px; text-transform:uppercase; letter-spacing:0.4px;">' + escapeHTML(f.type||'') + '</span>' +
-                      '<span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">' + escapeHTML(nm) + '</span>' +
-                      '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(f.page||'') + '</span>' +
-                      '<span style="margin-left:auto; font-size:0.66rem; font-weight:800; color:' + statusColor + '; text-transform:uppercase;">' + escapeHTML(f.status||'New') + '</span>' +
-                  '</div>' +
-                  '<div style="font-size:0.82rem; color:var(--text-secondary); line-height:1.4; white-space:pre-wrap; word-break:break-word;">' + escapeHTML(f.message||'') + '</div>' +
-                  '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + escapeHTML(f.ts||'') + '</div>' +
-              '</div>';
-          }).join('');
+          var arr = showArch ? (data.archived || []) : (data.items || []);
+          if (!arr.length) {
+              listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">' + (showArch ? 'Nothing archived yet.' : 'No submissions yet — be the first.') + '</div>';
+          } else {
+              listHtml = arr.map(function(f) { return fbItemHtml(f, data); }).join('');
+          }
       }
+      var listHeader = '<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">' +
+          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">' + (showArch ? 'Archived' : 'Recent submissions') + '</div>' +
+          (data ? '<button onclick="toggleFeedbackArchive()" style="margin-left:auto; font-size:0.66rem; font-weight:800; color:var(--text-muted); background:var(--card-bg); border:1px solid var(--glass-border); border-radius:8px; padding:3px 9px; cursor:pointer;">' + (showArch ? ('&larr; Active (' + activeCount + ')') : ('Archive (' + archCount + ')')) + '</button>' : '') +
+          '</div>' +
+          (data && data.isAdmin && !showArch ? '<div style="font-size:0.64rem; color:var(--text-muted); font-weight:600; margin-bottom:6px;">Set a status to let managers know it\'s handled. Completed items auto-archive after a few days.</div>' : '');
 
       body.innerHTML =
           '<div style="display:flex; gap:8px; margin-bottom:14px;">' + typeBtns + '</div>' +
@@ -704,7 +758,7 @@
               '<button class="btn btn-primary" onclick="sendFeedback()" ' + (sending ? 'disabled' : '') + ' style="height:40px; background:' + meta.color + '; border-color:' + meta.color + '; opacity:' + (sending ? '0.6' : '1') + ';"><i data-lucide="' + (sending ? 'loader' : 'send') + '" width="16"></i> ' + (sending ? 'Sending…' : 'Send ' + meta.label) + '</button>' +
           '</div>' +
           '<div style="margin-top:22px; border-top:1px solid var(--glass-border); padding-top:14px;">' +
-              '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">Recent submissions</div>' +
+              listHeader +
               '<div style="border:1px solid var(--glass-border); border-radius:12px; overflow:hidden; max-height:230px; overflow-y:auto;" class="custom-scrollbar">' + listHtml + '</div>' +
           '</div>';
 

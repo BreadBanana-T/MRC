@@ -14,8 +14,12 @@
 var FeedbackTracker = {
 
   SHEET: 'WF_FEEDBACK',
-  HEADERS: ['Timestamp', 'User', 'Type', 'Message', 'Page', 'Status'],
+  HEADERS: ['Timestamp', 'User', 'Type', 'Message', 'Page', 'Status', 'Updated', 'Completed At', 'Updated By'],
   TYPES: { suggestion: 'Suggestion', idea: 'Idea', bug: 'Bug' },
+
+  // Lifecycle a manager's item moves through. "Understood" = acknowledged/read.
+  ALL_STATUSES: ['New', 'Understood', 'In Progress', 'Completed', 'Declined', 'Archived'],
+  DEFAULT_ARCHIVE_DAYS: 3, // Completed items auto-archive after this many days.
 
   _sheet: function() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -26,6 +30,50 @@ var FeedbackTracker = {
       sh.setFrozenRows(1);
     }
     return sh;
+  },
+
+  // Bring older sheets (6-column) up to the current header set without touching
+  // existing data rows — the new columns simply read blank until first written.
+  _ensureColumns: function() {
+    var sh = this._sheet();
+    var lastCol = sh.getLastColumn();
+    var have = (lastCol > 0) ? sh.getRange(1, 1, 1, Math.max(lastCol, this.HEADERS.length)).getValues()[0] : [];
+    var need = false;
+    for (var i = 0; i < this.HEADERS.length; i++) { if (String(have[i] || '') !== this.HEADERS[i]) { need = true; break; } }
+    if (need) sh.getRange(1, 1, 1, this.HEADERS.length).setValues([this.HEADERS]).setFontWeight('bold');
+    return sh;
+  },
+
+  _archiveDays: function() {
+    try {
+      var v = parseInt(PropertiesService.getScriptProperties().getProperty('FEEDBACK_ARCHIVE_DAYS'), 10);
+      if (v > 0) return v;
+    } catch (e) {}
+    return this.DEFAULT_ARCHIVE_DAYS;
+  },
+
+  // Who may change status. The deploying owner is always an admin; add more via
+  // the FEEDBACK_ADMINS Script Property (comma/space separated emails).
+  _admins: function() {
+    var list = [];
+    try {
+      var p = PropertiesService.getScriptProperties().getProperty('FEEDBACK_ADMINS') || '';
+      p.split(/[,;\s]+/).forEach(function(s) { s = s.trim().toLowerCase(); if (s) list.push(s); });
+    } catch (e) {}
+    try { var eff = Session.getEffectiveUser().getEmail(); if (eff) list.push(String(eff).toLowerCase()); } catch (e) {}
+    return list;
+  },
+
+  isAdmin: function(email) {
+    if (!email) { try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {} }
+    email = String(email || '').toLowerCase();
+    if (!email) return false;
+    return this._admins().indexOf(email) !== -1;
+  },
+
+  _fmt: function(v) {
+    if (v instanceof Date) return Utilities.formatDate(v, 'America/Toronto', 'yyyy-MM-dd HH:mm');
+    return String(v == null ? '' : v);
   },
 
   // Best-effort identity. Active user = the person viewing the app (same-domain
@@ -57,9 +105,9 @@ var FeedbackTracker = {
     if (!email) { try { email = Session.getEffectiveUser().getEmail() || ''; } catch (e) {} }
     var who = email || 'unknown';
 
-    var sh = this._sheet();
+    var sh = this._ensureColumns();
     var ts = new Date();
-    sh.appendRow([ts, who, label, msg, String(page || '').substring(0, 120), 'New']);
+    sh.appendRow([ts, who, label, msg, String(page || '').substring(0, 120), 'New', '', '', '']);
 
     this._notify(label, who, msg, page);
     return JSON.stringify({ ok: true, who: who, name: this._displayName(email) });
@@ -84,26 +132,91 @@ var FeedbackTracker = {
     }
   },
 
-  // Recent submissions, newest first, so managers can see status and avoid
-  // filing the same bug twice.
+  // Recent submissions, newest first. Returns active + archived buckets plus
+  // whether the viewer may edit status, so managers see progress at a glance
+  // and admins get inline controls. Completed items auto-move to Archived after
+  // FEEDBACK_ARCHIVE_DAYS days (flipped lazily here so the sheet stays tidy).
   getList: function(limit) {
-    var sh = this._sheet();
+    var sh = this._ensureColumns();
     var last = sh.getLastRow();
-    if (last < 2) return JSON.stringify([]);
-    var max = limit || 50;
-    var n = Math.min(max, last - 1);
-    var rows = sh.getRange(last - n + 1, 1, n, this.HEADERS.length).getValues();
-    var out = rows.map(function(r) {
-      var ts = r[0];
-      return {
-        ts: (ts instanceof Date) ? Utilities.formatDate(ts, 'America/Toronto', 'yyyy-MM-dd HH:mm') : String(ts || ''),
+    var admin = this.isAdmin();
+    var base = { items: [], archived: [], isAdmin: admin, statuses: this.ALL_STATUSES, activeCount: 0, archivedCount: 0 };
+    if (last < 2) return JSON.stringify(base);
+
+    var readN = Math.min(last - 1, 500);
+    var startRow = last - readN + 1;
+    var rows = sh.getRange(startRow, 1, readN, this.HEADERS.length).getValues();
+    var now = Date.now();
+    var archiveMs = this._archiveDays() * 86400000;
+    var self = this;
+    var flips = [];
+    var active = [], archived = [];
+
+    rows.forEach(function(r, i) {
+      var rowNum = startRow + i;
+      var status = String(r[5] || 'New');
+      var completedRaw = r[7];
+      var completedMs = (completedRaw instanceof Date) ? completedRaw.getTime() : (completedRaw ? new Date(completedRaw).getTime() : 0);
+      var isArch = /archived/i.test(status);
+      if (!isArch && /completed/i.test(status) && completedMs && (now - completedMs) > archiveMs) {
+        isArch = true; status = 'Archived'; flips.push(rowNum);
+      }
+      var item = {
+        row: rowNum,
+        ts: self._fmt(r[0]),
         user: String(r[1] || ''),
         type: String(r[2] || ''),
         message: String(r[3] || ''),
         page: String(r[4] || ''),
-        status: String(r[5] || 'New')
+        status: status,
+        updated: self._fmt(r[6]),
+        completedAt: completedMs ? self._fmt(completedRaw) : '',
+        updatedBy: String(r[8] || '')
       };
-    }).reverse();
-    return JSON.stringify(out);
+      (isArch ? archived : active).push(item);
+    });
+
+    // Persist auto-archive flips (best-effort; never block the read).
+    flips.forEach(function(rn) { try { sh.getRange(rn, 6).setValue('Archived'); } catch (e) {} });
+
+    active.reverse(); archived.reverse();
+    base.activeCount = active.length;
+    base.archivedCount = archived.length;
+    base.items = active.slice(0, limit || 50);
+    base.archived = archived.slice(0, 100);
+    return JSON.stringify(base);
+  },
+
+  // Admin-only status change. `row` is the sheet row supplied by getList.
+  setStatus: function(row, status) {
+    if (!this.isAdmin()) return JSON.stringify({ ok: false, error: 'Not authorized to change status.' });
+    row = parseInt(row, 10);
+    if (!row || row < 2) return JSON.stringify({ ok: false, error: 'Invalid item.' });
+
+    var norm = null;
+    for (var i = 0; i < this.ALL_STATUSES.length; i++) {
+      if (this.ALL_STATUSES[i].toLowerCase() === String(status || '').toLowerCase()) norm = this.ALL_STATUSES[i];
+    }
+    if (!norm) return JSON.stringify({ ok: false, error: 'Unknown status.' });
+
+    var sh = this._ensureColumns();
+    if (row > sh.getLastRow()) return JSON.stringify({ ok: false, error: 'Item not found.' });
+
+    var email = '';
+    try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+    var now = new Date();
+    sh.getRange(row, 6).setValue(norm);   // Status
+    sh.getRange(row, 7).setValue(now);    // Updated
+    sh.getRange(row, 9).setValue(email);  // Updated By
+    if (/completed/i.test(norm)) sh.getRange(row, 8).setValue(now);          // stamp Completed At
+    else if (!/archived/i.test(norm)) sh.getRange(row, 8).setValue('');      // reopened -> clear it
+    return JSON.stringify({ ok: true, status: norm });
   }
 };
+
+// Add/replace the feedback status admins (comma/space separated emails). The
+// deploying owner is always an admin even if this is empty.
+function setFeedbackAdmins(csv) {
+  PropertiesService.getScriptProperties().setProperty('FEEDBACK_ADMINS', String(csv || ''));
+  return 'FEEDBACK_ADMINS = ' + (csv || '(empty — owner only)');
+}
