@@ -21,6 +21,12 @@ var FeedbackTracker = {
   ALL_STATUSES: ['New', 'Understood', 'In Progress', 'Completed', 'Declined', 'Archived'],
   DEFAULT_ARCHIVE_DAYS: 3, // Completed items auto-archive after this many days.
 
+  // Always-admins (can change status), in ADDITION to the deploying owner and any
+  // emails in the FEEDBACK_ADMINS Script Property. Kept here so it works without
+  // any setup; edit this list or run setFeedbackAdmins('a@x.com, b@y.com') to
+  // change who can mark items complete. Everyone else is read-only.
+  OWNER_ADMINS: ['dylan.medina-marchand@telus.com'],
+
   _sheet: function() {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sh = ss.getSheetByName(this.SHEET);
@@ -56,6 +62,7 @@ var FeedbackTracker = {
   // the FEEDBACK_ADMINS Script Property (comma/space separated emails).
   _admins: function() {
     var list = [];
+    (this.OWNER_ADMINS || []).forEach(function(s) { s = String(s).trim().toLowerCase(); if (s) list.push(s); });
     try {
       var p = PropertiesService.getScriptProperties().getProperty('FEEDBACK_ADMINS') || '';
       p.split(/[,;\s]+/).forEach(function(s) { s = s.trim().toLowerCase(); if (s) list.push(s); });
