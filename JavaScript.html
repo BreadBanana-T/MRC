@@ -421,7 +421,7 @@
       var urls = opts.urls || {};
       var rows = [
           { code: 'BC', name: 'BC Hydro',          hint: 'outage-list.json (DevTools → Network → filter "outage" or ".json")' },
-          { code: 'ON', name: 'Hydro One',         hint: 'ArcGIS FeatureServer/0/query (DevTools → filter "FeatureServer" or "query")' },
+          { code: 'ON', name: 'Hydro One',         hint: 'Kubra currentState URL (DevTools → Network → filter "currentState" → copy link). Resolves the live data.json each poll so it never goes stale.' },
           { code: 'QC', name: 'Hydro-Québec',      hint: 'bilan.json (DevTools → filter "bilan" or "pannes")' }
       ];
       var html = rows.map(function(r) {

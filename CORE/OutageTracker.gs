@@ -10,21 +10,31 @@
  * silently skips and the UI shows "source offline" for that province.
  *
  * ────────────────────────────────────────────────────────────────────
- * FINDING THE HYDRO ONE URL
+ * FINDING THE HYDRO ONE URL (Kubra Storm Centre)
  * ────────────────────────────────────────────────────────────────────
- * Hydro One's Storm Centre backend shifts periodically. Current discovery
- * recipe:
+ * Hydro One now uses Kubra. Kubra publishes each data generation under a NEW
+ * folder id, so a hard-coded .../summary-1/data.json (e.g.
+ * kubra.io/data/<guid>/public/summary-1/data.json) STOPS updating once Kubra
+ * rotates to a new folder — that folder id is a one-time snapshot.
+ *
+ * The fix is to give this module the "currentState" URL. It resolves the live
+ * data.json on every poll (currentState -> current folder -> data.json), so it
+ * never goes stale.
+ *
+ * Recipe:
  *   1. Open https://stormcentre.hydroone.com/ in Chrome
- *   2. Open DevTools -> Network tab, filter "query" or "FeatureServer"
- *   3. Refresh the page. Look for a request hitting a URL like
- *        https://services*.arcgis.com/<orgId>/arcgis/rest/services/<SvcName>/FeatureServer/0/query
- *      or a self-hosted variant such as
- *        https://<host>.hydroone.com/.../rest/services/Outages/MapServer/0/query
- *   4. Copy the FULL URL including query string, or just the base /query
- *      path and this module will add the usual params.
- *   5. Set it via the Apps Script editor:
- *        setOutageUrl('ON', '<paste full URL here>')
- *      (See `setOutageUrl` at bottom of this file.)
+ *   2. DevTools -> Network tab, filter: currentState
+ *   3. Refresh. Click the "currentState?preview=false" request and
+ *      right-click -> Copy -> Copy link address. It looks like:
+ *        https://kubra.io/stormcenter/api/v1/stormcenters/<guid>/views/<guid>/currentState?preview=false
+ *   4. Set it via the Apps Script editor:
+ *        setOutageUrl('ON', '<paste currentState URL>')
+ *   5. Verify with debugOutages() — it follows currentState to the live
+ *      data.json and prints the resolved URL + summaryFileData totals.
+ *
+ * (A raw .../summary-1/data.json URL still works but will go stale; prefer the
+ * currentState URL. Legacy ArcGIS FeatureServer /query URLs are also supported
+ * and auto-paginated.)
  *
  * BC Hydro's outage-list.json has been stable for years. Hydro-Québec's
  * bilan.json has drifted a few times — if QC fails, do the same recipe
@@ -262,15 +272,49 @@ var OutageTracker = {
     }
   },
 
+  // Deep-scan a Kubra JSON blob for a deployment-folder value: either a bare
+  // GUID or a "data/<guid>" path (that's how the summary data folder is named).
+  _findKubraFolder: function(obj) {
+    var guidRe = /^(data\/)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
+    var found = null;
+    var walk = function(o) {
+      if (found) return;
+      if (typeof o === 'string') { if (guidRe.test(o)) found = o; return; }
+      if (o && typeof o === 'object') { for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { walk(o[k]); if (found) return; } } }
+    };
+    walk(obj);
+    return found;
+  },
+
+  // Kubra publishes each data generation under a NEW folder id, so a hard-coded
+  // .../summary-1/data.json goes stale. The live map first calls currentState to
+  // discover the current folder, then reads that folder's data.json. Given a
+  // currentState URL we do the same and return the live summary data.json URL.
+  _resolveKubraDataUrl: function(currentStateUrl) {
+    var res = UrlFetchApp.fetch(currentStateUrl, this._commonHeaders());
+    if (res.getResponseCode() !== 200) throw new Error('currentState HTTP ' + res.getResponseCode());
+    var state = JSON.parse(res.getContentText());
+    var folder = (state.data && state.data.interval_generation_data) ||
+                 state.interval_generation_data || state.datastore ||
+                 this._findKubraFolder(state);
+    if (!folder) throw new Error('currentState: no deployment folder found');
+    folder = String(folder).replace(/^https?:\/\/kubra\.io\//i, '').replace(/^\/+|\/+$/g, '');
+    if (/data\.json$/i.test(folder)) return 'https://kubra.io/' + folder;
+    return 'https://kubra.io/' + folder + '/public/summary-1/data.json';
+  },
+
   _fetchHydroOne: function() {
     try {
       var url = this._getUrl('HYDRO_ONE_URL', this._DEFAULT_HYDRO_ONE_URL);
       if (!url) return { skipped: true };
-      var isKubra = /kubra\.io|\/data\.json(\?|$)/i.test(url);
+      var isKubra = /kubra\.io|currentState|\/data\.json(\?|$)/i.test(url);
 
-      // ---- Kubra / self-hosted summary JSON (totals only, no /query) ----
+      // ---- Kubra summary JSON (totals only, no /query) ----
       if (isKubra) {
-        var resK = UrlFetchApp.fetch(url, this._commonHeaders());
+        // If given a currentState URL, resolve the CURRENT data.json each poll so
+        // it never goes stale. A raw data.json URL is used as-is (may go stale).
+        var dataUrl = /currentState/i.test(url) ? this._resolveKubraDataUrl(url) : url;
+        var resK = UrlFetchApp.fetch(dataUrl, this._commonHeaders());
         if (resK.getResponseCode() !== 200) throw new Error('HTTP ' + resK.getResponseCode());
         var bodyK = JSON.parse(resK.getContentText());
         if (bodyK.summaryFileData && Array.isArray(bodyK.summaryFileData.totals) && bodyK.summaryFileData.totals.length) {
@@ -278,7 +322,7 @@ var OutageTracker = {
           var custK = (t.total_cust_a && t.total_cust_a.val != null) ? t.total_cust_a.val : (t.total_cust_s && t.total_cust_s.val);
           return { data: { outages: this._safeInt(t.total_outages), customers: this._safeInt(custK), top: [], source: 'Hydro One' } };
         }
-        throw new Error('Unrecognized Kubra summary shape');
+        throw new Error('Unrecognized Kubra summary shape @ ' + dataUrl);
       }
 
       // ---- ArcGIS FeatureServer / MapServer /query, WITH PAGINATION ----
@@ -461,6 +505,12 @@ function debugOutages() {
     var info = { url: url || '(not set)' };
     if (url) {
       try {
+        // Follow a Kubra currentState URL to the live data.json so the dump
+        // shows the actual totals, not just the discovery response.
+        if (/currentState/i.test(url)) {
+          try { info.resolvedDataUrl = OutageTracker._resolveKubraDataUrl(url); url = info.resolvedDataUrl; }
+          catch (rk) { info.resolveError = rk.message; }
+        }
         var res = UrlFetchApp.fetch(url, OutageTracker._commonHeaders());
         info.httpStatus = res.getResponseCode();
         var text = res.getContentText();
