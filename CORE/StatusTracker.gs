@@ -98,20 +98,32 @@ const StatusTracker = {
   // One row per agent (latest wins), NO date stamp — assignments persist
   // until the agent is explicitly moved back to Avaya (channel = "").
   setGenesys: function(name, channel, queuesJson) {
+    return this.setGenesysBatch([name], channel, queuesJson);
+  },
+
+  // Batch write: one sheet read to index existing rows, then per-name
+  // in-place updates and a single append for the new ones.
+  setGenesysBatch: function(names, channel, queuesJson) {
     const sheet = this._getSheet("Genesys_Assignments", ["Timestamp", "Agent Name", "Channel", "Queues JSON"]);
-    const cleanName = String(name).trim().toLowerCase();
     const q = channel === 'inbound' ? (queuesJson || "[]") : "[]";
+    const now = new Date();
 
     const data = sheet.getDataRange().getValues();
-    let foundRow = -1;
+    const rowByName = {};
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][1]).trim().toLowerCase() === cleanName) { foundRow = i + 1; break; }
+      rowByName[String(data[i][1]).trim().toLowerCase()] = i + 1;
     }
 
-    if (foundRow > -1) {
-      sheet.getRange(foundRow, 1, 1, 4).setValues([[new Date(), name, channel || "", q]]);
-    } else {
-      sheet.appendRow([new Date(), name, channel || "", q]);
+    const toAppend = [];
+    names.forEach(function(name) {
+      const cleanName = String(name).trim().toLowerCase();
+      if (!cleanName) return;
+      const row = rowByName[cleanName];
+      if (row) sheet.getRange(row, 1, 1, 4).setValues([[now, name, channel || "", q]]);
+      else toAppend.push([now, name, channel || "", q]);
+    });
+    if (toAppend.length) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length, 4).setValues(toAppend);
     }
     return "Genesys Saved";
   },

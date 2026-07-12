@@ -266,6 +266,12 @@
                 <button class="btn-popout" onclick="closeGenesysModal()"><i data-lucide="x" width="14"></i></button>
             </div>
 
+            <div id="genesys-batch-panel" style="display:none; margin-bottom:18px;">
+                <div class="gen-mlabel">Agents <span id="genesys-batch-count" style="color:var(--genesys); letter-spacing:0; text-transform:none;">(0 selected)</span></div>
+                <input class="input-aether" id="genesys-batch-search" placeholder="Filter agents…" oninput="filterGenesysBatch(this.value)" style="margin-bottom:10px;">
+                <div id="genesys-batch-list" class="gen-batch-list custom-scrollbar"></div>
+            </div>
+
             <div class="gen-mlabel">Channel</div>
             <div class="gen-seg">
                 <button id="genesys-seg-in" onclick="setGenesysChannel('inbound')"><i data-lucide="phone-incoming" width="15"></i> Inbound</button>

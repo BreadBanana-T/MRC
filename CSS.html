@@ -410,6 +410,17 @@
   .gen-qopt .lang { opacity: 0.55; }
   .gen-qbody { max-height: 42vh; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
 
+  /* batch mode: agent multi-picker inside the assign modal */
+  .gen-batch-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; max-height: 200px; overflow-y: auto; padding-right: 4px; }
+  @media (max-width: 560px) { .gen-batch-list { grid-template-columns: 1fr; } }
+  .gen-agent-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--glass-border); background: rgba(120,120,140,0.06); cursor: pointer; user-select: none; transition: 0.12s; min-width: 0; }
+  .gen-agent-opt:hover { border-color: var(--genesys-border); }
+  .gen-agent-opt.on { background: var(--genesys-soft); border-color: var(--genesys); }
+  .gen-agent-opt .status-dot { width: 8px; height: 8px; flex-shrink: 0; }
+  .gen-agent-opt .nm { font-weight: 700; font-size: 0.8rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .gen-agent-opt .id { font-family: monospace; font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
+  .gen-agent-opt .gen-cur { font-size: 0.6rem; font-weight: 800; color: var(--genesys); border: 1px solid var(--genesys-border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
+
   .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
   .break-card:hover { transform: translateY(-4px); box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
 

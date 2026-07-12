@@ -835,6 +835,7 @@
       if (a) { var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T'; meta = (a.region || '') + (a.id ? ' · ' + pfx + a.id : ''); }
       document.getElementById('genesys-agent-meta').textContent = meta;
       document.getElementById('genesys-mark').innerHTML = genLogoSvg(34);
+      document.getElementById('genesys-batch-panel').style.display = 'none';
       document.getElementById('genesys-qsearch').value = '';
       renderGenesysQueues();
       setGenesysChannel(state.genesysDraft.channel);
@@ -844,6 +845,64 @@
   // Outbound has no queue — assign straight from the menu.
   window.assignGenesysOutbound = function() { closeMenu(); setAgentGenesys('outbound', []); };
   window.removeGenesys = function() { closeMenu(); setAgentGenesys('', []); };
+
+  // ---- Batch assignment: same modal, plus an agent multi-picker ----
+  window.openGenesysBatch = function() {
+      state.genesysDraft = { batch: true, names: [], channel: 'inbound', queues: [] };
+      document.getElementById('genesys-agent-name').textContent = 'Batch assign';
+      document.getElementById('genesys-agent-meta').textContent = 'Pick agents, then a channel';
+      document.getElementById('genesys-mark').innerHTML = genLogoSvg(34);
+      document.getElementById('genesys-batch-panel').style.display = '';
+      document.getElementById('genesys-batch-search').value = '';
+      document.getElementById('genesys-qsearch').value = '';
+      renderGenesysBatchList('');
+      renderGenesysQueues();
+      setGenesysChannel('inbound');
+      document.getElementById('genesys-modal').classList.add('open');
+      refreshIcons();
+  };
+  function renderGenesysBatchList(filter) {
+      filter = (filter || '').toLowerCase();
+      var sel = {}; (state.genesysDraft.names || []).forEach(function(n) { sel[n] = 1; });
+      var list = (state.agents.active || []).slice().sort(function(x, y) { return (x.name || '').localeCompare(y.name || ''); });
+      var h = list.map(function(a) {
+          var name = a.name || '';
+          if (filter && name.toLowerCase().indexOf(filter) === -1) return '';
+          var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+          var cur = (a.genesys && a.genesys.channel) ? '<span class="gen-cur">' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span>' : '';
+          return '<div class="gen-agent-opt' + (sel[name] ? ' on' : '') + '" data-n="' + escapeHTML(name) + '" onclick="toggleGenesysBatchAgent(this)">' +
+                 '<span class="status-dot ' + ((a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on') + '"></span>' +
+                 '<span class="nm">' + escapeHTML(name) + '</span>' +
+                 '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span>' + cur + '</div>';
+      }).join('');
+      document.getElementById('genesys-batch-list').innerHTML = h || '<div class="gen-empty" style="grid-column:1/-1;">No matching active agents.</div>';
+      updateGenesysBatchCount();
+  }
+  window.toggleGenesysBatchAgent = function(el) {
+      var name = el.getAttribute('data-n');
+      var arr = state.genesysDraft.names || [];
+      var idx = arr.indexOf(name);
+      if (idx === -1) arr.push(name); else arr.splice(idx, 1);
+      state.genesysDraft.names = arr;
+      el.classList.toggle('on');
+      updateGenesysBatchCount();
+  };
+  function updateGenesysBatchCount() {
+      var el = document.getElementById('genesys-batch-count');
+      if (el) el.textContent = '(' + (state.genesysDraft.names || []).length + ' selected)';
+  }
+  window.filterGenesysBatch = function(v) { renderGenesysBatchList(v); };
+
+  // Move every currently-assigned agent back to Avaya in one save.
+  window.returnAllGenesys = function() {
+      var names = (state.agents.active || []).filter(function(a) { return a.genesys && a.genesys.channel; }).map(function(a) { return a.name; });
+      if (!names.length) { showToast('No one is on Genesys'); return; }
+      if (!confirm('Return all ' + names.length + ' agent' + (names.length === 1 ? '' : 's') + ' to Avaya?')) return;
+      names.forEach(function(n) { applyGenesysInMemory(n, '', []); });
+      if (state.view === 'agents') render();
+      showToast('Returned ' + names.length + ' to Avaya');
+      if (typeof google !== 'undefined') google.script.run.updateAgentGenesysBatch(JSON.stringify(names), '', '[]');
+  };
 
   window.setGenesysChannel = function(ch) {
       if (!state.genesysDraft) state.genesysDraft = { channel: ch, queues: [] };
@@ -891,6 +950,19 @@
   window.closeGenesysModal = function() { document.getElementById('genesys-modal').classList.remove('open'); };
   window.saveGenesysAssignment = function() {
       var d = state.genesysDraft; if (!d) return;
+      if (d.batch) {
+          var names = d.names || [];
+          if (!names.length) { showToast('Pick at least one agent'); return; }
+          var queues = d.channel === 'inbound' ? (d.queues || []) : [];
+          names.forEach(function(n) { applyGenesysInMemory(n, d.channel, queues); });
+          if (state.view === 'agents') render();
+          showToast(names.length + ' agent' + (names.length === 1 ? '' : 's') + ' → Genesys ' + (d.channel === 'inbound' ? 'Inbound' : 'Outbound'));
+          // One server call for the whole group — parallel single saves
+          // would race on the shared fast-map property.
+          if (typeof google !== 'undefined') google.script.run.updateAgentGenesysBatch(JSON.stringify(names), d.channel, JSON.stringify(queues));
+          closeGenesysModal();
+          return;
+      }
       state.selectedAgent = d.name;
       if (d.channel === 'inbound') setAgentGenesys('inbound', d.queues || []);
       else setAgentGenesys('outbound', []);
@@ -1425,7 +1497,8 @@
               genLogoSvg(56) +
               '<div style="margin-top:20px;">' + genCloudLogoSvg(26) + '</div>' +
               '<p style="color:var(--text-muted); max-width:420px; margin:16px auto 24px; font-size:0.92rem; line-height:1.6;">Nobody is tracked on Genesys Cloud yet. Assignments are manual (no IT integration) and persist until an agent is moved back to Avaya.</p>' +
-              '<div style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 18px;">Avaya Floor → click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> or <span style="color:var(--status-break);">Genesys Outbound</span></div>' +
+              '<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openGenesysBatch()"><i data-lucide="users" width="16"></i> Batch assign agents</button>' +
+              '<div style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 18px;">or: Avaya Floor → click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span></div>' +
               '</div>';
       }
 
@@ -1445,6 +1518,10 @@
                 kpi('Inbound', inbound.length, 'var(--region-on)') +
                 kpi('Outbound', outbound.length, 'var(--status-break)') +
                 kpi('On Genesys', genTotal + ' <span style="font-size:0.62em; color:var(--text-muted);">' + (pIn + pOut) + '%</span>', 'var(--genesys)') +
+              '</div>' +
+              '<div style="display:flex; gap:8px; align-items:center;">' +
+                '<button class="btn btn-glass" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="15"></i> Batch assign</button>' +
+                '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Return everyone to Avaya"><i data-lucide="undo-2" width="15"></i></button>' +
               '</div>' +
             '</div>' +
             '<div class="gen-share" title="Avaya ' + pAv + '% · Inbound ' + pIn + '% · Outbound ' + pOut + '%">' +
