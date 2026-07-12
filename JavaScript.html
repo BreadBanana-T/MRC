@@ -798,6 +798,19 @@
       return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 246 30" aria-label="Genesys Cloud" style="flex-shrink:0;">' + GENESYS_CLOUD_LOGO_PATHS + '</svg>';
   }
 
+  // Genesys ACD queue names all share this prefix; the UI shows the short
+  // form and copies the full name (Genesys admin needs it verbatim).
+  var GENESYS_QUEUE_PREFIX = 'acd_tel_sec_monit_';
+  window.copyQueueName = function(e, q) {
+      e.stopPropagation();
+      fallbackCopyTextToClipboard(GENESYS_QUEUE_PREFIX + q, 'Copied: ' + GENESYS_QUEUE_PREFIX + q);
+  };
+  // Inbound agents holding an ICL queue count as ICL for the floor's
+  // Special Roles card — same duty, different platform.
+  function genHasIclQueue(g) {
+      return !!(g && g.channel === 'inbound' && (g.queues || []).some(function(q) { return q.indexOf('icl_') === 0; }));
+  }
+
   // Queues from the provided list, grouped by service type (EN/FR + tcan).
   var GENESYS_QUEUES = [
       ['Urgent', ['urgent_en','urgent_fr','urgent_tcan_en','urgent_tcan_fr']],
@@ -977,9 +990,17 @@
       if (typeof google !== 'undefined') google.script.run.updateAgentGenesys(name, channel || '', JSON.stringify(queues || []));
   }
   function setGenesysOnAgent(name, channel, queues) {
+      var hasIcl = channel === 'inbound' && (queues || []).some(function(q) { return q.indexOf('icl_') === 0; });
       for (var k in state.agents) {
           if (!Array.isArray(state.agents[k])) continue;
-          state.agents[k].forEach(function(a) { if (a.name === name) a.genesys = channel ? { channel: channel, queues: (queues || []).slice() } : null; });
+          state.agents[k].forEach(function(a) {
+              if (a.name !== name) return;
+              a.genesys = channel ? { channel: channel, queues: (queues || []).slice() } : null;
+              // Mirror the server rule: ICL queues on Genesys = ICL role on the
+              // floor. _genIcl marks roles we derived so we can undo only ours.
+              if (hasIcl && (a.role || '').indexOf('ICL') === -1) { a.role = ((a.role || '') + ' ICL').trim(); a._genIcl = true; }
+              else if (!hasIcl && a._genIcl) { a.role = (a.role || '').split(/\s+/).filter(function(t) { return t !== 'ICL'; }).join(' '); delete a._genIcl; }
+          });
       }
   }
   function applyGenesysInMemory(name, channel, queues) {
@@ -1425,11 +1446,11 @@
       if (a.genesys && a.genesys.channel === 'inbound') {
           var qs = a.genesys.queues || [];
           if (qs.length) {
-              var shown = qs.slice(0, 3).map(function(q){ return '<span class="qchip">' + escapeHTML(q) + '</span>'; }).join('');
+              var shown = qs.slice(0, 3).map(function(q){ return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
               if (qs.length > 3) shown += '<span class="qchip more" title="' + escapeHTML(qs.slice(3).join(', ')) + '">+' + (qs.length - 3) + '</span>';
               mid = '<div class="qrow">' + shown + '</div>';
           } else { mid = '<span style="color:var(--status-warn); font-size:0.78rem; font-weight:700;">No queue yet — click to assign</span>'; }
-      } else { mid = '<span style="color:var(--text-muted); font-size:0.78rem; font-weight:600;">Callbacks · alarm verification</span>'; }
+      } else { mid = ''; }
       // Right column keeps the agent's real shift window (like the Avaya
       // floor) — the lane header already says Inbound/Outbound.
       var timeDisplay = 'OFF';
@@ -1458,8 +1479,8 @@
               totalQ++;
               var n = counts[q] || 0; if (n) covered++;
               var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
-              var title = n ? escapeHTML(names[q].join(', ')) : 'No one assigned';
-              return '<span class="gen-cov' + (n ? ' on' : '') + '" title="' + title + '">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
+              var title = (n ? escapeHTML(names[q].join(', ')) : 'No one assigned') + ' — click to copy ' + escapeHTML(GENESYS_QUEUE_PREFIX + q);
+              return '<span class="gen-cov' + (n ? ' on' : '') + '" title="' + title + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
           }).join('');
           return '<div class="gen-qgroup"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + chips + '</div></div>';
       }).join('');
@@ -1499,7 +1520,8 @@
               '<p style="color:var(--text-muted); max-width:420px; margin:16px auto 24px; font-size:0.92rem; line-height:1.6;">Nobody is tracked on Genesys Cloud yet. Assignments are manual (no IT integration) and persist until an agent is moved back to Avaya.</p>' +
               '<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openGenesysBatch()"><i data-lucide="users" width="16"></i> Batch assign agents</button>' +
               '<div style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 18px;">or: Avaya Floor → click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span></div>' +
-              '</div>';
+              '</div>' +
+              '<div class="aether-card" style="padding:20px 24px; margin-top:20px;">' + renderGenesysCoverage([]) + '</div>';
       }
 
       var kpi = function(label, val, color) {
@@ -1674,7 +1696,7 @@
                 '<div class="status-dot ' + stripClass + '"></div>' +
                 '<div class="row-name">' + escapeHTML(a.name || '') + hoverCardHtml + '</div>' +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
-                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + ((a.genesys && a.genesys.channel) ? '<span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span>' : '') + '</div>' + breakHtml + '</div>' +
+                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + ((a.genesys && a.genesys.channel) ? '<div style="margin-top:3px;"><span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span></div>' : '') + breakHtml + '</div>' +
                 '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
      return html;
   }

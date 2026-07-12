@@ -216,6 +216,13 @@ function compileFloorData() {
     }
 
     let effectiveRole = manualRole || dynamicRoleNow;
+    // Genesys inbound agents holding an ICL queue ARE the ICL role, just on
+    // the other platform — surface them in the floor's ICL card too.
+    if (genesysData && genesysData.channel === 'inbound' &&
+        (genesysData.queues || []).some(q => String(q).indexOf('icl_') === 0) &&
+        effectiveRole.indexOf('ICL') === -1) {
+      effectiveRole = (effectiveRole + ' ICL').trim();
+    }
     let category = "active";
     let subStatus = effectiveRole || "";
 
