@@ -29,11 +29,13 @@
     --status-warn: #d97706;
     --status-role: #7c3aed;
     --status-ulc: #f97316;
-    /* Genesys Cloud brand orange (#ff4f1f) — the one non-indigo accent,
-       used only to mark agents working on the new platform. */
-    --genesys: #ff4f1f;
-    --genesys-soft: rgba(255, 79, 31, 0.10);
-    --genesys-border: rgba(255, 79, 31, 0.28);
+    /* Genesys Cloud brand orange — official #ff451a from Genesys's design
+       system (genesys-spark-components). The one non-indigo accent, used
+       only to mark agents working on the new platform. */
+    --genesys: #ff451a;
+    --genesys-soft: rgba(255, 69, 26, 0.10);
+    --genesys-border: rgba(255, 69, 26, 0.28);
+    --gen-logo-text: #141929; /* official wordmark color on light */
 
     --region-on: #0ea5e9;
     --region-off: #8b5cf6;
@@ -61,9 +63,10 @@
     --status-warn: #fbbf24;
     --status-role: #c084fc;
     --status-ulc: #fb923c;
-    --genesys: #ff6a3d;
-    --genesys-soft: rgba(255, 106, 61, 0.14);
-    --genesys-border: rgba(255, 106, 61, 0.34);
+    --genesys: #ff5c33; /* lifted slightly for dark-bg contrast */
+    --genesys-soft: rgba(255, 92, 51, 0.14);
+    --genesys-border: rgba(255, 92, 51, 0.34);
+    --gen-logo-text: #ffffff; /* official wordmark color on dark */
     --region-on: #38bdf8;
     --region-off: #a78bfa;
   }
@@ -350,22 +353,22 @@
   .floor-seg button.active.gen { color: var(--genesys); }
 
   /* ===================== GENESYS CLOUD SECTION ===================== */
-  /* Follows the app idiom: neutral aether-card differentiated only by an
-     accent-colored title (like ICL/SAFE/ULC), plus the brand orange. */
-  .gen-header { color: var(--genesys); background: var(--genesys-soft); }
-  .gen-mark { flex-shrink: 0; filter: drop-shadow(0 3px 6px rgba(255, 79, 31, 0.35)); }
-  .gen-title { color: var(--genesys); font-weight: 800; }
+  /* Official logo colorways (paths carry .gcl-mk / .gcl-tx classes). */
+  .gcl-mk { fill: var(--genesys); }
+  .gcl-tx { fill: var(--gen-logo-text); }
 
-  /* summary line + platform share bar */
-  .gen-sumline { display: flex; align-items: center; gap: 12px; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); flex-wrap: wrap; }
-  .gen-sumline b { font-variant-numeric: tabular-nums; }
-  .gen-sumline .s-av { color: var(--accent-primary); }
-  .gen-sumline .s-in { color: var(--region-on); }
-  .gen-sumline .s-out { color: var(--status-break); }
-  .gen-share { height: 6px; border-radius: 99px; overflow: hidden; display: flex; background: var(--glass-border); margin: 2px 0 18px; }
+  /* KPI strip — same idiom as the header .kpi-box row */
+  .gen-kpis { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+  .gen-kpi h4 { margin: 0; font-size: 0.62rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; letter-spacing: 0.06em; }
+  .gen-kpi div { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2; }
+
+  /* platform share bar */
+  .gen-share { height: 6px; border-radius: 99px; overflow: hidden; display: flex; background: var(--glass-border); margin: 2px 0 20px; }
   .gen-share i { display: block; height: 100%; transition: width 0.4s ease; }
-  .gen-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-  @media (max-width: 760px) { .gen-cols { grid-template-columns: 1fr; } }
+
+  /* lanes — inbound needs more room for queue chips */
+  .gen-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .gen-cols { grid-template-columns: 1fr; } }
   .gen-lane-title { display: flex; align-items: center; justify-content: space-between; font-size: 0.9rem; font-weight: 800; margin-bottom: 10px; border-bottom: 1px solid var(--glass-border); padding-bottom: 6px; }
   .gen-lane-title .sub { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: 0; margin-left: 6px; }
   .gen-lane-title .cnt { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; }
@@ -375,14 +378,22 @@
   .qrow { display: flex; gap: 4px; flex-wrap: wrap; }
   .qchip { font-family: monospace; font-size: 0.68rem; font-weight: 700; color: var(--region-on); background: rgba(14,165,233,0.10); border: 1px solid rgba(14,165,233,0.22); padding: 1px 6px; border-radius: 5px; white-space: nowrap; }
   body.dark .qchip { color: #7dd3fc; background: rgba(56,189,248,0.12); }
-  .qchip.more { color: var(--text-muted); background: transparent; border-color: var(--glass-border); }
-  /* outbound inline tag — mirrors the app's inline "OT" badge */
-  .tag-out { font-size: 0.7em; font-weight: 800; border: 1px solid var(--status-break); color: var(--status-break); padding: 0 5px; border-radius: 4px; letter-spacing: 0.04em; }
+  .qchip.more { color: var(--text-muted); background: transparent; border-color: var(--glass-border); cursor: help; }
+
+  /* queue coverage panel — spot uncovered queues at a glance */
+  .gen-cov-panel { margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 14px; }
+  .gen-cov-panel summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 10px; }
+  .gen-cov-panel summary::-webkit-details-marker { display: none; }
+  .gen-cov-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 20px; }
+  .gen-cov { font-size: 0.68rem; font-weight: 700; font-family: monospace; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--glass-border); color: var(--text-muted); opacity: 0.55; display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+  .gen-cov.on { opacity: 1; color: var(--region-on); background: rgba(14,165,233,0.08); border-color: rgba(14,165,233,0.25); }
+  .gen-cov.on b { background: var(--region-on); color: #fff; border-radius: 6px; min-width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.62rem; padding: 0 3px; }
+  .gen-cov .lang { opacity: 0.55; }
 
   /* the FLOOR flag — sits on the normal Avaya row so everyone knows the
      agent is working elsewhere. Sibling of the inline OT badge, in orange. */
   .gen-flag { font-size: 0.7em; font-weight: 800; border: 1px solid var(--genesys); color: var(--genesys); padding: 0 4px; border-radius: 3px; margin-left: 6px; display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; letter-spacing: 0.03em; white-space: nowrap; }
-  .gen-flag svg { width: 9px; height: 9px; flex-shrink: 0; }
+  .gen-flag svg { flex-shrink: 0; }
 
   /* queue picker modal internals */
   .gen-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 18px; }
