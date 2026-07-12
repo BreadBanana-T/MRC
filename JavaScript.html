@@ -1319,17 +1319,27 @@
   function renderAgents() {
       var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
       for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
-      
+
+      var tab = state.floorTab || 'avaya';
+      // Sub-page switch: Avaya (the current floor) vs Genesys Cloud.
+      var seg = '<div class="floor-seg">' +
+                '<button class="' + (tab==='avaya'?'active':'') + '" onclick="setFloorTab(\'avaya\')"><i data-lucide="users" width="15"></i> Avaya Floor</button>' +
+                '<button class="' + (tab==='genesys'?'active gen':'') + '" onclick="setFloorTab(\'genesys\')">' + genLogoSvg(16) + ' Genesys Cloud</button>' +
+                '</div>';
+
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
-                 '' + searchBox('agent-search', 'Search agents...', escapeHTML(state.searchTerm || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
+                 seg +
+                 '' + searchBox('agent-search', 'Search agents...', escapeHTML(state.searchTerm || ''), 'handleSearch(this.value)', 'width:200px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
                  '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
                  '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
                  '<button class="btn ' + (state.regionFilter==='Onshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Onshore\')">On</button>' +
                  '<button class="btn ' + (state.regionFilter==='Offshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Offshore\')">Off</button>' +
-                 '</div></div></div>' + renderFloorLayout(upMap);
+                 '</div></div></div>' +
+                 (tab==='genesys' ? renderGenesysPage() : renderFloorLayout(upMap));
       return html;
   }
+  window.setFloorTab = function(t) { state.floorTab = t; render(); };
   
   // One agent card inside a Genesys lane. Reuses the .agent-row grid but
   // swaps the status column for queue chips (inbound) or an OUTBOUND tag.
@@ -1355,10 +1365,10 @@
              '<div class="row-time">' + side + '</div></div>';
   }
 
-  // The Genesys Cloud card — lives at the top of the Floor, above the Avaya
-  // units. Splits the currently-active roster into Genesys Inbound / Outbound
-  // vs everyone still on Avaya, so the platform breakdown reads at a glance.
-  function renderGenesysSection() {
+  // The Genesys Cloud sub-page of the Floor. Splits the currently-active
+  // roster into Genesys Inbound / Outbound vs everyone still on Avaya, so the
+  // platform breakdown reads at a glance. Reached via the Floor sub-tab.
+  function renderGenesysPage() {
       var active = state.agents.active || [];
       function match(a) {
           var mName = !state.searchTerm || (a.name || '').toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1;
@@ -1379,10 +1389,9 @@
       var inList = inbound.length ? inbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Genesys Inbound. Click any agent → <b>Genesys Inbound</b>.</div>';
       var outList = outbound.length ? outbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Genesys Outbound.</div>';
 
-      return '<div class="group-header gen-header">' + genLogoSvg(18) + ' Genesys Cloud · manual tracking</div>' +
-          '<div class="aether-card" style="padding:24px; margin-bottom:24px;">' +
+      return '<div class="aether-card" style="padding:24px;">' +
             '<div class="section-header">' +
-              '<span style="display:flex; align-items:center; gap:8px;">' + genWordmark(17) + '</span>' +
+              '<span style="display:flex; align-items:center; gap:10px;">' + genLogoSvg(26) + '<span style="display:flex; flex-direction:column; gap:2px;"><span style="display:inline-flex; align-items:baseline;">' + genWordmark(18) + '</span><span style="font-size:0.66rem; font-weight:700; letter-spacing:0.04em; color:var(--text-muted); text-transform:uppercase;">Manual tracking · no IT integration</span></span></span>' +
               '<div class="gen-sumline">' +
                 '<span class="s-av">Avaya <b>' + avaya.length + '</b></span><span>·</span>' +
                 '<span class="s-in">Inbound <b>' + inbound.length + '</b></span>' +
@@ -1446,7 +1455,7 @@
          if (offRendered) { offHtml = '<div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div><div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">' + offRendered + '</div>'; } 
      }
      
-     var html = renderGenesysSection() + startingHtml +
+     var html = startingHtml +
          '<div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div><div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-role);">ICL</div><div class="agent-list-view">' + renderGroup(state.agents.icl||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-active);">SAFE</div><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div><div class="agent-list-view">' + renderGroup(state.agents.ulc||[], upMap) + '</div></div></div>' +
          '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +

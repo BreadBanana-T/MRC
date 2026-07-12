@@ -342,6 +342,13 @@
   .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
   .group-header i { opacity: 0.7; }
 
+  /* Floor sub-page switch: Avaya Floor <-> Genesys Cloud */
+  .floor-seg { display: flex; gap: 3px; background: rgba(120,120,140,0.10); padding: 3px; border-radius: 12px; flex-shrink: 0; }
+  .floor-seg button { appearance: none; -webkit-appearance: none; border: none; background: transparent; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 0.85rem; height: 34px; padding: 0 14px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: 0.15s; white-space: nowrap; }
+  .floor-seg button:hover { color: var(--text-main); }
+  .floor-seg button.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .floor-seg button.active.gen { color: var(--genesys); }
+
   /* ===================== GENESYS CLOUD SECTION ===================== */
   /* Follows the app idiom: neutral aether-card differentiated only by an
      accent-colored title (like ICL/SAFE/ULC), plus the brand orange. */
