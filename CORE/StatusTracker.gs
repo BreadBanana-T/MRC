@@ -94,16 +94,38 @@ const StatusTracker = {
     return "OT Logged";
   },
 
+  // --- 4. GENESYS ASSIGNMENT (Genesys_Assignments) ---
+  // One row per agent (latest wins), NO date stamp — assignments persist
+  // until the agent is explicitly moved back to Avaya (channel = "").
+  setGenesys: function(name, channel, queuesJson) {
+    const sheet = this._getSheet("Genesys_Assignments", ["Timestamp", "Agent Name", "Channel", "Queues JSON"]);
+    const cleanName = String(name).trim().toLowerCase();
+    const q = channel === 'inbound' ? (queuesJson || "[]") : "[]";
+
+    const data = sheet.getDataRange().getValues();
+    let foundRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][1]).trim().toLowerCase() === cleanName) { foundRow = i + 1; break; }
+    }
+
+    if (foundRow > -1) {
+      sheet.getRange(foundRow, 1, 1, 4).setValues([[new Date(), name, channel || "", q]]);
+    } else {
+      sheet.appendRow([new Date(), name, channel || "", q]);
+    }
+    return "Genesys Saved";
+  },
+
   // --- DATA RETRIEVAL (INTELLIGENT) ---
   getConsolidatedData: function() {
     const todayStr = this._getTodayStr();
     const yesterdayStr = this._getYesterdayStr();
-    
+
     const map = new Map();
 
     const getEntry = (name) => {
       const k = String(name).trim().toLowerCase();
-      if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [] });
+      if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [], genesys: null });
       return map.get(k);
     };
     
@@ -133,6 +155,22 @@ const StatusTracker = {
        const e = getEntry(row[1]);
        e.ot.push({ start: row[2], end: row[3], bStart: row[4], bEnd: row[5] });
     });
+
+    // Genesys assignments are date-agnostic — read every row, latest wins.
+    const gSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Genesys_Assignments");
+    if (gSheet && gSheet.getLastRow() > 1) {
+      gSheet.getDataRange().getValues().slice(1).forEach(row => {
+        const e = getEntry(row[1]);
+        const channel = row[2];
+        if (channel) {
+          let q = [];
+          try { q = JSON.parse(row[3] || "[]"); } catch (err) { q = []; }
+          e.genesys = { channel: String(channel), queues: q };
+        } else {
+          e.genesys = null;
+        }
+      });
+    }
     return map;
   },
 

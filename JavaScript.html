@@ -773,10 +773,146 @@
   window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
-  window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
+  window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var a=genAgentByName(n); var back=document.getElementById('ctx-back-avaya'); if(back) back.style.display=(a && a.genesys && a.genesys.channel)?'flex':'none'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
   window.closeMenu = function() { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   
   window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') { render(); flipAgentRow(name); } showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
+
+  // ======================= GENESYS CLOUD =======================
+  // Manual, IT-independent tracking of who's working the Genesys Cloud
+  // platform (Inbound = queue-assigned, Outbound = callbacks) vs everyone
+  // still on the Avaya floor. Persists until an agent is moved back.
+  // Faithful mark: brand-orange tile (#ff4f1f) + swoosh, paired with the
+  // "Genesys" wordmark set in text (the real logo is the wordmark).
+  function genLogoSvg(size) {
+      return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 48 48" aria-label="Genesys" style="flex-shrink:0;">' +
+             '<rect x="2" y="2" width="44" height="44" rx="13" fill="#ff4f1f"/>' +
+             '<path d="M13 20c3.6 8.4 18.4 8.4 22 0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>' +
+             '</svg>';
+  }
+  function genWordmark(px) {
+      return '<span style="font-weight:800; letter-spacing:-0.02em; font-size:' + px + 'px; color:var(--text-main); line-height:1;">Genesys</span>' +
+             '<span style="font-weight:800; letter-spacing:-0.02em; font-size:' + px + 'px; color:var(--genesys); line-height:1;"> Cloud</span>';
+  }
+  var GENESYS_MARK_MINI = '<svg width="9" height="9" viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="12" fill="currentColor"/></svg>';
+
+  // Queues from the provided list, grouped by service type (EN/FR + tcan).
+  var GENESYS_QUEUES = [
+      ['Urgent', ['urgent_en','urgent_fr','urgent_tcan_en','urgent_tcan_fr']],
+      ['ICL — Standard', ['icl_std_en','icl_std_fr','icl_std_tcan_en','icl_std_tcan_fr']],
+      ['ICL — Fallback', ['icl_fallback_en','icl_fallback_fr','icl_fallback_tcan_en','icl_fallback_tcan_fr']],
+      ['Standard', ['std_en','std_fr','std_tcan_en','std_tcan_fr']],
+      ['Transfer', ['transfer_en','transfer_fr','transfer_tcan_en','transfer_tcan_fr']],
+      ['IVR', ['ivr_default_en','ivr_default_fr']],
+      ['MRC', ['mrc_en','mrc_fr']],
+      ['Escalation', ['escalation_tcan_en','escalation_tcan_fr']],
+      ['Questions', ['questions_tcan_en','questions_tcan_fr']],
+      ['Patrol', ['patrol_tcan_en','patrol_tcan_fr']],
+      ['Special assistance', ['special_assistance_en','special_assistance_fr']],
+      ['Tech support overflow', ['tech_support_overflow_en','tech_support_overflow_fr']],
+      ['Smartwear', ['smartwear_tcan_en']],
+      ['Hotline', ['hotline_tcan_en']]
+  ];
+
+  function genAgentByName(name) {
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          for (var i = 0; i < state.agents[k].length; i++) { if (state.agents[k][i].name === name) return state.agents[k][i]; }
+      }
+      return null;
+  }
+
+  // Open the Inbound picker (also used by "Assign queues"). Prefills queues.
+  window.openGenesysPicker = function(channel) {
+      var name = state.selectedAgent; closeMenu();
+      var a = genAgentByName(name);
+      var pre = (a && a.genesys && a.genesys.channel === 'inbound' && a.genesys.queues) ? a.genesys.queues.slice() : [];
+      state.genesysDraft = { name: name, channel: channel || 'inbound', queues: pre };
+      document.getElementById('genesys-agent-name').textContent = name;
+      var meta = '';
+      if (a) { var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T'; meta = (a.region || '') + (a.id ? ' · ' + pfx + a.id : ''); }
+      document.getElementById('genesys-agent-meta').textContent = meta;
+      document.getElementById('genesys-mark').innerHTML = genLogoSvg(34);
+      document.getElementById('genesys-qsearch').value = '';
+      renderGenesysQueues();
+      setGenesysChannel(state.genesysDraft.channel);
+      document.getElementById('genesys-modal').classList.add('open');
+      refreshIcons();
+  };
+  // Outbound has no queue — assign straight from the menu.
+  window.assignGenesysOutbound = function() { closeMenu(); setAgentGenesys('outbound', []); };
+  window.removeGenesys = function() { closeMenu(); setAgentGenesys('', []); };
+
+  window.setGenesysChannel = function(ch) {
+      if (!state.genesysDraft) state.genesysDraft = { channel: ch, queues: [] };
+      state.genesysDraft.channel = ch;
+      var din = document.getElementById('genesys-seg-in'), dout = document.getElementById('genesys-seg-out');
+      var inP = document.getElementById('genesys-inbound-panel'), outP = document.getElementById('genesys-outbound-panel');
+      if (ch === 'inbound') { din.className = 'sel-in'; dout.className = ''; inP.style.display = ''; outP.style.display = 'none'; }
+      else { dout.className = 'sel-out'; din.className = ''; inP.style.display = 'none'; outP.style.display = ''; }
+  };
+
+  function renderGenesysQueues() {
+      var picked = {}; (state.genesysDraft.queues || []).forEach(function(q){ picked[q] = 1; });
+      var h = GENESYS_QUEUES.map(function(g) {
+          var opts = g[1].map(function(q) {
+              var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
+              return '<div class="gen-qopt' + (picked[q] ? ' on' : '') + '" data-q="' + escapeHTML(q) + '" onclick="toggleGenesysQueue(\'' + q + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span></div>';
+          }).join('');
+          return '<div class="gen-qgroup" data-g="' + escapeHTML(g[0].toLowerCase()) + '"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + opts + '</div></div>';
+      }).join('');
+      document.getElementById('genesys-qgroups').innerHTML = h;
+      updateGenesysCount();
+  }
+  window.toggleGenesysQueue = function(q) {
+      var arr = state.genesysDraft.queues || [];
+      var idx = arr.indexOf(q);
+      if (idx === -1) arr.push(q); else arr.splice(idx, 1);
+      state.genesysDraft.queues = arr;
+      var el = document.querySelector('#genesys-qgroups .gen-qopt[data-q="' + q + '"]');
+      if (el) el.classList.toggle('on');
+      updateGenesysCount();
+  };
+  function updateGenesysCount() { var el = document.getElementById('genesys-qcount'); if (el) el.textContent = '(' + (state.genesysDraft.queues || []).length + ')'; }
+  window.filterGenesysQueues = function(v) {
+      v = (v || '').toLowerCase();
+      var groups = document.querySelectorAll('#genesys-qgroups .gen-qgroup');
+      for (var i = 0; i < groups.length; i++) {
+          var g = groups[i], any = false, opts = g.querySelectorAll('.gen-qopt');
+          for (var j = 0; j < opts.length; j++) {
+              var hit = opts[j].getAttribute('data-q').indexOf(v) !== -1 || g.getAttribute('data-g').indexOf(v) !== -1;
+              opts[j].style.display = hit ? '' : 'none'; if (hit) any = true;
+          }
+          g.style.display = any ? '' : 'none';
+      }
+  };
+  window.closeGenesysModal = function() { document.getElementById('genesys-modal').classList.remove('open'); };
+  window.saveGenesysAssignment = function() {
+      var d = state.genesysDraft; if (!d) return;
+      state.selectedAgent = d.name;
+      if (d.channel === 'inbound') setAgentGenesys('inbound', d.queues || []);
+      else setAgentGenesys('outbound', []);
+      closeGenesysModal();
+  };
+
+  function setAgentGenesys(channel, queues) {
+      var name = state.selectedAgent;
+      applyGenesysInMemory(name, channel, queues);
+      if (state.view === 'agents') render();
+      showToast(channel ? ('On Genesys · ' + (channel === 'inbound' ? 'Inbound' : 'Outbound')) : 'Back on Avaya');
+      if (typeof google !== 'undefined') google.script.run.updateAgentGenesys(name, channel || '', JSON.stringify(queues || []));
+  }
+  function setGenesysOnAgent(name, channel, queues) {
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          state.agents[k].forEach(function(a) { if (a.name === name) a.genesys = channel ? { channel: channel, queues: (queues || []).slice() } : null; });
+      }
+  }
+  function applyGenesysInMemory(name, channel, queues) {
+      state.pendingGenesys = state.pendingGenesys || {};
+      state.pendingGenesys[name] = { channel: channel || '', queues: (queues || []).slice(), timestamp: Date.now() };
+      setGenesysOnAgent(name, channel, queues);
+  }
   window.openPopout = function(mode) { var baseUrl = state.appUrl || window.location.href.split('?')[0]; var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); };
 
   function showToast(m) {
@@ -1079,7 +1215,13 @@
       }).getTrainings();
   }
 
-  function applyPendingUpdates() { var now=Date.now(); for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
+  function applyPendingUpdates() {
+     var now=Date.now();
+     for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); }
+     // Genesys assignments race the async save — re-apply the optimistic value
+     // over the freshly-fetched payload for a short window.
+     if (state.pendingGenesys) { for(var gn in state.pendingGenesys) { if(now-state.pendingGenesys[gn].timestamp>120000) delete state.pendingGenesys[gn]; else setGenesysOnAgent(gn, state.pendingGenesys[gn].channel, state.pendingGenesys[gn].queues); } }
+  }
   
   function moveAgentInMemory(name, type, val) {
      var o = null; 
@@ -1189,6 +1331,77 @@
       return html;
   }
   
+  // One agent card inside a Genesys lane. Reuses the .agent-row grid but
+  // swaps the status column for queue chips (inbound) or an OUTBOUND tag.
+  function renderGenesysRow(a) {
+      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
+      var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+      var fid = prefix + escapeHTML(a.id || '');
+      var mid, side;
+      if (a.genesys && a.genesys.channel === 'inbound') {
+          var qs = a.genesys.queues || [];
+          if (qs.length) {
+              var shown = qs.slice(0, 3).map(function(q){ return '<span class="qchip">' + escapeHTML(q) + '</span>'; }).join('');
+              if (qs.length > 3) shown += '<span class="qchip more">+' + (qs.length - 3) + '</span>';
+              mid = '<div class="qrow">' + shown + '</div>';
+          } else { mid = '<span style="color:var(--text-muted); font-size:0.8rem;">No queue — tap to assign</span>'; }
+          side = 'IN';
+      } else { mid = '<div><span class="tag-out">OUTBOUND</span></div>'; side = 'OUT'; }
+      return '<div class="agent-row" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
+             '<div class="status-dot ' + stripClass + '"></div>' +
+             '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
+             '<div class="row-id" style="padding-left:4px;">' + fid + '</div>' +
+             '<div class="row-status">' + mid + '</div>' +
+             '<div class="row-time">' + side + '</div></div>';
+  }
+
+  // The Genesys Cloud card — lives at the top of the Floor, above the Avaya
+  // units. Splits the currently-active roster into Genesys Inbound / Outbound
+  // vs everyone still on Avaya, so the platform breakdown reads at a glance.
+  function renderGenesysSection() {
+      var active = state.agents.active || [];
+      function match(a) {
+          var mName = !state.searchTerm || (a.name || '').toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1;
+          var mReg = state.regionFilter === 'All' || (a.region || '').indexOf(state.regionFilter) !== -1;
+          return mName && mReg;
+      }
+      var visible = active.filter(match);
+      var inbound = [], outbound = [], avaya = [];
+      visible.forEach(function(a) {
+          if (a.genesys && a.genesys.channel === 'inbound') inbound.push(a);
+          else if (a.genesys && a.genesys.channel === 'outbound') outbound.push(a);
+          else avaya.push(a);
+      });
+      var total = visible.length || 1;
+      var pAv = Math.round(avaya.length / total * 100), pIn = Math.round(inbound.length / total * 100), pOut = Math.round(outbound.length / total * 100);
+      var genTotal = inbound.length + outbound.length;
+
+      var inList = inbound.length ? inbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Genesys Inbound. Click any agent → <b>Genesys Inbound</b>.</div>';
+      var outList = outbound.length ? outbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Genesys Outbound.</div>';
+
+      return '<div class="group-header gen-header">' + genLogoSvg(18) + ' Genesys Cloud · manual tracking</div>' +
+          '<div class="aether-card" style="padding:24px; margin-bottom:24px;">' +
+            '<div class="section-header">' +
+              '<span style="display:flex; align-items:center; gap:8px;">' + genWordmark(17) + '</span>' +
+              '<div class="gen-sumline">' +
+                '<span class="s-av">Avaya <b>' + avaya.length + '</b></span><span>·</span>' +
+                '<span class="s-in">Inbound <b>' + inbound.length + '</b></span>' +
+                '<span class="s-out">Outbound <b>' + outbound.length + '</b></span>' +
+                '<span style="color:var(--genesys);">On Genesys <b>' + genTotal + '</b></span>' +
+              '</div>' +
+            '</div>' +
+            '<div class="gen-share">' +
+              '<i style="width:' + pAv + '%; background:var(--accent-primary);"></i>' +
+              '<i style="width:' + pIn + '%; background:var(--region-on);"></i>' +
+              '<i style="width:' + pOut + '%; background:var(--status-break);"></i>' +
+            '</div>' +
+            '<div class="gen-cols">' +
+              '<div><div class="gen-lane-title"><span style="color:var(--region-on);">Inbound<span class="sub">queue-assigned</span></span><span class="cnt">' + inbound.length + '</span></div><div class="agent-list-view">' + inList + '</div></div>' +
+              '<div><div class="gen-lane-title"><span style="color:var(--status-break);">Outbound<span class="sub">callback / verify</span></span><span class="cnt">' + outbound.length + '</span></div><div class="agent-list-view">' + outList + '</div></div>' +
+            '</div>' +
+          '</div>';
+  }
+
   function renderFloorLayout(upMap) {
      // Upcoming shifts (later today). The startingSoon bucket holds EVERY agent
      // whose shift starts after "now", so we group them by shift-start time into
@@ -1233,7 +1446,7 @@
          if (offRendered) { offHtml = '<div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div><div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">' + offRendered + '</div>'; } 
      }
      
-     var html = startingHtml + 
+     var html = renderGenesysSection() + startingHtml +
          '<div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div><div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-role);">ICL</div><div class="agent-list-view">' + renderGroup(state.agents.icl||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-active);">SAFE</div><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div><div class="agent-list-view">' + renderGroup(state.agents.ulc||[], upMap) + '</div></div></div>' +
          '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
@@ -1326,7 +1539,7 @@
                 '<div class="status-dot ' + stripClass + '"></div>' +
                 '<div class="row-name">' + escapeHTML(a.name || '') + hoverCardHtml + '</div>' +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
-                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + breakHtml + '</div>' +
+                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + ((a.genesys && a.genesys.channel) ? '<span class="gen-flag">' + GENESYS_MARK_MINI + 'GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span>' : '') + '</div>' + breakHtml + '</div>' +
                 '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
      return html;
   }

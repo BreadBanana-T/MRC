@@ -61,6 +61,8 @@ function compileFloorData() {
 
     let manualRole = (fastData.role !== undefined) ? fastData.role : (persistentData.role || "");
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
+    // Genesys Cloud manual assignment (fast map wins, else sheet). null = on Avaya.
+    let genesysData = (fastData.genesys !== undefined) ? fastData.genesys : (persistentData.genesys || null);
     let shiftType = row ? row[5] : "Off";
     
     // Region resolution order: RegionRegistry > MasterList inference > Raw Schedule row.
@@ -263,7 +265,8 @@ function compileFloorData() {
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn,
       level: ml ? ml.level : null,
       manager: ml ? ml.manager : null,
-      skills: ml ? ml.skills : null
+      skills: ml ? ml.skills : null,
+      genesys: genesysData
     };
 
     if (category === 'active' && nextBreakStr) {
