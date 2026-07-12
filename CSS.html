@@ -389,6 +389,20 @@
   .gen-cov { font-size: 0.68rem; font-weight: 700; font-family: monospace; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--glass-border); color: var(--text-muted); opacity: 0.55; display: inline-flex; align-items: center; gap: 5px; cursor: copy; user-select: none; transition: 0.12s; }
   .gen-cov:hover { opacity: 0.85; }
   .gen-cov.on:hover { opacity: 1; border-color: var(--region-on); }
+  .gen-cov { cursor: pointer; }
+  .gen-cov.open { opacity: 1; border-color: var(--genesys); color: var(--genesys); background: var(--genesys-soft); }
+  .gen-cov.open b { background: var(--genesys); }
+
+  /* inline roster expansion under the clicked queue */
+  .gen-cov-detail { grid-column: 1 / -1; border: 1px solid var(--genesys-border); background: var(--genesys-soft); border-radius: 12px; padding: 12px 14px; margin: 2px 0 6px; }
+  .gen-cov-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .gen-cov-detail-head .full-name { font-family: monospace; font-size: 0.78rem; font-weight: 700; color: var(--text-main); cursor: copy; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gen-cov-detail-head .full-name:hover { color: var(--genesys); }
+  .gen-cov-detail-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 130px; overflow-y: auto; }
+  .gen-cov-agent { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: var(--text-main); background: var(--glass-surface); border: 1px solid var(--glass-border); border-radius: 8px; padding: 4px 9px; cursor: pointer; transition: 0.12s; }
+  .gen-cov-agent:hover { border-color: var(--genesys); transform: translateY(-1px); }
+  .gen-cov-agent .status-dot { width: 7px; height: 7px; }
+  .gen-cov-agent .id { font-family: monospace; font-size: 0.66rem; color: var(--text-muted); font-weight: 700; }
   .gen-cov.on { opacity: 1; color: var(--region-on); background: rgba(14,165,233,0.08); border-color: rgba(14,165,233,0.25); }
   .gen-cov.on b { background: var(--region-on); color: #fff; border-radius: 6px; min-width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.62rem; padding: 0 3px; }
   .gen-cov .lang { opacity: 0.55; }

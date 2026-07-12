@@ -1465,30 +1465,61 @@
 
   // Queue coverage panel: every queue from the list with how many inbound
   // agents hold it. Uncovered queues are dimmed — gaps read at a glance.
+  // Clicking a queue expands an inline roster (a 50-name title tooltip
+  // doesn't scan); the full queue name + copy live in the expansion.
   function renderGenesysCoverage(inbound) {
-      var counts = {}, names = {};
+      var counts = {}, holders = {};
       inbound.forEach(function(a) {
           ((a.genesys && a.genesys.queues) || []).forEach(function(q) {
               counts[q] = (counts[q] || 0) + 1;
-              (names[q] = names[q] || []).push(a.name);
+              (holders[q] = holders[q] || []).push(a);
           });
       });
+      var openQ = state.genesysCovOpen || null;
       var totalQ = 0, covered = 0;
       var groups = GENESYS_QUEUES.map(function(g) {
+          var hasOpen = false;
           var chips = g[1].map(function(q) {
               totalQ++;
               var n = counts[q] || 0; if (n) covered++;
+              if (q === openQ) hasOpen = true;
               var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
-              var title = (n ? escapeHTML(names[q].join(', ')) : 'No one assigned') + ' — click to copy ' + escapeHTML(GENESYS_QUEUE_PREFIX + q);
-              return '<span class="gen-cov' + (n ? ' on' : '') + '" title="' + title + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
+              return '<span class="gen-cov' + (n ? ' on' : '') + (q === openQ ? ' open' : '') + '" title="' + n + ' agent' + (n === 1 ? '' : 's') + ' — click for details" onclick="toggleGenesysCov(\'' + q + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
           }).join('');
-          return '<div class="gen-qgroup"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + chips + '</div></div>';
+          var html = '<div class="gen-qgroup"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + chips + '</div></div>';
+          // Roster expansion spans the full panel width, right below the
+          // group that owns the open queue.
+          if (hasOpen) {
+              var full = GENESYS_QUEUE_PREFIX + openQ;
+              var who = (holders[openQ] || []).map(function(a) {
+                  var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+                  var dot = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
+                  return '<span class="gen-cov-agent" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')"><span class="status-dot ' + dot + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span></span>';
+              }).join('');
+              html += '<div class="gen-cov-detail">' +
+                      '<div class="gen-cov-detail-head">' +
+                        '<span class="full-name" title="Click to copy" onclick="copyQueueName(event, \'' + openQ + '\')">' + escapeHTML(full) + '</span>' +
+                        '<button class="btn-popout" title="Copy full queue name" onclick="copyQueueName(event, \'' + openQ + '\')"><i data-lucide="copy" width="13"></i></button>' +
+                        '<span style="flex:1;"></span>' +
+                        '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted);">' + (holders[openQ] || []).length + ' agent' + ((holders[openQ] || []).length === 1 ? '' : 's') + '</span>' +
+                      '</div>' +
+                      (who ? '<div class="gen-cov-detail-list custom-scrollbar">' + who + '</div>' : '<div style="font-size:0.76rem; color:var(--text-muted); font-weight:600; padding:2px 0 4px;">No one assigned — click an agent on the floor to add them.</div>') +
+                      '</div>';
+          }
+          return html;
       }).join('');
       return '<details class="gen-cov-panel"' + (inbound.length ? ' open' : '') + '>' +
              '<summary><span style="font-weight:800; font-size:0.82rem;">Queue coverage</span>' +
              '<span style="font-size:0.72rem; font-weight:700; color:' + (covered ? 'var(--text-muted)' : 'var(--status-warn)') + ';">' + covered + ' of ' + totalQ + ' queues covered</span></summary>' +
              '<div class="gen-cov-body">' + groups + '</div></details>';
   }
+  window.toggleGenesysCov = function(q) {
+      state.genesysCovOpen = (state.genesysCovOpen === q) ? null : q;
+      render();
+      // Keep the panel in view after the re-render collapses/moves things.
+      var el = document.querySelector('.gen-cov.open');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  };
 
   // The Genesys Cloud sub-page of the Floor. Splits the currently-active
   // roster into Genesys Inbound / Outbound vs everyone still on Avaya, so the
