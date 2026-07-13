@@ -185,12 +185,12 @@ var WeatherService = {
     //   risk_colour_en  -> "yellow" / "red"         (severity — RED = most severe)
     //   status_en       -> "continued" / "ended"    (lifecycle)
     //
-    // "RED-level" filters on risk_colour_en === "red". This is important: many
-    // items are alert_type="warning" yet only YELLOW (e.g. heat warnings), so
-    // filtering by type alone flooded the banner. Watches/advisories/statements
-    // and ended alerts are dropped. Alerts are aggregated per province + hazard,
-    // counting DISTINCT affected regions. Geometry / city-text remain only as a
-    // fallback for the rare feature missing a province code.
+    // We surface active WARNINGS and WATCHES (colour-coded red/orange/yellow by
+    // risk_colour_en so severity is still visible at a glance); ADVISORIES,
+    // STATEMENTS, and ended/expired alerts are dropped as too low-signal for the
+    // ops banner. Alerts are aggregated per province + hazard, counting DISTINCT
+    // affected regions. Geometry / city-text remain only as a fallback for the
+    // rare feature missing a province code.
     var cityWeights = {
         // Major
         "TORONTO": 10, "MONTREAL": 10, "VANCOUVER": 10, "CALGARY": 10, "OTTAWA": 10, "EDMONTON": 10,
@@ -301,9 +301,10 @@ var WeatherService = {
         for (var i = 0; i < HAZARD_MAP.length; i++) { if (t.indexOf(HAZARD_MAP[i][0]) !== -1) return HAZARD_MAP[i][1]; }
         return "Warning"; // couldn't identify a specific hazard phrase
     };
-    // ECCC risk-based colours: yellow / orange / red. "RED-level" = the most severe.
-    // Set to { red:true, orange:true } if you ever want to include amber alerts too.
-    var RED_COLOURS = { "red": true };
+    // ECCC risk-based colours: yellow / orange / red (red = most severe). Rank
+    // drives both sort order and chip styling; unrecognized/missing colours sort last.
+    var COLOUR_RANK = { "red": 3, "orange": 2, "yellow": 1 };
+    var colourRank = function(c) { return COLOUR_RANK[c] || 0; };
     // Severity rank drives sort order and colour intensity (higher = more dangerous).
     var hazardRank = function(name) {
         var t = String(name || "").toLowerCase();
@@ -361,15 +362,12 @@ var WeatherService = {
             // Skip ended / expired alerts.
             if (status === "ended" || status === "expired" || alertType === "ended") continue;
 
-            // RED-LEVEL ONLY — filter on ECCC's official risk colour. This is what
-            // drops the flood of yellow/orange alerts (e.g. heat warnings), which
-            // are "warnings" by type but not red. Fall back to alert_type only when
-            // the feed omits the colour.
-            var isRed = RED_COLOURS[colour] === true;
-            if (!colour && alertType.indexOf("warning") !== -1) isRed = true;
-            if (!isRed) continue;
-            // Never surface watches / advisories / statements.
-            if (alertType.indexOf("watch") !== -1 || alertType.indexOf("advisory") !== -1 || alertType.indexOf("statement") !== -1) continue;
+            // Surface WARNINGS and WATCHES only; advisories/statements are too
+            // low-signal for the ops banner. Severity (colour) no longer gates
+            // inclusion — it drives sort order and chip styling instead.
+            var isWatch = alertType.indexOf("watch") !== -1;
+            var isWarning = alertType.indexOf("warning") !== -1;
+            if (!isWarning && !isWatch) continue;
 
             // Hazard name straight from the feed ("wind warning" -> "Wind warning");
             // fall back to text sniffing only if the field is missing.
@@ -386,7 +384,7 @@ var WeatherService = {
 
             if (!provAgg[provCode]) provAgg[provCode] = { hazards: {}, ids: {}, zoneCount: 0 };
             var pa = provAgg[provCode];
-            if (!pa.hazards[hazard]) pa.hazards[hazard] = { count: 0, areas: {} };
+            if (!pa.hazards[hazard]) pa.hazards[hazard] = { count: 0, areas: {}, colour: "", isWatch: isWatch };
 
             // Count DISTINCT affected regions per hazard (feature_name_en is the
             // region, e.g. "Alma - Desbiens area"), so the same region under the
@@ -395,26 +393,42 @@ var WeatherService = {
             var dkey = hazard + "|" + (areaLabel || ("_" + j));
             if (!pa.ids[dkey]) { pa.ids[dkey] = true; pa.hazards[hazard].count += 1; pa.zoneCount += 1; }
             if (areaLabel) pa.hazards[hazard].areas[areaLabel] = true;
+            // Keep the worst (highest-ranked) colour seen for this hazard.
+            if (colourRank(colour) > colourRank(pa.hazards[hazard].colour)) pa.hazards[hazard].colour = colour;
         }
 
-        // Materialize: one entry per province, hazards sorted most-dangerous first.
+        // Materialize: one entry per province, hazards sorted most-dangerous first
+        // (warnings before watches, then by colour severity, then hazard/count).
         Object.keys(provAgg).forEach(function(prov) {
             var pa = provAgg[prov];
             var hazList = Object.keys(pa.hazards).map(function(name) {
                 var h = pa.hazards[name];
-                return { type: name, count: h.count, areas: Object.keys(h.areas), rank: hazardRank(name) };
+                return { type: name, count: h.count, areas: Object.keys(h.areas), rank: hazardRank(name), colour: h.colour, watch: h.isWatch };
             });
-            hazList.sort(function(a, b) { return (b.rank - a.rank) || (b.count - a.count); });
+            hazList.sort(function(a, b) {
+                return (a.watch === b.watch ? 0 : (a.watch ? 1 : -1)) ||
+                       (colourRank(b.colour) - colourRank(a.colour)) ||
+                       (b.rank - a.rank) || (b.count - a.count);
+            });
+            var topColour = "";
+            hazList.forEach(function(h) { if (colourRank(h.colour) > colourRank(topColour)) topColour = h.colour; });
             activeAlerts.push({
                 province: prov,
                 hazards: hazList,
                 zoneCount: pa.zoneCount,
                 topRank: hazList.length ? hazList[0].rank : 0,
+                topColour: topColour,
+                hasWarning: hazList.some(function(h) { return !h.watch; }),
                 summary: hazList.map(function(h) { return h.type; }).join(" · ")
             });
         });
-        // Most-dangerous province first, then by number of affected zones.
-        activeAlerts.sort(function(a, b) { return (b.topRank - a.topRank) || (b.zoneCount - a.zoneCount); });
+        // Most-dangerous province first: any active warning outranks watch-only,
+        // then by colour severity, then hazard rank, then affected-zone count.
+        activeAlerts.sort(function(a, b) {
+            return (a.hasWarning === b.hasWarning ? 0 : (a.hasWarning ? -1 : 1)) ||
+                   (colourRank(b.topColour) - colourRank(a.topColour)) ||
+                   (b.topRank - a.topRank) || (b.zoneCount - a.zoneCount);
+        });
     } catch (e) {
         console.error("ECCC Alerts Error: " + e.toString());
     }
@@ -444,8 +458,28 @@ function debugWeatherAlerts() {
     if (blob.indexOf("warning") !== -1) { sample = feats[i]; break; }
   }
   if (!sample) sample = feats[0];
+
+  // Breakdown of (alert_type, risk_colour_en, province) -> count, plus how many
+  // features would pass the current warning/watch filter used by fetch().
+  var breakdown = {};
+  var passCount = 0;
+  for (var f = 0; f < feats.length; f++) {
+    var pr = feats[f].properties || {};
+    var aType = String(pr.alert_type || pr.type || "").toLowerCase();
+    var status = String(pr.status_en || pr.status || "").toLowerCase();
+    var colour = String(pr.risk_colour_en || pr.risk_colour || pr.risk_color_en || "").toLowerCase();
+    var prov = String(pr.province || "").toUpperCase();
+    var key = aType + " | " + colour + " | " + prov;
+    breakdown[key] = (breakdown[key] || 0) + 1;
+    var isEnded = (status === "ended" || status === "expired" || aType === "ended");
+    var isWarnOrWatch = aType.indexOf("warning") !== -1 || aType.indexOf("watch") !== -1;
+    if (!isEnded && isWarnOrWatch) passCount++;
+  }
+
   var out = {
     totalFeatures: feats.length,
+    passingWarningOrWatchFilter: passCount,
+    breakdownByTypeColourProvince: breakdown,
     propertyKeys: sample ? Object.keys(sample.properties || {}) : [],
     geometryType: sample && sample.geometry ? sample.geometry.type : null,
     sampleProperties: sample ? sample.properties : null
