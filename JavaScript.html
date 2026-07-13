@@ -1872,36 +1872,50 @@
       var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
       
       if (state.alerts && state.alerts.length > 0) {
-         html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level) — tap a province to expand</div><div style="display:flex; flex-direction:column; gap:8px;">';
+         // Severity colour -> { fg, bg, border }. Falls back to red for unknown colours.
+         var SEVERITY_STYLE = {
+             red:    { fg: '#dc2626', bg: 'rgba(220,38,38,0.18)',  bgLight: 'rgba(220,38,38,0.08)',  border: '#dc2626' },
+             orange: { fg: '#ea580c', bg: 'rgba(234,88,12,0.18)',  bgLight: 'rgba(234,88,12,0.08)',  border: '#ea580c' },
+             yellow: { fg: '#b45309', bg: 'rgba(217,119,6,0.18)',  bgLight: 'rgba(217,119,6,0.08)',  border: '#d97706' }
+         };
+         var severityStyle = function(colour) { return SEVERITY_STYLE[colour] || SEVERITY_STYLE.red; };
+
+         html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings &amp; Watches — tap a province to expand</div><div style="display:flex; flex-direction:column; gap:8px;">';
          state.alerts.forEach(function(a) {
              var prov = escapeHTML(a.province || '—');
              var hazards = a.hazards || [];
              var zones = a.zoneCount || 0;
+             var provStyle = severityStyle(a.topColour);
              var severe = (a.topRank || 0) >= 80;               // tornado / blizzard / winter storm / surge
-             var provBg = severe ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.07)';
+             var provBg = severe ? provStyle.bg : provStyle.bgLight;
 
-             // Hazard chips (each: "Wind warning ×12").
+             // Hazard chips (each: "Wind warning ×12"), colour-coded by risk colour;
+             // watches render dimmer/outlined so warnings stay visually dominant.
              var chips = hazards.map(function(h) {
-                 var hot = (h.rank || 0) >= 70;
-                 return '<span style="background:' + (hot ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.08)') + '; color:var(--status-alert); padding:2px 8px; border-radius:6px; font-size:0.72rem; font-weight:700; white-space:nowrap;">' +
-                        escapeHTML(h.type || 'Warning') + (h.count ? ' <span style="opacity:0.7;">×' + h.count + '</span>' : '') + '</span>';
+                 var st = severityStyle(h.colour);
+                 var isWatch = !!h.watch;
+                 var chipBg = isWatch ? 'transparent' : ((h.rank || 0) >= 70 ? st.bg : st.bgLight);
+                 var chipBorder = isWatch ? ('1px solid ' + st.border) : 'none';
+                 var label = escapeHTML(h.type || 'Warning') + (h.count ? ' <span style="opacity:0.7;">×' + h.count + '</span>' : '');
+                 return '<span style="background:' + chipBg + '; border:' + chipBorder + '; color:' + st.fg + '; padding:2px 8px; border-radius:6px; font-size:0.72rem; font-weight:' + (isWatch ? '600' : '700') + '; white-space:nowrap;">' + label + '</span>';
              }).join('');
 
              // Expanded detail: per hazard, the actual affected region names (or an
              // honest note when the feed doesn't provide them).
              var details = hazards.map(function(h) {
+                 var st = severityStyle(h.colour);
                  var areas = h.areas || [];
                  var body = areas.length
                      ? areas.map(function(x){ return escapeHTML(x); }).join(', ')
                      : (h.count || 0) + ' affected ' + ((h.count === 1) ? 'zone' : 'zones') + ' (specific region names not provided by the alert feed)';
                  return '<div style="padding:6px 0; border-top:1px solid var(--glass-border);">' +
-                        '<span style="font-weight:800; color:var(--status-alert); font-size:0.8rem;">' + escapeHTML(h.type || 'Warning') + '</span>' +
+                        '<span style="font-weight:800; color:' + st.fg + '; font-size:0.8rem;">' + escapeHTML(h.type || 'Warning') + (h.watch ? ' <span style="opacity:0.7; font-weight:600;">(watch)</span>' : '') + '</span>' +
                         '<div style="color:var(--text-muted); font-size:0.78rem; margin-top:3px; line-height:1.4;">' + body + '</div></div>';
              }).join('');
 
-             html += '<details style="background:var(--bg-root); border:1px solid var(--status-alert); border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(220,38,38,0.08);">' +
+             html += '<details style="background:var(--bg-root); border:1px solid ' + provStyle.border + '; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.06);">' +
                        '<summary style="list-style:none; cursor:pointer; padding:10px 14px; display:flex; align-items:center; gap:12px;">' +
-                         '<span style="background:' + provBg + '; color:var(--status-alert); padding:3px 10px; border-radius:6px; font-weight:800; font-size:0.8rem; letter-spacing:1px; flex-shrink:0;">' + prov + '</span>' +
+                         '<span style="background:' + provBg + '; color:' + provStyle.fg + '; padding:3px 10px; border-radius:6px; font-weight:800; font-size:0.8rem; letter-spacing:1px; flex-shrink:0;">' + prov + '</span>' +
                          '<span style="display:flex; gap:6px; flex-wrap:wrap; flex:1; min-width:0;">' + chips + '</span>' +
                          '<span title="Distinct affected zones" style="color:var(--text-muted); font-weight:700; font-size:0.74rem; white-space:nowrap; flex-shrink:0;">' + zones + (zones !== 1 ? ' zones' : ' zone') + '</span>' +
                        '</summary>' +
