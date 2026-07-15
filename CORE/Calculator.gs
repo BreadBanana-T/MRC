@@ -7,9 +7,9 @@
 function calculateMetrics(inText, outText) {
   let stats = {
     svl: "0%", ack: "0s", safe: "N/A",
-    trendData: { labels: [], actual: [], trend: [] }, 
-    trendIn: "0%", trendOut: "0%",
-    asa: "0s", inSVL: "0%",
+    trendData: { labels: [], actual: [], trend: [] },
+    trendIn: "N/A", trendOut: "0%",
+    asa: "N/A", inSVL: "N/A", lcw: "N/A",
     burgActual: 0, burgAckSec: 0, updateHour: null,
     report: ""
   };
@@ -43,34 +43,23 @@ function calculateMetrics(inText, outText) {
   ];
 
   if (inText) {
-    // SAFE = MON_SAFE Intraday SL20. With zero offered calls MAS reports
-    // 100 — that IS the figure the team reports (not "N/A").
-    const intraIdx = inText.indexOf("Stats - Intraday");
-    if (intraIdx !== -1) {
-      const detailIdx = inText.indexOf("Details -", intraIdx);
-      const intraIn = inText.substring(intraIdx, detailIdx === -1 ? undefined : detailIdx);
-      const safeLine = intraIn.split(/\r?\n/).find(l => l.trim().indexOf("MON_SAFE") === 0);
-      if (safeLine) {
-        const sp = safeLine.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
-        if (sp[5] && sp[5].match(/^\d+$/)) stats.safe = sp[5] + "%";
-      }
-    }
+    // Inbound now comes from three Genesys Cloud widgets pasted as one block:
+    // External ASA / External SL / External LCW, each with a Today column and
+    // a Current interval column. The team reports ASA from Today, SVL IN and
+    // LCW from the Current interval. SAFE lives on a separate tableau and the
+    // Genesys paste has no inbound trend, so both stay "N/A" for manual fill.
+    // Times show as "10s" (or "2m", "1:05"); SL shows as "61%".
+    const TIME_RE = /^(\d+(\.\d+)?(s|m|min|h)|\d{1,2}:\d{2}(:\d{2})?)$/i;
+    const PCT_RE = /^\d+(\.\d+)?%$/;
 
-    const lines = inText.split(/\r?\n/);
-    for (const line of lines) {
-      const parts = line.replace(/\t/g, '|').split('|').filter(p => p.trim() !== "");
-      if (line.includes("Monit - Intraday")) {
-          const asaPart = parts.find(p => p.includes(":"));
-          if (asaPart) stats.asa = fmt(asaPart);
-          
-          if (parts[5] && parts[5].match(/^\d+$/)) stats.inSVL = parts[5] + "%";
-      }
-      
-      if (line.includes("Monit - Last 60 minutes")) {
-          const diffPart = parts.find(p => p.includes("%"));
-          if (diffPart) stats.trendIn = diffPart;
-      }
-    }
+    const asaP = genesysPair(inText, "External ASA", TIME_RE);
+    if (asaP) stats.asa = asaP.today;
+
+    const slP = genesysPair(inText, "External SL", PCT_RE);
+    if (slP) stats.inSVL = slP.interval;
+
+    const lcwP = genesysPair(inText, "External LCW", TIME_RE);
+    if (lcwP) stats.lcw = lcwP.interval;
   }
 
   if (outText) {
@@ -158,8 +147,25 @@ function calculateMetrics(inText, outText) {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL}\nACK: ${stats.ack}\nASA: ${stats.asa}\nSAFE: ${stats.safe}\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n %% Coachings Open%%`;
+  // SAFE is read off a separate tableau and Inbound trend isn't available
+  // from Genesys yet — both print as N/A for the sender to fill in.
+  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL} (Genesys)\nACK: ${stats.ack}\nASA: ${stats.asa} (Genesys)\nLCW Interval: ${stats.lcw}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n%% Coaching Closed %%`;
   return JSON.stringify(stats);
+}
+
+// Genesys widget paste: widget title line ("External ASA"…), then the
+// "Today" / "Current interval" column labels and the metric name, then the
+// values — first value-shaped token = Today, second = Current interval (the
+// copy duplicates the pair; only the first two count). The scan is cut at
+// the next "External " title so widgets can be pasted in any order.
+function genesysPair(text, header, valueRe) {
+  const idx = text.indexOf(header);
+  if (idx === -1) return null;
+  let block = text.substring(idx + header.length);
+  const nextIdx = block.indexOf("External ");
+  if (nextIdx !== -1) block = block.substring(0, nextIdx);
+  const tokens = block.split(/\s+/).filter(t => valueRe.test(t));
+  return tokens.length >= 2 ? { today: tokens[0], interval: tokens[1] } : null;
 }
 
 function extractSection(text, header) {

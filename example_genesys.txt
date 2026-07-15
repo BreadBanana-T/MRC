@@ -1,0 +1,56 @@
+Genesys Cloud inbound paste (replaces the MAS "Stats / InCust SVC" page).
+Copy the three widgets — External ASA, External SL, External LCW — into the
+INBOUND box in one paste. Each widget has a Today column and a Current
+interval column (the copy duplicates the value pair; only the first pair is
+read).
+
+Mapping used by the calculator:
+  ASA          -> External ASA, Today value
+  SVL IN       -> External SL, Current interval value
+  LCW Interval -> External LCW, Current interval value
+  SAFE         -> N/A (read from a separate tableau, filled in manually)
+  Inbound trend-> N/A (not available from Genesys yet, filled in manually)
+
+RAW Inbound stats (Genesys);
+External ASA
+Today
+Current interval
+ASA
+10s
+13s
+10s
+13s
+External SL
+Today
+Current interval
+Service Level %
+61%
+50%
+61%
+50%
+External LCW
+Today
+Current interval
+Max Wait
+16s
+13s
+16s
+13s
+
+Expected output (outbound fields depend on the MAS outbound paste);
+STATS UPDATE:
+SVL OUT: 88%
+SVL IN: 50% (Genesys)
+ACK: 14s
+ASA: 10s (Genesys)
+LCW Interval: 13s
+SAFE: N/A
+
+TRENDS:
+Inbound: N/A
+Outbound: -2%
+
+DELAYS: None
+
+NOTES:
+%% Coaching Closed %%
