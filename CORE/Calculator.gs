@@ -45,7 +45,7 @@ function calculateMetrics(inText, outText) {
   if (inText) {
     // Inbound now comes from three Genesys Cloud widgets pasted as one block:
     // External ASA / External SL / External LCW, each with a Today column and
-    // a Current interval column. The team reports ASA from Today, SVL IN and
+    // a Current interval column. The team reports ASA and SVL IN from Today,
     // LCW from the Current interval. SAFE lives on a separate tableau and the
     // Genesys paste has no inbound trend, so both stay "N/A" for manual fill.
     // Times show as "10s" (or "2m", "1:05"); SL shows as "61%".
@@ -56,7 +56,7 @@ function calculateMetrics(inText, outText) {
     if (asaP) stats.asa = asaP.today;
 
     const slP = genesysPair(inText, "External SL", PCT_RE);
-    if (slP) stats.inSVL = slP.interval;
+    if (slP) stats.inSVL = slP.today;
 
     const lcwP = genesysPair(inText, "External LCW", TIME_RE);
     if (lcwP) stats.lcw = lcwP.interval;

@@ -6,7 +6,7 @@ read).
 
 Mapping used by the calculator:
   ASA          -> External ASA, Today value
-  SVL IN       -> External SL, Current interval value
+  SVL IN       -> External SL, Today value
   LCW Interval -> External LCW, Current interval value
   SAFE         -> N/A (read from a separate tableau, filled in manually)
   Inbound trend-> N/A (not available from Genesys yet, filled in manually)
@@ -40,7 +40,7 @@ Max Wait
 Expected output (outbound fields depend on the MAS outbound paste);
 STATS UPDATE:
 SVL OUT: 88%
-SVL IN: 50% (Genesys)
+SVL IN: 61% (Genesys)
 ACK: 14s
 ASA: 10s (Genesys)
 LCW Interval: 13s
