@@ -200,7 +200,10 @@
       overviewLunch: null, overviewLunchLoading: false,
       // Manager feedback + presence/attribution layer.
       currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false, feedbackShowArchive: false,
-      presence: [], lastActions: {}
+      presence: [], lastActions: {},
+      // Editable Calculator report template (server-persisted, shared). Loaded
+      // lazily when the Calculator view opens via fetchCalcTemplate().
+      calcTemplate: null, calcTemplateDefault: "", calcTemplateCustom: false, calcTemplateEditing: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -937,6 +940,19 @@
               }
           } catch(e) {}
       }).getStatsHistory();
+  }
+
+  function fetchCalcTemplate() {
+      if(typeof google === 'undefined') { state.calcTemplate = state.calcTemplate || "STATS UPDATE:\nSVL OUT: {svlOut}\nSVL IN: {svlIn}\nACK: {ack}\nASA: {asa}\nLCW Interval: {lcw}\nSAFE: {safe}\n\nTRENDS:\nInbound: {trendIn}\nOutbound: {trendOut}\n\nDELAYS: None\n\nNOTES:\n%% Coaching Open %%"; state.calcTemplateDefault = state.calcTemplate; if(state.view==='calculator') render(); return; }
+      google.script.run.withSuccessHandler(function(j) {
+          try {
+              var d = JSON.parse(j);
+              state.calcTemplate = d.template || "";
+              state.calcTemplateDefault = d.default || "";
+              state.calcTemplateCustom = !!d.custom;
+              if(state.view === 'calculator') render();
+          } catch(e) {}
+      }).getCalcTemplate();
   }
 
   function fetchScripts() { if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e) {} }).fetchScripts(); }
@@ -4110,13 +4126,92 @@
   }
 
   function renderCalc() {
+     if(state.calcTemplate === null) fetchCalcTemplate();
      return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-paste" width="17" style="color:var(--accent-primary);"></i> Stats Paste</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">inbound from Genesys Cloud, outbound from MAS</span></div>' +
         '<label class="paste-label"><i data-lucide="phone-incoming" width="13"></i> Inbound — Genesys Cloud (External ASA / SL / LCW)</label>' +
         '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…"></textarea>' +
         '<label class="paste-label" style="margin-top:16px;"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
         '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…"></textarea>' +
-        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>';
+        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>' + renderCalcTemplateEditor();
   }
+
+  // Client-side token fill — mirrors buildCalcReport() in CORE/Calculator.gs so
+  // the editor preview matches what the server will produce.
+  function applyCalcTemplate(tpl, s) {
+     var map = { svlOut: s.svl, svlIn: s.inSVL, ack: s.ack, asa: s.asa, lcw: s.lcw, safe: s.safe, trendIn: s.trendIn, trendOut: s.trendOut };
+     return (tpl || "").replace(/\{(\w+)\}/g, function(m, k) { return (map[k] !== undefined && map[k] !== null) ? map[k] : m; });
+  }
+
+  function calcPreviewStats() {
+     // Use the last real calculation if there is one, else representative sample values.
+     var lc = state.lastCalc;
+     if(lc && lc.svl) return { svl: lc.svl, inSVL: lc.inSVL, ack: lc.ack, asa: lc.asa, lcw: lc.lcw, safe: lc.safe, trendIn: lc.trendIn, trendOut: lc.trendOut };
+     return { svl: "88%", inSVL: "61%", ack: "14s", asa: "10s", lcw: "13s", safe: "N/A", trendIn: "N/A", trendOut: "-2%" };
+  }
+
+  function renderCalcTemplateEditor() {
+     if(state.calcTemplate === null) return '<div class="aether-card" style="margin-top:24px; color:var(--text-muted); font-weight:600;">Loading report template…</div>';
+     var badge = state.calcTemplateCustom
+        ? '<span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.12); padding:2px 8px; border-radius:99px; letter-spacing:1px;">CUSTOM</span>'
+        : '<span style="font-size:0.62rem; font-weight:800; color:var(--text-muted); background:var(--bg-root); padding:2px 8px; border-radius:99px; letter-spacing:1px;">DEFAULT</span>';
+     var header = '<div class="section-header" style="cursor:pointer;" onclick="toggleCalcEditor()"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="pencil-ruler" width="17" style="color:var(--accent-primary);"></i> Report Template ' + badge + '</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (state.calcTemplateEditing ? 'click to collapse' : 'edit the report layout — no redeploy') + '</span></div>';
+     if(!state.calcTemplateEditing) return '<div class="aether-card" style="margin-top:24px;">' + header + '</div>';
+
+     var preview = escapeHTML(applyCalcTemplate(state.calcTemplate, calcPreviewStats()));
+     var legend = '{svlOut} {svlIn} {ack} {asa} {lcw} {safe} {trendIn} {trendOut}';
+     return '<div class="aether-card" style="margin-top:24px;">' + header +
+        '<div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin:4px 0 12px;">Anything in the box below is the exact report. Placeholders in braces are replaced with live values; edit any other text freely (add/remove "(Genesys)", switch NOTES to Coaching Open/Closed, etc.). Available placeholders: <code style="color:var(--text-accent);">' + legend + '</code></div>' +
+        '<div class="grid-split">' +
+          '<div><label class="paste-label"><i data-lucide="code" width="13"></i> Template</label>' +
+          '<textarea id="calc-template" class="paste-zone custom-scrollbar" style="min-height:280px; font-family:monospace;" oninput="previewCalcTemplate()">' + escapeHTML(state.calcTemplate) + '</textarea></div>' +
+          '<div><label class="paste-label"><i data-lucide="eye" width="13"></i> Live preview' + (state.lastCalc && state.lastCalc.svl ? ' (your last run)' : ' (sample values)') + '</label>' +
+          '<div id="calc-template-preview" class="custom-scrollbar" style="background:var(--bg-root); padding:18px; border-radius:18px; font-family:monospace; font-size:0.85rem; min-height:280px; max-height:340px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;">' + preview + '</div></div>' +
+        '</div>' +
+        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' +
+          '<button class="btn btn-primary" style="flex:1; min-width:140px; height:40px;" onclick="saveCalcTemplateUI()"><i data-lucide="save" width="15"></i> Save Template</button>' +
+          '<button class="btn btn-glass" style="flex:1; min-width:140px; height:40px;" onclick="resetCalcTemplateUI()"><i data-lucide="rotate-ccw" width="15"></i> Reset to Default</button>' +
+        '</div></div>';
+  }
+
+  window.toggleCalcEditor = function() { state.calcTemplateEditing = !state.calcTemplateEditing; render(); };
+
+  window.previewCalcTemplate = function() {
+     var el = document.getElementById('calc-template'); var pv = document.getElementById('calc-template-preview');
+     if(el && pv) pv.textContent = applyCalcTemplate(el.value, calcPreviewStats());
+  };
+
+  window.saveCalcTemplateUI = function() {
+     var el = document.getElementById('calc-template'); if(!el) return;
+     var t = el.value;
+     if(!t || t.trim() === "") { showToast("Template can't be empty"); return; }
+     state.calcTemplate = t; state.calcTemplateCustom = true;
+     if(typeof google === 'undefined') { showToast("Saved (local)"); return; }
+     showToast("Saving template…");
+     google.script.run.withSuccessHandler(function(r) {
+        var d = {}; try { d = JSON.parse(r); } catch(e) {}
+        if(d.ok) {
+           state.calcTemplateCustom = !!d.custom;
+           showToast("Template saved");
+           // Regenerate the visible report with the new layout if a paste is loaded.
+           var i = document.getElementById('in-text'); var o = document.getElementById('out-text');
+           if(i && o && (i.value.trim() || o.value.trim())) runCalculation(); else render();
+        } else { showToast(d.error || "Save failed"); }
+     }).saveCalcTemplate(t);
+  };
+
+  window.resetCalcTemplateUI = function() {
+     if(typeof google === 'undefined') { state.calcTemplate = state.calcTemplateDefault; state.calcTemplateCustom = false; render(); return; }
+     showToast("Resetting…");
+     google.script.run.withSuccessHandler(function(r) {
+        var d = {}; try { d = JSON.parse(r); } catch(e) {}
+        if(d.ok) {
+           state.calcTemplate = d.template; state.calcTemplateCustom = false;
+           showToast("Reset to default");
+           var i = document.getElementById('in-text'); var o = document.getElementById('out-text');
+           if(i && o && (i.value.trim() || o.value.trim())) runCalculation(); else render();
+        } else { showToast(d.error || "Reset failed"); }
+     }).resetCalcTemplate();
+  };
   
   window.runCalculation = function() {
      var i = document.getElementById('in-text').value; var o = document.getElementById('out-text').value;

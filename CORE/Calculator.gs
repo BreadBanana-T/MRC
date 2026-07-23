@@ -4,6 +4,30 @@
 
 // Router export runCalculator() lives in Code.gs.
 
+// The report layout is editable at runtime (no redeploy) via the Calculator
+// view — it's stored in a Script Property and read through CalcSettings
+// (CORE/CalcSettings.gs). This constant is the built-in fallback used when no
+// custom template has been saved. Placeholders {…} are filled from the
+// computed stats by buildCalcReport(); any literal text (labels, DELAYS,
+// NOTES, "(Genesys)" suffixes, etc.) is edited straight in the template.
+const DEFAULT_CALC_TEMPLATE =
+`STATS UPDATE:
+SVL OUT: {svlOut}
+SVL IN: {svlIn}
+ACK: {ack}
+ASA: {asa}
+LCW Interval: {lcw}
+SAFE: {safe}
+
+TRENDS:
+Inbound: {trendIn}
+Outbound: {trendOut}
+
+DELAYS: None
+
+NOTES:
+%% Coaching Open %%`;
+
 function calculateMetrics(inText, outText) {
   let stats = {
     svl: "0%", ack: "0s", safe: "N/A",
@@ -147,10 +171,23 @@ function calculateMetrics(inText, outText) {
       StatsTracker.logHourlyStats(stats.svl, stats.ack);
   }
 
-  // SAFE is read off a separate tableau and Inbound trend isn't available
-  // from Genesys yet — both print as N/A for the sender to fill in.
-  stats.report = `STATS UPDATE:\nSVL OUT: ${stats.svl}\nSVL IN: ${stats.inSVL} (Genesys)\nACK: ${stats.ack}\nASA: ${stats.asa} (Genesys)\nLCW Interval: ${stats.lcw}\nSAFE: N/A\n\nTRENDS:\nInbound: ${stats.trendIn}\nOutbound: ${stats.trendOut}\n\nDELAYS: None\n\nNOTES:\n%% Coaching Closed %%`;
+  // Render the report from the (possibly customized) template. SAFE and the
+  // inbound trend default to "N/A" for the sender to fill in manually.
+  stats.report = buildCalcReport(stats);
   return JSON.stringify(stats);
+}
+
+// Fill the report template's {tokens} from the computed stats. Unknown tokens
+// are left untouched so a typo in the template is visible rather than silently
+// dropping text. Uses CalcSettings.template() when available, else the
+// built-in DEFAULT_CALC_TEMPLATE.
+function buildCalcReport(stats) {
+  const tpl = (typeof CalcSettings !== 'undefined') ? CalcSettings.template() : DEFAULT_CALC_TEMPLATE;
+  const map = {
+    svlOut: stats.svl, svlIn: stats.inSVL, ack: stats.ack, asa: stats.asa,
+    lcw: stats.lcw, safe: stats.safe, trendIn: stats.trendIn, trendOut: stats.trendOut
+  };
+  return tpl.replace(/\{(\w+)\}/g, (m, key) => (map[key] !== undefined ? map[key] : m));
 }
 
 // Genesys widget paste: widget title line ("External ASA"…), then the

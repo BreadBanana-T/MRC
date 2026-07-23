@@ -37,12 +37,19 @@ Max Wait
 16s
 13s
 
-Expected output (outbound fields depend on the MAS outbound paste);
+Expected output with the DEFAULT template (outbound fields depend on the MAS
+outbound paste). The report layout is now editable at runtime from the
+Calculator view ("Report Template" panel) and stored server-side — no redeploy
+needed to change wording. Placeholders {svlOut} {svlIn} {ack} {asa} {lcw}
+{safe} {trendIn} {trendOut} are filled from the stats; everything else is
+literal text you can edit (e.g. add "(Genesys)" back, or flip Coaching Open ->
+Closed);
+
 STATS UPDATE:
 SVL OUT: 88%
-SVL IN: 61% (Genesys)
+SVL IN: 61%
 ACK: 14s
-ASA: 10s (Genesys)
+ASA: 10s
 LCW Interval: 13s
 SAFE: N/A
 
@@ -53,4 +60,4 @@ Outbound: -2%
 DELAYS: None
 
 NOTES:
-%% Coaching Closed %%
+%% Coaching Open %%

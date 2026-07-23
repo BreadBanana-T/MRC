@@ -81,6 +81,9 @@ function updateAgentStatus(n, t, v) { _stampAction('agent_status', 'Agent status
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
+function getCalcTemplate() { return (typeof CalcSettings!=='undefined') ? CalcSettings.payload() : JSON.stringify({ template:"", default:"", custom:false }); }
+function saveCalcTemplate(t) { return (typeof CalcSettings!=='undefined') ? CalcSettings.save(t) : JSON.stringify({ ok:false, error:"unavailable" }); }
+function resetCalcTemplate() { return (typeof CalcSettings!=='undefined') ? CalcSettings.reset() : JSON.stringify({ ok:false, error:"unavailable" }); }
 function fetchScripts() { return (typeof ScriptHandler!=='undefined') ? JSON.stringify(ScriptHandler.getAll()) : "[]"; }
 // saveTeamScript / deleteTeamScript / getTeamScripts live in CORE/ScriptHandler.gs.
 // Do NOT redeclare them here: duplicate top-level names across .gs files
