@@ -38,12 +38,17 @@ Max Wait
 13s
 
 Expected output with the DEFAULT template (outbound fields depend on the MAS
-outbound paste). The report layout is now editable at runtime from the
-Calculator view ("Report Template" panel) and stored server-side — no redeploy
-needed to change wording. Placeholders {svlOut} {svlIn} {ack} {asa} {lcw}
-{safe} {trendIn} {trendOut} are filled from the stats; everything else is
-literal text you can edit (e.g. add "(Genesys)" back, or flip Coaching Open ->
-Closed);
+outbound paste). The report layout is editable at runtime from the Calculator
+view ("Report Template" panel) and stored server-side — no redeploy needed to
+change wording. Placeholders {svlOut} {svlIn} {ack} {asa} {lcw} {safe}
+{trendIn} {trendOut} are filled from the stats; everything else is literal text
+you can edit (e.g. add "(Genesys)" back, or flip Coaching Open -> Closed).
+
+You can also keep a LIBRARY of named layouts (e.g. "Week A - Night",
+"Week B - Evening") and switch the active one from the panel's dropdown; the
+built-in "Default" is always available and can't be edited or deleted. Note:
+adding this feature required one clasp push + a New Version deployment; after
+that, template/library edits take effect live with no further redeploy;
 
 STATS UPDATE:
 SVL OUT: 88%

@@ -201,9 +201,10 @@
       // Manager feedback + presence/attribution layer.
       currentUser: null, feedbackType: 'suggestion', feedbackList: null, feedbackSubmitting: false, feedbackShowArchive: false,
       presence: [], lastActions: {},
-      // Editable Calculator report template (server-persisted, shared). Loaded
-      // lazily when the Calculator view opens via fetchCalcTemplate().
-      calcTemplate: null, calcTemplateDefault: "", calcTemplateCustom: false, calcTemplateEditing: false
+      // Editable Calculator report-template LIBRARY (server-persisted, shared).
+      // Loaded lazily when the Calculator view opens via fetchCalcTemplate().
+      // calcActive === "" means the built-in default template is in use.
+      calcLibLoaded: false, calcActive: "", calcTemplates: [], calcDefault: "", calcEditBody: "", calcEditing: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -942,16 +943,37 @@
       }).getStatsHistory();
   }
 
+  var CALC_LOCAL_DEFAULT = "STATS UPDATE:\nSVL OUT: {svlOut}\nSVL IN: {svlIn}\nACK: {ack}\nASA: {asa}\nLCW Interval: {lcw}\nSAFE: {safe}\n\nTRENDS:\nInbound: {trendIn}\nOutbound: {trendOut}\n\nDELAYS: None\n\nNOTES:\n%% Coaching Open %%";
+
+  // Load the template library from the server. Applies a library payload to
+  // state and (re)loads the editor working copy from the active template.
+  function applyCalcLibrary(d) {
+      state.calcTemplates = Array.isArray(d.templates) ? d.templates : [];
+      state.calcActive = (typeof d.active === 'string') ? d.active : "";
+      state.calcDefault = d.default || CALC_LOCAL_DEFAULT;
+      state.calcEditBody = calcActiveBody();
+      state.calcLibLoaded = true;
+  }
+
+  function calcActiveBody() {
+      if(state.calcActive) {
+          for(var i=0;i<state.calcTemplates.length;i++) if(state.calcTemplates[i].name === state.calcActive) return state.calcTemplates[i].body;
+      }
+      return state.calcDefault || CALC_LOCAL_DEFAULT;
+  }
+
   function fetchCalcTemplate() {
-      if(typeof google === 'undefined') { state.calcTemplate = state.calcTemplate || "STATS UPDATE:\nSVL OUT: {svlOut}\nSVL IN: {svlIn}\nACK: {ack}\nASA: {asa}\nLCW Interval: {lcw}\nSAFE: {safe}\n\nTRENDS:\nInbound: {trendIn}\nOutbound: {trendOut}\n\nDELAYS: None\n\nNOTES:\n%% Coaching Open %%"; state.calcTemplateDefault = state.calcTemplate; if(state.view==='calculator') render(); return; }
+      if(state.calcLibLoaded) return;
+      if(typeof google === 'undefined') { applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT }); if(state.view==='calculator') render(); return; }
       google.script.run.withSuccessHandler(function(j) {
-          try {
-              var d = JSON.parse(j);
-              state.calcTemplate = d.template || "";
-              state.calcTemplateDefault = d.default || "";
-              state.calcTemplateCustom = !!d.custom;
-              if(state.view === 'calculator') render();
-          } catch(e) {}
+          try { applyCalcLibrary(JSON.parse(j)); } catch(e) { applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT }); }
+          if(state.view === 'calculator') render();
+      }).withFailureHandler(function() {
+          // Backend not deployed yet / call failed — degrade to a local default so
+          // the panel is usable instead of stuck on "Loading…".
+          applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT });
+          showToast("Template library unavailable — deploy the latest version");
+          if(state.view === 'calculator') render();
       }).getCalcTemplate();
   }
 
@@ -4126,7 +4148,7 @@
   }
 
   function renderCalc() {
-     if(state.calcTemplate === null) fetchCalcTemplate();
+     if(!state.calcLibLoaded) fetchCalcTemplate();
      return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-paste" width="17" style="color:var(--accent-primary);"></i> Stats Paste</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">inbound from Genesys Cloud, outbound from MAS</span></div>' +
         '<label class="paste-label"><i data-lucide="phone-incoming" width="13"></i> Inbound — Genesys Cloud (External ASA / SL / LCW)</label>' +
         '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…"></textarea>' +
@@ -4149,68 +4171,132 @@
      return { svl: "88%", inSVL: "61%", ack: "14s", asa: "10s", lcw: "13s", safe: "N/A", trendIn: "N/A", trendOut: "-2%" };
   }
 
-  function renderCalcTemplateEditor() {
-     if(state.calcTemplate === null) return '<div class="aether-card" style="margin-top:24px; color:var(--text-muted); font-weight:600;">Loading report template…</div>';
-     var badge = state.calcTemplateCustom
-        ? '<span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.12); padding:2px 8px; border-radius:99px; letter-spacing:1px;">CUSTOM</span>'
-        : '<span style="font-size:0.62rem; font-weight:800; color:var(--text-muted); background:var(--bg-root); padding:2px 8px; border-radius:99px; letter-spacing:1px;">DEFAULT</span>';
-     var header = '<div class="section-header" style="cursor:pointer;" onclick="toggleCalcEditor()"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="pencil-ruler" width="17" style="color:var(--accent-primary);"></i> Report Template ' + badge + '</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (state.calcTemplateEditing ? 'click to collapse' : 'edit the report layout — no redeploy') + '</span></div>';
-     if(!state.calcTemplateEditing) return '<div class="aether-card" style="margin-top:24px;">' + header + '</div>';
+  // Re-run the current paste (so the visible report updates) or re-render.
+  function calcRefreshAfterChange() {
+     var i = document.getElementById('in-text'); var o = document.getElementById('out-text');
+     if(i && o && (i.value.trim() || o.value.trim())) runCalculation(); else render();
+  }
 
-     var preview = escapeHTML(applyCalcTemplate(state.calcTemplate, calcPreviewStats()));
+  // Apply a library payload returned by a mutation, then refresh. Returns true on ok.
+  function calcHandleLibResult(r) {
+     var d = {}; try { d = JSON.parse(r); } catch(e) {}
+     if(d && d.ok) { applyCalcLibrary(d); calcRefreshAfterChange(); return true; }
+     showToast((d && d.error) || "Action failed");
+     return false;
+  }
+
+  function renderCalcTemplateEditor() {
+     if(!state.calcLibLoaded) return '<div class="aether-card" style="margin-top:24px; color:var(--text-muted); font-weight:600;">Loading report template…</div>';
+     var activeName = state.calcActive || "Default";
+     var header = '<div class="section-header" style="cursor:pointer;" onclick="toggleCalcEditor()"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="pencil-ruler" width="17" style="color:var(--accent-primary);"></i> Report Template <span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.12); padding:2px 8px; border-radius:99px; letter-spacing:1px;">' + escapeHTML(activeName.toUpperCase()) + '</span></span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (state.calcEditing ? 'click to collapse' : 'switch or edit report layouts — no redeploy') + '</span></div>';
+     if(!state.calcEditing) return '<div class="aether-card" style="margin-top:24px;">' + header + '</div>';
+
+     // Active-template selector (Default built-in + every saved template).
+     var opts = '<option value=""' + (state.calcActive === "" ? ' selected' : '') + '>Default (built-in)</option>';
+     state.calcTemplates.forEach(function(t) {
+        opts += '<option value="' + escapeHTML(t.name) + '"' + (state.calcActive === t.name ? ' selected' : '') + '>' + escapeHTML(t.name) + '</option>';
+     });
+     var isDefault = (state.calcActive === "");
+     var body = state.calcEditBody;
+     var preview = escapeHTML(applyCalcTemplate(body, calcPreviewStats()));
      var legend = '{svlOut} {svlIn} {ack} {asa} {lcw} {safe} {trendIn} {trendOut}';
-     return '<div class="aether-card" style="margin-top:24px;">' + header +
-        '<div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin:4px 0 12px;">Anything in the box below is the exact report. Placeholders in braces are replaced with live values; edit any other text freely (add/remove "(Genesys)", switch NOTES to Coaching Open/Closed, etc.). Available placeholders: <code style="color:var(--text-accent);">' + legend + '</code></div>' +
+
+     var controls = '<div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">' +
+        '<div style="flex:1; min-width:200px;"><label class="paste-label"><i data-lucide="layers" width="13"></i> Active template (used by the report)</label>' +
+        '<select id="calc-select" class="paste-zone custom-scrollbar" style="height:40px; padding:0 12px;" onchange="calcSelectTemplate(this.value)">' + opts + '</select></div>' +
+        '<button class="btn btn-glass" style="height:40px;" onclick="calcNewTemplate()"><i data-lucide="plus" width="15"></i> New</button>' +
+        '<button class="btn btn-glass" style="height:40px;"' + (isDefault ? ' disabled title="The built-in Default can\'t be renamed"' : '') + ' onclick="calcRenameTemplate()"><i data-lucide="pencil" width="15"></i> Rename</button>' +
+        '<button class="btn btn-glass" style="height:40px;"' + (isDefault ? ' disabled title="The built-in Default can\'t be deleted"' : '') + ' onclick="calcDeleteTemplate()"><i data-lucide="trash-2" width="15"></i> Delete</button>' +
+        '</div>';
+
+     var editHint = isDefault
+        ? 'You\'re viewing the built-in <b>Default</b> (read-only). Edit below and use <b>Save As New…</b> to keep it as its own named layout — e.g. "Week A - Night".'
+        : 'Editing <b>' + escapeHTML(state.calcActive) + '</b>. Placeholders in braces are filled with live values; all other text is literal (add/remove "(Genesys)", flip Coaching Open/Closed, etc.).';
+
+     var saveBtn = isDefault
+        ? '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="save" width="15"></i> Save As New…</button>'
+        : '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveTemplate()"><i data-lucide="save" width="15"></i> Save "' + escapeHTML(state.calcActive) + '"</button>' +
+          '<button class="btn btn-glass" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="copy" width="15"></i> Save As New…</button>';
+
+     return '<div class="aether-card" style="margin-top:24px;">' + header + controls +
+        '<div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin:4px 0 12px;">' + editHint + ' Available placeholders: <code style="color:var(--text-accent);">' + legend + '</code></div>' +
         '<div class="grid-split">' +
           '<div><label class="paste-label"><i data-lucide="code" width="13"></i> Template</label>' +
-          '<textarea id="calc-template" class="paste-zone custom-scrollbar" style="min-height:280px; font-family:monospace;" oninput="previewCalcTemplate()">' + escapeHTML(state.calcTemplate) + '</textarea></div>' +
+          '<textarea id="calc-template" class="paste-zone custom-scrollbar" style="min-height:280px; font-family:monospace;" oninput="calcOnEdit()">' + escapeHTML(body) + '</textarea></div>' +
           '<div><label class="paste-label"><i data-lucide="eye" width="13"></i> Live preview' + (state.lastCalc && state.lastCalc.svl ? ' (your last run)' : ' (sample values)') + '</label>' +
           '<div id="calc-template-preview" class="custom-scrollbar" style="background:var(--bg-root); padding:18px; border-radius:18px; font-family:monospace; font-size:0.85rem; min-height:280px; max-height:340px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;">' + preview + '</div></div>' +
         '</div>' +
-        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' +
-          '<button class="btn btn-primary" style="flex:1; min-width:140px; height:40px;" onclick="saveCalcTemplateUI()"><i data-lucide="save" width="15"></i> Save Template</button>' +
-          '<button class="btn btn-glass" style="flex:1; min-width:140px; height:40px;" onclick="resetCalcTemplateUI()"><i data-lucide="rotate-ccw" width="15"></i> Reset to Default</button>' +
+        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' + saveBtn +
+          '<button class="btn btn-glass" style="height:40px;" onclick="calcResetBody()" title="Load the built-in default text into the editor"><i data-lucide="rotate-ccw" width="15"></i> Load default text</button>' +
         '</div></div>';
   }
 
-  window.toggleCalcEditor = function() { state.calcTemplateEditing = !state.calcTemplateEditing; render(); };
+  window.toggleCalcEditor = function() { state.calcEditing = !state.calcEditing; if(state.calcEditing) state.calcEditBody = calcActiveBody(); render(); };
 
-  window.previewCalcTemplate = function() {
+  // Keep the working copy in state so edits survive a re-render, and refresh preview.
+  window.calcOnEdit = function() {
      var el = document.getElementById('calc-template'); var pv = document.getElementById('calc-template-preview');
+     if(el) state.calcEditBody = el.value;
      if(el && pv) pv.textContent = applyCalcTemplate(el.value, calcPreviewStats());
   };
 
-  window.saveCalcTemplateUI = function() {
-     var el = document.getElementById('calc-template'); if(!el) return;
-     var t = el.value;
-     if(!t || t.trim() === "") { showToast("Template can't be empty"); return; }
-     state.calcTemplate = t; state.calcTemplateCustom = true;
-     if(typeof google === 'undefined') { showToast("Saved (local)"); return; }
-     showToast("Saving template…");
-     google.script.run.withSuccessHandler(function(r) {
-        var d = {}; try { d = JSON.parse(r); } catch(e) {}
-        if(d.ok) {
-           state.calcTemplateCustom = !!d.custom;
-           showToast("Template saved");
-           // Regenerate the visible report with the new layout if a paste is loaded.
-           var i = document.getElementById('in-text'); var o = document.getElementById('out-text');
-           if(i && o && (i.value.trim() || o.value.trim())) runCalculation(); else render();
-        } else { showToast(d.error || "Save failed"); }
-     }).saveCalcTemplate(t);
+  // Switch which template the report uses.
+  window.calcSelectTemplate = function(name) {
+     if(typeof google === 'undefined') { state.calcActive = name; state.calcEditBody = calcActiveBody(); render(); return; }
+     showToast("Switching template…");
+     google.script.run.withSuccessHandler(calcHandleLibResult).withFailureHandler(function(){ showToast("Switch failed"); }).setCalcTemplate(name);
   };
 
-  window.resetCalcTemplateUI = function() {
-     if(typeof google === 'undefined') { state.calcTemplate = state.calcTemplateDefault; state.calcTemplateCustom = false; render(); return; }
-     showToast("Resetting…");
-     google.script.run.withSuccessHandler(function(r) {
-        var d = {}; try { d = JSON.parse(r); } catch(e) {}
-        if(d.ok) {
-           state.calcTemplate = d.template; state.calcTemplateCustom = false;
-           showToast("Reset to default");
-           var i = document.getElementById('in-text'); var o = document.getElementById('out-text');
-           if(i && o && (i.value.trim() || o.value.trim())) runCalculation(); else render();
-        } else { showToast(d.error || "Reset failed"); }
-     }).resetCalcTemplate();
+  window.calcSaveTemplate = function() {
+     var el = document.getElementById('calc-template'); if(!el) return;
+     if(!el.value.trim()) { showToast("Template can't be empty"); return; }
+     if(typeof google === 'undefined') { showToast("Saved (local)"); return; }
+     showToast("Saving…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast("Saved"); }).withFailureHandler(function(){ showToast("Save failed"); }).saveCalcTemplate(state.calcActive, el.value, true);
+  };
+
+  window.calcSaveAsNew = function() {
+     var el = document.getElementById('calc-template'); if(!el) return;
+     if(!el.value.trim()) { showToast("Template can't be empty"); return; }
+     var name = (window.prompt("Name this template (e.g. \"Week A - Night\"):", "") || "").trim();
+     if(!name) return;
+     if(typeof google === 'undefined') { state.calcTemplates.push({name:name, body:el.value}); state.calcActive = name; state.calcEditBody = el.value; render(); return; }
+     showToast("Saving…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast('Saved "' + name + '"'); }).withFailureHandler(function(){ showToast("Save failed"); }).saveCalcTemplate(name, el.value, true);
+  };
+
+  window.calcNewTemplate = function() {
+     var name = (window.prompt("Name the new template (e.g. \"Week B - Evening\"):", "") || "").trim();
+     if(!name) return;
+     var body = (state.calcEditBody && state.calcEditBody.trim()) ? state.calcEditBody : (state.calcDefault || CALC_LOCAL_DEFAULT);
+     if(typeof google === 'undefined') { state.calcTemplates.push({name:name, body:body}); state.calcActive = name; state.calcEditBody = body; render(); return; }
+     showToast("Creating…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast('Created "' + name + '"'); }).withFailureHandler(function(){ showToast("Create failed"); }).saveCalcTemplate(name, body, true);
+  };
+
+  window.calcRenameTemplate = function() {
+     if(!state.calcActive) return;
+     var old = state.calcActive;
+     var name = (window.prompt("Rename \"" + old + "\" to:", old) || "").trim();
+     if(!name || name === old) return;
+     if(typeof google === 'undefined') { var t = state.calcTemplates.filter(function(x){return x.name===old;})[0]; if(t) t.name = name; state.calcActive = name; render(); return; }
+     showToast("Renaming…");
+     google.script.run.withSuccessHandler(calcHandleLibResult).withFailureHandler(function(){ showToast("Rename failed"); }).renameCalcTemplate(old, name);
+  };
+
+  window.calcDeleteTemplate = function() {
+     if(!state.calcActive) return;
+     var name = state.calcActive;
+     if(!window.confirm('Delete the template "' + name + '"? The report falls back to Default.')) return;
+     if(typeof google === 'undefined') { state.calcTemplates = state.calcTemplates.filter(function(x){return x.name!==name;}); state.calcActive = ""; state.calcEditBody = calcActiveBody(); render(); return; }
+     showToast("Deleting…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast('Deleted "' + name + '"'); }).withFailureHandler(function(){ showToast("Delete failed"); }).deleteCalcTemplate(name);
+  };
+
+  // Load the built-in default text into the editor (does not save until you do).
+  window.calcResetBody = function() {
+     state.calcEditBody = state.calcDefault || CALC_LOCAL_DEFAULT;
+     render();
   };
   
   window.runCalculation = function() {

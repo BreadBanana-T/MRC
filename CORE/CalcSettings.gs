@@ -1,52 +1,111 @@
 /**
- * MODULE: CALC SETTINGS
+ * MODULE: CALC SETTINGS  (report-template library)
  *
- * Runtime-editable store for the Calculator's report template, so the layout
- * (the "(Genesys)" suffixes, the NOTES line, DELAYS, labels, …) can change on
- * the fly without redeploying the Apps Script. Follows the same Script-Property
- * JSON pattern the app already uses (RoleManager floor map, FeedbackTracker
- * config). The default lives in code as DEFAULT_CALC_TEMPLATE (CORE/Calculator.gs)
- * so a missing or blank property always renders a valid report.
+ * Runtime-editable store for the Calculator's report templates, so the layout
+ * ("(Genesys)" suffixes, NOTES wording, DELAYS, labels, …) can change on the
+ * fly without redeploying. Holds a LIBRARY of named templates plus which one
+ * is active; the report is rendered from the active template's body.
  *
- * Routers getCalcTemplate() / saveCalcTemplate() / resetCalcTemplate() live in
- * Code.gs; the edit UI is in the Calculator view (JavaScript.html).
+ * Stored as one JSON blob in a Script Property (same pattern as RoleManager /
+ * FeedbackTracker):
+ *   { active: "<name>|''", templates: [ { name, body }, ... ] }
+ * active === "" means "use the built-in default" (DEFAULT_CALC_TEMPLATE in
+ * CORE/Calculator.gs), which is always available and can't be edited/deleted.
+ *
+ * Routers live in Code.gs; the edit UI is in the Calculator view.
  */
 var CalcSettings = {
-  KEY: 'CALC_TEMPLATE',
+  KEY: 'CALC_LIBRARY',
+  OLD_KEY: 'CALC_TEMPLATE',   // legacy single-template key (auto-migrated)
 
-  // Stored custom template, or "" when none is saved.
-  raw: function() {
-    return PropertiesService.getScriptProperties().getProperty(this.KEY) || "";
-  },
-
-  // The template to render with: the saved one if non-blank, else the default.
-  template: function() {
-    var t = this.raw();
-    return (t && t.trim() !== "") ? t : DEFAULT_CALC_TEMPLATE;
-  },
-
-  // Persist a new template. Rejects empty input so the report can't be blanked.
-  save: function(t) {
-    if (typeof t !== 'string' || t.trim() === "") {
-      return JSON.stringify({ ok: false, error: "Template can't be empty." });
+  _load: function() {
+    var sp = PropertiesService.getScriptProperties();
+    var lib = null;
+    var raw = sp.getProperty(this.KEY);
+    if (raw) { try { lib = JSON.parse(raw); } catch (e) { lib = null; } }
+    if (!lib || !Array.isArray(lib.templates)) {
+      // First run — seed from the legacy single-template property if present.
+      lib = { active: "", templates: [] };
+      var old = sp.getProperty(this.OLD_KEY);
+      if (old && old.trim() !== "") {
+        lib.templates.push({ name: "Saved template", body: old });
+        lib.active = "Saved template";
+      }
     }
-    PropertiesService.getScriptProperties().setProperty(this.KEY, t);
-    return JSON.stringify({ ok: true, template: t, custom: true });
+    if (typeof lib.active !== 'string') lib.active = "";
+    return lib;
   },
 
-  // Drop the custom template and fall back to the built-in default.
-  reset: function() {
-    PropertiesService.getScriptProperties().deleteProperty(this.KEY);
-    return JSON.stringify({ ok: true, template: DEFAULT_CALC_TEMPLATE, custom: false });
+  _persist: function(lib) {
+    PropertiesService.getScriptProperties().setProperty(this.KEY, JSON.stringify(lib));
   },
 
-  // What the edit UI needs: current template, the default (for Reset preview),
-  // and whether a custom template is currently in effect.
+  _find: function(lib, name) {
+    for (var i = 0; i < lib.templates.length; i++) if (lib.templates[i].name === name) return lib.templates[i];
+    return null;
+  },
+
+  // Success shape shared by every call the UI makes.
+  _state: function(lib, extra) {
+    var o = { ok: true, active: lib.active, templates: lib.templates, default: DEFAULT_CALC_TEMPLATE };
+    if (extra) for (var k in extra) o[k] = extra[k];
+    return JSON.stringify(o);
+  },
+
+  // Body used to render the report: the active template, else the default.
+  template: function() {
+    var lib = this._load();
+    var t = this._find(lib, lib.active);
+    return (t && t.body && t.body.trim() !== "") ? t.body : DEFAULT_CALC_TEMPLATE;
+  },
+
+  // Full library state for the editor.
   payload: function() {
-    return JSON.stringify({
-      template: this.template(),
-      default: DEFAULT_CALC_TEMPLATE,
-      custom: this.raw().trim() !== ""
-    });
+    return this._state(this._load());
+  },
+
+  // Create or update a named template (upsert). Optionally make it active.
+  saveTemplate: function(name, body, makeActive) {
+    name = (name || "").trim();
+    if (name === "") return JSON.stringify({ ok: false, error: "Template name is required." });
+    if (name.toLowerCase() === "default") return JSON.stringify({ ok: false, error: '"Default" is reserved for the built-in template.' });
+    if (typeof body !== 'string' || body.trim() === "") return JSON.stringify({ ok: false, error: "Template can't be empty." });
+    var lib = this._load();
+    var t = this._find(lib, name);
+    if (t) t.body = body; else lib.templates.push({ name: name, body: body });
+    if (makeActive || lib.active === "") lib.active = name;
+    this._persist(lib);
+    return this._state(lib, { savedName: name });
+  },
+
+  // Switch the active template. "" selects the built-in default.
+  setActive: function(name) {
+    var lib = this._load();
+    if (name !== "" && !this._find(lib, name)) return JSON.stringify({ ok: false, error: "No such template." });
+    lib.active = name;
+    this._persist(lib);
+    return this._state(lib);
+  },
+
+  rename: function(oldName, newName) {
+    newName = (newName || "").trim();
+    if (newName === "") return JSON.stringify({ ok: false, error: "New name is required." });
+    if (newName.toLowerCase() === "default") return JSON.stringify({ ok: false, error: '"Default" is reserved.' });
+    var lib = this._load();
+    if (this._find(lib, newName)) return JSON.stringify({ ok: false, error: "A template with that name already exists." });
+    var t = this._find(lib, oldName);
+    if (!t) return JSON.stringify({ ok: false, error: "No such template." });
+    t.name = newName;
+    if (lib.active === oldName) lib.active = newName;
+    this._persist(lib);
+    return this._state(lib);
+  },
+
+  remove: function(name) {
+    var lib = this._load();
+    lib.templates = lib.templates.filter(function (x) { return x.name !== name; });
+    if (lib.active === name) lib.active = "";   // fall back to built-in default
+    this._persist(lib);
+    return this._state(lib);
   }
 };
