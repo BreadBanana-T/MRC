@@ -72,9 +72,12 @@ function calculateMetrics(inText, outText) {
     // a Current interval column. The team reports ASA and SVL IN from Today,
     // LCW from the Current interval. SAFE lives on a separate tableau and the
     // Genesys paste has no inbound trend, so both stay "N/A" for manual fill.
-    // Times show as "10s" (or "2m", "1:05"); SL shows as "61%".
-    const TIME_RE = /^(\d+(\.\d+)?(s|m|min|h)|\d{1,2}:\d{2}(:\d{2})?)$/i;
-    const PCT_RE = /^\d+(\.\d+)?%$/;
+    // A time value can be multi-part with spaces ("2m 29s"), a single unit
+    // ("10s", "2m"), or a clock value ("1:05"). SL shows as "61%". These match
+    // a whole value (one line / one tab-cell), never a fragment — see the
+    // newline/tab-only split in genesysPair so "2m 29s" stays one value.
+    const TIME_RE = /^(?:\d{1,2}:\d{2}(?::\d{2})?|(?:\d+(?:\.\d+)?\s*(?:hrs|hr|h|min|m|s)\b\s*)+)$/i;
+    const PCT_RE = /^\d+(?:\.\d+)?%$/;
 
     const asaP = genesysPair(inText, "External ASA", TIME_RE);
     if (asaP) stats.asa = asaP.today;
@@ -201,7 +204,9 @@ function genesysPair(text, header, valueRe) {
   let block = text.substring(idx + header.length);
   const nextIdx = block.indexOf("External ");
   if (nextIdx !== -1) block = block.substring(0, nextIdx);
-  const tokens = block.split(/\s+/).filter(t => valueRe.test(t));
+  // Split on newlines/tabs only — NOT spaces — so a multi-word value like
+  // "2m 29s" stays a single value instead of being torn into "2m" and "29s".
+  const tokens = block.split(/[\t\r\n]+/).map(s => s.trim()).filter(s => valueRe.test(s));
   return tokens.length >= 2 ? { today: tokens[0], interval: tokens[1] } : null;
 }
 
