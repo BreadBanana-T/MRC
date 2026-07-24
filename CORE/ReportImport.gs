@@ -28,7 +28,18 @@ var ReportImport = {
       return r;
     });
     var prevRows = sh.getLastRow(), prevCols = sh.getLastColumn();
-    sh.getRange(1, 1, all.length, nCols).setValues(all);
+    // Store everything as PLAIN TEXT so the exact strings round-trip through
+    // getDisplayValues(). Otherwise Sheets coerces the ISO date strings we write
+    // (WeekStart / Period / PeriodStart-End) into Date serials rendered in the
+    // spreadsheet's locale (e.g. "5/31/2026"), which then fail the ISO string
+    // comparisons in getActivityCodes/getForecast/getSafe, and renders decimal
+    // hours with the locale decimal separator (e.g. "196,5") that parseFloat
+    // truncates to 196 — so the Management View cards silently show nothing or
+    // wrong numbers. The number format MUST be set before setValues, or the
+    // coercion has already happened. (@ = text.)
+    var wr = sh.getRange(1, 1, all.length, nCols);
+    wr.setNumberFormat('@');
+    wr.setValues(all);
     if (prevRows > all.length) sh.getRange(all.length + 1, 1, prevRows - all.length, Math.max(nCols, prevCols)).clearContent();
     if (prevCols > nCols) sh.getRange(1, nCols + 1, Math.max(all.length, prevRows), prevCols - nCols).clearContent();
     return rows.length;
@@ -89,6 +100,15 @@ var ReportImport = {
     return (t.indexOf('fcst alarm') !== -1 || t.indexOf('fcst acc') !== -1) && t.indexOf('servtype') === -1;
   },
   _num: function(s) { s = String(s == null ? '' : s).replace(/[, %]/g, '').trim(); var n = parseFloat(s); return isFinite(n) ? n : null; },
+  // Normalize a cell value to a yyyy-MM-dd string, whether it comes back as the
+  // text we stored ("2026-05-31") or as a Date object (Sheets coerced a legacy
+  // pre-text-format import). Returns '' if it isn't a resolvable date.
+  _isoDate: function(v) {
+    if (v instanceof Date && !isNaN(v.getTime())) return Utilities.formatDate(v, this.TZ, 'yyyy-MM-dd');
+    var s = String(v == null ? '' : v).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+  },
   // Accepts "21 June 2026", "21-Jun-26", "Jun 21 2026", "2026-06-21", etc.
   _dayDate: function(lbl) {
     var s = String(lbl).trim();
@@ -398,14 +418,18 @@ var ReportImport = {
 
   // Activity hours per CODE / per GRP within [startStr, endStr] (week-start Sundays).
   getActivityCodes: function(startStr, endStr) {
+    var self = this;
     var out = { byCode: {}, byGrp: {}, total: 0, weeks: 0, has: false };
     try {
       var sh = this._ss().getSheetByName('WF_ACTIVITY_WK');
       if (!sh || sh.getLastRow() < 2) return out;
       var weeks = {};
-      sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
-        var ws = r[0]; if (!ws || ws < startStr || ws > endStr) return;
-        var h = parseFloat(r[4]) || 0;
+      // Read RAW typed values (not display): WeekStart may be text or a coerced
+      // Date, and hours may be a number or text — normalize both so the ISO
+      // window filter and the totals are locale-proof.
+      sh.getDataRange().getValues().slice(1).forEach(function(r) {
+        var ws = self._isoDate(r[0]); if (!ws || ws < startStr || ws > endStr) return;
+        var h = (typeof r[4] === 'number') ? r[4] : (parseFloat(String(r[4]).replace(/[, ]/g, '')) || 0);
         out.byCode[r[2]] = (out.byCode[r[2]] || 0) + h;
         out.byGrp[r[1]] = (out.byGrp[r[1]] || 0) + h;
         out.total += h; weeks[ws] = true;
