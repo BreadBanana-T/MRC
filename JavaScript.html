@@ -4268,6 +4268,8 @@
      if(!el.value.trim()) { showToast("Template can't be empty"); return; }
      var name = (window.prompt("Name this template (e.g. \"Week A - Night\"):", "") || "").trim();
      if(!name) return;
+     // Typing "Default" here means "change the built-in Default" — do that.
+     if(name.toLowerCase() === "default") { calcSaveDefault(); return; }
      if(typeof google === 'undefined') { state.calcTemplates.push({name:name, body:el.value}); state.calcActive = name; state.calcEditBody = el.value; render(); return; }
      showToast("Saving…");
      google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast('Saved "' + name + '"'); }).withFailureHandler(function(){ showToast("Save failed"); }).saveCalcTemplate(name, el.value, true);
@@ -4329,7 +4331,50 @@
      if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; state.lastCalc = d; fetchStats(); render(); }).runCalculator(i, o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
   };
 
-  window.copyReport = function() { var text = document.getElementById('report-content').innerText; fallbackCopyTextToClipboard(text, "Report Copied"); };
+  // Section headers copied in red; the ":" and everything else keep the normal
+  // (theme) colour. Only these exact leading labels turn red — the metric rows
+  // (SVL OUT, ACK, …) stay normal even though they're uppercase too.
+  var CALC_RED_HEADERS = ["STATS UPDATE", "TRENDS", "DELAYS", "NOTES"];
+  var CALC_RED = "#E5484D";
+
+  function calcEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function reportToColoredHtml(text) {
+     var lines = String(text).split('\n');
+     var out = lines.map(function(line) {
+        var ci = line.indexOf(':');
+        var head = (ci >= 0 ? line.slice(0, ci) : line);
+        if(CALC_RED_HEADERS.indexOf(head.trim().toUpperCase()) >= 0) {
+           var rest = (ci >= 0 ? line.slice(ci) : "");
+           return '<span style="color:' + CALC_RED + ';font-weight:bold;">' + calcEsc(head) + '</span>' + calcEsc(rest);
+        }
+        return calcEsc(line);
+     });
+     return '<div style="font-family:Arial,Helvetica,sans-serif;white-space:pre-wrap;">' + out.join('<br>') + '</div>';
+  }
+
+  // Copy rich HTML (red headers) with a plain-text fallback in the same clipboard
+  // write, so apps that honour pasted colour show red and the rest stay plain.
+  function copyRichReport(html, plain, successMsg) {
+     try {
+        var box = document.createElement('div');
+        box.setAttribute('contenteditable', 'true');
+        box.style.position = 'fixed'; box.style.left = '-9999px'; box.style.top = '0'; box.style.whiteSpace = 'pre-wrap';
+        box.innerHTML = html;
+        document.body.appendChild(box);
+        var range = document.createRange(); range.selectNodeContents(box);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        var ok = document.execCommand('copy');
+        sel.removeAllRanges(); document.body.removeChild(box);
+        if(ok) { showToast(successMsg || "Copied"); return; }
+     } catch(e) {}
+     fallbackCopyTextToClipboard(plain, successMsg);   // plain-text safety net
+  }
+
+  window.copyReport = function() {
+     var text = document.getElementById('report-content').innerText;
+     copyRichReport(reportToColoredHtml(text), text, "Report Copied");
+  };
 
   window.copyWindTemplate = function() {
      var targetOrder = ["Toronto", "Ottawa", "Calgary", "Edmonton", "Vancouver", "Prince George", "Montreal", "Quebec City"]; var flatList = []; 

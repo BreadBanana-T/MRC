@@ -99,7 +99,9 @@ var CalcSettings = {
   saveTemplate: function(name, body, makeActive) {
     name = (name || "").trim();
     if (name === "") return JSON.stringify({ ok: false, error: "Template name is required." });
-    if (name.toLowerCase() === "default") return JSON.stringify({ ok: false, error: '"Default" is reserved for the built-in template.' });
+    // Saving under the name "Default" edits the built-in Default itself
+    // (that's what the user wants when they type it), rather than erroring.
+    if (name.toLowerCase() === "default") return this.saveDefault(body);
     if (typeof body !== 'string' || body.trim() === "") return JSON.stringify({ ok: false, error: "Template can't be empty." });
     var lib = this._load();
     var t = this._find(lib, name);
