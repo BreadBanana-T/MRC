@@ -47,16 +47,47 @@ var CalcSettings = {
 
   // Success shape shared by every call the UI makes.
   _state: function(lib, extra) {
-    var o = { ok: true, active: lib.active, templates: lib.templates, default: DEFAULT_CALC_TEMPLATE };
+    var hasOverride = !!(lib.defaultBody && lib.defaultBody.trim() !== "");
+    var o = {
+      ok: true, active: lib.active, templates: lib.templates,
+      default: DEFAULT_CALC_TEMPLATE,                                   // factory text (for "load factory")
+      defaultBody: hasOverride ? lib.defaultBody : DEFAULT_CALC_TEMPLATE, // effective Default (editable)
+      defaultCustom: hasOverride
+    };
     if (extra) for (var k in extra) o[k] = extra[k];
     return JSON.stringify(o);
   },
 
-  // Body used to render the report: the active template, else the default.
+  // The effective built-in Default: the saved override, else the factory text.
+  _default: function(lib) {
+    return (lib.defaultBody && lib.defaultBody.trim() !== "") ? lib.defaultBody : DEFAULT_CALC_TEMPLATE;
+  },
+
+  // Body used to render the report: the active named template, else the Default.
   template: function() {
     var lib = this._load();
+    if (lib.active === "") return this._default(lib);
     var t = this._find(lib, lib.active);
-    return (t && t.body && t.body.trim() !== "") ? t.body : DEFAULT_CALC_TEMPLATE;
+    return (t && t.body && t.body.trim() !== "") ? t.body : this._default(lib);
+  },
+
+  // Edit the built-in Default itself (stored as an override; factory text is
+  // always recoverable via resetDefault / the "load factory text" button).
+  saveDefault: function(body) {
+    if (typeof body !== 'string' || body.trim() === "") return JSON.stringify({ ok: false, error: "Template can't be empty." });
+    var lib = this._load();
+    lib.defaultBody = body;
+    lib.active = "";   // saving the Default implies you want it in use
+    this._persist(lib);
+    return this._state(lib);
+  },
+
+  // Restore the built-in Default to the factory text.
+  resetDefault: function() {
+    var lib = this._load();
+    delete lib.defaultBody;
+    this._persist(lib);
+    return this._state(lib);
   },
 
   // Full library state for the editor.

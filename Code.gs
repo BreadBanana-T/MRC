@@ -86,6 +86,8 @@ function saveCalcTemplate(name, body, makeActive) { return (typeof CalcSettings!
 function setCalcTemplate(name) { return (typeof CalcSettings!=='undefined') ? CalcSettings.setActive(name) : JSON.stringify({ ok:false, error:"unavailable" }); }
 function renameCalcTemplate(oldName, newName) { return (typeof CalcSettings!=='undefined') ? CalcSettings.rename(oldName, newName) : JSON.stringify({ ok:false, error:"unavailable" }); }
 function deleteCalcTemplate(name) { return (typeof CalcSettings!=='undefined') ? CalcSettings.remove(name) : JSON.stringify({ ok:false, error:"unavailable" }); }
+function saveCalcDefault(body) { return (typeof CalcSettings!=='undefined') ? CalcSettings.saveDefault(body) : JSON.stringify({ ok:false, error:"unavailable" }); }
+function resetCalcDefault() { return (typeof CalcSettings!=='undefined') ? CalcSettings.resetDefault() : JSON.stringify({ ok:false, error:"unavailable" }); }
 function fetchScripts() { return (typeof ScriptHandler!=='undefined') ? JSON.stringify(ScriptHandler.getAll()) : "[]"; }
 // saveTeamScript / deleteTeamScript / getTeamScripts live in CORE/ScriptHandler.gs.
 // Do NOT redeclare them here: duplicate top-level names across .gs files

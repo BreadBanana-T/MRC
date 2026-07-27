@@ -204,7 +204,7 @@
       // Editable Calculator report-template LIBRARY (server-persisted, shared).
       // Loaded lazily when the Calculator view opens via fetchCalcTemplate().
       // calcActive === "" means the built-in default template is in use.
-      calcLibLoaded: false, calcActive: "", calcTemplates: [], calcDefault: "", calcEditBody: "", calcEditing: false
+      calcLibLoaded: false, calcActive: "", calcTemplates: [], calcDefault: "", calcDefaultBody: "", calcDefaultCustom: false, calcEditBody: "", calcEditing: false
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
@@ -950,7 +950,9 @@
   function applyCalcLibrary(d) {
       state.calcTemplates = Array.isArray(d.templates) ? d.templates : [];
       state.calcActive = (typeof d.active === 'string') ? d.active : "";
-      state.calcDefault = d.default || CALC_LOCAL_DEFAULT;
+      state.calcDefault = d.default || CALC_LOCAL_DEFAULT;                  // factory text
+      state.calcDefaultBody = d.defaultBody || state.calcDefault;           // effective (editable) Default
+      state.calcDefaultCustom = !!d.defaultCustom;
       state.calcEditBody = calcActiveBody();
       state.calcLibLoaded = true;
   }
@@ -959,21 +961,21 @@
       if(state.calcActive) {
           for(var i=0;i<state.calcTemplates.length;i++) if(state.calcTemplates[i].name === state.calcActive) return state.calcTemplates[i].body;
       }
-      return state.calcDefault || CALC_LOCAL_DEFAULT;
+      return state.calcDefaultBody || state.calcDefault || CALC_LOCAL_DEFAULT;
   }
 
   function fetchCalcTemplate() {
       if(state.calcLibLoaded) return;
-      if(typeof google === 'undefined') { applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT }); if(state.view==='calculator') render(); return; }
+      if(typeof google === 'undefined') { applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT }); if(state.view==='calc') render(); return; }
       google.script.run.withSuccessHandler(function(j) {
           try { applyCalcLibrary(JSON.parse(j)); } catch(e) { applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT }); }
-          if(state.view === 'calculator') render();
+          if(state.view === 'calc') render();
       }).withFailureHandler(function() {
           // Backend not deployed yet / call failed — degrade to a local default so
           // the panel is usable instead of stuck on "Loading…".
           applyCalcLibrary({ active:"", templates:[], default: CALC_LOCAL_DEFAULT });
           showToast("Template library unavailable — deploy the latest version");
-          if(state.view === 'calculator') render();
+          if(state.view === 'calc') render();
       }).getCalcTemplate();
   }
 
@@ -4210,13 +4212,20 @@
         '</div>';
 
      var editHint = isDefault
-        ? 'You\'re viewing the built-in <b>Default</b> (read-only). Edit below and use <b>Save As New…</b> to keep it as its own named layout — e.g. "Week A - Night".'
+        ? 'Editing the built-in <b>Default</b>' + (state.calcDefaultCustom ? ' (customized)' : '') + ' — used whenever no named template is active. <b>Save Default</b> keeps your changes; <b>Save As New…</b> branches a named layout (e.g. "Week A - Night").'
         : 'Editing <b>' + escapeHTML(state.calcActive) + '</b>. Placeholders in braces are filled with live values; all other text is literal (add/remove "(Genesys)", flip Coaching Open/Closed, etc.).';
 
      var saveBtn = isDefault
-        ? '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="save" width="15"></i> Save As New…</button>'
+        ? '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveDefault()"><i data-lucide="save" width="15"></i> Save Default</button>' +
+          '<button class="btn btn-glass" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="copy" width="15"></i> Save As New…</button>'
         : '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveTemplate()"><i data-lucide="save" width="15"></i> Save "' + escapeHTML(state.calcActive) + '"</button>' +
           '<button class="btn btn-glass" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="copy" width="15"></i> Save As New…</button>';
+
+     // On the Default, offer a reset-to-factory when it's been customized;
+     // elsewhere, a button to pull the Default text into the editor.
+     var resetBtn = isDefault
+        ? (state.calcDefaultCustom ? '<button class="btn btn-glass" style="height:40px;" onclick="calcResetDefaultFactory()" title="Discard customizations and restore the factory Default"><i data-lucide="rotate-ccw" width="15"></i> Reset to factory</button>' : '')
+        : '<button class="btn btn-glass" style="height:40px;" onclick="calcResetBody()" title="Load the Default text into the editor"><i data-lucide="rotate-ccw" width="15"></i> Load default text</button>';
 
      return '<div class="aether-card" style="margin-top:24px;">' + header + controls +
         '<div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin:4px 0 12px;">' + editHint + ' Available placeholders: <code style="color:var(--text-accent);">' + legend + '</code></div>' +
@@ -4226,8 +4235,7 @@
           '<div><label class="paste-label"><i data-lucide="eye" width="13"></i> Live preview' + (state.lastCalc && state.lastCalc.svl ? ' (your last run)' : ' (sample values)') + '</label>' +
           '<div id="calc-template-preview" class="custom-scrollbar" style="background:var(--bg-root); padding:18px; border-radius:18px; font-family:monospace; font-size:0.85rem; min-height:280px; max-height:340px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;">' + preview + '</div></div>' +
         '</div>' +
-        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' + saveBtn +
-          '<button class="btn btn-glass" style="height:40px;" onclick="calcResetBody()" title="Load the built-in default text into the editor"><i data-lucide="rotate-ccw" width="15"></i> Load default text</button>' +
+        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' + saveBtn + resetBtn +
         '</div></div>';
   }
 
@@ -4293,9 +4301,26 @@
      google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast('Deleted "' + name + '"'); }).withFailureHandler(function(){ showToast("Delete failed"); }).deleteCalcTemplate(name);
   };
 
-  // Load the built-in default text into the editor (does not save until you do).
+  // Save edits to the built-in Default itself (stored as an override).
+  window.calcSaveDefault = function() {
+     var el = document.getElementById('calc-template'); if(!el) return;
+     if(!el.value.trim()) { showToast("Template can't be empty"); return; }
+     if(typeof google === 'undefined') { state.calcDefaultBody = el.value; state.calcDefaultCustom = true; state.calcActive = ""; showToast("Saved (local)"); render(); return; }
+     showToast("Saving default…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast("Default saved"); }).withFailureHandler(function(){ showToast("Save failed"); }).saveCalcDefault(el.value);
+  };
+
+  // Restore the built-in Default to the original factory text.
+  window.calcResetDefaultFactory = function() {
+     if(!window.confirm("Discard your Default customizations and restore the original text?")) return;
+     if(typeof google === 'undefined') { state.calcDefaultBody = state.calcDefault; state.calcDefaultCustom = false; state.calcEditBody = state.calcDefault; render(); return; }
+     showToast("Restoring…");
+     google.script.run.withSuccessHandler(function(r){ if(calcHandleLibResult(r)) showToast("Default reset to factory"); }).withFailureHandler(function(){ showToast("Reset failed"); }).resetCalcDefault();
+  };
+
+  // Load the Default text into the editor (does not save until you do).
   window.calcResetBody = function() {
-     state.calcEditBody = state.calcDefault || CALC_LOCAL_DEFAULT;
+     state.calcEditBody = state.calcDefaultBody || state.calcDefault || CALC_LOCAL_DEFAULT;
      render();
   };
   
