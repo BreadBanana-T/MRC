@@ -390,12 +390,39 @@ var AssignmentAnalyzer = {
       return { month: targetMonth, matched: matched, unmatched: unmatched };
   },
 
+  /**
+   * Provenance of a month's Inbound/Outbound %. 'gem' = measured, straight from
+   * the 20-column export. 'aux' = ESTIMATED from the Agent AUX time report, whose
+   * mapping is not yet validated (see docs §2.3) — the dashboard must say so.
+   */
+  _setPctSource: function(month, src) {
+      if (!month) return;
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sh = ss.getSheetByName('WF_GEM_PCT_SOURCE');
+      if (!sh) { sh = ss.insertSheet('WF_GEM_PCT_SOURCE'); sh.appendRow(['Month', 'Source', 'Updated']); }
+      var data = sh.getDataRange().getValues();
+      var stamp = Utilities.formatDate(new Date(), 'America/Toronto', 'yyyy-MM-dd');
+      for (var i = 1; i < data.length; i++) {
+          if (String(data[i][0]) === month) { sh.getRange(i + 1, 2, 1, 2).setValues([[src, stamp]]); return; }
+      }
+      sh.appendRow([month, src, stamp]);
+  },
+
+  _getPctSource: function(month) {
+      var sh = this._getDB('WF_GEM_PCT_SOURCE');
+      if (!sh || sh.getLastRow() < 2 || !month) return '';
+      var data = sh.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) if (String(data[i][0]) === month) return String(data[i][1] || '');
+      return '';
+  },
+
   /** Public: apply an AUX time report to a month's Inbound/Outbound split. */
   importAuxTime: function(rawText, targetMonth) {
       let p = this._parseAuxTime(rawText);
       if (p.error) return p;
       let r = this._applyPctToMonth(p.byKey, targetMonth || p.month || null);
       if (r.error) return r;
+      this._setPctSource(r.month, 'aux');
       r.count = p.count;
       r.outShare = p.outShare;
       r.outShareLogged = p.outShareLogged;
@@ -457,7 +484,9 @@ var AssignmentAnalyzer = {
           }
       }
       if (!Object.keys(byKey).length) return { error: "No agent percentages found in that paste." };
-      return this._applyPctToMonth(byKey, targetMonth);
+      let res = this._applyPctToMonth(byKey, targetMonth);
+      if (!res.error) this._setPctSource(res.month, 'gem');   // real Inbound/Outbound Time % columns
+      return res;
   },
 
   importGEMData: function(rawText, targetMonth) {
@@ -503,6 +532,7 @@ var AssignmentAnalyzer = {
           // that reads as "nobody is unbalanced" instead of "we can't tell".
           // Keep whatever percentages the month already had.
           this._saveGEMToDB(map, repMonth, !parsed.hasPct);
+          if (parsed.hasPct) this._setPctSource(repMonth, 'gem');   // measured, not estimated
 
           let res = JSON.parse(this.getAnalyzerData(repMonth));
           res.importWarning = parsed.hasPct ? null : {
@@ -681,6 +711,7 @@ var AssignmentAnalyzer = {
               rosterSource: genesysMode ? 'genesys' : (useMasterList ? 'sharepoint' : 'none'),
               rosterCounts: roster.counts,
               pctPresent: pctPresent, agentsInMonth: Object.keys(currentMap).length,
+              pctSource: this._getPctSource(targetMonth),
               filtered: {
                   junior: filtered.junior.sort(), noProfile: filtered.noProfile.sort(),
                   noLevel: filtered.noLevel.sort(), notOnRoster: filtered.notOnRoster.sort()

@@ -157,6 +157,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (Genesys tag bag, or SharePoint `Name;#Lvl;#…`), 4 Location, 5 Email, **6 Agent Id (Genesys GUID), 7 Language (EN/FR/BL), 8 Level Name, 9 Skill List, 10 Source (`genesys`\|`sharepoint`)** | `importAgentRoster` → `AssignmentAnalyzer.importMasterList` (Import Data box, or Red Flags → Sync Roster) |
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
 | **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
+| **WF_GEM_PCT_SOURCE** | 0 Month, 1 Source (`gem` measured \| `aux` estimated), 2 Updated | `AssignmentAnalyzer._setPctSource` |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
 | **Stats History** | 0 DateTime, 1 SVL%, 2 Ack | external/digest |
 | **DB_Sessions** | 1 Agent, 2 Role, 3 Start, 4 End, 6 Hours | external |
@@ -274,14 +275,27 @@ handles that alongside the GEM's ISO form.
 and Other AUX as inbound. Measured against the Assignment Tracker's own April
 `Inbound Time %` (mean 0.578, 27 agents ≥ 75%):
 
+Calibration must be done on **countable agents only** — juniors are heavily outbound
+(April mean In% **0.166** vs 0.628 for Regular/Senior), so including them drags the
+target down and flatters the naive basis. On countable agents:
+
 | Basis | mean In% | ≥ 75% |
 |---|---|---|
-| `1 - AUX7/Login` | 0.752 | 67 |
-| `1 - AUX7/(Login - AUX5 - AUX8 - Other)` ← **used** | 0.643 | 44 |
+| **April GEM — ground truth** | **0.628** | **24** |
+| `1 - AUX7/Login` | 0.844 | 62 |
+| `1 - AUX7/(Login - AUX5 - AUX8 - Other)` ← **used** | 0.758 | 42 |
+| `1 - AUX7/(AUX7 + CallsAnsw × AHT)` | 0.508 | 10 |
 
-So the split is taken over **productive time**. ⚠️ Still unconfirmed: settling it needs
-one month holding BOTH the 20-column GEM export and this report. The import message
-reports the outbound share on both bases so they can be compared against a known month.
+⚠️ **The AUX-derived split is an ESTIMATE, not the measured value.** The shipped basis
+runs ~13pp high on inbound (42 over the 75% line vs 24 measured); the truth is bracketed
+between it and the handling-time basis, and no candidate reproduces it. Resolving this
+needs one month holding BOTH the 20-column GEM export and the AUX report.
+
+Provenance is therefore tracked per month in **WF_GEM_PCT_SOURCE** (`Month | Source |
+Updated`): `gem` = measured columns, `aux` = estimated. `getAnalyzerData` returns
+`pctSource`, and the dashboard shows an "In / Out % are ESTIMATED" notice plus a
+measured/estimated chip. Re-importing a 20-column GEM export overwrites the estimate and
+flips the flag back to `gem`.
 
 **Inconsistent rows are skipped, never clamped.** The report's `Other AUX agent %` reads
 above 100% for some agents (Melgar: 164.98 h "Other" against 140.04 h logged), which
