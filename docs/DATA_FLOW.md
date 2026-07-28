@@ -223,6 +223,36 @@ is a reason to erase a real agent or to rewrite an old month. `getAnalyzerData` 
 both groups without conflating them. Juniors are still stored and still shown on the
 floor; only the flags exclude them.
 
+### 2.2 Red Flag rules, as reverse‑engineered from Assignment Tracker 2026
+
+Recovered from the workbook's `RedFlagHooks` / `Shift_Analysis` formulas (July 2026).
+`Current_Stats!G` = Inbound Time %, `H` = Outbound Time %, `C` = Worked Days,
+`E` = CPH, `F` = Total Tasks, `K` = Calls Answered.
+
+| Card | Workbook formula | App |
+|---|---|---|
+| Tasks x Calls | `1-((TotalTasks-CallsAnsw)/TotalTasks)` = CallsAnsw/TotalTasks | ✅ same |
+| **Inbound Red Flags** | `In% >= 0.75 AND WDays >= 5` then `TasksxCalls >= 0.5` | ✅ same |
+| **Inbound Out of Scope** | same ≥75% set, `COUNTIF(inboundList)=0` → mutually exclusive | ✅ same |
+| **Outbound Red Flags** | `In% <= 0.25 AND WDays >= 5 AND ISNUMBER(ERC_Level) AND ERC_Level >= 2` | ⚠️ app tests `Out% >= 0.75` — equivalent only because In%+Out% = 1 exactly in every observed row |
+| **CP/H Red Flags** | `Curr.Rank = 3 AND WDays >= 5`, where rank is **per shift**: `0` if no data, `1` if `CPH >= shiftAvg`, `2` if `CPH > shiftAvg/2`, else `3` | ❌ app uses a flat `cph <= 7.3` |
+
+**`Inbound Time %` cannot be derived.** It measures time *staffed on the inbound
+skill*, not call handling time: in the April data Goddard shows In% = 100.0% while
+placing 931 outbound calls, and Landry shows 100.0% on 13 total calls. Every
+call‑ratio candidate (answ×AHT vs outCalls×outTalk, ± extension calls, talk‑only,
+talk+hold+ACW, call counts) misses by a mean of 24–36 **percentage points** over 101
+agents. An export missing the two columns therefore makes three of the four rules
+uncomputable — `_parseGEM` reports `hasPct:false`, `_saveGEMToDB` preserves whatever
+percentages the month already held rather than writing structural zeros, and the
+dashboard says "not measurable" instead of "No agents flagged".
+
+**The CP/H threshold is a moving, shift-relative bar.** `Shift_Analysis!H7 = H3/2`
+where `H3 = AVERAGEIFS(day CPH)`. April: Day avg 14.70 → 7.35, Evening 12.97 → 6.48,
+Night 9.00 → 4.50. The app's hardcoded `7.3` is the **day** threshold frozen from one
+month, applied to every shift — on April data it flags 21 agents where the night bar
+would flag 6.
+
 **Historical months need no migration.** There is no per-month roster snapshot —
 `getAnalyzerData` reads `WF_MASTERLIST` fresh and applies it to whichever month's
 `WF_GEM_DATA_V3` rows are selected. One roster sync therefore re-filters every month at

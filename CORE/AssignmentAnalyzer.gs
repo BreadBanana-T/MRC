@@ -244,15 +244,32 @@ var AssignmentAnalyzer = {
 
   importGEMData: function(rawText) {
       try {
-          let map = this._parseGEM(rawText);
+          let parsed = this._parseGEM(rawText);
+          let map = parsed.agents;
           if (Object.keys(map).length === 0) return JSON.stringify({error: "Invalid data format or missing GEM headers."});
 
           let repMonth = "";
           for (let k in map) { if (map[k].month) { repMonth = map[k].month; break; } }
           if (!repMonth) repMonth = Utilities.formatDate(new Date(), "America/Toronto", "yyyy-MM-01");
-          
-          this._saveGEMToDB(map, repMonth);
-          return this.getAnalyzerData(repMonth);
+
+          // "Inbound Time %" / "Outbound Time %" are the ONLY source for three of
+          // the four flag rules. They are a *time-staffed-on-skill* measure, not
+          // anything derivable from the call columns — in the Assignment Tracker
+          // an agent shows 100% inbound while placing 931 outbound calls. So when
+          // an export arrives without them we must not silently write zeros:
+          // that reads as "nobody is unbalanced" instead of "we can't tell".
+          // Keep whatever percentages the month already had.
+          this._saveGEMToDB(map, repMonth, !parsed.hasPct);
+
+          let res = JSON.parse(this.getAnalyzerData(repMonth));
+          res.importWarning = parsed.hasPct ? null : {
+              kind: 'missing-pct',
+              month: repMonth,
+              missing: parsed.missingCols,
+              text: 'This export has no "Inbound Time %" / "Outbound Time %" columns, so Inbound, Out of Scope and Outbound flags cannot be computed for ' + repMonth +
+                    '. CP/H flags are unaffected. Any percentages already stored for this month were kept, not overwritten. Re-export the GEM report with both columns to restore the other three.'
+          };
+          return JSON.stringify(res);
       } catch (e) {
           return JSON.stringify({error: "Engine Error: " + e.message});
       }
@@ -367,11 +384,16 @@ var AssignmentAnalyzer = {
               }
           });
 
+          // Does this month have any In/Out % at all? If every agent reads 0,
+          // the import lacked the two columns — the Inbound / Out of Scope /
+          // Outbound cards are then "not measurable", not "nobody is flagged".
+          let pctPresent = Object.keys(currentMap).some(a => currentMap[a].inPct > 0 || currentMap[a].outPct > 0);
+
           let inboundList = [];
           let outOfScopeList = [];
           let outboundList = [];
           let cphList = [];
-          
+
           Object.keys(currentMap).forEach(agent => {
               let c = currentMap[agent];
               let p = prevMap[agent] || null;
@@ -415,6 +437,7 @@ var AssignmentAnalyzer = {
               selectedMonth: targetMonth, availableMonths: months, usingMasterList: useMasterList,
               rosterSource: genesysMode ? 'genesys' : (useMasterList ? 'sharepoint' : 'none'),
               rosterCounts: roster.counts,
+              pctPresent: pctPresent, agentsInMonth: Object.keys(currentMap).length,
               filtered: {
                   junior: filtered.junior.sort(), noProfile: filtered.noProfile.sort(),
                   noLevel: filtered.noLevel.sort(), notOnRoster: filtered.notOnRoster.sort()
@@ -496,12 +519,19 @@ var AssignmentAnalyzer = {
       return null;
   },
 
+  /**
+   * @return {{agents:Object, hasPct:boolean, missingCols:string[]}}
+   *   hasPct is false when the export omits Inbound/Outbound Time % — three of
+   *   the four flag rules are then uncomputable and the caller must say so
+   *   rather than treat 0% as a measurement.
+   */
   _parseGEM: function(raw) {
-      if (!raw || raw.trim() === "") return {};
+      let empty = { agents: {}, hasPct: false, missingCols: [] };
+      if (!raw || raw.trim() === "") return empty;
       let lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let headerIdx = lines.findIndex(l => l.toLowerCase().includes('in & out by hr') || l.toLowerCase().includes('cph'));
-      if (headerIdx === -1) return {};
-      
+      if (headerIdx === -1) return empty;
+
       let headers = this._parseCSVLine(lines[headerIdx]);
       let colMap = {};
       headers.forEach((h, i) => {
@@ -525,7 +555,13 @@ var AssignmentAnalyzer = {
           else if (low.includes('outbound calls')) colMap.outCalls = i;
           else if (low.includes('extension in calls') || low.includes('ext in calls')) colMap.extCalls = i;
       });
-      
+
+      // Three of the four flag rules read nothing but these two columns.
+      let missingCols = [];
+      if (colMap.inPct === undefined) missingCols.push('Inbound Time %');
+      if (colMap.outPct === undefined) missingCols.push('Outbound Time %');
+      let hasPct = missingCols.length === 0;
+
       let map = {};
       for (let i = headerIdx + 1; i < lines.length; i++) {
           let cols = this._parseCSVLine(lines[i]);
@@ -564,7 +600,7 @@ var AssignmentAnalyzer = {
               extTalk: this._parseSafeAHT(cols[colMap.extTalk])
           };
       }
-      return map;
+      return { agents: map, hasPct: hasPct, missingCols: missingCols };
   },
 
   _parseSafePercent: function(val) {
@@ -601,10 +637,15 @@ var AssignmentAnalyzer = {
       return s;
   },
 
-  _saveGEMToDB: function(gemMap, repMonth) {
+  /**
+   * @param {boolean} keepExistingPct  the export had no Inbound/Outbound Time %
+   *   columns, so every parsed percentage is a structural 0, not a measurement.
+   *   Carry forward whatever the month already held instead of destroying it.
+   */
+  _saveGEMToDB: function(gemMap, repMonth, keepExistingPct) {
       let sheetName = 'WF_GEM_DATA_V3';
       const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
-      
+
       const writeToSheet = (targetSS) => {
           let sheet = targetSS.getSheetByName(sheetName);
           let expectedHeaders = ["Month", "Agent Name", "CPH", "Inbound %", "Outbound %", "AHT", "Tasks x Calls", "Total Tasks", "Calls Answered", "WDays", "Transfers", "Transf %", "Avg Talk", "Avg Hold", "Avg ACW", "Out Calls", "Out Talk", "Ext Calls", "Ext Talk"];
@@ -618,18 +659,37 @@ var AssignmentAnalyzer = {
           
           let headers = existing.length > 0 ? existing.shift() : expectedHeaders;
           
-          let retained = existing.filter(row => {
-              let dStr = row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
-              return dStr !== repMonth;
-          });
+          let monthOf = function(row) {
+              return row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
+          };
+          let retained = existing.filter(row => monthOf(row) !== repMonth);
+
+          // Percentages already on file for this month, keyed the same way the
+          // analyzer keys agents, so a re-import with a column-short export
+          // doesn't wipe them.
+          let priorPct = {};
+          if (keepExistingPct) {
+              existing.forEach(row => {
+                  if (monthOf(row) !== repMonth) return;
+                  let k = _normalizeAgentKey(row[1]);
+                  if (!k) return;
+                  let pin = parseFloat(row[3]) || 0, pout = parseFloat(row[4]) || 0;
+                  if (pin > 0 || pout > 0) priorPct[k] = { inPct: pin, outPct: pout };
+              });
+          }
 
           let safeT = function(t) { return (t && t !== '-' && t !== '00:00') ? "'" + t : "-"; };
-          
+
           let newRows = [];
           Object.keys(gemMap).forEach(agent => {
               let m = gemMap[agent];
+              let inP = m.inPct, outP = m.outPct;
+              if (keepExistingPct) {
+                  let p = priorPct[_normalizeAgentKey(agent)];
+                  if (p) { inP = p.inPct; outP = p.outPct; }
+              }
               newRows.push([
-                  repMonth, agent, m.cph, m.inPct, m.outPct, safeT(m.aht), m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays,
+                  repMonth, agent, m.cph, inP, outP, safeT(m.aht), m.tasksXCalls, m.totalCalls, m.callsAnsw, m.wDays,
                   m.transfers, m.transfPct, safeT(m.avgTalk), safeT(m.avgHold), safeT(m.avgAcw), m.outCalls, safeT(m.outTalk), m.extCalls, safeT(m.extTalk)
               ]);
           });
