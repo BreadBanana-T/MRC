@@ -32,18 +32,28 @@ var AssignmentAnalyzer = {
           if (!rawText || rawText.trim() === "") return "Error: No data pasted.";
           let lines = rawText.split(/\r?\n/).filter(l => l.trim().length > 0);
 
-          // ── Genesys Cloud export? ── Scan every line, not just the top: a
-          // paste often carries a title/filter preamble above the real header.
-          // Data rows can't false-positive — the check needs literal "Agent Id"
-          // / "Agent Name" / "Skills" cells.
+          let rows = lines.map(l => this._parseCSVLine(l));
+
+          // ── Genesys Cloud export, with its header row? ── Scan every line,
+          // not just the top: a paste often carries a title/filter preamble
+          // above the real header. Data rows can't false-positive — the check
+          // needs literal "Agent Id" / "Agent Name" / "Skills" cells.
           let gHeaderIdx = -1;
-          for (let i = 0; i < lines.length; i++) {
-              if (GenesysRoster.looksLikeGenesysHeader(this._parseCSVLine(lines[i]))) { gHeaderIdx = i; break; }
+          for (let i = 0; i < rows.length; i++) {
+              if (GenesysRoster.looksLikeGenesysHeader(rows[i])) { gHeaderIdx = i; break; }
           }
-          if (gHeaderIdx !== -1) return this._importGenesysRoster(lines.slice(gHeaderIdx));
+          if (gHeaderIdx !== -1) return this._importGenesysRoster(rows.slice(gHeaderIdx), null);
 
           let headerIdx = lines.findIndex(l => l.toLowerCase().includes('employee_name') || l.toLowerCase().includes('job_title') || l.toLowerCase().includes('name_first'));
-          if (headerIdx === -1) return "Error: Could not find MasterList or Genesys headers.";
+
+          // ── Genesys rows WITHOUT the header ── Selecting rows in the Genesys
+          // grid and copying gives data only. Infer the layout from the
+          // SAM_Monit tags rather than rejecting a perfectly good paste.
+          if (headerIdx === -1) {
+              let layout = GenesysRoster.sniffLayout(rows);
+              if (layout) return this._importGenesysRoster(rows, layout);
+              return "Error: Not a recognized roster. Paste the Genesys agent export (Agent Id / Agent Name / Skills) or the SharePoint MasterList.";
+          }
 
           let headers = this._parseCSVLine(lines[headerIdx]);
           let colName = headers.findIndex(h => h.toLowerCase().includes('employee_name') || h.toLowerCase() === 'name');
@@ -106,7 +116,7 @@ var AssignmentAnalyzer = {
                       RegionRegistry.upsert(agentName, isOffshore ? 'Offshore' : 'Onshore', 'masterlist');
                   });
               }
-              return `Success: Locked ${validAgents.length} Active Agents into the engine.\nManagers are permanently ignored.`;
+              return `Agent roster synced from the SharePoint MasterList — ${validAgents.length} active agent${validAgents.length === 1 ? '' : 's'} locked in.\nManagers are permanently ignored. Paste the Genesys export instead to get levels, skills and languages.`;
           }
           return "Error: No active agents found in the pasted list.";
       } catch (e) {
@@ -115,16 +125,18 @@ var AssignmentAnalyzer = {
   },
 
   /**
-   * Genesys Cloud roster writer. `lines` starts at the header row.
+   * Genesys Cloud roster writer.
+   * @param {string[][]} rows    parsed cells; starts at the header row unless
+   *                             `layout` is given, in which case it's all data
+   * @param {?Object} layout     column indices from GenesysRoster.sniffLayout
+   *
    * Region is NOT touched: the export carries no location or TI email, so
    * upserting everyone as "Onshore" would poison RegionRegistry at masterlist
    * rank and silently move offshore agents. Region keeps coming from the
    * registry / WFM schedule.
    */
-  _importGenesysRoster: function(lines) {
-      var self = this;
-      var rows = lines.map(function(l) { return self._parseCSVLine(l); });
-      var built = GenesysRoster.buildRoster(rows);
+  _importGenesysRoster: function(rows, layout) {
+      var built = GenesysRoster.buildRoster(rows, layout);
       if (!built.agents.length) return "Error: No agents found in the Genesys export.";
 
       var out = built.agents.map(function(a) {
@@ -151,11 +163,12 @@ var AssignmentAnalyzer = {
       sheet.getRange(2, 1, out.length, this.ML_HEADERS.length).setValues(out);
 
       var c = built.counts;
-      return "Success: Genesys roster synced — " + c.countable + " monitoring specialists counted"
+      return "Agent roster synced from Genesys — " + c.countable + " monitoring specialist" + (c.countable === 1 ? "" : "s") + " counted"
            + " (" + c.senior + " Senior / " + c.regular + " Regular · "
            + c.bilingual + " BL, " + c.english + " EN, " + c.french + " FR).\n"
            + "Excluded from Red Flags: " + c.junior + " Junior, " + c.noProfile + " with no skills attached"
-           + (c.noLevel ? ", " + c.noLevel + " with a language but no level" : "") + ".";
+           + (c.noLevel ? ", " + c.noLevel + " with a language but no level" : "") + "."
+           + (layout ? "\n(no header row in the paste — columns inferred from the SAM_Monit tags)" : "");
   },
 
   /**

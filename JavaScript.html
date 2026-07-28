@@ -4617,6 +4617,21 @@
   var DIRECT_LIMIT = 800 * 1024;
   var CHUNK_SIZE   = 50 * 1024;
 
+  // One name per import kind, used for the "detected" toast, the result toast
+  // and the global notification. Previously each of the three had its own
+  // ternary chain, so a new kind could be detected correctly and still be
+  // announced as "WFM Schedule".
+  var IMPORT_KINDS = {
+      roster:   { detect: 'Agent roster detected — decoding levels, skills and languages…', label: 'Agent roster',       notif: 'Agent Roster Synced. Levels, skills and languages updated.' },
+      activity: { detect: 'Activity-loading report detected — ingesting…',                   label: 'Activity loading',   notif: 'Activity Loading Refreshed.' },
+      alarms:   { detect: 'Alarms report detected — ingesting…',                             label: 'Alarms report',      notif: 'Alarms Data Refreshed.' },
+      forecast: { detect: 'Forecast report detected — ingesting…',                           label: 'Forecast report',    notif: 'Forecast Data Refreshed.' },
+      safe:     { detect: 'SAFE roster detected — tagging…',                                 label: 'SAFE roster',        notif: 'SAFE Roster Refreshed.' },
+      otopen:   { detect: 'OT slots JSON detected — ingesting…',                             label: 'OT open slots',      notif: 'OT Open Slots Refreshed.' },
+      idp:      { detect: 'IDP paste detected — syncing…',                                   label: 'IDP heatmap',        notif: 'IDP Heatmap Refreshed.' },
+      sched:    { detect: 'WFM schedule detected — syncing…',                                label: 'WFM schedule',       notif: 'WFM Schedule Refreshed.' }
+  };
+
   function _chunkUpload(text, kind, onSuccess, onFailure) {
       var token = 't' + Date.now() + Math.random().toString(36).slice(2, 8);
       var total = Math.ceil(text.length / CHUNK_SIZE);
@@ -4769,20 +4784,27 @@
       };
       var onSuccess = function(trackerResult) {
           if (settled) return; settled = true; clearTimeout(backstop);
-          console.log('[sync] success:', trackerResult);
+          console.log('[sync] success (kind=' + kind + '):', trackerResult);
           resetBtn();
+          var res = String(trackerResult == null ? '' : trackerResult);
+          // A server that answered with "Error: …" did NOT import anything. This
+          // used to be rewritten to "Schedule Synced" — a failed import reported
+          // as a success, under the wrong name. Show what actually happened.
+          var failed = res.indexOf('Error') !== -1;
+          if (failed) {
+              showToast('⚠ ' + IMPORT_KINDS[kind].label + ' not imported — ' + res.replace(/^Error:?\s*/, ''));
+              return;   // nothing changed server-side: no refresh, no "Global Update"
+          }
           // Clear the paste box so the next import starts on a clean slate.
           var ta = document.getElementById('import-text'); if (ta) ta.value = '';
-          var msg = (trackerResult && String(trackerResult).indexOf('Error') !== -1) ? 'Schedule Synced' : (trackerResult || 'Schedule Synced');
-          showToast(msg);
+          showToast(res || (IMPORT_KINDS[kind].label + ' synced'));
           fetchData(); fetchMetadata();
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
           if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
           // A roster sync changes who Red Flags counts, so refresh the flags too.
           if (kind === 'roster' && state.view === 'analyzer') getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null);
-          var notifMsg = isRoster ? 'Global Update: Agent Roster Synced. Levels, skills and languages updated.' : (isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.'))))));
-          google.script.run.addGlobalNotification(notifMsg);
+          google.script.run.addGlobalNotification('Global Update: ' + IMPORT_KINDS[kind].notif);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
       var onFailure = function(err) {
@@ -4793,23 +4815,23 @@
       };
 
       if (kind === 'roster') {
-          showToast('Agent roster detected — decoding levels, skills and languages…');
+          showToast(IMPORT_KINDS.roster.detect);
           if (t.length > DIRECT_LIMIT) _chunkUpload(t, kind, onSuccess, onFailure);
           else google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importAgentRoster(t);
           return;
       }
       if (kind === 'activity') {
-          showToast('Activity-loading report detected — ingesting…');
+          showToast(IMPORT_KINDS.activity.detect);
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importActivityLoading(t);
           return;
       }
       if (kind === 'alarms') {
-          showToast('Alarms report detected — ingesting…');
+          showToast(IMPORT_KINDS.alarms.detect);
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importAlarmsReport(t);
           return;
       }
       if (kind === 'forecast') {
-          showToast('Forecast report detected — ingesting…');
+          showToast(IMPORT_KINDS.forecast.detect);
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importForecastReport(t);
           return;
       }
@@ -4821,19 +4843,19 @@
       }
       if (t.length > DIRECT_LIMIT) {
           console.log('[sync] paste is ' + Math.round(t.length / 1024) + ' KB — using chunked upload (' + kind + ')');
-          showToast('Large paste (' + Math.round(t.length / 1024) + ' KB) — chunking…');
+          showToast(IMPORT_KINDS[kind].label + ' — large paste (' + Math.round(t.length / 1024) + ' KB), chunking…');
           _chunkUpload(t, kind, onSuccess, onFailure);
       } else if (kind === 'otopen') {
           // Direct path must honor the kind too — previously only the chunked
           // path knew about 'otopen', so small JSON pastes were silently fed
           // to the schedule importer and vanished without a trace.
-          showToast('OT slots JSON detected — ingesting…');
+          showToast(IMPORT_KINDS.otopen.detect);
           google.script.run
               .withSuccessHandler(onSuccess)
               .withFailureHandler(onFailure)
               .importOtOpenSlots(t);
       } else if (isIdp) {
-          showToast('Syncing IDP…');
+          showToast(IMPORT_KINDS.idp.detect);
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importWorkforceData('', t);
       } else {
           // Schedule: run the archive (ImportHandler → Raw Schedule + Schedule_History)
@@ -4841,7 +4863,7 @@
           // gets its own 6-min budget. A single combined call was timing out — but
           // sequential + handled still guarantees BOTH run (no silent fire-and-forget),
           // so SAFE hours can't exist without a shift.
-          showToast('Syncing schedule…');
+          showToast(IMPORT_KINDS.sched.detect);
           google.script.run.withSuccessHandler(function() {
               showToast('Schedule archived — syncing activities…');
               google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importWorkforceData(t, '');

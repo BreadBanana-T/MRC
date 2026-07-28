@@ -135,6 +135,42 @@ var GenesysRoster = {
     return out;
   },
 
+  _GUID: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+
+  /**
+   * Infer the column layout of a HEADERLESS paste — selecting rows in the
+   * Genesys grid and copying gives you the data without the header line.
+   * Anchors on the Skills column (the only one carrying SAM_Monit tags), then
+   * the GUID column, then the first name-shaped column that is neither.
+   *
+   * @return {?{id:number, name:number, skills:number}} null if not a roster
+   */
+  sniffLayout: function (rows) {
+    var self = this;
+    var idxSkills = -1, idxId = -1, idxName = -1;
+    for (var r = 0; r < rows.length && idxSkills === -1; r++) {
+      var cols = rows[r] || [];
+      for (var c = 0; c < cols.length; c++) {
+        var v = String(cols[c] || '').trim();
+        if (!v) continue;
+        if (idxSkills === -1 && self.looksLikeGenesys(v)) idxSkills = c;
+        if (idxId === -1 && self._GUID.test(v)) idxId = c;
+      }
+    }
+    if (idxSkills === -1) return null;   // no SAM_Monit tags anywhere → not a Genesys roster
+    for (var r2 = 0; r2 < rows.length && idxName === -1; r2++) {
+      var cc = rows[r2] || [];
+      for (var c2 = 0; c2 < cc.length; c2++) {
+        if (c2 === idxSkills || c2 === idxId) continue;
+        var v2 = String(cc[c2] || '').trim();
+        // A name has letters, no digits, and isn't a GUID or a status count.
+        if (v2 && !/\d/.test(v2) && !self._GUID.test(v2) && /[A-Za-zÀ-ÿ]{2,}/.test(v2)) { idxName = c2; break; }
+      }
+    }
+    if (idxName === -1) return null;
+    return { id: idxId, name: idxName, skills: idxSkills };
+  },
+
   /**
    * Parse a whole pasted Genesys export into roster rows.
    * Tolerates tab- or comma-separated paste, and the trailing status columns
@@ -142,21 +178,28 @@ var GenesysRoster = {
    * elsewhere, this is a roster sync only.
    *
    * @param {string[][]} rows  already-split cells, header row included
+   * @param {?{id:number,name:number,skills:number}} layout  when given, `rows`
+   *        is treated as ALL data (headerless paste) with these column indices
    * @return {{agents:Array, counts:Object}}
    */
-  buildRoster: function (rows) {
+  buildRoster: function (rows, layout) {
     var self = this;
-    var headers = rows[0] || [];
-    var low = headers.map(function (h) { return String(h || '').toLowerCase().trim(); });
-    var idxId = low.findIndex(function (h) { return h === 'agent id' || h === 'agentid' || h === 'user id'; });
-    var idxName = low.findIndex(function (h) { return h.indexOf('agent name') !== -1 || h === 'name' || h === 'user name'; });
-    var idxSkills = low.findIndex(function (h) { return h === 'skills'; });
+    var idxId, idxName, idxSkills, firstRow;
+    if (layout) {
+      idxId = layout.id; idxName = layout.name; idxSkills = layout.skills; firstRow = 0;
+    } else {
+      var low = (rows[0] || []).map(function (h) { return String(h || '').toLowerCase().trim(); });
+      idxId = low.findIndex(function (h) { return h === 'agent id' || h === 'agentid' || h === 'user id'; });
+      idxName = low.findIndex(function (h) { return h.indexOf('agent name') !== -1 || h === 'name' || h === 'user name'; });
+      idxSkills = low.findIndex(function (h) { return h === 'skills'; });
+      firstRow = 1;
+    }
 
     var agents = [];
     var counts = { total: 0, countable: 0, junior: 0, noProfile: 0, noLevel: 0, senior: 0, regular: 0, bilingual: 0, english: 0, french: 0 };
     var seen = {};
 
-    for (var i = 1; i < rows.length; i++) {
+    for (var i = firstRow; i < rows.length; i++) {
       var cols = rows[i] || [];
       var name = String(cols[idxName] || '').replace(/(^"|"$)/g, '').trim();
       if (!name) continue;
