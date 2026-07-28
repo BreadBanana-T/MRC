@@ -1805,6 +1805,93 @@
   window.runAnalyzerImport = function() { var txt = document.getElementById('gem-import-text').value; if (!txt) return; var btn = event.target; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true; var modal = document.getElementById('gem-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Parsing GEM & Updating DB..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; if (state.analyzerData.error) { showToast('\u26a0 ' + state.analyzerData.error); render(); return; } showToast(state.analyzerData.importWarning ? state.analyzerData.importWarning.text : "Analysis Complete!"); document.getElementById('gem-import-text').value = ""; render(); google.script.run.addGlobalNotification("Global Update: GEM Report Synced. Deep Dives Refreshed."); } catch(e) { state.analyzerLoading = false; showToast("Error processing data"); render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).importNewGEMReport(txt, state.analyzerData ? state.analyzerData.selectedMonth : null); } };
   window.runMasterListImport = function() { var txt = document.getElementById('masterlist-import-text').value; if (!txt) return; var modal = document.getElementById('master-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Syncing Master Roster..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { showToast(res); document.getElementById('masterlist-import-text').value = ""; if (state.analyzerData && state.analyzerData.selectedMonth) { getAnalyzerHistory(state.analyzerData.selectedMonth); } else { getAnalyzerHistory(null); } google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Profiles Updated."); }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).importAgentRoster(txt); } }
   window.getAnalyzerHistory = function(month) { state.analyzerLoading = true; render(); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; render(); } catch(e) { state.analyzerLoading = false; render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).fetchAnalyzerData(month); google.script.run.withSuccessHandler(function(res) { try { state.coachingCadence = JSON.parse(res); if (state.view === 'analyzer') render(); } catch(e) {} }).fetchCoachingCadence(30); } };
+  // ── Red Flags threshold editor ────────────────────────────────────────────
+  // Every number the rules test against, editable at runtime. No redeploy.
+  window.openRfThresholds = function() {
+      var host = document.getElementById('rf-thresholds-body');
+      if (!host) { showToast('Threshold editor unavailable — redeploy needed'); return; }
+      host.innerHTML = '<div style="padding:30px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.85rem;">Loading…</div>';
+      document.getElementById('rf-thresholds-modal').classList.add('open');
+      if (typeof google === 'undefined') { host.innerHTML = '<div style="padding:20px;">Preview mode.</div>'; return; }
+      google.script.run.withSuccessHandler(renderRfThresholds).withFailureHandler(function() {
+          host.innerHTML = '<div style="padding:20px; color:var(--status-alert); font-weight:700;">Could not load thresholds.</div>';
+      }).getRedFlagSettings();
+  };
+
+  window.closeRfThresholds = function() {
+      var m = document.getElementById('rf-thresholds-modal'); if (m) m.classList.remove('open');
+  };
+
+  function renderRfThresholds(res) {
+      var o = {}; try { o = JSON.parse(res); } catch (e) {}
+      if (!o.ok) { document.getElementById('rf-thresholds-body').innerHTML = '<div style="padding:20px; color:var(--status-alert);">' + escapeHTML(o.error || 'unavailable') + '</div>'; return; }
+      state.rfThresholdMeta = o;
+      var t = o.thresholds, lim = o.limits, def = o.defaults;
+      var order = ['inPct', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
+      var rows = order.map(function(k) {
+          var L = lim[k] || {};
+          var shown = L.pct ? +(t[k] * 100).toFixed(1) : t[k];
+          var defShown = L.pct ? +(def[k] * 100).toFixed(1) + '%' : def[k];
+          var changed = Math.abs(t[k] - def[k]) > 1e-9;
+          return '<div style="display:grid; grid-template-columns:1fr 110px; gap:14px; align-items:start; padding:11px 0; border-bottom:1px solid var(--glass-border);">' +
+              '<div><div style="font-weight:700; font-size:0.85rem; color:var(--text-main);">' + escapeHTML(L.label || k) +
+                (changed ? ' <span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:var(--bg-root); border:1px solid var(--glass-border); padding:1px 6px; border-radius:6px; vertical-align:1px;">CHANGED</span>' : '') + '</div>' +
+                '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:2px; line-height:1.4;">' + escapeHTML(L.hint || '') +
+                ' · default <b>' + defShown + '</b></div></div>' +
+              '<div style="position:relative;"><input id="rf-th-' + k + '" class="input-aether" type="number" step="' + (L.pct ? '0.1' : (k === 'cph' ? '0.1' : '1')) + '" value="' + shown + '" style="height:34px; font-weight:800; font-size:0.85rem; text-align:right; padding-right:' + (L.pct ? '26px' : '10px') + ';">' +
+                (L.pct ? '<span style="position:absolute; right:10px; top:8px; font-size:0.78rem; font-weight:700; color:var(--text-muted); pointer-events:none;">%</span>' : '') + '</div>' +
+              '</div>';
+      }).join('');
+
+      var est = (state.analyzerData && state.analyzerData.pctSource === 'aux');
+      var note = est
+          ? '<div style="margin:0 0 16px; padding:11px 13px; background:var(--bg-root); border:1px solid var(--glass-border); border-left:3px solid var(--status-warn); border-radius:10px; font-size:0.78rem; font-weight:600; color:var(--text-secondary); line-height:1.5;">' +
+            'This month\'s In/Out % are <b>estimated</b> from the AUX report and run about <b>13 points high</b>. Raising Inbound % to ~88% compensates — but it is a fix for the input, not the rule. ' +
+            'Put it back to 75% once a GEM export with the real Inbound/Outbound Time % columns is imported, or the flags will under-report.</div>'
+          : '<div style="margin:0 0 16px; padding:11px 13px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:10px; font-size:0.78rem; font-weight:600; color:var(--text-secondary); line-height:1.5;">' +
+            'Defaults match the Assignment Tracker 2026 workbook exactly. This month\'s In/Out % are <b>measured</b>, so the defaults are the right numbers.</div>';
+
+      document.getElementById('rf-thresholds-body').innerHTML =
+          '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">' +
+            '<div style="font-weight:800; font-size:1.05rem;">Red Flag thresholds</div>' +
+            '<i data-lucide="x" style="cursor:pointer; color:var(--text-muted);" onclick="closeRfThresholds()"></i></div>' +
+          '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; margin-bottom:14px;">Applies immediately to every month — nothing to redeploy.</div>' +
+          note + rows +
+          '<div style="display:flex; justify-content:space-between; gap:12px; margin-top:20px;">' +
+            '<button class="btn btn-glass" onclick="resetRfThresholds()"><i data-lucide="rotate-ccw" width="15"></i> Reset to workbook defaults</button>' +
+            '<div style="display:flex; gap:10px;"><button class="btn btn-glass" onclick="closeRfThresholds()">Cancel</button>' +
+            '<button class="btn btn-primary" onclick="saveRfThresholds()"><i data-lucide="save" width="15"></i> Save</button></div>' +
+          '</div>';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  window.saveRfThresholds = function() {
+      var order = ['inPct', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
+      var payload = {};
+      order.forEach(function(k) {
+          var el = document.getElementById('rf-th-' + k);
+          if (el) payload[k] = el.value;
+      });
+      closeRfThresholds();
+      showToast('Saving thresholds…');
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          var o = {}; try { o = JSON.parse(res); } catch (e) {}
+          showToast(o.ok ? ('Thresholds saved' + (o.isDefault ? ' (back to workbook defaults)' : '')) : ('\u26a0 ' + (o.error || 'save failed')));
+          getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null);
+      }).withFailureHandler(function() { showToast('\u26a0 Could not save thresholds'); }).saveRedFlagSettings(JSON.stringify(payload));
+  };
+
+  window.resetRfThresholds = function() {
+      closeRfThresholds();
+      showToast('Restoring workbook defaults…');
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function() {
+          showToast('Thresholds reset to workbook defaults');
+          getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null);
+      }).withFailureHandler(function() { showToast('\u26a0 Could not reset'); }).resetRedFlagSettings();
+  };
+
   // Red Flags cards show the worst 8 by default so a card stays screenshot-sized;
   // this toggles one card between the top 8 and the full list.
   window.toggleRfCard = function(type) {
@@ -1834,19 +1921,23 @@
       // One accent per rule. Hue says WHICH rule fired; the per-row meter says
       // how hard. Thresholds mirror the Assignment Tracker exactly (§2.2).
       var RF = {
-          in:    { c: 'var(--status-alert)',   icon: 'phone-incoming', m: 'In %',        s: 'Tasks/Calls', at: 0.75, dir: 'up' },
-          scope: { c: 'var(--status-warn)',    icon: 'alert-triangle', m: 'In %',        s: 'Tasks/Calls', at: 0.75, dir: 'up' },
-          out:   { c: 'var(--status-role)',    icon: 'phone-outgoing', m: 'Out %',       s: '',                    at: 0.75, dir: 'up' },
-          cph:   { c: 'var(--accent-primary)', icon: 'trending-down',  m: 'CP/H',        s: 'Total Tasks',         at: 7.3,  dir: 'down' }
+          in:    { c: 'var(--status-alert)',    icon: 'phone-incoming', m: 'In %',  s: 'Tasks/Calls',  dir: 'up' },
+          scope: { c: 'var(--text-secondary)', icon: 'alert-triangle', m: 'In %',  s: 'Tasks/Calls',  dir: 'up' },
+          out:   { c: 'var(--status-alert)',    icon: 'phone-outgoing', m: 'Out %', s: '',             dir: 'up' },
+          cph:   { c: 'var(--status-alert)',    icon: 'trending-down',  m: 'CP/H',  s: 'Total Tasks',  dir: 'down' }
       };
       var RF_CAP = 8;   // rows shown before "Show all" — keeps a card screenshot-sized
 
-      // 0..1 — how far past the threshold. Drives the meter width only.
+      // Live thresholds (runtime-editable). Defaults match the workbook.
+      var TH = d.thresholds || { inPct:0.75, tasksXCalls:0.50, outPct:0.75, outMinLevel:2, cph:7.3, minWorkedDays:5 };
+
+      // 0..1 — how far past its threshold this agent sits. Meter width only.
       function rfSeverity(type, a) {
-          var cfg = RF[type];
-          if (type === 'cph') return Math.max(0, Math.min(1, (cfg.at - (a.cph || 0)) / cfg.at));
+          if (type === 'cph') { var t = TH.cph || 7.3; return Math.max(0, Math.min(1, (t - (a.cph || 0)) / t)); }
+          var at = (type === 'out') ? (TH.outPct || 0.75) : (TH.inPct || 0.75);
           var v = (type === 'out') ? (a.outPct || 0) : (a.inPct || 0);
-          return Math.max(0, Math.min(1, (v - cfg.at) / (1 - cfg.at)));
+          var span = 1 - at;
+          return span <= 0 ? 1 : Math.max(0, Math.min(1, (v - at) / span));
       }
 
       function renderTable(title, list, type, tooltip) {
@@ -1903,7 +1994,7 @@
 
           return '<div class="aether-card rf-card" style="--rf:' + cfg.c + '; padding:0; overflow:hidden;">' +
               '<div class="rf-head">' +
-                '<span class="rf-icon"><i data-lucide="' + cfg.icon + '" width="15"></i></span>' +
+                '<span class="rf-icon"><i data-lucide="' + cfg.icon + '" width="16"></i></span>' +
                 '<span class="rf-title">' + title + '</span>' +
                 '<span class="rf-info-icon" data-tip="' + encodeURIComponent(tooltip) + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" style="display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; cursor:help; color:var(--text-muted); opacity:0.6;"><i data-lucide="help-circle" width="13"></i></span>' +
                 '<span class="rf-count">' + safeList.length + '</span>' +
@@ -2013,7 +2104,7 @@
                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
       }
 
-      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + pctChip + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div>' + filterBanner + '<div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + '</div>' + renderCoachingCadenceCard();
+      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + pctChip + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-glass" onclick="openRfThresholds()" style="height:40px; border-radius:12px;" title="Edit the numbers each rule tests against — applies immediately, no redeploy"><i data-lucide="sliders-horizontal" width="16"></i> Thresholds' + (d.thresholdsAreDefault === false ? ' <span style="width:6px; height:6px; border-radius:3px; background:var(--accent-primary); display:inline-block; margin-left:2px;"></span>' : '') + '</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div>' + filterBanner + '<div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + '</div>' + renderCoachingCadenceCard();
   }
 
   window.toggleInsightRow = function(id) {

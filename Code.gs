@@ -136,6 +136,18 @@ function importOtOpenSlots(t) {
   _bustWfCache(); return r;
 }
 
+// --- RED FLAG THRESHOLDS (runtime-editable, no redeploy) ---
+function getRedFlagSettings() {
+  return (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.payload() : JSON.stringify({ ok:false, error:'unavailable' });
+}
+function saveRedFlagSettings(json) {
+  _stampAction('import', 'Red Flag thresholds');
+  return (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.save(json) : JSON.stringify({ ok:false, error:'unavailable' });
+}
+function resetRedFlagSettings() {
+  return (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.reset() : JSON.stringify({ ok:false, error:'unavailable' });
+}
+
 // --- AGENT ROSTER (Genesys Cloud export or legacy SharePoint MasterList) ---
 // The single entry point for a roster sync, used by BOTH doors: the universal
 // Import Data box (kind='roster') and Red Flags → Sync Roster. Busting the

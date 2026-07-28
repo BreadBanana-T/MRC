@@ -573,6 +573,7 @@ var AssignmentAnalyzer = {
           // acts as a hard filter (see _classifyAgent); with the legacy
           // SharePoint list it stays advisory — a stale list must not silently
           // erase real agents from the flags.
+          const T = (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.get() : { inPct:0.75, tasksXCalls:0.50, outPct:0.75, outMinLevel:2, cph:7.3, minWorkedDays:5 };
           const roster = this.readRoster();
           const useMasterList = roster.counts.total > 0;
           const genesysMode = roster.isGenesys;
@@ -671,7 +672,7 @@ var AssignmentAnalyzer = {
               let c = currentMap[agent];
               let p = prevMap[agent] || null;
               
-              if (c.wDays < 5) return; 
+              if (c.wDays < T.minWorkedDays) return;
 
               let trendIn = p ? (c.inPct - p.inPct) : 0;
               let trendOut = p ? (c.outPct - p.outPct) : 0;
@@ -692,13 +693,15 @@ var AssignmentAnalyzer = {
               //                         (mutually exclusive — Excel's COUNTIF
               //                          in F6 explicitly excludes Red Flag
               //                          agents from the Out of Scope list)
-              // wDays >= 5 already enforced at the top of this loop.
-              if (c.inPct >= 0.75) {
-                  if (c.tasksXCalls >= 0.50) inboundList.push(payload);
+              // Worked-days gate already enforced at the top of this loop.
+              // Thresholds are runtime-editable (RedFlagSettings) — defaults
+              // match the workbook, so an untouched install is unchanged.
+              if (c.inPct >= T.inPct) {
+                  if (c.tasksXCalls >= T.tasksXCalls) inboundList.push(payload);
                   else outOfScopeList.push(payload);
               }
-              if (c.outPct >= 0.75 && c.level >= 2) outboundList.push(payload);
-              if (c.cph > 0 && c.cph <= 7.3) cphList.push(payload);
+              if (c.outPct >= T.outPct && c.level >= T.outMinLevel) outboundList.push(payload);
+              if (c.cph > 0 && c.cph <= T.cph) cphList.push(payload);
           });
           
           inboundList.sort((a,b) => b.inPct - a.inPct);
@@ -712,6 +715,8 @@ var AssignmentAnalyzer = {
               rosterCounts: roster.counts,
               pctPresent: pctPresent, agentsInMonth: Object.keys(currentMap).length,
               pctSource: this._getPctSource(targetMonth),
+              thresholds: T,
+              thresholdsAreDefault: (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings._isDefault(T) : true,
               filtered: {
                   junior: filtered.junior.sort(), noProfile: filtered.noProfile.sort(),
                   noLevel: filtered.noLevel.sort(), notOnRoster: filtered.notOnRoster.sort()
