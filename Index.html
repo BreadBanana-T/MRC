@@ -106,7 +106,30 @@
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">
           <h2 style="margin-top:0;">Import Data <span id="import-build" style="font-size:0.62rem; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.05); padding:3px 10px; border-radius:99px; vertical-align:middle; margin-left:8px;">stale build — redeploy needed</span></h2>
-          <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 16px;" placeholder="Paste WFM schedule text here... (Also accepts the Genesys Cloud agent roster, IDP, the open-OT slots JSON, and the IEX/BI reports: Activity loading, Alarms, Forecast, and the SAFE roster)"></textarea>
+          <textarea id="import-text" class="input-aether" style="height: 250px; padding-top: 16px; resize: none; margin-bottom: 12px;" placeholder="Paste WFM schedule text here... (Also accepts the Genesys Cloud agent roster, IDP, the open-OT slots JSON, and the IEX/BI reports: Activity loading, Alarms, Forecast, and the SAFE roster)" oninput="updateImportDetection()"></textarea>
+
+          <!-- Live verdict: what Sync is about to do with this paste, and why.
+               Misrouting used to be invisible until after the fact. -->
+          <div style="display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:16px; padding:10px 14px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px;">
+             <div style="flex:1; min-width:220px; font-size:0.78rem; line-height:1.35;">
+                <div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:3px;">Detected as</div>
+                <div id="import-detect"><span style="color:var(--text-muted); font-weight:600;">Paste data to detect its type…</span></div>
+             </div>
+             <div>
+                <div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:3px;">Force type</div>
+                <select id="import-kind-override" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;" onchange="updateImportDetection()">
+                   <option value="">Auto-detect</option>
+                   <option value="roster">Agent roster (Genesys / MasterList)</option>
+                   <option value="sched">WFM schedule</option>
+                   <option value="idp">IDP heatmap</option>
+                   <option value="otopen">OT open slots</option>
+                   <option value="activity">Activity loading</option>
+                   <option value="alarms">Alarms report</option>
+                   <option value="forecast">Forecast report</option>
+                   <option value="safe">SAFE roster</option>
+                </select>
+             </div>
+          </div>
           <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:20px; padding:10px 14px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px;">
              <span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">SAFE report period</span>
              <select id="safe-period-grain" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;" onchange="onSafeGrainChange()">

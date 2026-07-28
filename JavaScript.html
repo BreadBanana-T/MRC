@@ -862,7 +862,7 @@
   window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
   window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
-  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
+  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); if (window.updateImportDetection) updateImportDetection(); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
@@ -4632,6 +4632,83 @@
       sched:    { detect: 'WFM schedule detected — syncing…',                                label: 'WFM schedule',       notif: 'WFM Schedule Refreshed.' }
   };
 
+  // Classify a paste. Pulled out of runImportAction so the Import modal can
+  // show the verdict live as you paste (and so it is testable on its own).
+  // Returns { kind, why } — `why` is the signal that decided it, surfaced in
+  // the UI so a misclassification is diagnosable instead of a mystery.
+  function detectImportKind(t) {
+      t = String(t || '');
+      var lower = t.toLowerCase();
+      var trimmed = t.trim();
+      if (!trimmed) return { kind: '', why: '' };
+
+      // ── Agent roster (Genesys Cloud export, or legacy SharePoint MasterList) ──
+      // Tested FIRST and excluded from every other sniff below. Several
+      // independent signals, because the Genesys grid can be copied with or
+      // without its header row and with or without the leading GUID column.
+      var why = '';
+      if (/sam[_\s-]*monit/i.test(t)) why = 'SAM_Monit skill tags';
+      else if (/(^|\n)[^\n]*\bagent id\b[^\n]*\bskills\b/i.test(t)) why = 'Genesys header row (Agent Id + Skills)';
+      else if (/(^|\n)\s*"?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"?\s*[,\t]/i.test(t)) why = 'rows led by a Genesys agent GUID';
+      else if (lower.indexOf('employee_name') !== -1) why = 'SharePoint employee_name column';
+      else if (lower.indexOf('job_title') !== -1) why = 'SharePoint job_title column';
+      else if (lower.indexOf('name_first') !== -1) why = 'SharePoint name_first column';
+      if (why) return { kind: 'roster', why: why };
+
+      // Order below preserves the original precedence exactly:
+      //   activity > forecast > safe > alarms > otopen > idp > sched
+      // (forecast before alarms — the forecast report also carries "AHT Secs").
+
+      // IEX/BI report pastes that feed the Management View.
+      if (lower.indexOf('exception grp') !== -1) return { kind: 'activity', why: '"Exception Grp" column' };
+      if (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1) return { kind: 'activity', why: 'Activity Name + Week of Ref' };
+      if ((lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1) return { kind: 'forecast', why: 'Fcst Acc / Fcst Alarm columns' };
+      if (lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1)) return { kind: 'safe', why: 'Active Time + Agent Languages / SOS' };
+      if ((lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1)) return { kind: 'alarms', why: 'ServType + Alarm Vol / AHT Secs' };
+
+      // WFM open-OT slot JSON, recognized by its shape.
+      if (trimmed.indexOf('"slotCount"') !== -1) return { kind: 'otopen', why: '"slotCount" key' };
+      if (/^[\[{]/.test(trimmed) && trimmed.indexOf('"slots"') !== -1) return { kind: 'otopen', why: 'JSON with a "slots" array' };
+      if (/^date\s*\t\s*start/i.test(trimmed)) return { kind: 'otopen', why: 'Date/Start slot table header' };
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed)) return { kind: 'otopen', why: 'header-less slot table rows' };
+
+      if (lower.indexOf('occupied seats') !== -1 || lower.indexOf('sièges occupés') !== -1) return { kind: 'idp', why: '"Occupied Seats" column' };
+
+      return { kind: 'sched', why: 'no other format matched — treated as a WFM schedule' };
+  }
+
+  // Live verdict in the Import modal. Runs on every keystroke/paste so you can
+  // see what the Sync button is about to do BEFORE pressing it.
+  window.updateImportDetection = function() {
+      var host = document.getElementById('import-detect');
+      if (!host) return;
+      var ta = document.getElementById('import-text');
+      var t = ta ? ta.value : '';
+      var ovr = document.getElementById('import-kind-override');
+      var forced = ovr ? ovr.value : '';
+
+      if (!t.trim()) {
+          host.innerHTML = '<span style="color:var(--text-muted); font-weight:600;">Paste data to detect its type…</span>';
+          return;
+      }
+      var det = detectImportKind(t);
+      var kind = forced || det.kind;
+      var k = IMPORT_KINDS[kind] || { label: kind };
+      var rows = t.trim().split(/\r?\n/).filter(function(l) { return l.trim(); }).length;
+      var kb = Math.round(t.length / 1024);
+      var accent = (kind === 'sched' && det.why.indexOf('no other format') === 0 && !forced) ? 'var(--status-warn)' : 'var(--status-active)';
+      var detail = forced
+          ? 'forced manually — auto-detect said <b>' + escapeHTML((IMPORT_KINDS[det.kind] || {}).label || det.kind) + '</b>'
+          : escapeHTML(det.why);
+      host.innerHTML =
+          '<span style="display:inline-flex; align-items:center; gap:7px; font-weight:800; color:' + accent + ';">' +
+            '<i data-lucide="' + (forced ? 'lock' : 'scan-line') + '" width="14"></i>' + escapeHTML(k.label) +
+          '</span>' +
+          '<span style="color:var(--text-muted); font-weight:600;"> · ' + rows + ' row' + (rows === 1 ? '' : 's') + ' · ' + kb + ' KB</span>' +
+          '<div style="margin-top:3px; font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + detail + '</div>';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+  };
+
   function _chunkUpload(text, kind, onSuccess, onFailure) {
       var token = 't' + Date.now() + Math.random().toString(36).slice(2, 8);
       var total = Math.ceil(text.length / CHUNK_SIZE);
@@ -4722,35 +4799,11 @@
       }
       var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
 
-      // Detect kind so we don't waste the wire by sending the same blob as
-      // both schedule AND IDP. WFM open-OT slot JSON is recognized by its
-      // shape ({"slots":[... or bare [{..."slotCount"...).
-      var lower = t.toLowerCase();
-      var trimmed = t.trim();
-      // Agent roster (Genesys Cloud export or legacy SharePoint MasterList).
-      // Tested FIRST and excluded from every other sniff below: the roster used
-      // to be reachable only from Red Flags → Sync Roster, which is why it went
-      // stale. Both header shapes are unique to a roster paste — no schedule,
-      // IDP or IEX report carries SAM_Monit tags or an employee_name column.
-      var isRoster = /\bsam_monit_(lv|sk)_/i.test(t)
-          || /(^|\n)[^\n]*\bagent id\b[^\n]*\bskills\b/i.test(t)
-          || lower.indexOf('employee_name') !== -1
-          || lower.indexOf('job_title') !== -1
-          || lower.indexOf('name_first') !== -1;
-      var isOtOpen = !isRoster && (trimmed.indexOf('"slotCount"') !== -1
-          || (/^[\[{]/.test(trimmed) && trimmed.indexOf('"slots"') !== -1)
-          || /^date\s*\t\s*start/i.test(trimmed)                                    // flattened table header
-          || /^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed)); // header-less table rows
-      var isIdp = !isRoster && !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
-      // IEX/BI report pastes that feed the Management View.
-      var isActivity = !isRoster && (lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1));
-      // Forecast report ("Fcst Alarm"/"Fcst Acc", no service-type column) — must
-      // be tested BEFORE alarms because it also carries "AHT Secs".
-      var isForecast = !isRoster && !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
-      var isAlarms = !isRoster && !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
-      // SAFE / SmartWear per-agent export (ACTIVE TIME + AGENT LANGUAGES / SOS volume).
-      var isSafe = !isRoster && !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
-      var kind = isRoster ? 'roster' : (isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))))));
+      // Explicit override beats the sniffer — see detectImportKind.
+      var ovr = document.getElementById('import-kind-override');
+      var forced = ovr ? ovr.value : '';
+      var kind = forced || detectImportKind(t).kind;
+      console.log('[sync] kind=' + kind + (forced ? ' (forced)' : ' (auto)'));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -4795,8 +4848,10 @@
               showToast('⚠ ' + IMPORT_KINDS[kind].label + ' not imported — ' + res.replace(/^Error:?\s*/, ''));
               return;   // nothing changed server-side: no refresh, no "Global Update"
           }
-          // Clear the paste box so the next import starts on a clean slate.
+          // Clear the paste box + any forced type so the next import starts clean.
           var ta = document.getElementById('import-text'); if (ta) ta.value = '';
+          var ov = document.getElementById('import-kind-override'); if (ov) ov.value = '';
+          if (window.updateImportDetection) updateImportDetection();
           showToast(res || (IMPORT_KINDS[kind].label + ' synced'));
           fetchData(); fetchMetadata();
           if (state.view === 'tracker') fetchTrackerData();
@@ -4854,7 +4909,7 @@
               .withSuccessHandler(onSuccess)
               .withFailureHandler(onFailure)
               .importOtOpenSlots(t);
-      } else if (isIdp) {
+      } else if (kind === 'idp') {
           showToast(IMPORT_KINDS.idp.detect);
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importWorkforceData('', t);
       } else {
