@@ -255,6 +255,41 @@ viewed, matched on `_normalizeAgentKey`, and reports matched / unmatched counts.
 percentage alone is enough — they are exact complements in every observed export. This
 copies real measurements onto real rows; nothing is inferred.
 
+### 2.3 Red Flags takes TWO reports
+
+| Report | Supplies |
+|---|---|
+| **PA Call Performance by Agent** | CPH (`In & Out by hr`), Total All Calls, Calls Answered → Tasks x Calls, Worked Days, AHT |
+| **Agent AUX time** | the **Inbound / Outbound time split** the call report no longer carries |
+
+Both are the same monthly pull — the July exports agree on total logged time to
+0.04 h (10,592.24 vs 10,592.20), same population. `detectImportKind` routes the AUX
+report as `kind:'auxtime'` → `importAuxTimeReport`; the Import GEM Data box accepts it
+too (`_looksLikeAuxReport`). Its `Month of Date` is `dd/MM/yyyy` — `_parseMonthCell`
+handles that alongside the GEM's ISO form.
+
+**Mapping** (`_parseAuxTime`). `Outbound AUX time %` is exactly
+`AUX 7 - Outbound (hr) / Login Time (hr)` — verified on every row. Its complement is
+*not* usable as Inbound Time %, because that counts Project (AUX 5), Emergency (AUX 8)
+and Other AUX as inbound. Measured against the Assignment Tracker's own April
+`Inbound Time %` (mean 0.578, 27 agents ≥ 75%):
+
+| Basis | mean In% | ≥ 75% |
+|---|---|---|
+| `1 - AUX7/Login` | 0.752 | 67 |
+| `1 - AUX7/(Login - AUX5 - AUX8 - Other)` ← **used** | 0.643 | 44 |
+
+So the split is taken over **productive time**. ⚠️ Still unconfirmed: settling it needs
+one month holding BOTH the 20-column GEM export and this report. The import message
+reports the outbound share on both bases so they can be compared against a known month.
+
+**Inconsistent rows are skipped, never clamped.** The report's `Other AUX agent %` reads
+above 100% for some agents (Melgar: 164.98 h "Other" against 140.04 h logged), which
+drives the productive base to zero, negative, or below the outbound hours it should
+contain. Those agents' splits are unknowable, so they are left at whatever the month
+already held. An earlier clamp to 100% manufactured **11 false Outbound Red Flags** on
+July data. The count of skipped agents is reported on import.
+
 **The CP/H threshold is a moving, shift-relative bar.** `Shift_Analysis!H7 = H3/2`
 where `H3 = AVERAGEIFS(day CPH)`. April: Day avg 14.70 → 7.35, Evening 12.97 → 6.48,
 Night 9.00 → 4.50. The app's hardcoded `7.3` is the **day** threshold frozen from one

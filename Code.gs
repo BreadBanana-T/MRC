@@ -148,6 +148,41 @@ function importAgentRoster(t) {
   _bustWfCache(); return r;
 }
 
+// --- AGENT AUX TIME (Avaya) ---
+// The second half of the Red Flags input pair. "PA Call Performance by Agent"
+// gives volumes/CPH/worked days; this gives the Inbound vs Outbound time split
+// that three of the four flag rules read. Applied to the month in the report.
+function importAuxTimeReport(t) {
+  _stampAction('import', 'AUX time report');
+  if (typeof AssignmentAnalyzer === 'undefined') return 'Error: engine unavailable.';
+  var r = AssignmentAnalyzer.importAuxTime(t, null);
+  _bustWfCache();
+  if (r.error) return 'Error: ' + r.error;
+  return 'AUX time report applied to ' + r.month + ' — Inbound/Outbound % set for ' + r.matched + ' of ' + r.count + ' agents'
+       + (r.unmatched ? ' (' + r.unmatched + ' had no GEM row that month)' : '')
+       + (r.skipped && r.skipped.length ? ' · ' + r.skipped.length + ' skipped (other-AUX exceeds logged time)' : '')
+       + (r.outShare !== null && r.outShare !== undefined ? ' · outbound ' + (r.outShare * 100).toFixed(1) + '% of productive time (' + (r.outShareLogged * 100).toFixed(1) + '% of logged)' : '') + '.';
+}
+
+// --- PA CALL PERFORMANCE (GEM) from the universal Import box ---
+// Same engine as Red Flags → Import GEM Data; this wrapper just returns a
+// human summary instead of the analyzer payload. Without it, pasting the GEM
+// report into the Import box fell through to the WFM schedule importer.
+function importGemReport(t) {
+  _stampAction('import', 'GEM report');
+  if (typeof AssignmentAnalyzer === 'undefined') return 'Error: engine unavailable.';
+  var raw = AssignmentAnalyzer.importGEMData(t, null);
+  _bustWfCache();
+  var d = {};
+  try { d = JSON.parse(raw); } catch (e) { return 'Error: could not parse the GEM report.'; }
+  if (d.error) return 'Error: ' + d.error;
+  var msg = 'PA Call Performance synced for ' + (d.selectedMonth || 'the detected month')
+          + ' — flags: ' + (d.inbound || []).length + ' inbound, ' + (d.outOfScope || []).length + ' out of scope, '
+          + (d.outbound || []).length + ' outbound, ' + (d.cph || []).length + ' CP/H.';
+  if (d.importWarning && d.importWarning.text) msg += '\n' + d.importWarning.text;
+  return msg;
+}
+
 // --- REPORT IMPORTS (IEX/BI pastes that fill the Management View) ---
 function importActivityLoading(t) {
   var r = (typeof ReportImport !== 'undefined') ? ReportImport.importActivity(t) : 'Error';

@@ -243,6 +243,167 @@ var AssignmentAnalyzer = {
   },
 
   /**
+   * Month cell → 'yyyy-MM-01'. Handles the GEM form ('2026-07-01') and the AUX
+   * report's 'dd/MM/yyyy' ('01/07/2026'). These are month buckets, so one of the
+   * two leading components is always 01 — which disambiguates dd/MM from MM/dd.
+   */
+  _parseMonthCell: function(v) {
+      let s = String(v == null ? '' : v).trim();
+      let iso = s.match(/(\d{4})-(\d{2})-\d{2}/);
+      if (iso) return iso[1] + '-' + iso[2] + '-01';
+      let sl = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if (sl) {
+          let a = parseInt(sl[1], 10), b = parseInt(sl[2], 10), y = sl[3];
+          let mo = (a === 1 && b !== 1) ? b : (b === 1 && a !== 1) ? a : b;
+          return y + '-' + (mo < 10 ? '0' + mo : mo) + '-01';
+      }
+      return '';
+  },
+
+  /** The Avaya "Agent AUX time" report — carries the outbound time share. */
+  _looksLikeAuxReport: function(rawText) {
+      let low = String(rawText || '').toLowerCase();
+      return low.indexOf('outbound aux time') !== -1 || (low.indexOf('aux 7') !== -1 && low.indexOf('outbound') !== -1);
+  },
+
+  /**
+   * Read the AUX report into { key -> {inPct, outPct} }.
+   *
+   * MAPPING. "Outbound AUX time %" is exactly AUX 7 - Outbound hours / Login
+   * hours (verified on every row of the report). Using its complement directly
+   * as Inbound Time % would count Project (AUX 5), Emergency (AUX 8) and Other
+   * AUX time as *inbound*, which inflates it badly: against the Assignment
+   * Tracker's own April Inbound Time % (mean 0.578, 27 agents ≥ 75%) that basis
+   * gives mean 0.752 and 67 agents ≥ 75%. So the split is taken over PRODUCTIVE
+   * time — logged time less the non-contact AUX buckets:
+   *
+   *     productive = Login - AUX5(Project) - AUX8(Emergency) - AUX(Other)
+   *     Outbound Time % = AUX7(Outbound) / productive
+   *     Inbound  Time % = 1 - Outbound Time %
+   *
+   * which lands at mean 0.643 / 44 agents ≥ 75% — the closest of the candidates.
+   * NOT yet confirmed against a month holding BOTH the 20-column GEM export and
+   * this report; `outShareLogged` is returned alongside so the two bases can be
+   * compared against a known month. See docs/DATA_FLOW.md §2.3.
+   */
+  _parseAuxTime: function(rawText) {
+      let lines = String(rawText).replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim().length > 0);
+      let rows = lines.map(l => this._parseCSVLine(l));
+
+      let hdr = -1, cName = -1, cOutPct = -1, cMonth = -1, cSup = -1, cLogin = -1;
+      let cOutHr = -1, cPrjHr = -1, cEmHr = -1, cOthHr = -1;
+      for (let i = 0; i < rows.length && hdr === -1; i++) {
+          let found = false;
+          rows[i].forEach((h, j) => {
+              let low = String(h).toLowerCase().trim();
+              if (low.indexOf('outbound aux time') !== -1) { cOutPct = j; found = true; }
+              else if (/aux\s*7/.test(low)) { cOutHr = j; found = true; }
+              else if (/aux\s*5/.test(low)) cPrjHr = j;
+              else if (/aux\s*8/.test(low)) cEmHr = j;
+              else if (low.indexOf('other agent') !== -1 && low.indexOf('%') === -1) cOthHr = j;
+              else if (low.indexOf('agent name') !== -1 || low === 'agent') cName = j;
+              else if (low.indexOf('month of') !== -1) cMonth = j;
+              else if (low.indexOf('team manager') !== -1) cSup = j;
+              else if (low.indexOf('login time') !== -1) cLogin = j;
+          });
+          if (found) hdr = i;
+      }
+      if (hdr === -1) return { error: "Could not find an 'Outbound AUX time %' or 'AUX 7 - Outbound' column." };
+      if (cName === -1) return { error: "Could not find the 'Agent Name' column in the AUX report." };
+
+      let hrs = c => c > -1 ? this._parseSafeFloat(String(rows_i[c]).replace(/,/g, '')) : 0;
+      let rows_i = [];
+      let byKey = {}, sups = {}, month = '', n = 0, skipped = [];
+      let sumOut = 0, sumProd = 0, sumLogin = 0;
+
+      for (let i = hdr + 1; i < rows.length; i++) {
+          rows_i = rows[i];
+          let nm = String(rows_i[cName] || '').replace(/"/g, '').trim();
+          if (!nm || nm.toLowerCase() === 'total' || nm.toLowerCase().indexOf('grand total') === 0) continue;
+          let k = _normalizeAgentKey(nm);
+          if (!k) continue;
+
+          let login = hrs(cLogin);
+          let outHr = hrs(cOutHr);
+          let outP;
+          if (login > 0 && cOutHr > -1) {
+              // Productive basis (preferred): hours columns are present.
+              let prod = login - hrs(cPrjHr) - hrs(cEmHr) - hrs(cOthHr);
+              // The report's "Other agent" bucket can EXCEED logged time (its own
+              // "Other AUX agent %" reads >100% for some agents), which drives the
+              // productive base to zero, below zero, or below the outbound hours
+              // it is supposed to contain. Those rows are internally inconsistent,
+              // so the split is unknowable — skip the agent and leave whatever the
+              // month already held. Clamping instead asserted 100% outbound and
+              // manufactured false Outbound Red Flags (11 of them on July data).
+              if (prod <= 0 || outHr > prod + 0.01) { skipped.push(nm); continue; }
+              outP = Math.min(1, Math.max(0, outHr / prod));
+              sumOut += outHr; sumProd += prod; sumLogin += login;
+          } else {
+              // Percentage-only fallback: rescale onto the same productive base.
+              let oP = this._parseSafePercent(rows_i[cOutPct]);
+              let other = 1 - oP;
+              outP = other > 0 ? Math.min(1, oP) : oP;
+          }
+          if (!isFinite(outP)) continue;
+          byKey[k] = { inPct: 1 - outP, outPct: outP };
+          if (cSup > -1) { let sv = String(rows_i[cSup] || '').trim(); if (sv && sv.toLowerCase() !== 'total') sups[k] = sv; }
+          if (!month && cMonth > -1) month = this._parseMonthCell(rows_i[cMonth]);
+          n++;
+      }
+      if (!n) return { error: "No agent rows found in the AUX report." };
+      return { byKey: byKey, month: month, count: n, sups: sups, skipped: skipped,
+               outShare: sumProd > 0 ? (sumOut / sumProd) : null,
+               outShareLogged: sumLogin > 0 ? (sumOut / sumLogin) : null };
+  },
+
+  /**
+   * Write { key -> {inPct,outPct} } onto the WF_GEM_DATA_V3 rows of one month.
+   * Shared by the AUX-report and percentages-only doors.
+   */
+  _applyPctToMonth: function(byKey, targetMonth) {
+      let db = this._getDB('WF_GEM_DATA_V3');
+      if (!db || db.getLastRow() < 2) return { error: "No GEM data to attach these percentages to — import the PA Call Performance report first." };
+
+      let data = db.getDataRange().getValues();
+      let monthOf = row => row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
+      if (!targetMonth) {
+          let months = {};
+          data.slice(1).forEach(r => { let m = monthOf(r); if (/^20\d{2}-\d{2}-\d{2}/.test(m)) months[m] = 1; });
+          targetMonth = Object.keys(months).sort().pop();
+      }
+
+      let matched = 0, seen = {};
+      for (let i = 1; i < data.length; i++) {
+          if (monthOf(data[i]) !== targetMonth) continue;
+          let k = _normalizeAgentKey(data[i][1]);
+          seen[k] = true;
+          if (!byKey[k]) continue;
+          data[i][3] = byKey[k].inPct;
+          data[i][4] = byKey[k].outPct;
+          matched++;
+      }
+      let unmatched = Object.keys(byKey).filter(k => !seen[k]).length;
+      if (!matched) return { error: "None of those agents appear in " + targetMonth + ". Check the month you're viewing." };
+
+      db.getRange(2, 1, data.length - 1, data[0].length).setValues(data.slice(1));
+      return { month: targetMonth, matched: matched, unmatched: unmatched };
+  },
+
+  /** Public: apply an AUX time report to a month's Inbound/Outbound split. */
+  importAuxTime: function(rawText, targetMonth) {
+      let p = this._parseAuxTime(rawText);
+      if (p.error) return p;
+      let r = this._applyPctToMonth(p.byKey, targetMonth || p.month || null);
+      if (r.error) return r;
+      r.count = p.count;
+      r.outShare = p.outShare;
+      r.outShareLogged = p.outShareLogged;
+      r.skipped = p.skipped;
+      return r;
+  },
+
+  /**
    * True for a narrow "Agent + Inbound Time % [+ Outbound Time %]" paste — the
    * two columns a short GEM export drops, copied on their own (e.g. columns A/G/H
    * of the Assignment Tracker's Current_Stats). It is NOT a full GEM report:
@@ -296,38 +457,25 @@ var AssignmentAnalyzer = {
           }
       }
       if (!Object.keys(byKey).length) return { error: "No agent percentages found in that paste." };
-
-      let db = this._getDB('WF_GEM_DATA_V3');
-      if (!db || db.getLastRow() < 2) return { error: "No GEM data to attach these percentages to — import the GEM report first." };
-
-      let data = db.getDataRange().getValues();
-      let monthOf = row => row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
-      if (!targetMonth) {
-          let months = {};
-          data.slice(1).forEach(r => { let m = monthOf(r); if (/^20\d{2}-\d{2}-\d{2}/.test(m)) months[m] = 1; });
-          targetMonth = Object.keys(months).sort().pop();
-      }
-
-      let matched = 0, unmatched = [];
-      let seen = {};
-      for (let i = 1; i < data.length; i++) {
-          if (monthOf(data[i]) !== targetMonth) continue;
-          let k = _normalizeAgentKey(data[i][1]);
-          seen[k] = true;
-          if (!byKey[k]) continue;
-          data[i][3] = byKey[k].inPct;
-          data[i][4] = byKey[k].outPct;
-          matched++;
-      }
-      Object.keys(byKey).forEach(k => { if (!seen[k]) unmatched.push(k); });
-      if (!matched) return { error: "None of those agents appear in " + targetMonth + ". Check the month you're viewing." };
-
-      db.getRange(2, 1, data.length - 1, data[0].length).setValues(data.slice(1));
-      return { month: targetMonth, matched: matched, unmatched: unmatched.length };
+      return this._applyPctToMonth(byKey, targetMonth);
   },
 
   importGEMData: function(rawText, targetMonth) {
       try {
+          // Avaya "Agent AUX time" report — supplies the Inbound/Outbound split
+          // that the PA Call Performance export no longer carries.
+          if (this._looksLikeAuxReport(rawText)) {
+              let a = this.importAuxTime(rawText, targetMonth);
+              if (a.error) return JSON.stringify({ error: a.error });
+              let res = JSON.parse(this.getAnalyzerData(a.month));
+              res.importWarning = { kind: 'aux-applied', month: a.month,
+                  text: 'AUX time report applied to ' + a.month + ' — Inbound/Outbound % set for ' + a.matched + ' of ' + a.count + ' agents'
+                        + (a.unmatched ? ' (' + a.unmatched + ' had no GEM row that month)' : '')
+                        + (a.skipped && a.skipped.length ? ' · ' + a.skipped.length + ' skipped: other-AUX exceeds logged time' : '')
+                        + (a.outShare !== null && a.outShare !== undefined ? ' · outbound ' + (a.outShare * 100).toFixed(1) + '% of productive time (' + (a.outShareLogged * 100).toFixed(1) + '% of logged)' : '') + '.' };
+              return JSON.stringify(res);
+          }
+
           // Percentages-only backfill for a month whose GEM export lacked them.
           if (this._looksLikePctOnly(rawText)) {
               let r = this._importPctOnly(rawText, targetMonth);
