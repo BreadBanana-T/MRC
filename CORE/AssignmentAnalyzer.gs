@@ -632,7 +632,10 @@ var AssignmentAnalyzer = {
 
 function importNewGEMReport(rawText) { return AssignmentAnalyzer.importGEMData(rawText); }
 function fetchAnalyzerData(monthStr) { return AssignmentAnalyzer.getAnalyzerData(monthStr); }
-function processMasterListUpload(rawText) { return AssignmentAnalyzer.importMasterList(rawText); }
+// Legacy name kept for any cached client bundle still calling it; both doors
+// (Import Data box and Red Flags → Sync Roster) go through importAgentRoster
+// in Code.gs so the analytics cache is always busted after a roster change.
+function processMasterListUpload(rawText) { return importAgentRoster(rawText); }
 function ignoreAnalyzerAgent(agentName) { return AssignmentAnalyzer.excludeAgent(agentName); }
 
 /**

@@ -27,9 +27,15 @@ var SafeTracker = {
   _r2: function (v) { return Math.round(v * 100) / 100; },
   _MON: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
 
-  // Language inference from the MasterList Skills string. No explicit column
-  // exists, so this is a heuristic; the raw skills are shown in the UI.
+  // Language from the roster Skills string. The Genesys export states it
+  // outright ("English; French" → BL), so defer to the shared decoder there and
+  // keep the heuristic below only for the legacy SharePoint list, where no
+  // explicit language exists.
   _inferLang: function (skills) {
+    if (typeof GenesysRoster !== 'undefined' && GenesysRoster.looksLikeGenesys(skills)) {
+      var g = GenesysRoster.parseSkills(skills);
+      if (g.lang) return g.lang;
+    }
     var s = String(skills || '').toLowerCase();
     var hasFr = /biling|bilingue|\bfr\b|french|fran[cç]ais|_fr\b|\bqc\b/.test(s);
     var hasEn = /\ben\b|english|anglais|_en\b/.test(s);

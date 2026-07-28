@@ -136,6 +136,18 @@ function importOtOpenSlots(t) {
   _bustWfCache(); return r;
 }
 
+// --- AGENT ROSTER (Genesys Cloud export or legacy SharePoint MasterList) ---
+// The single entry point for a roster sync, used by BOTH doors: the universal
+// Import Data box (kind='roster') and Red Flags → Sync Roster. Busting the
+// analytics cache is the part that was missing while the roster import lived
+// off on its own wire — SAFE/WFM payloads are cached by WF_CACHE_VER, so a
+// fresh roster used to sit unseen behind stale level/language/capability data.
+function importAgentRoster(t) {
+  _stampAction('import', 'Agent roster sync');
+  var r = (typeof AssignmentAnalyzer !== 'undefined') ? AssignmentAnalyzer.importMasterList(t) : 'Error';
+  _bustWfCache(); return r;
+}
+
 // --- REPORT IMPORTS (IEX/BI pastes that fill the Management View) ---
 function importActivityLoading(t) {
   var r = (typeof ReportImport !== 'undefined') ? ReportImport.importActivity(t) : 'Error';
@@ -206,7 +218,7 @@ function uploadChunk(token, index, total, chunk) {
 
 function processChunkedImport(token, total, kind) {
   Logger.log('[chunkedImport] start: token=' + token + ' total=' + total + ' kind=' + kind);
-  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : 'WFM data import')));
+  _stampAction('import', (kind === 'roster' ? 'Agent roster sync' : (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : 'WFM data import'))));
   var cache = CacheService.getScriptCache();
   var keys = [];
   for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
@@ -224,7 +236,9 @@ function processChunkedImport(token, total, kind) {
   Logger.log('[chunkedImport] assembled ' + fullText.length + ' chars');
   var t0 = new Date().getTime();
   var result;
-  if (kind === 'idp') {
+  if (kind === 'roster') {
+    result = (typeof AssignmentAnalyzer !== 'undefined') ? AssignmentAnalyzer.importMasterList(fullText) : 'Error';
+  } else if (kind === 'idp') {
     result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
   } else if (kind === 'otopen') {
     result = (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(fullText) : 'Error';

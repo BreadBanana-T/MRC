@@ -1803,7 +1803,7 @@
   window.openAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.add('open'); };
   window.closeAnalyzerModal = function() { document.getElementById('analyzer-modal').classList.remove('open'); };
   window.runAnalyzerImport = function() { var txt = document.getElementById('gem-import-text').value; if (!txt) return; var btn = event.target; btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...'; btn.disabled = true; var modal = document.getElementById('gem-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Parsing GEM & Updating DB..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; showToast("Analysis Complete!"); document.getElementById('gem-import-text').value = ""; render(); google.script.run.addGlobalNotification("Global Update: GEM Report Synced. Deep Dives Refreshed."); } catch(e) { state.analyzerLoading = false; showToast("Error processing data"); render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).importNewGEMReport(txt); } };
-  window.runMasterListImport = function() { var txt = document.getElementById('masterlist-import-text').value; if (!txt) return; var modal = document.getElementById('master-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Syncing Master Roster..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { showToast(res); document.getElementById('masterlist-import-text').value = ""; if (state.analyzerData && state.analyzerData.selectedMonth) { getAnalyzerHistory(state.analyzerData.selectedMonth); } else { getAnalyzerHistory(null); } google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Profiles Updated."); }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).processMasterListUpload(txt); } }
+  window.runMasterListImport = function() { var txt = document.getElementById('masterlist-import-text').value; if (!txt) return; var modal = document.getElementById('master-modal'); if (modal) modal.classList.remove('open'); state.analyzerLoading = true; render(); showToast("Syncing Master Roster..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { showToast(res); document.getElementById('masterlist-import-text').value = ""; if (state.analyzerData && state.analyzerData.selectedMonth) { getAnalyzerHistory(state.analyzerData.selectedMonth); } else { getAnalyzerHistory(null); } google.script.run.addGlobalNotification("Global Update: Master Roster Synced. Profiles Updated."); }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).importAgentRoster(txt); } }
   window.getAnalyzerHistory = function(month) { state.analyzerLoading = true; render(); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; render(); } catch(e) { state.analyzerLoading = false; render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).fetchAnalyzerData(month); google.script.run.withSuccessHandler(function(res) { try { state.coachingCadence = JSON.parse(res); if (state.view === 'analyzer') render(); } catch(e) {} }).fetchCoachingCadence(30); } };
   window.dismissFlagAgent = function(agentName) { if (confirm("Are you sure you want to dismiss " + agentName + "? They will be permanently hidden from all future Red Flag reports.")) { showToast("Dismissing Agent..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function() { getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null); }).ignoreAnalyzerAgent(agentName); } } };
 
@@ -4712,20 +4712,30 @@
       // shape ({"slots":[... or bare [{..."slotCount"...).
       var lower = t.toLowerCase();
       var trimmed = t.trim();
-      var isOtOpen = trimmed.indexOf('"slotCount"') !== -1
+      // Agent roster (Genesys Cloud export or legacy SharePoint MasterList).
+      // Tested FIRST and excluded from every other sniff below: the roster used
+      // to be reachable only from Red Flags → Sync Roster, which is why it went
+      // stale. Both header shapes are unique to a roster paste — no schedule,
+      // IDP or IEX report carries SAM_Monit tags or an employee_name column.
+      var isRoster = /\bsam_monit_(lv|sk)_/i.test(t)
+          || /(^|\n)[^\n]*\bagent id\b[^\n]*\bskills\b/i.test(t)
+          || lower.indexOf('employee_name') !== -1
+          || lower.indexOf('job_title') !== -1
+          || lower.indexOf('name_first') !== -1;
+      var isOtOpen = !isRoster && (trimmed.indexOf('"slotCount"') !== -1
           || (/^[\[{]/.test(trimmed) && trimmed.indexOf('"slots"') !== -1)
           || /^date\s*\t\s*start/i.test(trimmed)                                    // flattened table header
-          || /^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed); // header-less table rows
-      var isIdp = !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
+          || /^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed)); // header-less table rows
+      var isIdp = !isRoster && !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
       // IEX/BI report pastes that feed the Management View.
-      var isActivity = lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1);
+      var isActivity = !isRoster && (lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1));
       // Forecast report ("Fcst Alarm"/"Fcst Acc", no service-type column) — must
       // be tested BEFORE alarms because it also carries "AHT Secs".
-      var isForecast = !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
-      var isAlarms = !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
+      var isForecast = !isRoster && !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
+      var isAlarms = !isRoster && !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
       // SAFE / SmartWear per-agent export (ACTIVE TIME + AGENT LANGUAGES / SOS volume).
-      var isSafe = !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
-      var kind = isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched')))));
+      var isSafe = !isRoster && !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
+      var kind = isRoster ? 'roster' : (isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))))));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -4769,7 +4779,9 @@
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
           if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
-          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')))));
+          // A roster sync changes who Red Flags counts, so refresh the flags too.
+          if (kind === 'roster' && state.view === 'analyzer') getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null);
+          var notifMsg = isRoster ? 'Global Update: Agent Roster Synced. Levels, skills and languages updated.' : (isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.'))))));
           google.script.run.addGlobalNotification(notifMsg);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
@@ -4780,6 +4792,12 @@
           showToast('Sync failed: ' + ((err && err.message) || 'unknown'));
       };
 
+      if (kind === 'roster') {
+          showToast('Agent roster detected — decoding levels, skills and languages…');
+          if (t.length > DIRECT_LIMIT) _chunkUpload(t, kind, onSuccess, onFailure);
+          else google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importAgentRoster(t);
+          return;
+      }
       if (kind === 'activity') {
           showToast('Activity-loading report detected — ingesting…');
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importActivityLoading(t);

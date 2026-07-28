@@ -34,7 +34,8 @@ flowchart TD
   WTI --> ARCH[("Weekly_Archives_V3 (per-month, ALL/WEEK A/WEEK B)")]
   OTO_IMP --> OTOPEN[("WF_OT_OPEN")]
 
-  GENPASTE["Genesys Cloud agent export / SharePoint MasterList paste"] --> MLI["AssignmentAnalyzer.importMasterList"]
+  GENPASTE["Genesys Cloud agent export / SharePoint MasterList paste"] --> MLI["importAgentRoster → AssignmentAnalyzer.importMasterList"]
+  PCI --> MLI
   MLI --> MASTER[("WF_MASTERLIST")]
   REGMAP[("WF_REGION_MAP / RegionRegistry (manual+auto)")]
   LANG[("WF_LANG_MAP (manual)")]
@@ -177,11 +178,22 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 
 ### 2.1 Genesys Cloud roster (`GenesysRoster.gs`)
 
-**Red Flags → Sync Roster** now accepts the Genesys Cloud *Agent Status Summary*
-export as well as the legacy SharePoint MasterList; `importMasterList` sniffs the
-header (`Agent Id` + `Agent Name` + `Skills`) and routes accordingly. Both write
-`WF_MASTERLIST`, so every downstream reader is unchanged — the Genesys fields are
-appended as cols 6‑10 and col 10 (`Source`) says which door the row came in.
+The roster now goes through the **universal Import Data box** like every other
+paste (`kind='roster'` → `importAgentRoster` / `processChunkedImport`), and
+**Red Flags → Sync Roster** is a shortcut onto the same entry point. Before this
+it was reachable *only* from the Red Flags page, on its own unchunked wire, with
+no `_stampAction` and — the actual bug — **no `_bustWfCache()`**, so a fresh
+roster sat unseen behind cached SAFE/WFM payloads keyed on `WF_CACHE_VER`.
+That silo is why the roster went stale, which is why the hard gate had been
+removed from the flags in the first place.
+
+`importMasterList` accepts the Genesys Cloud *Agent Status Summary* export as
+well as the legacy SharePoint MasterList; it sniffs the header (`Agent Id` +
+`Agent Name` + `Skills`, vs `employee_name` / `job_title` / `name_first`) and
+routes accordingly. Both write `WF_MASTERLIST`, so every downstream reader is
+unchanged — the Genesys fields are appended as cols 6‑10 and col 10 (`Source`)
+says which door the row came in. The client sniffer tests `isRoster` **first**
+and excludes it from every other format test (`runImportAction`).
 
 One Genesys `Skills` cell holds three kinds of token:
 
