@@ -158,6 +158,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
 | **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
 | **WF_GEM_PCT_SOURCE** | 0 Month, 1 Source (`gem` measured \| `aux` estimated), 2 Updated | `AssignmentAnalyzer._setPctSource` |
+| *(Script Property)* **RF_THRESHOLDS** | JSON: inPct, inPctSenior, inSeniorExempt, tasksXCalls, outPct, outMinLevel, cph, minWorkedDays | `RedFlagSettings.save` |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
 | **Stats History** | 0 DateTime, 1 SVL%, 2 Ack | external/digest |
 | **DB_Sessions** | 1 Agent, 2 Role, 3 Start, 4 End, 6 Hours | external |
@@ -303,6 +304,34 @@ drives the productive base to zero, negative, or below the outbound hours it sho
 contain. Those agents' splits are unknowable, so they are left at whatever the month
 already held. An earlier clamp to 100% manufactured **11 false Outbound Red Flags** on
 July data. The count of skipped agents is reported on import.
+
+### 2.4 Thresholds are runtime-editable, and the inbound gate is level-aware
+
+`CORE/RedFlagSettings.gs` holds every number the rules test against in a Script
+Property, editable from the dashboard (Red Flags → **Thresholds**). Defaults match
+the workbook, so an untouched install is unchanged.
+
+**The inbound gate splits by level, because the floor changed.** The workbook's
+premise was "high In% = unbalanced = actionable". That no longer holds: with a large
+junior population the **Level 4s deliberately carry inbound to hold service level**
+while juniors run outbound. On July data, 29 of the 44 agents in the ≥75% pool were
+L4, averaging 87.3% inbound — two thirds of the list was seniors doing their job.
+So `inPct` (Regular, L2/L3) and `inPctSenior` (L4+, per `SENIOR_LEVEL = 4`) are
+separate, plus `inSeniorExempt` to drop seniors from the inbound rules entirely.
+Both default to 0.75 — identical to the workbook until changed.
+
+| Setting | July result |
+|---|---|
+| L4 bar = L2 bar (75%, default) | 5 Inbound / 39 Out of Scope |
+| L4 bar 90% | 4 / 24 |
+| L4 bar 95% | 3 / 19 |
+| L4 exempt | 2 / 13 — all remaining rows are L2 |
+
+⚠️ **`tasksXCalls` splits the pool, it never shrinks it.** Moving it trades rows
+between Inbound Red Flags and Out of Scope and leaves the total identical (July: 45%
+→ 7+37, 50% → 5+39, 88% → 2+42, pool 44 throughout). To shorten the lists, raise the
+inbound gates. The editor's hint text says this — it was a genuine source of
+confusion.
 
 **The CP/H threshold is a moving, shift-relative bar.** `Shift_Analysis!H7 = H3/2`
 where `H3 = AVERAGEIFS(day CPH)`. April: Day avg 14.70 → 7.35, Evening 12.97 → 6.48,

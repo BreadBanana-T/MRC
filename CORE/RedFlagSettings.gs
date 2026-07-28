@@ -25,18 +25,26 @@ var RedFlagSettings = {
   KEY: 'RF_THRESHOLDS',
 
   DEFAULTS: {
-    inPct: 0.75,          // Inbound / Out of Scope entry gate
-    tasksXCalls: 0.50,    // splits Inbound Red Flag from Out of Scope
+    inPct: 0.75,          // Inbound / Out of Scope entry gate (Regular, level 2-3)
+    inPctSenior: 0.75,    // separate gate for SENIORS (level >= 4)
+    inSeniorExempt: 0,    // 1 = seniors never enter the inbound rules at all
+    tasksXCalls: 0.50,    // SPLITS the pool: Inbound Red Flag vs Out of Scope
     outPct: 0.75,         // Outbound Red Flags
     outMinLevel: 2,       // Outbound only applies at this ERC level or above
     cph: 7.3,             // CP/H at or below this is flagged
     minWorkedDays: 5      // every rule ignores agents below this
   },
 
+  // Level at or above which `inPctSenior` / `inSeniorExempt` apply. Matches the
+  // Genesys taxonomy: SAM_Monit_Lv_Senior = 4.
+  SENIOR_LEVEL: 4,
+
   // Bounds keep a typo from silently emptying or flooding the dashboard.
   LIMITS: {
-    inPct:         { min: 0.30, max: 1,   pct: true,  label: 'Inbound %',        hint: 'In% at or above this enters the Inbound / Out of Scope pool' },
-    tasksXCalls:   { min: 0,    max: 1,   pct: true,  label: 'Tasks / Calls',    hint: 'At or above → Inbound Red Flag; below → Out of Scope' },
+    inPct:         { min: 0.30, max: 1,   pct: true,  label: 'Inbound % — Regular (L2/L3)', hint: 'A Regular agent at or above this In% enters the inbound pool' },
+    inPctSenior:   { min: 0.30, max: 1,   pct: true,  label: 'Inbound % — Senior (L4)',     hint: 'Seniors deliberately carry inbound to hold service level, so they usually need a higher bar than Regulars' },
+    inSeniorExempt:{ min: 0,    max: 1,   pct: false, bool: true, label: 'Exempt Seniors entirely', hint: 'Seniors (L4) never appear in Inbound Red Flags or Out of Scope, whatever their In%' },
+    tasksXCalls:   { min: 0,    max: 1,   pct: true,  label: 'Tasks / Calls split', hint: 'SPLITS the pool — it does not shrink it. At or above → Inbound Red Flag; below → Out of Scope. To make the lists SHORTER, raise the Inbound % gates above' },
     outPct:        { min: 0.30, max: 1,   pct: true,  label: 'Outbound %',       hint: 'Out% at or above this is flagged' },
     outMinLevel:   { min: 0,    max: 9,   pct: false, label: 'Outbound min ERC', hint: 'Outbound rule only applies from this level up' },
     cph:           { min: 0,    max: 40,  pct: false, label: 'CP/H at or below', hint: 'Contacts per hour at or below this is flagged' },
@@ -82,6 +90,7 @@ var RedFlagSettings = {
         if (isNaN(v)) { next[k] = this.DEFAULTS[k]; continue; }
         // 75 and 0.75 both mean 75% — a manager typing "88" must not become 8800%.
         if (this.LIMITS[k] && this.LIMITS[k].pct && v > 1) v = v / 100;
+        if (this.LIMITS[k] && this.LIMITS[k].bool) v = v ? 1 : 0;
         next[k] = this._clamp(k, v);
       }
       PropertiesService.getScriptProperties().setProperty(this.KEY, JSON.stringify(next));

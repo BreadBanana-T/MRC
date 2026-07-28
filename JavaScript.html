@@ -1827,20 +1827,25 @@
       if (!o.ok) { document.getElementById('rf-thresholds-body').innerHTML = '<div style="padding:20px; color:var(--status-alert);">' + escapeHTML(o.error || 'unavailable') + '</div>'; return; }
       state.rfThresholdMeta = o;
       var t = o.thresholds, lim = o.limits, def = o.defaults;
-      var order = ['inPct', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
+      var order = ['inPct', 'inPctSenior', 'inSeniorExempt', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
       var rows = order.map(function(k) {
           var L = lim[k] || {};
-          var shown = L.pct ? +(t[k] * 100).toFixed(1) : t[k];
-          var defShown = L.pct ? +(def[k] * 100).toFixed(1) + '%' : def[k];
-          var changed = Math.abs(t[k] - def[k]) > 1e-9;
-          return '<div style="display:grid; grid-template-columns:1fr 110px; gap:14px; align-items:start; padding:11px 0; border-bottom:1px solid var(--glass-border);">' +
-              '<div><div style="font-weight:700; font-size:0.85rem; color:var(--text-main);">' + escapeHTML(L.label || k) +
-                (changed ? ' <span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:var(--bg-root); border:1px solid var(--glass-border); padding:1px 6px; border-radius:6px; vertical-align:1px;">CHANGED</span>' : '') + '</div>' +
-                '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:2px; line-height:1.4;">' + escapeHTML(L.hint || '') +
-                ' · default <b>' + defShown + '</b></div></div>' +
-              '<div style="position:relative;"><input id="rf-th-' + k + '" class="input-aether" type="number" step="' + (L.pct ? '0.1' : (k === 'cph' ? '0.1' : '1')) + '" value="' + shown + '" style="height:34px; font-weight:800; font-size:0.85rem; text-align:right; padding-right:' + (L.pct ? '26px' : '10px') + ';">' +
-                (L.pct ? '<span style="position:absolute; right:10px; top:8px; font-size:0.78rem; font-weight:700; color:var(--text-muted); pointer-events:none;">%</span>' : '') + '</div>' +
-              '</div>';
+          var changed = Math.abs((t[k] || 0) - (def[k] || 0)) > 1e-9;
+          var head = '<div><div style="font-weight:700; font-size:0.85rem; color:var(--text-main);">' + escapeHTML(L.label || k) +
+              (changed ? ' <span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:var(--bg-root); border:1px solid var(--glass-border); padding:1px 6px; border-radius:6px; vertical-align:1px;">CHANGED</span>' : '') + '</div>' +
+              '<div style="font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-top:2px; line-height:1.4;">' + escapeHTML(L.hint || '') + '</div></div>';
+          var field;
+          if (L.bool) {
+              field = '<label style="display:flex; align-items:center; justify-content:flex-end; gap:8px; height:34px; cursor:pointer; font-size:0.8rem; font-weight:700; color:var(--text-secondary);">' +
+                  '<input id="rf-th-' + k + '" type="checkbox"' + (t[k] ? ' checked' : '') + ' style="width:16px; height:16px; accent-color:var(--accent-primary); cursor:pointer;">Exempt</label>';
+          } else {
+              var shown = L.pct ? +(t[k] * 100).toFixed(1) : t[k];
+              var defShown = L.pct ? +(def[k] * 100).toFixed(1) + '%' : def[k];
+              head = head.replace('</div></div>', ' · default <b>' + defShown + '</b></div></div>');
+              field = '<div style="position:relative;"><input id="rf-th-' + k + '" class="input-aether" type="number" step="' + (L.pct ? '0.1' : (k === 'cph' ? '0.1' : '1')) + '" value="' + shown + '" style="height:34px; font-weight:800; font-size:0.85rem; text-align:right; padding-right:' + (L.pct ? '26px' : '10px') + ';">' +
+                  (L.pct ? '<span style="position:absolute; right:10px; top:8px; font-size:0.78rem; font-weight:700; color:var(--text-muted); pointer-events:none;">%</span>' : '') + '</div>';
+          }
+          return '<div style="display:grid; grid-template-columns:1fr 118px; gap:14px; align-items:start; padding:11px 0; border-bottom:1px solid var(--glass-border);">' + head + field + '</div>';
       }).join('');
 
       var est = (state.analyzerData && state.analyzerData.pctSource === 'aux');
@@ -1866,11 +1871,12 @@
   }
 
   window.saveRfThresholds = function() {
-      var order = ['inPct', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
+      var order = ['inPct', 'inPctSenior', 'inSeniorExempt', 'tasksXCalls', 'outPct', 'outMinLevel', 'cph', 'minWorkedDays'];
       var payload = {};
       order.forEach(function(k) {
           var el = document.getElementById('rf-th-' + k);
-          if (el) payload[k] = el.value;
+          if (!el) return;
+          payload[k] = (el.type === 'checkbox') ? (el.checked ? 1 : 0) : el.value;
       });
       closeRfThresholds();
       showToast('Saving thresholds…');

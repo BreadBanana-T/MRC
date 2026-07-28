@@ -573,7 +573,8 @@ var AssignmentAnalyzer = {
           // acts as a hard filter (see _classifyAgent); with the legacy
           // SharePoint list it stays advisory — a stale list must not silently
           // erase real agents from the flags.
-          const T = (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.get() : { inPct:0.75, tasksXCalls:0.50, outPct:0.75, outMinLevel:2, cph:7.3, minWorkedDays:5 };
+          const T = (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.get() : { inPct:0.75, inPctSenior:0.75, inSeniorExempt:0, tasksXCalls:0.50, outPct:0.75, outMinLevel:2, cph:7.3, minWorkedDays:5 };
+          const SENIOR = (typeof RedFlagSettings !== 'undefined') ? RedFlagSettings.SENIOR_LEVEL : 4;
           const roster = this.readRoster();
           const useMasterList = roster.counts.total > 0;
           const genesysMode = roster.isGenesys;
@@ -696,7 +697,14 @@ var AssignmentAnalyzer = {
               // Worked-days gate already enforced at the top of this loop.
               // Thresholds are runtime-editable (RedFlagSettings) — defaults
               // match the workbook, so an untouched install is unchanged.
-              if (c.inPct >= T.inPct) {
+              // Seniors carry inbound on purpose (they hold service level while the
+              // juniors run outbound), so they get their own gate — or none at all.
+              // Both default to the Regular gate, so an untouched install is
+              // identical to the workbook.
+              let isSenior = (c.level || 0) >= SENIOR;
+              let inGate = isSenior ? T.inPctSenior : T.inPct;
+              let inEligible = !(isSenior && T.inSeniorExempt);
+              if (inEligible && c.inPct >= inGate) {
                   if (c.tasksXCalls >= T.tasksXCalls) inboundList.push(payload);
                   else outOfScopeList.push(payload);
               }
