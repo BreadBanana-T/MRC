@@ -81,6 +81,8 @@
     </div>
 
     <div id="agent-menu" class="ctx-menu">
+        <button class="ctx-item" style="font-weight:800;" onclick="openAgentCard()">Info Card</button>
+        <div style="height:1px; background:var(--glass-border); margin:4px 0;"></div>
         <button class="ctx-item" onclick="setAgentStatus('role', 'ICL')">Assign ICL</button>
         <button class="ctx-item" onclick="setAgentStatus('role', 'SAFE')">Assign SAFE</button>
         <button class="ctx-item" onclick="setAgentStatus('role', 'ULC FIRE')" style="color:var(--status-ulc);">Assign ULC FIRE</button>
@@ -93,6 +95,13 @@
     </div>
     
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
+
+    <!-- Agent info card: level / language / Genesys skills at a glance. -->
+    <div id="agent-card-modal" class="modal-blur" onclick="closeAgentCard()">
+       <div class="modal-window" style="width:520px; max-width:95%;" onclick="event.stopPropagation()">
+          <div id="agent-card-body"></div>
+       </div>
+    </div>
 
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
        <div class="modal-window" onclick="event.stopPropagation()">

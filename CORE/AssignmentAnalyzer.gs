@@ -4,18 +4,47 @@
 
 var AssignmentAnalyzer = {
 
+  // WF_MASTERLIST layout. Columns 1-6 are the original SharePoint shape and
+  // must not move — AgentMonitor, SafeTracker, OutageTracker, TrainingTracker
+  // and WorkforceTracker all read them positionally. Columns 7-11 are the
+  // Genesys additions, appended so those readers keep working untouched.
+  ML_HEADERS: ["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI",
+               "Agent Id", "Language", "Level Name", "Skill List", "Source"],
+
   _getDB: function(sheetName) {
       return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
+  /**
+   * Roster sync. Accepts EITHER source and auto-detects which one was pasted:
+   *
+   *   GENESYS CLOUD (preferred)  "Agent Id / Agent Name / Skills / …"
+   *       Level, skills and language all come out of the Skills cell — see
+   *       GenesysRoster. Juniors and profile-less rows are still stored (the
+   *       floor wants their names) but are marked non-countable so Red Flags
+   *       drops them.
+   *   SHAREPOINT MASTERLIST (legacy)  "employee_name / job_title / erc_level / …"
+   *       Unchanged behaviour: managers filtered by job title, region inferred
+   *       from Location / TI email.
+   */
   importMasterList: function(rawText) {
       try {
           if (!rawText || rawText.trim() === "") return "Error: No data pasted.";
           let lines = rawText.split(/\r?\n/).filter(l => l.trim().length > 0);
-          
+
+          // ── Genesys Cloud export? ── Scan every line, not just the top: a
+          // paste often carries a title/filter preamble above the real header.
+          // Data rows can't false-positive — the check needs literal "Agent Id"
+          // / "Agent Name" / "Skills" cells.
+          let gHeaderIdx = -1;
+          for (let i = 0; i < lines.length; i++) {
+              if (GenesysRoster.looksLikeGenesysHeader(this._parseCSVLine(lines[i]))) { gHeaderIdx = i; break; }
+          }
+          if (gHeaderIdx !== -1) return this._importGenesysRoster(lines.slice(gHeaderIdx));
+
           let headerIdx = lines.findIndex(l => l.toLowerCase().includes('employee_name') || l.toLowerCase().includes('job_title') || l.toLowerCase().includes('name_first'));
-          if (headerIdx === -1) return "Error: Could not find MasterList headers.";
-          
+          if (headerIdx === -1) return "Error: Could not find MasterList or Genesys headers.";
+
           let headers = this._parseCSVLine(lines[headerIdx]);
           let colName = headers.findIndex(h => h.toLowerCase().includes('employee_name') || h.toLowerCase() === 'name');
           let colJob = headers.findIndex(h => h.toLowerCase().includes('title') || h.toLowerCase().includes('job'));
@@ -51,18 +80,20 @@ var AssignmentAnalyzer = {
               let isInactive = s.includes('terminated') || s.includes('resigned') || s.includes('inactive') || s.includes('separated') || s === 'left';
 
               if (name && !isInactive && !isManager) {
-                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI]);
+                  let cleanName = name.replace(/(^"|"$)/g, '').trim();
+                  // Cols 7-11 stay blank for the SharePoint source: no Genesys
+                  // id/level-tag, and the language is inferred at read time.
+                  validAgents.push([cleanName, level, sup, skills, loc, emailTI, "", "", "", "", "sharepoint"]);
               }
           }
-          
+
           if (validAgents.length > 0) {
               const ss = SpreadsheetApp.getActiveSpreadsheet();
               let sheet = ss.getSheetByName('WF_MASTERLIST');
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
-              // Save the 6 columns
-              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]);
-              sheet.getRange(2, 1, validAgents.length, 6).setValues(validAgents);
+              sheet.appendRow(this.ML_HEADERS);
+              sheet.getRange(2, 1, validAgents.length, this.ML_HEADERS.length).setValues(validAgents);
 
               // Sync to RegionRegistry with source=masterlist so these entries
               // outrank future WFM auto-detection but remain overridable manually.
@@ -81,6 +112,121 @@ var AssignmentAnalyzer = {
       } catch (e) {
           return "Error parsing MasterList: " + e.message;
       }
+  },
+
+  /**
+   * Genesys Cloud roster writer. `lines` starts at the header row.
+   * Region is NOT touched: the export carries no location or TI email, so
+   * upserting everyone as "Onshore" would poison RegionRegistry at masterlist
+   * rank and silently move offshore agents. Region keeps coming from the
+   * registry / WFM schedule.
+   */
+  _importGenesysRoster: function(lines) {
+      var self = this;
+      var rows = lines.map(function(l) { return self._parseCSVLine(l); });
+      var built = GenesysRoster.buildRoster(rows);
+      if (!built.agents.length) return "Error: No agents found in the Genesys export.";
+
+      var out = built.agents.map(function(a) {
+          var p = a.profile;
+          return [
+              a.name,
+              p.level === null ? "" : p.level,   // blank level = no Lv tag = not a monitoring specialist
+              "",                                // Supervisor: not in the Genesys export
+              p.raw,                              // raw Skills cell — SafeTracker/OutageTracker read this
+              "", "",                             // Location / Email_TI: not in the Genesys export
+              a.id,
+              p.lang,
+              p.levelName,
+              p.skillText,
+              "genesys"
+          ];
+      });
+
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName('WF_MASTERLIST');
+      if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
+      sheet.clearContents();
+      sheet.appendRow(this.ML_HEADERS);
+      sheet.getRange(2, 1, out.length, this.ML_HEADERS.length).setValues(out);
+
+      var c = built.counts;
+      return "Success: Genesys roster synced — " + c.countable + " monitoring specialists counted"
+           + " (" + c.senior + " Senior / " + c.regular + " Regular · "
+           + c.bilingual + " BL, " + c.english + " EN, " + c.french + " FR).\n"
+           + "Excluded from Red Flags: " + c.junior + " Junior, " + c.noProfile + " with no skills attached"
+           + (c.noLevel ? ", " + c.noLevel + " with a language but no level" : "") + ".";
+  },
+
+  /**
+   * Read WF_MASTERLIST into a normalized-key map. Single reader shared by the
+   * analyzer so the Genesys/SharePoint difference is resolved in one place.
+   *
+   * @return {{byKey:Object, isGenesys:boolean, counts:Object}}
+   *   byKey[key] = { name, level, levelName, lang, langLabel, skills:[],
+   *                  skillText, countable, reason, agentId, source }
+   */
+  readRoster: function() {
+      var out = { byKey: {}, isGenesys: false, counts: { total: 0, countable: 0, junior: 0, noProfile: 0, noLevel: 0 } };
+      var sheet = this._getDB('WF_MASTERLIST');
+      if (!sheet || sheet.getLastRow() < 2) return out;
+
+      var rows = sheet.getDataRange().getDisplayValues().slice(1);
+      rows.forEach(function(r) {
+          var name = String(r[0] || '').trim();
+          if (!name) return;
+          var key = _normalizeAgentKey(name);
+          if (!key) return;
+
+          var source = String(r[10] || '').toLowerCase();
+          var rawSkills = String(r[3] || '');
+          // Rows written before this column existed have no Source: fall back
+          // to sniffing the Skills cell for SAM_Monit tags.
+          var genesys = (source === 'genesys') || (!source && GenesysRoster.looksLikeGenesys(rawSkills));
+
+          var entry;
+          if (genesys) {
+              out.isGenesys = true;
+              var p = GenesysRoster.parseSkills(rawSkills);
+              // Prefer the stored decoded columns when present (cheap + lets a
+              // human correct a row by hand in the sheet).
+              var storedLvl = parseInt(r[1], 10);
+              if (!isNaN(storedLvl)) p.level = storedLvl;
+              if (String(r[7] || '').trim()) p.lang = String(r[7]).trim().toUpperCase();
+              if (String(r[8] || '').trim()) p.levelName = String(r[8]).trim();
+              if (String(r[9] || '').trim()) { p.skillText = String(r[9]).trim(); p.skills = p.skillText.split(/\s*,\s*/).filter(Boolean); }
+              p.langLabel = GenesysRoster.LANG_LABELS[p.lang] || '';
+              // Recompute countability off the (possibly corrected) values.
+              if (p.level === null || isNaN(p.level)) { p.countable = false; p.reason = p.lang ? 'no-level' : 'no-profile'; }
+              else if (p.level < 2) { p.countable = false; p.reason = 'junior'; }
+              else { p.countable = true; p.reason = ''; }
+
+              entry = {
+                  name: name, level: p.level, levelName: p.levelName, lang: p.lang, langLabel: p.langLabel,
+                  skills: p.skills, skillText: p.skillText, countable: p.countable, reason: p.reason,
+                  agentId: String(r[6] || '').trim(), source: 'genesys'
+              };
+          } else {
+              var lvl = parseInt(r[1], 10);
+              if (isNaN(lvl)) lvl = 2;
+              // Legacy rows carry no level tags — everyone in the SharePoint
+              // MasterList is a monitoring specialist by construction (managers
+              // were dropped at import), so they all stay countable.
+              entry = {
+                  name: name, level: lvl, levelName: '', lang: '', langLabel: '',
+                  skills: [], skillText: '', countable: true, reason: '',
+                  agentId: '', source: 'sharepoint'
+              };
+          }
+
+          out.byKey[key] = entry;
+          out.counts.total++;
+          if (entry.countable) out.counts.countable++;
+          else if (entry.reason === 'junior') out.counts.junior++;
+          else if (entry.reason === 'no-level') out.counts.noLevel++;
+          else out.counts.noProfile++;
+      });
+      return out;
   },
 
   importGEMData: function(rawText) {
@@ -120,19 +266,13 @@ var AssignmentAnalyzer = {
               if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
           }
           
-          let validAgents = new Map();
-          let mlSheet = this._getDB('WF_MASTERLIST');
-          let useMasterList = false;
-          
-          if (mlSheet && mlSheet.getLastRow() > 1) {
-              useMasterList = true;
-              mlSheet.getDataRange().getDisplayValues().slice(1).forEach(r => {
-                  let lvl = parseInt(r[1]);
-                  if (isNaN(lvl)) lvl = 2;
-                  let cleanName = _normalizeAgentKey(r[0]);
-                  validAgents.set(cleanName, lvl);
-              });
-          }
+          // Roster gate. With a Genesys roster the roster is authoritative and
+          // acts as a hard filter (see _classifyAgent); with the legacy
+          // SharePoint list it stays advisory — a stale list must not silently
+          // erase real agents from the flags.
+          const roster = this.readRoster();
+          const useMasterList = roster.counts.total > 0;
+          const genesysMode = roster.isGenesys;
 
           let exclusions = new Set();
           let exclSheet = this._getDB('WF_EXCLUSIONS');
@@ -174,56 +314,40 @@ var AssignmentAnalyzer = {
               return s;
           };
 
+          // Why each agent was dropped, so the dashboard can prove the filter
+          // ran instead of just showing a shorter list.
+          let filtered = { junior: [], noProfile: [], noLevel: [], notOnRoster: [] };
+
           let currentMap = {};
           let prevMap = {};
           validData.forEach(r => {
               let agent = String(r[1]).trim();
-              let cleanAgent = _normalizeAgentKey(agent);
-              let agentLevel = 2;
+              let verdict = this._classifyAgent(agent, roster, genesysMode);
 
-              if (useMasterList) {
-                  let matchedLvl = null;
-                  if (validAgents.has(cleanAgent)) {
-                      matchedLvl = validAgents.get(cleanAgent);
-                  } else {
-                      let gnParts = cleanAgent.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
-                      for (let [mlName, lvl] of validAgents.entries()) {
-                          let mlParts = mlName.replace(/,/g, ' ').split(' ').filter(x => x.length > 1);
-                          if (gnParts.length > 1 && mlParts.length > 1 && gnParts[0] === mlParts[0] && gnParts[1] === mlParts[1]) {
-                              matchedLvl = lvl; break;
-                          }
-                          let minLen = Math.min(cleanAgent.length, mlName.length);
-                          if (minLen >= 8 && (cleanAgent.includes(mlName) || mlName.includes(cleanAgent))) {
-                              matchedLvl = lvl; break;
-                          }
-                      }
-                  }
-                  // No MasterList match — pass through with default level 2
-                  // instead of dropping the agent. The MasterList stays useful
-                  // as a manager filter (managers never enter it in the first
-                  // place via the job-title check at import), but isn't a
-                  // hard gate anymore: agents missing because the MasterList
-                  // is stale still appear in Red Flags.
-                  agentLevel = (matchedLvl === null) ? 2 : matchedLvl;
+              if (r[0] === targetMonth && verdict.dropReason) {
+                  let bucket = { 'junior': 'junior', 'no-profile': 'noProfile', 'no-level': 'noLevel', 'not-on-roster': 'notOnRoster' }[verdict.dropReason];
+                  if (bucket && filtered[bucket].indexOf(agent) === -1) filtered[bucket].push(agent);
               }
-              
+              if (verdict.dropReason) return;
+
               if (exclusions.has(agent)) return;
               let inP = parseFloat(r[3]) || 0; if (inP > 1) inP = inP / 100;
               let outP = parseFloat(r[4]) || 0; if (outP > 1) outP = outP / 100;
               let cphV = parseFloat(r[2]) || 0;
-              
+
               if (r[0] === targetMonth) {
                   currentMap[agent] = {
-                      level: agentLevel,
-                      cph: cphV, inPct: inP, outPct: outP, aht: fixTime(r[5]), 
-                      tasksXCalls: parseFloat(r[6]) || 0, totalCalls: parseInt(r[7]) || 0, 
+                      level: verdict.level, levelName: verdict.levelName,
+                      lang: verdict.lang, langLabel: verdict.langLabel, skills: verdict.skills,
+                      cph: cphV, inPct: inP, outPct: outP, aht: fixTime(r[5]),
+                      tasksXCalls: parseFloat(r[6]) || 0, totalCalls: parseInt(r[7]) || 0,
                       callsAnsw: parseInt(r[8]) || 0, wDays: parseInt(r[9]) || 0
                   };
               } else if (r[0] === prevMonth) {
                   prevMap[agent] = { cph: cphV, inPct: inP, outPct: outP };
               }
           });
-          
+
           let inboundList = [];
           let outOfScopeList = [];
           let outboundList = [];
@@ -244,7 +368,8 @@ var AssignmentAnalyzer = {
                   inPct: c.inPct, prevIn: p ? p.inPct : null, trendIn: trendIn,
                   outPct: c.outPct, prevOut: p ? p.outPct : null, trendOut: trendOut,
                   cph: c.cph, prevCph: p ? p.cph : null, trendCph: trendCPH,
-                  aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls
+                  aht: c.aht, tasksXCalls: c.tasksXCalls, totalCalls: c.totalCalls,
+                  level: c.level, levelName: c.levelName, lang: c.lang, langLabel: c.langLabel, skills: c.skills
               };
 
               // Mirrors the Assignment Tracker 2026 RedFlag dashboard rule:
@@ -269,11 +394,81 @@ var AssignmentAnalyzer = {
           
           return JSON.stringify({
               selectedMonth: targetMonth, availableMonths: months, usingMasterList: useMasterList,
+              rosterSource: genesysMode ? 'genesys' : (useMasterList ? 'sharepoint' : 'none'),
+              rosterCounts: roster.counts,
+              filtered: {
+                  junior: filtered.junior.sort(), noProfile: filtered.noProfile.sort(),
+                  noLevel: filtered.noLevel.sort(), notOnRoster: filtered.notOnRoster.sort()
+              },
               inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList
           });
       } catch (e) {
           return JSON.stringify({ error: "Data generation failed: " + e.message });
       }
+  },
+
+  /**
+   * Decide whether a GEM row belongs in Red Flags, and with what profile.
+   *
+   * GENESYS MODE — the roster is the whole contact centre, so it is a hard
+   * gate. Dropped: juniors (not counted, per product owner), agents with no
+   * SAM_Monit tags at all ("nothing attached"), agents with a language but no
+   * level, and anyone absent from the roster entirely.
+   * LEGACY MODE — advisory only: unmatched agents pass through at level 2 so a
+   * stale SharePoint list can't erase real people from the flags.
+   *
+   * @return {{dropReason:string, level:number, levelName:string, lang:string,
+   *           langLabel:string, skills:string[]}}  dropReason '' = keep
+   */
+  _classifyAgent: function(agentName, roster, genesysMode) {
+      var keep = function(e) {
+          return { dropReason: '', level: e ? e.level : 2, levelName: e ? e.levelName : '',
+                   lang: e ? e.lang : '', langLabel: e ? e.langLabel : '', skills: (e && e.skills) ? e.skills : [] };
+      };
+      if (!roster || roster.counts.total === 0) return keep(null);
+
+      // Memoized: the GEM table repeats every agent once per month, and the
+      // fuzzy fallback below is an O(roster) scan.
+      if (!roster._verdicts) roster._verdicts = {};
+      var ck = _normalizeAgentKey(agentName);
+      if (roster._verdicts[ck]) return roster._verdicts[ck];
+
+      var entry = this._matchRoster(agentName, roster.byKey);
+      var verdict;
+      if (!entry) {
+          verdict = genesysMode
+              ? { dropReason: 'not-on-roster', level: 2, levelName: '', lang: '', langLabel: '', skills: [] }
+              : keep(null);
+      } else if (genesysMode && !entry.countable) {
+          verdict = { dropReason: entry.reason || 'no-profile', level: entry.level, levelName: entry.levelName,
+                      lang: entry.lang, langLabel: entry.langLabel, skills: entry.skills };
+      } else {
+          verdict = keep(entry);
+      }
+      if (ck) roster._verdicts[ck] = verdict;
+      return verdict;
+  },
+
+  /**
+   * Roster lookup: exact normalized key first, then the historical fallbacks
+   * for the same person spelled differently across GEM and the roster
+   * (first+last token pair, or one name contained in the other).
+   */
+  _matchRoster: function(agentName, byKey) {
+      var key = _normalizeAgentKey(agentName);
+      if (!key) return null;
+      if (byKey[key]) return byKey[key];
+
+      var parts = key.split(' ').filter(function(x) { return x.length > 1; });
+      var keys = Object.keys(byKey);
+      for (var i = 0; i < keys.length; i++) {
+          var mlKey = keys[i];
+          var mlParts = mlKey.split(' ').filter(function(x) { return x.length > 1; });
+          if (parts.length > 1 && mlParts.length > 1 && parts[0] === mlParts[0] && parts[1] === mlParts[1]) return byKey[mlKey];
+          var minLen = Math.min(key.length, mlKey.length);
+          if (minLen >= 8 && (key.indexOf(mlKey) !== -1 || mlKey.indexOf(key) !== -1)) return byKey[mlKey];
+      }
+      return null;
   },
 
   _parseGEM: function(raw) {

@@ -1,0 +1,27 @@
+Genesys Cloud roster paste (Red Flags → Sync Roster).
+
+Export the "Agent Status Summary" view from Genesys Cloud Performance and paste
+it whole — comma- or tab-separated both work, and the trailing status columns
+(Logged In / On Queue / Idle / …) are ignored: this is a roster sync, not a
+presence sync.
+
+How the Skills cell is read (see CORE/GenesysRoster.gs):
+  English / French          -> language: EN, FR, or BL when both are present
+  SAM_Monit_Lv_<tier>       -> level:    Junior = 1, Regular = 2, Senior = 4
+  SAM_Monit_Sk_<name>       -> skill:    Questions, Video, SmartWear, Escalation,
+                                         BckMRC (= Back MRC), BTS, SME
+
+Who counts in Red Flags:
+  Regular / Senior          -> counted
+  Junior                    -> NOT counted (still shown on the floor)
+  language only, no Lv tag  -> NOT counted
+  nothing attached          -> NOT counted
+
+Sample paste (one row per case):
+
+Agent Id,Agent Name,Skills,Logged In,On Queue,Idle,Available,Away,Break,Meal,Not Responding,Off Queue
+5bcbf189-e6fc-4574-a2f0-ecf9e7e9ef55,Adam Paquette,English; French; SAM_Monit_Lv_Senior; SAM_Monit_Sk_BckMRC; SAM_Monit_Sk_Escalation; SAM_Monit_Sk_Questions; SAM_Monit_Sk_SmartWear; SAM_Monit_Sk_Video,,,,,,,,,
+9c932887-95be-408d-8a3c-e460d0c1e7e7,Abdelmalek Aboul-Hilal,English; French; SAM_Monit_Lv_Regular,,,,,,,,,
+6b1c4d2e-0000-0000-0000-000000000001,Junior Example,English; SAM_Monit_Lv_Junior; SAM_Monit_Sk_BTS,,,,,,,,,
+6b1c4d2e-0000-0000-0000-000000000002,Language Only Example,English; French,,,,,,,,,
+5661cc00-a460-4bf8-9b19-2a949922dd8a,Achraf Laazizi,,,,,,,,,,

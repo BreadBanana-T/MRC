@@ -30,18 +30,46 @@ function compileFloorData() {
   const sheetOverrides = (typeof StatusTracker !== 'undefined') ? StatusTracker.getConsolidatedData() : new Map(); 
   const fastOverrides = (typeof RoleManager !== 'undefined') ? RoleManager.getFastMap() : {};
   
-  // Fetch MasterList for Metadata
+  // Fetch MasterList for Metadata. Cols 1-6 are the legacy SharePoint shape;
+  // 7-11 (Agent Id / Language / Level Name / Skill List / Source) come from the
+  // Genesys Cloud roster and drive the floor's agent info card.
   const dbML = localSS.getSheetByName('WF_MASTERLIST');
   let mlData = {};
   if (dbML && dbML.getLastRow() > 1) {
       dbML.getDataRange().getDisplayValues().slice(1).forEach(r => {
           let cleanName = _normalizeAgentKey(r[0]);
-          let isOffshore = String(r[4]).toUpperCase().includes("TI") || String(r[5]).includes("@") || String(r[4]).toUpperCase().includes("EL SALVADOR") || String(r[4]).toUpperCase().includes("GUATEMALA");
+          if (!cleanName) return;
+          let loc = String(r[4] || '').toUpperCase();
+          let emailTi = String(r[5] || '');
+          // Only claim to know the region when the row actually carries location
+          // data. The Genesys export has none, so without this guard every
+          // agent on it would be forced Onshore and override the WFM schedule.
+          let hasRegionInfo = !!(loc.trim() || emailTi.trim());
+          let isOffshore = loc.includes("TI") || emailTi.includes("@") || loc.includes("EL SALVADOR") || loc.includes("GUATEMALA");
+
+          let p = GenesysRoster.parseSkills(r[3]);
+          let lang = String(r[7] || '').trim().toUpperCase() || p.lang;
+          let skillText = String(r[9] || '').trim() || p.skillText;
+          // The sheet's level column wins (it can be hand-corrected), so the
+          // countable verdict is recomputed from it rather than from the tags.
+          let effLvl = parseInt(r[1], 10);
+          if (!isNaN(effLvl)) {
+              p.countable = effLvl >= 2;
+              p.reason = p.countable ? '' : 'junior';
+          }
           mlData[cleanName] = {
               level: r[1],
               manager: r[2],
               skills: r[3],
-              isOffshore: isOffshore
+              isOffshore: isOffshore,
+              hasRegionInfo: hasRegionInfo,
+              genesysId: String(r[6] || '').trim(),
+              levelName: String(r[8] || '').trim() || p.levelName,
+              lang: lang,
+              langLabel: GenesysRoster.LANG_LABELS[lang] || '',
+              skillList: skillText ? skillText.split(/\s*,\s*/).filter(Boolean) : [],
+              countable: p.countable,
+              profileReason: p.reason
           };
       });
   }
@@ -65,7 +93,7 @@ function compileFloorData() {
     
     // Region resolution order: RegionRegistry > MasterList inference > Raw Schedule row.
     let region = row ? row[6] : "Offshore";
-    if (ml) region = ml.isOffshore ? "Offshore" : "Onshore";
+    if (ml && ml.hasRegionInfo) region = ml.isOffshore ? "Offshore" : "Onshore";
     if (typeof RegionRegistry !== 'undefined') {
         const rg = RegionRegistry.getRegion(rawName);
         if (rg) region = rg;
@@ -263,7 +291,15 @@ function compileFloorData() {
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn,
       level: ml ? ml.level : null,
       manager: ml ? ml.manager : null,
-      skills: ml ? ml.skills : null
+      skills: ml ? ml.skills : null,
+      // Genesys profile — powers the floor info card ("player card").
+      levelName: ml ? ml.levelName : '',
+      lang: ml ? ml.lang : '',
+      langLabel: ml ? ml.langLabel : '',
+      skillList: ml ? ml.skillList : [],
+      genesysId: ml ? ml.genesysId : '',
+      countable: ml ? ml.countable : false,
+      profileReason: ml ? ml.profileReason : 'no-profile'
     };
 
     if (category === 'active' && nextBreakStr) {

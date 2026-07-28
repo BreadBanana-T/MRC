@@ -47,6 +47,13 @@ var SafeTracker = {
   _parseSkills: function (raw) {
     var s = String(raw || '').trim();
     if (!s) return { pretty: '', swLevel: null };
+    // Genesys Cloud roster: the cell is a tag bag ("English; French;
+    // SAM_Monit_Lv_Senior; SAM_Monit_Sk_Video; …"). Render only the decoded
+    // skill names — level and language are surfaced as their own fields.
+    if (typeof GenesysRoster !== 'undefined' && GenesysRoster.looksLikeGenesys(s)) {
+      var g = GenesysRoster.parseSkills(s);
+      return { pretty: g.skills.join(' · '), swLevel: null };
+    }
     var list = [];
     if (s.indexOf(';#') !== -1) {
       var parts = s.split(';#');

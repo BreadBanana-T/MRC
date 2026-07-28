@@ -34,7 +34,8 @@ flowchart TD
   WTI --> ARCH[("Weekly_Archives_V3 (per-month, ALL/WEEK A/WEEK B)")]
   OTO_IMP --> OTOPEN[("WF_OT_OPEN")]
 
-  MASTER[("WF_MASTERLIST (manual)")]
+  GENPASTE["Genesys Cloud agent export / SharePoint MasterList paste"] --> MLI["AssignmentAnalyzer.importMasterList"]
+  MLI --> MASTER[("WF_MASTERLIST")]
   REGMAP[("WF_REGION_MAP / RegionRegistry (manual+auto)")]
   LANG[("WF_LANG_MAP (manual)")]
 
@@ -152,7 +153,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_IDP** | 0 Day, 1 Interval `HH:mm`, 2 Required, 3 Open | `WorkforceTracker.importData` |
 | **WF_OVERTIME** | 0 Agent, 1 Date, 2 Code, 3 Rate, 4 Bucket, 5 IsBreak, 6 Start, 7 End, 8 Region | `OvertimeTracker.importFromSchedule` |
 | **WF_OT_OPEN** | 0 Date, 1 Start, 2 End, 3 Slots, 4 Activity, 5 MinLen, 6 ADG, 7 ADValues, 8 Type, 9 Rate, 10 ReqGroup, 11 WindowHrs, 12 OpenHrs, 13 Visible(`N`=hidden), 14 OID | `OvertimeTracker.importOpenSlots` |
-| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (`Name;#Lvl;#…`), 4 Location, 5 Email | manual |
+| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (Genesys tag bag, or SharePoint `Name;#Lvl;#…`), 4 Location, 5 Email, **6 Agent Id (Genesys GUID), 7 Language (EN/FR/BL), 8 Level Name, 9 Skill List, 10 Source (`genesys`\|`sharepoint`)** | `AssignmentAnalyzer.importMasterList` (Red Flags → Sync Roster) |
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
 | **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
@@ -173,6 +174,44 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 > in both the Master Operations Tracker (`getUnifiedReport`) and the SAFE Tracker,
 > falling back to the existing name-fuzzy (`matchSafeHours`) when an ID is missing —
 > so it's never worse than name matching, only more exact.
+
+### 2.1 Genesys Cloud roster (`GenesysRoster.gs`)
+
+**Red Flags → Sync Roster** now accepts the Genesys Cloud *Agent Status Summary*
+export as well as the legacy SharePoint MasterList; `importMasterList` sniffs the
+header (`Agent Id` + `Agent Name` + `Skills`) and routes accordingly. Both write
+`WF_MASTERLIST`, so every downstream reader is unchanged — the Genesys fields are
+appended as cols 6‑10 and col 10 (`Source`) says which door the row came in.
+
+One Genesys `Skills` cell holds three kinds of token:
+
+| Token | Meaning |
+|---|---|
+| `English` / `French` | language → **EN**, **FR**, or **BL** when both are present |
+| `SAM_Monit_Lv_<tier>` | level → **Junior = 1**, **Regular = 2**, **Senior = 4** |
+| `SAM_Monit_Sk_<name>` | skill → Questions, Video, SmartWear, Escalation, `BckMRC` = Back MRC, BTS, SME |
+
+**Countability** (`GenesysRoster.parseSkills().countable`) — Genesys carries the whole
+contact centre, so the roster is filtered before anything is measured against it:
+
+| Row | Verdict | `reason` |
+|---|---|---|
+| no tokens at all | not MRC | `no-profile` |
+| language only, no `Lv` tag | not MRC | `no-level` |
+| `SAM_Monit_Lv_Junior` | excluded | `junior` |
+| Regular / Senior | **counted** | `''` |
+
+Red Flags (`AssignmentAnalyzer._classifyAgent`) treats a Genesys roster as a **hard
+gate**: non‑countable agents and agents absent from the export are dropped, and
+`getAnalyzerData` returns `filtered.{junior,noProfile,noLevel,notOnRoster}` by name so
+the dashboard can show what it removed. A legacy SharePoint roster stays **advisory** —
+unmatched agents still pass through at level 2, because a stale list must not erase
+real people from the flags. Juniors are still stored and still shown on the floor; only
+the flags exclude them.
+
+The floor's agent info card (`openAgentCard`) reads the same decoded fields off
+`compileFloorData`, and re‑decodes the raw `Skills` cell client‑side
+(`parseGenesysSkills`) so it survives a server payload from an older deploy.
 
 ---
 
