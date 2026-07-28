@@ -1832,26 +1832,37 @@
           : '<span style="font-size:0.75rem; font-weight:700; color:var(--status-warn); background:rgba(245,158,11,0.1); padding:4px 10px; border-radius:12px; cursor:pointer;" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');"><i data-lucide="alert-circle" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Missing</span>';
 
       // Filter receipt. A shorter list is only trustworthy if you can see who
-      // was removed and why — juniors, profile-less agents and anyone absent
-      // from the Genesys roster are listed by name behind each chip.
+      // was removed and why. Two distinct groups, never mixed:
+      //   EXCLUDED  — the roster explicitly classified them out (junior /
+      //               nothing attached / language but no level)
+      //   UNMATCHED — not on the roster at all: still COUNTED at L2, shown as
+      //               a data-health signal for GEM↔Genesys name mismatches.
       var filterBanner = '';
       var f = d.filtered || {};
       if (d.rosterSource === 'genesys') {
-          var groups = [
-              { key: 'junior',      label: 'Junior — not counted',        names: f.junior || [],      color: 'var(--status-warn)' },
-              { key: 'noProfile',   label: 'No skills attached',          names: f.noProfile || [],   color: 'var(--text-muted)' },
-              { key: 'noLevel',     label: 'Language only, no level',     names: f.noLevel || [],     color: 'var(--text-muted)' },
-              { key: 'notOnRoster', label: 'Not on the Genesys roster',   names: f.notOnRoster || [], color: 'var(--status-alert)' }
+          var chipHtml = function(n, label, color, tip) {
+              return '<span title="' + escapeHTML(tip) + '" style="cursor:help; font-size:0.72rem; font-weight:800; color:' + color + '; background:var(--bg-root); border:1px solid var(--glass-border); padding:4px 10px; border-radius:99px;">' + n + ' ' + escapeHTML(label) + '</span>';
+          };
+          var excluded = [
+              { label: 'Junior — not counted',    names: f.junior || [],    color: 'var(--status-warn)' },
+              { label: 'No skills attached',      names: f.noProfile || [], color: 'var(--text-muted)' },
+              { label: 'Language only, no level', names: f.noLevel || [],   color: 'var(--text-muted)' }
           ].filter(function(g) { return g.names.length > 0; });
-          var totalOut = groups.reduce(function(n, g) { return n + g.names.length; }, 0);
-          if (totalOut > 0) {
-              var chips = groups.map(function(g) {
-                  return '<span title="' + escapeHTML(g.names.join(', ')) + '" style="cursor:help; font-size:0.72rem; font-weight:800; color:' + g.color + '; background:var(--bg-root); border:1px solid var(--glass-border); padding:4px 10px; border-radius:99px;">' + g.names.length + ' ' + escapeHTML(g.label) + '</span>';
-              }).join('');
-              filterBanner = '<div class="aether-card" style="padding:12px 18px; margin-bottom:20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">' +
-                  '<span style="display:flex; align-items:center; gap:7px; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted);"><i data-lucide="filter" width="14"></i>Excluded this month</span>' +
-                  chips + '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">hover a chip for names</span></div>';
+          var unmatched = f.notOnRoster || [];
+          var rowsHtml = '';
+          if (excluded.length) {
+              rowsHtml += '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">' +
+                  '<span style="display:flex; align-items:center; gap:7px; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); min-width:150px;"><i data-lucide="filter" width="14"></i>Excluded this month</span>' +
+                  excluded.map(function(g) { return chipHtml(g.names.length, g.label, g.color, g.names.join(', ')); }).join('') +
+                  '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">hover for names</span></div>';
           }
+          if (unmatched.length) {
+              rowsHtml += '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;' + (excluded.length ? ' margin-top:8px; padding-top:8px; border-top:1px dashed var(--glass-border);' : '') + '">' +
+                  '<span style="display:flex; align-items:center; gap:7px; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); min-width:150px;"><i data-lucide="search-x" width="14"></i>Not on the roster</span>' +
+                  chipHtml(unmatched.length, 'counted at L2', 'var(--accent-primary)', unmatched.join(', ')) +
+                  '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">left the team, or the name is spelled differently in Genesys — check before trusting their level</span></div>';
+          }
+          if (rowsHtml) filterBanner = '<div class="aether-card" style="padding:12px 18px; margin-bottom:20px;">' + rowsHtml + '</div>';
       }
 
       function renderCoachingCadenceCard() {

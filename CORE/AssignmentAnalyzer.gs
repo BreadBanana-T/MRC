@@ -328,7 +328,9 @@ var AssignmentAnalyzer = {
           };
 
           // Why each agent was dropped, so the dashboard can prove the filter
-          // ran instead of just showing a shorter list.
+          // ran instead of just showing a shorter list. `notOnRoster` is NOT a
+          // drop list — those agents are counted at L2; it's a data-health
+          // signal for name mismatches between GEM and Genesys.
           let filtered = { junior: [], noProfile: [], noLevel: [], notOnRoster: [] };
 
           let currentMap = {};
@@ -337,9 +339,13 @@ var AssignmentAnalyzer = {
               let agent = String(r[1]).trim();
               let verdict = this._classifyAgent(agent, roster, genesysMode);
 
-              if (r[0] === targetMonth && verdict.dropReason) {
-                  let bucket = { 'junior': 'junior', 'no-profile': 'noProfile', 'no-level': 'noLevel', 'not-on-roster': 'notOnRoster' }[verdict.dropReason];
-                  if (bucket && filtered[bucket].indexOf(agent) === -1) filtered[bucket].push(agent);
+              if (r[0] === targetMonth) {
+                  if (verdict.dropReason) {
+                      let bucket = { 'junior': 'junior', 'no-profile': 'noProfile', 'no-level': 'noLevel' }[verdict.dropReason];
+                      if (bucket && filtered[bucket].indexOf(agent) === -1) filtered[bucket].push(agent);
+                  } else if (verdict.unmatched && filtered.notOnRoster.indexOf(agent) === -1) {
+                      filtered.notOnRoster.push(agent);
+                  }
               }
               if (verdict.dropReason) return;
 
@@ -423,19 +429,26 @@ var AssignmentAnalyzer = {
   /**
    * Decide whether a GEM row belongs in Red Flags, and with what profile.
    *
-   * GENESYS MODE — the roster is the whole contact centre, so it is a hard
-   * gate. Dropped: juniors (not counted, per product owner), agents with no
-   * SAM_Monit tags at all ("nothing attached"), agents with a language but no
-   * level, and anyone absent from the roster entirely.
-   * LEGACY MODE — advisory only: unmatched agents pass through at level 2 so a
-   * stale SharePoint list can't erase real people from the flags.
+   * The roster only removes people it EXPLICITLY classifies:
+   *   - juniors (not counted, per product owner)
+   *   - agents with no SAM_Monit tags at all ("nothing attached")
+   *   - agents with a language but no level tag
+   * An agent the roster has never heard of is KEPT at level 2 — in every month.
+   * They're someone who has since left, or a GEM/Genesys name mismatch, and
+   * neither is a reason to silently erase a real agent from the flags or to
+   * rewrite an old month. They're reported separately as `unmatched` so a
+   * spelling mismatch is visible instead of invisible.
    *
-   * @return {{dropReason:string, level:number, levelName:string, lang:string,
-   *           langLabel:string, skills:string[]}}  dropReason '' = keep
+   * LEGACY (SharePoint) MODE — no level tags exist, so nothing is dropped.
+   *
+   * @return {{dropReason:string, unmatched:boolean, level:number,
+   *           levelName:string, lang:string, langLabel:string,
+   *           skills:string[]}}  dropReason '' = keep
    */
   _classifyAgent: function(agentName, roster, genesysMode) {
-      var keep = function(e) {
-          return { dropReason: '', level: e ? e.level : 2, levelName: e ? e.levelName : '',
+      var keep = function(e, unmatched) {
+          return { dropReason: '', unmatched: !!unmatched,
+                   level: e ? e.level : 2, levelName: e ? e.levelName : '',
                    lang: e ? e.lang : '', langLabel: e ? e.langLabel : '', skills: (e && e.skills) ? e.skills : [] };
       };
       if (!roster || roster.counts.total === 0) return keep(null);
@@ -449,14 +462,13 @@ var AssignmentAnalyzer = {
       var entry = this._matchRoster(agentName, roster.byKey);
       var verdict;
       if (!entry) {
-          verdict = genesysMode
-              ? { dropReason: 'not-on-roster', level: 2, levelName: '', lang: '', langLabel: '', skills: [] }
-              : keep(null);
+          verdict = keep(null, genesysMode);   // unmatched only means anything in Genesys mode
       } else if (genesysMode && !entry.countable) {
-          verdict = { dropReason: entry.reason || 'no-profile', level: entry.level, levelName: entry.levelName,
+          verdict = { dropReason: entry.reason || 'no-profile', unmatched: false,
+                      level: entry.level, levelName: entry.levelName,
                       lang: entry.lang, langLabel: entry.langLabel, skills: entry.skills };
       } else {
-          verdict = keep(entry);
+          verdict = keep(entry, false);
       }
       if (ck) roster._verdicts[ck] = verdict;
       return verdict;

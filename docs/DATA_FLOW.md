@@ -213,13 +213,20 @@ contact centre, so the roster is filtered before anything is measured against it
 | `SAM_Monit_Lv_Junior` | excluded | `junior` |
 | Regular / Senior | **counted** | `''` |
 
-Red Flags (`AssignmentAnalyzer._classifyAgent`) treats a Genesys roster as a **hard
-gate**: non‑countable agents and agents absent from the export are dropped, and
-`getAnalyzerData` returns `filtered.{junior,noProfile,noLevel,notOnRoster}` by name so
-the dashboard can show what it removed. A legacy SharePoint roster stays **advisory** —
-unmatched agents still pass through at level 2, because a stale list must not erase
-real people from the flags. Juniors are still stored and still shown on the floor; only
-the flags exclude them.
+Red Flags (`AssignmentAnalyzer._classifyAgent`) removes only agents the roster
+**explicitly classifies out** — junior, nothing attached, language-but-no-level. An
+agent the roster has never heard of is **kept and counted at level 2**: they either
+left the team or their name is spelled differently in GEM than in Genesys, and neither
+is a reason to erase a real agent or to rewrite an old month. `getAnalyzerData` returns
+`filtered.{junior,noProfile,noLevel}` (dropped) plus `filtered.notOnRoster`
+(**counted**, reported separately as a name-mismatch signal), so the dashboard shows
+both groups without conflating them. Juniors are still stored and still shown on the
+floor; only the flags exclude them.
+
+**Historical months need no migration.** There is no per-month roster snapshot —
+`getAnalyzerData` reads `WF_MASTERLIST` fresh and applies it to whichever month's
+`WF_GEM_DATA_V3` rows are selected. One roster sync therefore re-filters every month at
+once, and the filter is identical across them.
 
 The floor's agent info card (`openAgentCard`) reads the same decoded fields off
 `compileFloorData`, and re‑decodes the raw `Skills` cell client‑side
