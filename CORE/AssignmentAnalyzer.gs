@@ -242,8 +242,103 @@ var AssignmentAnalyzer = {
       return out;
   },
 
-  importGEMData: function(rawText) {
+  /**
+   * True for a narrow "Agent + Inbound Time % [+ Outbound Time %]" paste — the
+   * two columns a short GEM export drops, copied on their own (e.g. columns A/G/H
+   * of the Assignment Tracker's Current_Stats). It is NOT a full GEM report:
+   * those always carry the per-call columns as well.
+   */
+  _looksLikePctOnly: function(rawText) {
+      let low = String(rawText || '').toLowerCase();
+      if (low.indexOf('inbound time %') === -1 && low.indexOf('outbound time %') === -1) return false;
+      return low.indexOf('in & out by hr') === -1 && low.indexOf('total all calls') === -1 && low.indexOf('nb calls answ') === -1;
+  },
+
+  /**
+   * Backfill Inbound/Outbound Time % onto a month already in WF_GEM_DATA_V3.
+   * Nothing is invented: it writes the pasted measurements onto existing rows,
+   * matched on the same normalized agent key the analyzer uses everywhere else.
+   */
+  _importPctOnly: function(rawText, targetMonth) {
+      let lines = String(rawText).split(/\r?\n/).filter(l => l.trim().length > 0);
+      let rows = lines.map(l => this._parseCSVLine(l));
+
+      let hdr = -1, cName = -1, cIn = -1, cOut = -1, cMonth = -1;
+      for (let i = 0; i < rows.length && hdr === -1; i++) {
+          rows[i].forEach((h, j) => {
+              let low = String(h).toLowerCase().trim();
+              if (low.indexOf('inbound time %') !== -1) { cIn = j; hdr = i; }
+              else if (low.indexOf('outbound time %') !== -1) { cOut = j; hdr = i; }
+              else if (low === 'agent' || low.indexOf('agent name') !== -1) cName = j;
+              else if (low.indexOf('month of ref') !== -1) cMonth = j;
+          });
+      }
+      if (hdr === -1 || cIn === -1 && cOut === -1) return { error: "Could not find an 'Inbound Time %' or 'Outbound Time %' column." };
+      if (cName === -1) cName = 0;   // Agent is the first column in every export seen
+
+      let byKey = {};
+      for (let i = hdr + 1; i < rows.length; i++) {
+          let cols = rows[i];
+          let nm = String(cols[cName] || '').replace(/"/g, '').trim();
+          if (!nm || nm.toLowerCase().indexOf('total') === 0) continue;
+          let k = _normalizeAgentKey(nm);
+          if (!k) continue;
+          let inP = cIn > -1 ? this._parseSafePercent(cols[cIn]) : null;
+          let outP = cOut > -1 ? this._parseSafePercent(cols[cOut]) : null;
+          // The two are complements in every export observed; accept either alone.
+          if (inP === null || inP === 0 && outP > 0) inP = 1 - outP;
+          if (outP === null || outP === 0 && inP > 0) outP = 1 - inP;
+          if (inP <= 0 && outP <= 0) continue;
+          byKey[k] = { inPct: inP, outPct: outP };
+          if (cMonth > -1 && !targetMonth) {
+              let m = String(cols[cMonth]).match(/(\d{4}-\d{2}-\d{2})/);
+              if (m) targetMonth = m[1];
+          }
+      }
+      if (!Object.keys(byKey).length) return { error: "No agent percentages found in that paste." };
+
+      let db = this._getDB('WF_GEM_DATA_V3');
+      if (!db || db.getLastRow() < 2) return { error: "No GEM data to attach these percentages to — import the GEM report first." };
+
+      let data = db.getDataRange().getValues();
+      let monthOf = row => row[0] instanceof Date ? Utilities.formatDate(row[0], "America/Toronto", "yyyy-MM-dd") : String(row[0]);
+      if (!targetMonth) {
+          let months = {};
+          data.slice(1).forEach(r => { let m = monthOf(r); if (/^20\d{2}-\d{2}-\d{2}/.test(m)) months[m] = 1; });
+          targetMonth = Object.keys(months).sort().pop();
+      }
+
+      let matched = 0, unmatched = [];
+      let seen = {};
+      for (let i = 1; i < data.length; i++) {
+          if (monthOf(data[i]) !== targetMonth) continue;
+          let k = _normalizeAgentKey(data[i][1]);
+          seen[k] = true;
+          if (!byKey[k]) continue;
+          data[i][3] = byKey[k].inPct;
+          data[i][4] = byKey[k].outPct;
+          matched++;
+      }
+      Object.keys(byKey).forEach(k => { if (!seen[k]) unmatched.push(k); });
+      if (!matched) return { error: "None of those agents appear in " + targetMonth + ". Check the month you're viewing." };
+
+      db.getRange(2, 1, data.length - 1, data[0].length).setValues(data.slice(1));
+      return { month: targetMonth, matched: matched, unmatched: unmatched.length };
+  },
+
+  importGEMData: function(rawText, targetMonth) {
       try {
+          // Percentages-only backfill for a month whose GEM export lacked them.
+          if (this._looksLikePctOnly(rawText)) {
+              let r = this._importPctOnly(rawText, targetMonth);
+              if (r.error) return JSON.stringify({ error: r.error });
+              let out = JSON.parse(this.getAnalyzerData(r.month));
+              out.importWarning = { kind: 'pct-backfill', month: r.month,
+                  text: 'Inbound / Outbound Time % applied to ' + r.matched + ' agent' + (r.matched === 1 ? '' : 's') + ' for ' + r.month +
+                        (r.unmatched ? ' · ' + r.unmatched + ' pasted agent' + (r.unmatched === 1 ? '' : 's') + ' had no GEM row for that month' : '') + '.' };
+              return JSON.stringify(out);
+          }
+
           let parsed = this._parseGEM(rawText);
           let map = parsed.agents;
           if (Object.keys(map).length === 0) return JSON.stringify({error: "Invalid data format or missing GEM headers."});
@@ -715,7 +810,9 @@ var AssignmentAnalyzer = {
   }
 };
 
-function importNewGEMReport(rawText) { return AssignmentAnalyzer.importGEMData(rawText); }
+// targetMonth is the month the dashboard is showing — used only by the
+// percentages-only backfill, which needs to know which month to attach to.
+function importNewGEMReport(rawText, targetMonth) { return AssignmentAnalyzer.importGEMData(rawText, targetMonth); }
 function fetchAnalyzerData(monthStr) { return AssignmentAnalyzer.getAnalyzerData(monthStr); }
 // Legacy name kept for any cached client bundle still calling it; both doors
 // (Import Data box and Red Flags → Sync Roster) go through importAgentRoster

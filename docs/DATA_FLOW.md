@@ -247,6 +247,14 @@ uncomputable — `_parseGEM` reports `hasPct:false`, `_saveGEMToDB` preserves wh
 percentages the month already held rather than writing structural zeros, and the
 dashboard says "not measurable" instead of "No agents flagged".
 
+**Backfill door for a short export.** When the report can't be re-run with both
+columns, paste `Agent` + `Inbound Time %` (± `Outbound Time %`) *on its own* into the
+same Import GEM Data box. `_looksLikePctOnly` routes it to `_importPctOnly`, which
+writes those measurements onto the existing `WF_GEM_DATA_V3` rows for the month being
+viewed, matched on `_normalizeAgentKey`, and reports matched / unmatched counts. Either
+percentage alone is enough — they are exact complements in every observed export. This
+copies real measurements onto real rows; nothing is inferred.
+
 **The CP/H threshold is a moving, shift-relative bar.** `Shift_Analysis!H7 = H3/2`
 where `H3 = AVERAGEIFS(day CPH)`. April: Day avg 14.70 → 7.35, Evening 12.97 → 6.48,
 Night 9.00 → 4.50. The app's hardcoded `7.3` is the **day** threshold frozen from one
