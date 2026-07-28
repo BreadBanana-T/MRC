@@ -154,7 +154,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_IDP** | 0 Day, 1 Interval `HH:mm`, 2 Required, 3 Open | `WorkforceTracker.importData` |
 | **WF_OVERTIME** | 0 Agent, 1 Date, 2 Code, 3 Rate, 4 Bucket, 5 IsBreak, 6 Start, 7 End, 8 Region | `OvertimeTracker.importFromSchedule` |
 | **WF_OT_OPEN** | 0 Date, 1 Start, 2 End, 3 Slots, 4 Activity, 5 MinLen, 6 ADG, 7 ADValues, 8 Type, 9 Rate, 10 ReqGroup, 11 WindowHrs, 12 OpenHrs, 13 Visible(`N`=hidden), 14 OID | `OvertimeTracker.importOpenSlots` |
-| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (Genesys tag bag, or SharePoint `Name;#Lvl;#…`), 4 Location, 5 Email, **6 Agent Id (Genesys GUID), 7 Language (EN/FR/BL), 8 Level Name, 9 Skill List, 10 Source (`genesys`\|`sharepoint`)** | `AssignmentAnalyzer.importMasterList` (Red Flags → Sync Roster) |
+| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (Genesys tag bag, or SharePoint `Name;#Lvl;#…`), 4 Location, 5 Email, **6 Agent Id (Genesys GUID), 7 Language (EN/FR/BL), 8 Level Name, 9 Skill List, 10 Source (`genesys`\|`sharepoint`)** | `importAgentRoster` → `AssignmentAnalyzer.importMasterList` (Import Data box, or Red Flags → Sync Roster) |
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
 | **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
