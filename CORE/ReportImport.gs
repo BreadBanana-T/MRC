@@ -320,6 +320,297 @@ var ReportImport = {
       return pairs.length;
     } catch (e) { return 0; }
   },
+  // ── GENESYS CLOUD — Agent Performance Summary ───────────────────────────────
+  // A per-agent voice export (one row per agent per interval). Durations come out
+  // of Genesys in MILLISECONDS; everything here is stored in seconds so the rest
+  // of the app never has to know that. Deliberately NOT merged with the Avaya GEM
+  // feed (WF_GEM_DATA_V3) — the two are displayed side by side as separate,
+  // labelled sources.
+  //
+  // The three metrics this unlocks:
+  //   Alert - No Answer  → calls that rang the agent and were never picked up
+  //   Min Talk           → shortest talk time (a low value = very short calls)
+  //   Average Ring Time  → mean time to answer
+  GENESYS_SHEET: 'WF_GENESYS_AGENT',
+  GENESYS_IDS_SHEET: 'WF_GENESYS_IDS',
+  GENESYS_HEADERS: ['PeriodStart', 'PeriodEnd', 'Label', 'AgentId', 'AgentKey', 'Agent', 'MediaType',
+                    'Answered', 'Handled', 'AvgHandleSec', 'AvgTalkSec', 'AvgHoldSec', 'AvgAcwSec',
+                    'Held', 'Transferred', 'NoAnswer', 'MinTalkSec', 'AvgRingSec'],
+
+  looksLikeGenesys: function(t) {
+    t = String(t || '').toLowerCase();
+    return t.indexOf('alert - no answer') !== -1
+        || (t.indexOf('interval start') !== -1 && t.indexOf('avg handle') !== -1);
+  },
+
+  // Quote-aware row split. Tab first (a paste out of Excel), else comma — this is
+  // the one import that arrives as real comma CSV. Handles "" escapes inside a
+  // quoted field, which AssignmentAnalyzer._parseCSVLine does not.
+  _splitRow: function(line) {
+    var trim = function(c) { return String(c).trim(); };
+    if (line.indexOf('\t') !== -1) return line.split('\t').map(trim);
+    var out = [], cur = '', q = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line.charAt(i);
+      if (q) {
+        if (ch === '"') { if (line.charAt(i + 1) === '"') { cur += '"'; i++; } else { q = false; } }
+        else cur += ch;
+      } else if (ch === '"') { q = true; }
+      else if (ch === ',') { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map(trim);
+  },
+
+  // Counts: a blank means "no such events", so 0 is the honest value.
+  _int: function(v) { var n = parseInt(String(v == null ? '' : v).replace(/[, ]/g, ''), 10); return isFinite(n) ? n : 0; },
+  // Durations: a blank means "no sample" — must stay blank, NOT become 0, or an
+  // agent who never put anyone on hold would look like an agent with 0s holds.
+  _msToSec: function(v) { var n = this._num(v); return n == null ? '' : Math.round(n / 10) / 100; },
+
+  // Genesys display names carry environment/role tags like "*PROD*".
+  _genesysName: function(s) {
+    return String(s == null ? '' : s).replace(/\*[^*]*\*/g, ' ').replace(/\s+/g, ' ').trim();
+  },
+
+  // "2026-01-26 0:00" / "8/22/26 12:00 AM" → Date (date part only), or null.
+  _looseDate: function(v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s) return null;
+    var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+    var us = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (us) {
+      var y = parseInt(us[3], 10); if (y < 100) y += 2000;
+      return new Date(y, parseInt(us[1], 10) - 1, parseInt(us[2], 10));
+    }
+    return null;
+  },
+
+  // The export carries its own Interval Start/End, but they cannot be trusted: a
+  // real export has been seen stamping Interval Start "2008-01-26" against an
+  // Interval End of "8/22/26". So the manager's grain+date picker wins; only when
+  // it is absent do we derive from the file, and an implausible start falls back
+  // to the calendar month of the interval end rather than storing a 2008 window.
+  _genesysPeriod: function(startStr, endStr, label, rawStart, rawEnd) {
+    var self = this;
+    var fmt = function(d) { return Utilities.formatDate(d, self.TZ, 'yyyy-MM-dd'); };
+    var mk = function(s, e, src) {
+      return { start: s, end: e, label: label || (s === e ? s : s + ' → ' + e), source: src };
+    };
+    if (startStr && String(startStr).length >= 10) {
+      var e0 = (endStr && String(endStr).length >= 10) ? endStr : startStr;
+      return mk(startStr, e0, 'import picker');
+    }
+
+    var de = this._looseDate(rawEnd), ds = this._looseDate(rawStart);
+    // Genesys stamps the interval end as the exclusive boundary (midnight of the
+    // day after), so a midnight end means "through the previous day".
+    if (de && /(^|\s)(0|12):00(:00)?(\s*[AaPp]\.?[Mm]\.?)?\s*$/.test(String(rawEnd).trim())) {
+      de = new Date(de.getTime() - 86400000);
+    }
+    if (!de) return mk(fmt(new Date()), fmt(new Date()), 'today (no usable dates in file)');
+
+    var plausible = ds && ds.getFullYear() >= 2020 && ds.getTime() <= de.getTime()
+                 && (de.getTime() - ds.getTime()) <= 800 * 86400000;
+    if (plausible) return mk(fmt(ds), fmt(de), 'file interval');
+
+    var mStart = new Date(de.getFullYear(), de.getMonth(), 1);
+    return mk(fmt(mStart), fmt(de), 'month of interval end (file start was implausible)');
+  },
+
+  importGenesysAgents: function(text, startStr, endStr, label) {
+    try {
+      var self = this;
+      var lines = String(text || '').split(/\r?\n/).filter(function(l) { return l.trim().length; });
+      var hi = -1;
+      for (var i = 0; i < lines.length; i++) {
+        var L = lines[i].toLowerCase();
+        if (L.indexOf('agent name') !== -1 && (L.indexOf('avg handle') !== -1 || L.indexOf('alert - no answer') !== -1)) { hi = i; break; }
+      }
+      if (hi < 0) return 'Genesys import: header row (Agent Name + Avg Handle) not found.';
+
+      // Header names are matched, not positions — this absorbs the real export's
+      // trailing space and asterisk in "Average Ring Time * ".
+      var H = self._splitRow(lines[hi]).map(function(c) { return String(c).toLowerCase().replace(/\*/g, '').trim(); });
+      var exact = function() {
+        for (var a = 0; a < arguments.length; a++) for (var k = 0; k < H.length; k++) if (H[k] === arguments[a]) return k;
+        return -1;
+      };
+      // Loose match, but never onto a column that is really an average — "handle"
+      // must not silently resolve to "avg handle".
+      var pick = function() {
+        var k = exact.apply(null, arguments); if (k >= 0) return k;
+        for (var a = 0; a < arguments.length; a++) {
+          var n = arguments[a];
+          for (var h = 0; h < H.length; h++) if (H[h].indexOf(n) !== -1 && H[h].indexOf('avg') === -1) return h;
+        }
+        return -1;
+      };
+
+      var iName = pick('agent name'), iId = pick('agent id'), iMedia = pick('media type'),
+          iAns = pick('answered'), iHandled = exact('handle', 'handled'),
+          iAvgHandle = exact('avg handle'), iTalk = exact('avg talk'), iHold = exact('avg hold'),
+          iAcw = exact('avg acw'), iHeld = exact('held'), iTrans = pick('transferred'),
+          iNoAns = pick('alert - no answer', 'alert no answer', 'no answer'),
+          iMinTalk = pick('min talk'), iRing = pick('average ring time', 'avg ring time', 'ring time'),
+          iIvStart = pick('interval start'), iIvEnd = pick('interval end');
+      if (iName < 0) return 'Genesys import: Agent Name column not found.';
+
+      var recs = [], ringRaw = [], rawS = '', rawE = '';
+      for (var j = hi + 1; j < lines.length; j++) {
+        var c = self._splitRow(lines[j]);
+        var nm = self._genesysName(c[iName]);
+        if (!nm || /^(grand\s*)?total$/i.test(nm)) continue;
+        if (!rawS && iIvStart >= 0) rawS = c[iIvStart] || '';
+        if (!rawE && iIvEnd >= 0) rawE = c[iIvEnd] || '';
+        var ring = iRing >= 0 ? self._num(c[iRing]) : null;
+        if (ring != null) ringRaw.push(ring);
+        recs.push({
+          id: iId >= 0 ? String(c[iId] || '').trim() : '',
+          name: nm,
+          media: iMedia >= 0 ? String(c[iMedia] || '').trim() : '',
+          answered: iAns >= 0 ? self._int(c[iAns]) : 0,
+          handled: iHandled >= 0 ? self._int(c[iHandled]) : 0,
+          avgHandle: iAvgHandle >= 0 ? self._msToSec(c[iAvgHandle]) : '',
+          avgTalk: iTalk >= 0 ? self._msToSec(c[iTalk]) : '',
+          avgHold: iHold >= 0 ? self._msToSec(c[iHold]) : '',
+          avgAcw: iAcw >= 0 ? self._msToSec(c[iAcw]) : '',
+          held: iHeld >= 0 ? self._int(c[iHeld]) : 0,
+          transferred: iTrans >= 0 ? self._int(c[iTrans]) : 0,
+          noAnswer: iNoAns >= 0 ? self._int(c[iNoAns]) : 0,
+          minTalk: iMinTalk >= 0 ? self._msToSec(c[iMinTalk]) : '',
+          ring: ring
+        });
+      }
+      if (!recs.length) return 'Genesys import: no agent rows found under the header.';
+
+      // Average Ring Time is a derived column and does NOT always honour the
+      // export's millisecond setting — real exports send it in seconds (values of
+      // 4–16, i.e. a plausible ring). Decide per import off the median so the
+      // parser survives the setting being changed later.
+      var ringUnit = 'seconds';
+      if (ringRaw.length) {
+        var sorted = ringRaw.slice().sort(function(a, b) { return a - b; });
+        var med = sorted[Math.floor(sorted.length / 2)];
+        if (med >= 1000) ringUnit = 'milliseconds';
+      }
+      var ringToSec = function(v) {
+        if (v == null) return '';
+        return ringUnit === 'milliseconds' ? Math.round(v / 10) / 100 : Math.round(v * 100) / 100;
+      };
+
+      var P = self._genesysPeriod(startStr, endStr, label, rawS, rawE);
+      var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
+
+      var rows = [], idPairs = [];
+      recs.forEach(function(r) {
+        var key = nk(r.name);
+        rows.push([P.start, P.end, P.label, r.id, key, r.name, r.media,
+                   r.answered, r.handled, r.avgHandle, r.avgTalk, r.avgHold, r.avgAcw,
+                   r.held, r.transferred, r.noAnswer, r.minTalk, ringToSec(r.ring)]);
+        if (r.id) idPairs.push([key, r.id, r.name]);
+      });
+
+      // Period-scoped replace: keep other periods, swap in this one.
+      var sh = self._ss().getSheetByName(self.GENESYS_SHEET);
+      var keep = [];
+      if (sh && sh.getLastRow() > 1) {
+        var nCols = self.GENESYS_HEADERS.length;
+        sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) {
+          if (!(r[0] === P.start && r[1] === P.end)) keep.push(r.slice(0, nCols));
+        });
+      }
+      self._write(self.GENESYS_SHEET, self.GENESYS_HEADERS, keep.concat(rows));
+      var idN = self._mergeGenesysIds(idPairs);
+
+      return 'Genesys agent report synced: ' + rows.length + ' agents for ' + P.label
+           + ' · durations ms→s, ring time read as ' + ringUnit
+           + ' · period from ' + P.source + ' · ' + idN + ' agent IDs mapped.';
+    } catch (e) { return 'Genesys import error: ' + e.message; }
+  },
+
+  // Upsert [AgentKey, AgentId, Display Name] in ONE write, so a display-name
+  // change ("Jo Smith" → "Jo Smith *PROD*") doesn't orphan an agent's history.
+  _mergeGenesysIds: function(pairs) {
+    if (!pairs || !pairs.length) return 0;
+    try {
+      var ss = this._ss();
+      var sh = ss.getSheetByName(this.GENESYS_IDS_SHEET) || ss.insertSheet(this.GENESYS_IDS_SHEET);
+      var vals = sh.getLastRow() > 0 ? sh.getDataRange().getValues() : [];
+      var hasHdr = vals.length && String(vals[0][0]).toLowerCase().indexOf('agent key') !== -1;
+      var body = hasHdr ? vals.slice(1) : vals;
+      var idx = {};
+      body.forEach(function(r, i) { idx[String(r[0])] = i; });
+      pairs.forEach(function(p) {
+        if (idx[p[0]] != null) { body[idx[p[0]]][1] = p[1]; body[idx[p[0]]][2] = p[2]; }
+        else { body.push([p[0], p[1], p[2]]); idx[p[0]] = body.length - 1; }
+      });
+      var out = [['Agent Key', 'Agent Id', 'Display Name']].concat(body.map(function(r) { return [r[0], r[1], r[2]]; }));
+      sh.getRange(1, 1, out.length, 3).setValues(out);
+      return pairs.length;
+    } catch (e) { return 0; }
+  },
+
+  // Pick the stored Genesys report that best OVERLAPS [viewStart, viewEnd]
+  // (yyyy-MM-dd) — same contract as getSafeForPeriod, so a monthly view lands on
+  // the monthly export. No view bounds → the latest stored period.
+  getGenesysForPeriod: function(viewStart, viewEnd) {
+    var out = { has: false, periodStart: '', periodEnd: '', label: '', rows: [], byKey: {}, byId: {},
+                totals: { agents: 0, answered: 0, handled: 0, noAnswer: 0, held: 0, transferred: 0, avgRing: null } };
+    try {
+      var sh = this._ss().getSheetByName(this.GENESYS_SHEET);
+      if (!sh || sh.getLastRow() < 2) return out;
+      var data = sh.getDataRange().getDisplayValues().slice(1);
+      var periods = {};
+      data.forEach(function(r) {
+        var ps = r[0]; if (!ps) return;
+        var k = ps + '|' + r[1];
+        if (!periods[k]) periods[k] = { ps: ps, pe: r[1] || ps, label: r[2], rows: [] };
+        periods[k].rows.push(r);
+      });
+      var dnum = function(s) { return s ? Date.parse(s + 'T00:00:00') : NaN; };
+      var haveView = viewStart && String(viewStart).length >= 10;
+      var vs = dnum(viewStart), ve = dnum(viewEnd || viewStart) + 86400000;
+      var best = null, bestOv = 0, latest = null;
+      Object.keys(periods).forEach(function(k) {
+        var p = periods[k];
+        if (!latest || p.ps > latest.ps) latest = p;
+        if (haveView) {
+          var ov = Math.min(dnum(p.pe) + 86400000, ve) - Math.max(dnum(p.ps), vs);
+          if (ov > bestOv) { bestOv = ov; best = p; }
+        }
+      });
+      if (!best) { if (haveView) return out; best = latest; }
+      if (!best) return out;
+
+      var num = function(v) { var n = parseFloat(v); return isFinite(n) ? n : null; };
+      var ringSum = 0, ringN = 0;
+      best.rows.forEach(function(r) {
+        var rec = {
+          id: r[3], key: r[4], name: r[5], media: r[6],
+          answered: parseInt(r[7], 10) || 0, handled: parseInt(r[8], 10) || 0,
+          avgHandle: num(r[9]), avgTalk: num(r[10]), avgHold: num(r[11]), avgAcw: num(r[12]),
+          held: parseInt(r[13], 10) || 0, transferred: parseInt(r[14], 10) || 0,
+          noAnswer: parseInt(r[15], 10) || 0, minTalk: num(r[16]), avgRing: num(r[17])
+        };
+        out.rows.push(rec);
+        if (rec.key) out.byKey[rec.key] = rec;
+        if (rec.id) out.byId[rec.id] = rec;
+        out.totals.answered += rec.answered; out.totals.handled += rec.handled;
+        out.totals.noAnswer += rec.noAnswer; out.totals.held += rec.held;
+        out.totals.transferred += rec.transferred;
+        if (rec.avgRing != null) { ringSum += rec.avgRing; ringN++; }
+      });
+      out.totals.agents = out.rows.length;
+      if (ringN) out.totals.avgRing = Math.round(ringSum / ringN * 100) / 100;
+      out.periodStart = best.ps; out.periodEnd = best.pe; out.label = best.label;
+      out.has = out.rows.length > 0;
+    } catch (e) {}
+    return out;
+  },
+
   // Pick the stored SAFE report period that best OVERLAPS the view window
   // [viewStart, viewEnd] (yyyy-MM-dd). Robust to Wed–Wed vs Sun–Sat week edges.
   // No overlap on a valid view → empty (that period has no SAFE report). When no

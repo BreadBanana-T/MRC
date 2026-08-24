@@ -153,6 +153,13 @@ function importSafeReport(t, startStr, endStr, label) {
   var r = (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
   _bustWfCache(); return r;
 }
+// Genesys Cloud "Agent Performance Summary". The export's own Interval Start is
+// not trustworthy, so the Import modal's grain+date picker is passed through the
+// same way the (dateless) SAFE roster does it.
+function importGenesysReport(t, startStr, endStr, label) {
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importGenesysAgents(t, startStr, endStr, label) : 'Error';
+  _bustWfCache(); return r;
+}
 
 // --- WORKFORCE TRACKER EXPORTS ---
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
@@ -204,9 +211,11 @@ function uploadChunk(token, index, total, chunk) {
   return index + 1;
 }
 
-function processChunkedImport(token, total, kind) {
+// `periodStart`/`periodEnd`/`periodLabel` are only used by report kinds that
+// have to be tagged with the period they cover (see importGenesysReport).
+function processChunkedImport(token, total, kind, periodStart, periodEnd, periodLabel) {
   Logger.log('[chunkedImport] start: token=' + token + ' total=' + total + ' kind=' + kind);
-  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : 'WFM data import')));
+  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : (kind === 'genesys' ? 'Genesys report import' : 'WFM data import'))));
   var cache = CacheService.getScriptCache();
   var keys = [];
   for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
@@ -228,6 +237,8 @@ function processChunkedImport(token, total, kind) {
     result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
   } else if (kind === 'otopen') {
     result = (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(fullText) : 'Error';
+  } else if (kind === 'genesys') {
+    result = (typeof ReportImport !== 'undefined') ? ReportImport.importGenesysAgents(fullText, periodStart, periodEnd, periodLabel) : 'Error';
   } else {
     if (typeof ImportHandler !== 'undefined') {
       Logger.log('[chunkedImport] running ImportHandler...');

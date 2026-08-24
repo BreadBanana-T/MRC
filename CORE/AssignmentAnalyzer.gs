@@ -112,12 +112,98 @@ var AssignmentAnalyzer = {
       } catch (e) { return "Error dismissing agent."; }
   },
 
+  // ── Genesys Cloud flag thresholds ────────────────────────────────────────
+  // Tunable in one place. The dropped-call rule is a RATE, not a raw count, so it
+  // surfaces agents who miss a disproportionate share of their calls rather than
+  // simply ranking the busiest people on the floor.
+  GENESYS_DROP_RATE: 0.05,          // Alert-No-Answer ÷ Answered
+  GENESYS_DROP_MIN_ANSWERED: 50,    // ignore tiny samples
+  // Short calls are flagged on AVG talk time against the floor median, not on Min
+  // Talk. Min Talk is a single minimum over the whole period, so across hundreds
+  // of calls virtually everyone has one near-instant call — on the real export a
+  // "Min Talk ≤ 5s" rule flagged 215 of 254 agents, i.e. no signal at all. Avg
+  // Talk relative to the floor separates the genuinely short-call agents (8 of
+  // 254 at 60%), and Min Talk is still shown alongside as corroboration.
+  GENESYS_SHORT_TALK_FACTOR: 0.6,   // avg talk ≤ this × the floor median
+  GENESYS_SHORT_MIN_HANDLED: 50,    // ignore tiny samples
+
+  // Flags derived from the Genesys agent report overlapping `monthStr`
+  // ("yyyy-MM-dd", the analyzer's first-of-month key). Entirely independent of
+  // the Avaya GEM feed — no GEM value is read, combined or overridden here.
+  _genesysFlags: function(monthStr, exclusions) {
+      var out = { has: false, label: '', month: '', noAnswer: [], shortCalls: [] };
+      try {
+          if (typeof ReportImport === 'undefined' || !ReportImport.getGenesysForPeriod) return out;
+          var ym = String(monthStr || '').substring(0, 7);
+          if (!/^20\d\d-\d\d$/.test(ym)) {
+              ym = Utilities.formatDate(new Date(), 'America/Toronto', 'yyyy-MM');
+          }
+          var y = parseInt(ym.substring(0, 4), 10), m = parseInt(ym.substring(5, 7), 10);
+          var start = ym + '-01';
+          var end = Utilities.formatDate(new Date(y, m, 0), 'America/Toronto', 'yyyy-MM-dd');
+          var rpt = ReportImport.getGenesysForPeriod(start, end);
+          if (!rpt.has) return out;
+
+          out.has = true; out.label = rpt.label || (start + ' → ' + end); out.month = ym;
+          var self = this;
+          var excl = exclusions || new Set();
+
+          // Floor median avg-talk over agents with enough volume — the yardstick
+          // the short-call rule is measured against.
+          var talk = [];
+          rpt.rows.forEach(function(r) {
+              if (r.avgTalk != null && r.handled >= self.GENESYS_SHORT_MIN_HANDLED) talk.push(r.avgTalk);
+          });
+          talk.sort(function(a, b) { return a - b; });
+          var medTalk = talk.length ? talk[Math.floor(talk.length / 2)] : null;
+          out.medianTalk = medTalk == null ? null : Math.round(medTalk * 10) / 10;
+          var shortCut = medTalk == null ? null : medTalk * self.GENESYS_SHORT_TALK_FACTOR;
+          out.shortTalkCutoff = shortCut == null ? null : Math.round(shortCut * 10) / 10;
+
+          rpt.rows.forEach(function(r) {
+              if (excl.has(String(r.name).trim()) || excl.has(r.key)) return;
+              var rate = r.answered > 0 ? (r.noAnswer / r.answered) : 0;
+              var payload = {
+                  name: r.name, answered: r.answered, handled: r.handled,
+                  noAnswer: r.noAnswer, dropRate: Math.round(rate * 1000) / 1000,
+                  minTalk: r.minTalk, avgTalk: r.avgTalk, avgRing: r.avgRing, avgHandle: r.avgHandle
+              };
+              if (r.answered >= self.GENESYS_DROP_MIN_ANSWERED && rate >= self.GENESYS_DROP_RATE) out.noAnswer.push(payload);
+              if (shortCut != null && r.handled >= self.GENESYS_SHORT_MIN_HANDLED
+                  && r.avgTalk != null && r.avgTalk <= shortCut) out.shortCalls.push(payload);
+          });
+          out.noAnswer.sort(function(a, b) { return b.dropRate - a.dropRate; });
+          out.shortCalls.sort(function(a, b) { return (a.avgTalk || 0) - (b.avgTalk || 0); });
+      } catch (e) {}
+      return out;
+  },
+
   getAnalyzerData: function(targetMonth) {
       try {
+          // Read exclusions first: they apply to Genesys flags too, so a dismissed
+          // agent cannot come back through the new sections.
+          let earlyExcl = new Set();
+          let earlyExclSheet = this._getDB('WF_EXCLUSIONS');
+          if (earlyExclSheet && earlyExclSheet.getLastRow() > 1) {
+              earlyExclSheet.getDataRange().getValues().slice(1).forEach(r => earlyExcl.add(String(r[0]).trim()));
+          }
+
           let db = this._getDB('WF_GEM_DATA_V3');
           if (!db || db.getLastRow() < 2) {
               db = this._getDB('WF_GEM_DATA_V2');
-              if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+              if (!db || db.getLastRow() < 2) {
+                  // The two feeds are independent: a Genesys-only shop still gets
+                  // its Genesys flags instead of a hard "import GEM first" wall.
+                  let genOnly = this._genesysFlags(targetMonth, earlyExcl);
+                  if (genOnly.has) {
+                      return JSON.stringify({
+                          selectedMonth: genOnly.month + '-01', availableMonths: [genOnly.month + '-01'],
+                          usingMasterList: false, inbound: [], outOfScope: [], outbound: [], cph: [],
+                          genesys: genOnly
+                      });
+                  }
+                  return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+              }
           }
           
           let validAgents = new Map();
@@ -269,7 +355,8 @@ var AssignmentAnalyzer = {
           
           return JSON.stringify({
               selectedMonth: targetMonth, availableMonths: months, usingMasterList: useMasterList,
-              inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList
+              inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList,
+              genesys: this._genesysFlags(targetMonth, exclusions)
           });
       } catch (e) {
           return JSON.stringify({ error: "Data generation failed: " + e.message });

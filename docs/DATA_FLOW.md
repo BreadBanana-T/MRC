@@ -67,7 +67,7 @@ flowchart TD
   GEM[("WF_GEM_DATA_V3")] --> UNI
 ```
 
-**Report pastes (Management View feeds).** Two IEX/BI exports are pasted into the
+**Report pastes (Management View feeds).** Several exports are pasted into the
 same Import box and auto-detected (`JavaScript.html: runImportAction`), then parsed by
 `CORE/ReportImport.gs`:
 - **Activity loading hours** (`Exception Grp`/`Activity Name`/week-of-Sunday cols) →
@@ -141,6 +141,51 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 - **WF_FEEDBACK** — `FeedbackTracker.submit` (suggestion/idea/bug), best-effort email to
   Script Property `FEEDBACK_NOTIFY_EMAIL` (falls back to the deploying owner).
 
+- **Genesys Cloud "Agent Performance Summary"** (`Alert - No Answer`, or
+  `Interval Start` + `Avg Handle`) → `WF_GENESYS_AGENT`, period-scoped replace
+  (`ReportImport.importGenesysAgents`). The **only real comma-CSV import** — it has its
+  own quote-aware `_splitRow` (tab-first, else comma, handling `""` escapes, which
+  `AssignmentAnalyzer._parseCSVLine` does not). Columns are located **by header name**,
+  which absorbs the real export's `Average Ring Time * ` (trailing asterisk *and* space).
+  - **Units.** Durations export in **milliseconds** and are stored in **seconds**
+    (`_msToSec`). `Average Ring Time` is a derived column that does **not** honour that
+    setting — real exports send it in seconds (values of 4–16) — so the unit is decided
+    **per import off the column median** (`< 1000` → seconds), and the resolved unit is
+    named in the import's result message.
+  - **Blanks are meaningful.** Blank *counts* (`Answered`, `Held`, `Transferred`,
+    `Alert - No Answer`) mean zero events → `0`. Blank *durations* mean *no sample* and
+    stay **blank** — never `0`, or an agent who never used hold would read as 0s holds.
+  - **Period.** The file's own `Interval Start` is **not trustworthy** (a real export
+    stamps `2008-01-26` against an `Interval End` of `8/22/26`), so the manager tags the
+    paste with the Import modal's grain+date picker, exactly as the dateless SAFE roster
+    does (`safePeriodBounds`). Only when the picker is empty does `_genesysPeriod` derive
+    from the file, treating a midnight `Interval End` as exclusive and falling back to the
+    **calendar month of the interval end** when the start is implausible (pre-2020, or
+    >800 days before the end). A 2008 window is never stored.
+  - **Keys.** Names are stripped of environment tags (`*PROD*`) then keyed with
+    `_normalizeAgentKey`; the Genesys user GUID is upserted into `WF_GENESYS_IDS` so a
+    display-name change cannot orphan an agent's history.
+  - **Read back** with `getGenesysForPeriod(viewStart, viewEnd)` — largest-overlap period
+    selection, same contract as `getSafeForPeriod`.
+  - **Deliberately NOT merged with `WF_GEM_DATA_V3`.** The Avaya GEM feed and Genesys are
+    displayed side by side as separate, labelled sources: `getUnifiedReport` sets
+    `a.genesys` and touches none of `a.gem` / `a.cph` / `a.aht` / `a.inOut`. Surfaces: two
+    columns (**Dropped**, **Ring**) plus a "Genesys Call Performance" card in the Insights
+    per-agent table, and two **Red Flags** sections (`AssignmentAnalyzer._genesysFlags`).
+    Red Flags stays usable with Genesys alone — no GEM import required.
+  - **Fixture:** `example_genesys_agents.csv` (anonymized, every structural quirk kept).
+
+**Alarm.com standby status.** `CORE/AlarmComMonitor.gs` probes
+`https://standby.alarm.com/` every 5 min from a time-driven trigger
+(`setupAlarmComTrigger`), logging one row per probe to the hidden
+`WF_ALARMCOM_UPTIME` sheet (throttled, ring-buffered to ~9 days) so uptime % is real
+whether or not anyone has the Dashboard open. `getStatus()` is cache-first (5 min) so N
+viewers cause at most one probe. `isUp` = HTTP 200–399 **and** `/All systems
+operational/i` in the body; a valid response *without* the banner is a **warn** state
+noted `banner text not matched`, never a flat outage. `debugAlarmCom()` is the read-only
+diagnostic — run it first, because `UrlFetchApp` executes no JavaScript, so a
+client-rendered status page would fail the regex on a healthy site.
+
 ---
 
 ## 2. Sheet schema (column index → meaning)
@@ -166,6 +211,9 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_ACTIONS** | 0 Action, 1 Label, 2 Email, 3 Name, 4 Timestamp | `Presence.recordAction` |
 | **WF_FEEDBACK** | 0 Timestamp, 1 User, 2 Type, 3 Message, 4 Page, 5 Status | `FeedbackTracker.submit` |
 | **WF_AGENT_IDS** | 0 Key (normalized), 1 Name, 2 TID (WFM `Agent: NNNNN`) | `WorkforceTracker.importData` (merge-upsert) |
+| **WF_GENESYS_AGENT** | 0 PeriodStart, 1 PeriodEnd, 2 Label, 3 AgentId (Genesys GUID), 4 AgentKey, 5 Agent, 6 MediaType, 7 Answered, 8 Handled, 9 AvgHandleSec, 10 AvgTalkSec, 11 AvgHoldSec, 12 AvgAcwSec, 13 Held, 14 Transferred, 15 NoAnswer, 16 MinTalkSec, 17 AvgRingSec — **all durations in SECONDS** (exported as ms); blank duration = no sample | `ReportImport.importGenesysAgents` |
+| **WF_GENESYS_IDS** | 0 Agent Key (normalized), 1 Agent Id (Genesys GUID), 2 Display Name | `ReportImport._mergeGenesysIds` (merge-upsert) |
+| **WF_ALARMCOM_UPTIME** (hidden) | 0 Timestamp, 1 Up (1/0), 2 LatencyMs, 3 HttpCode, 4 PartnerPortalUp (1/0), 5 Note | `AlarmComMonitor._logHistory` (5-min trigger, ring-buffered) |
 
 > **SAFE matching on Employee ID (this build).** The schedule import now stores the
 > WFM agent ID (`Agent: NNNNN`) in `WF_AGENT_IDS`. SAFE-report hours match on
@@ -189,6 +237,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | `_getCycleForEpoch` (`:585`) | — | Week A/B (anchor 2026‑01‑29) |
 | `_calculateEpochBoundaries` (`:593`) | — | day/week/month/quarter/ytd window for the **trackers** |
 | `ManagementView._periodBounds` (`:48`) | — | **separate** calendar window for Mgmt View (Sun–Sat weeks) |
+| `mgmtGrainToTrackerMode` (`JavaScript.html`) | — | Mgmt grain → tracker mode for **embedded trackers** (Customize → "Bring in a tracker"). Only `week` differs: a Mgmt week is Sun–Sat = `week_sun`; plain `week` is the Wed→Wed operational week. The embed cache key includes the grain, or a Weekly→Monthly switch (which does not change `mgmtDate`) would serve the stale weekly payload |
 | `_batchDisplayValues` | `{}` / per-sheet fallback | Mgmt `getDashboard` — reads N sheets in one Sheets-API `batchGet`, padded rectangular to match `getDisplayValues` |
 
 **The big parser split (NARROWED, SAFE21):** `_timeToMins` now parses fr‑CA `"13 h 30"`, meridian‑anywhere

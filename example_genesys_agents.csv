@@ -1,0 +1,33 @@
+# Genesys Cloud → Analytics → Agent Performance Summary, exported with durations
+# in MILLISECONDS. Paste into the Import box; it is auto-detected on
+# "Alert - No Answer" (or "Interval Start" + "Avg Handle") and parsed by
+# ReportImport.importGenesysAgents.
+#
+# ANONYMIZED: agent names and Genesys user ids are synthetic. Every structural
+# quirk of a real export is preserved on purpose, because each one is a case the
+# parser has to survive:
+#   * "Interval Start" reads 2008-01-26 against an Interval End of 8/22/26 — the
+#     file's own start date is NOT trustworthy, which is why the Import modal's
+#     grain+date picker tags the period.
+#   * "Average Ring Time * " has a trailing asterisk AND a trailing space, and
+#     arrives in SECONDS (4-16) even though everything else is milliseconds — the
+#     parser decides per import off the column median.
+#   * Blank Answered / Avg Hold / Avg ACW / Held / Transferred / Alert - No Answer:
+#     blank COUNTS mean zero events, blank DURATIONS mean no sample and must stay
+#     blank rather than becoming 0s.
+#   * An agent name carrying an environment tag ("*PROD*"), stripped before the
+#     name is normalized into an agent key.
+Interval Start,Interval End,Interval Complete,Filters,Media Type,Agent Id,Agent Name,Answered,Handle,Avg Handle,Avg Talk,Avg Hold,Avg ACW,Held,Transferred,Alert - No Answer,Min Talk,Average Ring Time * 
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,a4c123b1-612d-d272-d137-1c17149d4395,Avery Abara,450,557,119194.3124,100793.2807,46412.08451,15287.50444,71,92,27,69,16.395587
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,36b3216f-daee-b975-729f-ae923d5a4fd1,Blair Haddad,445,498,130314.9357,111890.0061,18235.44762,16000,105,128,13,1314,10.05343668
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,2aabfe22-8f21-9e9c-b0eb-53f16947ccf2,Casey Okonkwo,318,1444,93440.02909,81333.67306,128704.7895,15817.90252,19,7,6,401,11.98021846
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,5ec84d8d-bc74-2547-70f5-8904dba41ecc,Devon Bertrand,212,353,134532.4023,120459.4389,81003.52174,15977.70283,46,56,5,2975,8.218247706
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,cc3fc162-6e53-a130-43b0-26c48bbf33fe,Emery Ibarra,,64,65953.03125,75654.7381,,,,,,3491,3.781
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,ff9243a8-f506-b409-28b5-b7a767c76fb0,Finley Petrov,,393,90998.28499,69288.66304,25911,4117090,16,20,,185,
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,08f86beb-b273-7f6a-6f0f-b23c6f5da2ce,Gray Cordova,437,452,187792.3827,178376.4139,,10955.78281,,40,8,285,11.3773236
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,c255404e-4fb4-4003-4d66-08697a8d41be,Harper Joshi,55,58,355720,344164.5345,,10941.03448,,2,,11667,9.307109091
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,d440e504-54f3-1af3-1768-13e02ea68ef7,Indigo Quiroga,2,79,180067.0759,164989.1266,14448,20000,1,,,2809,7.236
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,86e4d3ce-a27d-2693-4b48-4e73cf575dca,Jules Delacroix *PROD*,,3,9999,4803.333333,,,,,,2657,
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,d6ba2b0a-ee0c-a923-7328-81584d8c4fa2,Kai Kowalski,,2217,78667.70862,67598.39563,21210.62921,,89,82,,9,
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,815d2802-8272-83e0-ad84-173581569969,Lane Rasmussen,,1,379110,378930,,,,,,378930,
+2008-01-26 0:00,8/22/26 12:00 AM,TRUE,,voice,e58b0810-06f7-e3df-c967-a64cb14028d5,Marlow Eze,,962,72054.13202,63589.84475,378,,1,28,,7,3.551

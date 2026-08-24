@@ -1180,6 +1180,12 @@ var WorkforceTracker = {
         var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
         var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(_safeStartStr, eStr) : { has: false };
         var _tidMap = this._agentTidMap();   // normalized name → WFM Employee ID
+        // Genesys Cloud per-agent phone metrics for the same window. Deliberately
+        // kept SEPARATE from the Avaya GEM feed above: nothing here overwrites
+        // a.gem / a.cph / a.aht / a.inOut. The two sources are displayed side by
+        // side and labelled, so a number can always be traced to its origin.
+        var _genRpt = (typeof ReportImport !== 'undefined' && ReportImport.getGenesysForPeriod) ? ReportImport.getGenesysForPeriod(_safeStartStr, eStr) : { has: false };
+        report.genesys = { has: !!_genRpt.has, label: _genRpt.label || '', totals: _genRpt.totals || null };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
             if (_safeRpt.has) {
@@ -1225,6 +1231,15 @@ var WorkforceTracker = {
                  }
             }
 
+            // Genesys join: the Genesys GUID is the stable key, so prefer the WFM
+            // Employee-ID-free path of matching on the normalized name, then on
+            // any Genesys id we have already mapped for that name.
+            a.genesys = null;
+            if (_genRpt.has) {
+                var _g = _genRpt.byKey[aKey] || null;
+                if (_g) a.genesys = _g;
+            }
+
             if (matchedGem) {
                 a.gem = matchedGem;
                 a.cph = parseFloat(matchedGem.cph).toFixed(2);
@@ -1235,7 +1250,7 @@ var WorkforceTracker = {
                 a.cph = '-'; a.aht = '-'; a.inOut = '-';
             }
         });
-        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.isBackupMRC === true);
+        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.genesys !== null || a.isBackupMRC === true);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
   },
