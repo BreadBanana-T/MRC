@@ -1449,6 +1449,7 @@
       if (d.latencyMs) facts.push(d.latencyMs + 'ms');
       if (up7) facts.push('7d ' + up7);
       facts.push('checked ' + escapeHTML(d.checked || '--'));
+      if (d.lastGoodChecked) facts.push('last good ' + escapeHTML(d.lastGoodChecked));
 
       var why = '';
       if (!d.up) {
@@ -1743,13 +1744,13 @@
               var jsSafeName = safeName.replace(/'/g, "\\'");
               var c1, c2, c3;
               if (type === 'drop') {
-                  c1 = '<td style="padding:12px 16px; font-weight:800;">' + escapeHTML(a.noAnswer || 0) + '</td>';
+                  c1 = '<td style="padding:12px 16px; font-weight:800;">' + String(a.noAnswer || 0) + '</td>';
                   c2 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + ((a.dropRate || 0) * 100).toFixed(1) + '%</td>';
-                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + escapeHTML(a.answered || 0) + '</td>';
+                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.answered || 0) + '</td>';
               } else {
                   c1 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + fmtSecsShort(a.avgTalk) + '</td>';
                   c2 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + fmtSecsShort(a.minTalk) + '</td>';
-                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + escapeHTML(a.handled || 0) + '</td>';
+                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.handled || 0) + '</td>';
               }
               return '<tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">' +
                   '<td style="padding:12px 16px; display:flex; align-items:center; gap:10px;"><div style="width:8px; height:8px; border-radius:4px; background:#0ea5e9; flex-shrink:0;"></div><span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + safeName + '</span></td>' +
@@ -1867,7 +1868,7 @@
              '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:' + (a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)') + '; font-weight:800; font-size:1.1rem;">' + escapeHTML(a.cph || '-') + '</td>' +
              '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + escapeHTML(a.aht || '-') + '</td>' +
              '<td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">' + escapeHTML(a.inOut || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? escapeHTML(gx.noAnswer || 0) : '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? String(gx.noAnswer || 0) : '-') + '</td>' +
              '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '-') + '</td>' +
              '<td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-' + safeId + '" data-lucide="chevron-down" width="18" style="transform:' + iconTransform + '; transition:0.3s;"></i></td>';
 
@@ -1883,19 +1884,19 @@
                     '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-bottom:14px;">' + escapeHTML(gRpt.label || 'imported report') + (gx.media ? ' · ' + escapeHTML(gx.media) : '') + '</div>' +
                     '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">' +
                       '<div style="display:flex; flex-direction:column; gap:8px;">' +
-                        '<div class="insight-pill"><span>Answered</span> <b style="color:var(--text-main);">' + escapeHTML(gx.answered || 0) + '</b></div>' +
-                        '<div class="insight-pill"><span>Handled</span> <b style="color:var(--text-main);">' + escapeHTML(gx.handled || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Answered</span> <b style="color:var(--text-main);">' + String(gx.answered || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Handled</span> <b style="color:var(--text-main);">' + String(gx.handled || 0) + '</b></div>' +
                         '<div class="insight-pill"><span>Avg Handle</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHandle) + '</b></div>' +
                         '<div class="insight-pill"><span>Avg Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgTalk) + '</b></div>' +
                         '<div class="insight-pill"><span>Avg Hold</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHold) + '</b></div>' +
                         '<div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgAcw) + '</b></div>' +
                       '</div>' +
                       '<div style="display:flex; flex-direction:column; gap:8px;">' +
-                        '<div class="insight-pill" title="Alert - No Answer: rang this agent, never picked up"><span>Dropped</span> <b style="color:' + (gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + escapeHTML(gx.noAnswer || 0) + (gx.answered ? ' (' + (Math.round(gx.noAnswer / gx.answered * 1000) / 10) + '%)' : '') + '</b></div>' +
+                        '<div class="insight-pill" title="Alert - No Answer: rang this agent, never picked up"><span>Dropped</span> <b style="color:' + (gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + String(gx.noAnswer || 0) + (gx.answered ? ' (' + (Math.round(gx.noAnswer / gx.answered * 1000) / 10) + '%)' : '') + '</b></div>' +
                         '<div class="insight-pill" title="Shortest talk time in the period — a very low value means very short calls"><span>Min Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.minTalk) + '</b></div>' +
                         '<div class="insight-pill" title="Average Ring Time: mean time to answer"><span>Avg Ring</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgRing) + '</b></div>' +
-                        '<div class="insight-pill"><span>Held</span> <b style="color:var(--text-main);">' + escapeHTML(gx.held || 0) + '</b></div>' +
-                        '<div class="insight-pill"><span>Transferred</span> <b style="color:var(--text-main);">' + escapeHTML(gx.transferred || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Held</span> <b style="color:var(--text-main);">' + String(gx.held || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Transferred</span> <b style="color:var(--text-main);">' + String(gx.transferred || 0) + '</b></div>' +
                       '</div>' +
                     '</div></div>'
                 : (gRpt.has

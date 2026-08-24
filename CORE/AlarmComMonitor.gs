@@ -208,21 +208,14 @@ var AlarmComMonitor = {
     } catch (e) { return '[]'; }
   },
 
-  // ── Client-facing payload ─────────────────────────────────────────────────
-  getStatus: function() {
-    try {
-      var cached = CacheService.getScriptCache().get(this.CACHE_KEY);
-      if (cached) return cached;
-    } catch (e) {}
-
-    var p = this.probe();
-
-    if (p.skipped) {
-      return JSON.stringify({ disabled: true, checked: Utilities.formatDate(new Date(), this.TZ, 'HH:mm') });
-    }
-
+  // Turn a probe result into the dashboard payload, log it, and cache it. Shared
+  // by getStatus() and the trigger handler so a background probe leaves the cache
+  // WARM — otherwise the next dashboard load would immediately probe again.
+  _publish: function(p) {
     this._logHistory(p);
     var stats = this._uptimeStats();
+    var props = null;
+    try { props = PropertiesService.getScriptProperties(); } catch (e) {}
 
     var result = {
       up: !!p.up,
@@ -240,18 +233,34 @@ var AlarmComMonitor = {
       error: p.error || ''
     };
 
-    var payload = JSON.stringify(result);
-    try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
-    // Durable last-good mirror, so a probe that throws still renders something
-    // truthful instead of an empty tile (same idea as the weather fallback).
-    if (result.up) { try { PropertiesService.getScriptProperties().setProperty(this.LAST_GOOD_PROP, payload); } catch (e) {} }
-    else if (!result.isReachable) {
+    // When the host is unreachable, carry the last time we saw it healthy so the
+    // tile can say "last good HH:mm" instead of just going blank. Resolved BEFORE
+    // caching, or the cached copy would be missing it for the next 5 minutes.
+    if (!result.isReachable && props) {
       try {
-        var lg = PropertiesService.getScriptProperties().getProperty(this.LAST_GOOD_PROP);
-        if (lg) { var prev = JSON.parse(lg); result.lastGoodChecked = prev.checked || ''; payload = JSON.stringify(result); }
+        var lg = props.getProperty(this.LAST_GOOD_PROP);
+        if (lg) result.lastGoodChecked = (JSON.parse(lg).checked) || '';
       } catch (e) {}
     }
+
+    var payload = JSON.stringify(result);
+    try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
+    if (result.up && props) { try { props.setProperty(this.LAST_GOOD_PROP, payload); } catch (e) {} }
     return payload;
+  },
+
+  // ── Client-facing payload ─────────────────────────────────────────────────
+  getStatus: function() {
+    try {
+      var cached = CacheService.getScriptCache().get(this.CACHE_KEY);
+      if (cached) return cached;
+    } catch (e) {}
+
+    var p = this.probe();
+    if (p.skipped) {
+      return JSON.stringify({ disabled: true, checked: Utilities.formatDate(new Date(), this.TZ, 'HH:mm') });
+    }
+    return this._publish(p);
   }
 };
 
@@ -262,11 +271,11 @@ function probeAlarmCom() {
   if (typeof AlarmComMonitor === 'undefined') return 'AlarmComMonitor unavailable.';
   var p = AlarmComMonitor.probe();
   if (p.skipped) return 'Alarm.com probe disabled (ALARMCOM_URL is empty).';
-  var logged = AlarmComMonitor._logHistory(p);
-  // Keep the dashboard payload in step with the row we just wrote.
-  try { CacheService.getScriptCache().remove(AlarmComMonitor.CACHE_KEY); } catch (e) {}
+  // _publish logs the row AND refreshes the cached payload, so the dashboard
+  // shows this probe's result without triggering another fetch of its own.
+  AlarmComMonitor._publish(p);
   return 'Alarm.com: ' + (p.up ? 'UP' : 'DOWN') + ' (HTTP ' + p.statusCode + ', ' + p.latencyMs + 'ms)'
-       + (p.note ? ' — ' + p.note : '') + (logged ? ' · logged' : ' · throttled');
+       + (p.note ? ' — ' + p.note : '');
 }
 
 /**
