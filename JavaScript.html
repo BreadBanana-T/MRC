@@ -3106,9 +3106,11 @@
   // ───────────────── PERSONALIZED MANAGEMENT VIEW (per-browser) ────────────────
   // A manager can hide built-in KPI cards and ADD focused "tracker sections"
   // (Overtime, Coaching, SAFE, Absence, …). Every section is powered by the
-  // SAME management dashboard data, so it automatically follows the Sun–Sat
-  // management week — no Wed–Wed / Week A-B mismatch. Layout persists in
-  // localStorage so each manager keeps their own view.
+  // SAME management dashboard data, so it follows the period picked in the
+  // header (Daily / Weekly / Monthly / Quarterly / YTD) — no Wed–Wed / Week A-B
+  // mismatch. Embedded trackers follow that same period: see
+  // mgmtGrainToTrackerMode. Layout persists in localStorage so each manager
+  // keeps their own view.
   var MGMT_LAYOUT_KEY = 'mgmt_layout_v1';
   // Section registry: a label, color, the per-bucket series getter and the
   // period total getter (read off the dashboard payload).
@@ -3139,8 +3141,9 @@
   // list. Add a tracker here once and it shows up in both — no other wiring.
   // `embeddable` trackers can be dropped into the Management View as a card;
   // `fetch` picks the backend (workforce trackers just pass their id as mode).
-  // NOTE: operational trackers run a Wed→Wed week, so an embed shows that
-  // tracker's native week (its label is surfaced) — not the Sun–Sat window.
+  // NOTE: an embed is scoped to the period selected in the Management header,
+  // translated to the tracker's own mode vocabulary by mgmtGrainToTrackerMode.
+  // Each card surfaces the window the backend actually used (data.label).
   var TRACKERS = [
       { id: 'furlough', label: 'Furlough Tracker', color: '#0ea5e9', embeddable: true, fetch: 'workforce', region: 'Onshore' },
       { id: 'coaching', label: 'Coaching Tracker', color: '#f59e0b', embeddable: true, fetch: 'workforce', region: 'All' },
@@ -3151,21 +3154,29 @@
   ];
   function trackerById(id) { for (var i = 0; i < TRACKERS.length; i++) { if (TRACKERS[i].id === id) return TRACKERS[i]; } return null; }
   function embeddableTrackers() { return TRACKERS.filter(function(t) { return t.embeddable; }); }
+  // The Management grain buttons (day/week/month/quarter/ytd) and the trackers'
+  // own mode vocabulary agree everywhere except "week": a Management week is
+  // Sun–Sat, which the trackers call 'week_sun' — plain 'week' there is the
+  // Wed→Wed operational week. Everything else passes straight through.
+  function mgmtGrainToTrackerMode(g) { return g === 'week' ? 'week_sun' : (g || 'week_sun'); }
   function fetchMgmtEmbed(type) {
       var t = trackerById(type);
       if (typeof google === 'undefined' || !t || !t.embeddable) return;
       var ref = state.mgmtDate;
-      var key = type + '|' + ref;
+      var mode = mgmtGrainToTrackerMode(state.mgmtGrain);
+      // The grain HAS to be in the key: switching Weekly→Monthly leaves mgmtDate
+      // untouched, so without it the early return below would serve the stale
+      // weekly payload and the card would never move off the week.
+      var key = type + '|' + ref + '|' + mode;
       var E = state.mgmtEmbed;
       if (E.key[type] === key && E.data[type] && !E.data[type].error) return;
       E.key[type] = key; E.loading[type] = true;
       var ok = function(res) { try { E.data[type] = JSON.parse(res); } catch (e) { E.data[type] = { error: 'Could not parse tracker data.' }; } E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var fail = function(err) { E.data[type] = { error: (err && err.message) || 'Tracker backend error.' }; E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var r = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
-      // 'week_sun' = Sunday→Saturday calendar week, matching the Management View.
-      if (t.fetch === 'overtime') r.getOvertimeAnalytics('week_sun', ref, t.region || 'All', 'ALL');
-      else if (t.fetch === 'safe') r.getSafeAnalytics('week_sun', ref, t.region || 'All', 'ALL');
-      else r.getWorkforceAnalytics('week_sun', ref, type, t.region || 'All', 'ALL'); // generic workforce tracker (mode = id)
+      if (t.fetch === 'overtime') r.getOvertimeAnalytics(mode, ref, t.region || 'All', 'ALL');
+      else if (t.fetch === 'safe') r.getSafeAnalytics(mode, ref, t.region || 'All', 'ALL');
+      else r.getWorkforceAnalytics(mode, ref, type, t.region || 'All', 'ALL'); // generic workforce tracker (tracker id passed separately)
   }
   window.addMgmtEmbed = function(type) { var L = getMgmtLayout(); var t = trackerById(type); if (t && t.embeddable && L.embeds.indexOf(type) === -1) { L.embeds.push(type); saveMgmtLayout(); fetchMgmtEmbed(type); render(); } };
   window.removeMgmtEmbed = function(type) { var L = getMgmtLayout(); var i = L.embeds.indexOf(type); if (i > -1) { L.embeds.splice(i, 1); saveMgmtLayout(); render(); } };
@@ -3175,7 +3186,7 @@
   window.addMgmtSection = function(type) { var L = getMgmtLayout(); if (MGMT_SECTIONS[type] && L.sections.indexOf(type) === -1) { L.sections.push(type); saveMgmtLayout(); render(); } };
   window.removeMgmtSection = function(type) { var L = getMgmtLayout(); var i = L.sections.indexOf(type); if (i > -1) { L.sections.splice(i, 1); saveMgmtLayout(); render(); } };
   window.setMgmtSectionChart = function(type, kind) { var L = getMgmtLayout(); L.chart[type] = kind; saveMgmtLayout(); render(); };
-  window.resetMgmtLayout = function() { state.mgmtLayout = { hidden: {}, sections: [], chart: {} }; saveMgmtLayout(); render(); };
+  window.resetMgmtLayout = function() { state.mgmtLayout = { hidden: {}, sections: [], chart: {}, embeds: [] }; saveMgmtLayout(); render(); };
 
   // Customize panel — chips to re-show hidden cards + add tracker sections.
   function mgmtCustomizePanel() {
@@ -3202,7 +3213,7 @@
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + embedChips + '</div>' +
           '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">KPI cards <span style="text-transform:none; font-weight:600;">(show / hide)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + cardChips + '</div>' +
-          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add a quick metric <span style="text-transform:none; font-weight:600;">(Sun–Sat mini-chart)</span></div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add a quick metric <span style="text-transform:none; font-weight:600;">(mini-chart, follows the selected period)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px;">' + sectionChips + '</div>' +
           '</div>';
   }
@@ -3251,19 +3262,51 @@
       }).join('') + '</div>';
   }
 
-  // Charts for embedded trackers (shift-split doughnut from each tracker's totals).
+  // Charts for embedded trackers. On a month/quarter/YTD grain a single doughnut
+  // of period totals reads as one undifferentiated ring, so when the backend
+  // hands us a month-over-month `trend` we draw that instead — with the months
+  // the selected period actually spans (`periodKeys`) highlighted. Trackers with
+  // no top-level trend (Overtime, SAFE) keep the shift-split doughnut.
   function buildMgmtEmbedCharts() {
       if (typeof Chart === 'undefined') return;
       var L = getMgmtLayout();
       var t = _mgmtChartTheme();
       var ff = "'Outfit', sans-serif";
+      var grain = state.mgmtGrain;
+      var wantsTrend = (grain === 'month' || grain === 'quarter' || grain === 'ytd');
       Object.keys(charts).forEach(function(k) { if (k.indexOf('mgmtEmbed_') === 0 && charts[k]) { charts[k].destroy(); charts[k] = null; } });
       (L.embeds || []).forEach(function(type) {
           var data = state.mgmtEmbed.data[type];
           if (!data || data.error) return;
           var el = document.getElementById('mgmt-embed-' + type); if (!el) return;
           var key = 'mgmtEmbed_' + type;
+          var e = trackerById(type) || {};
           var T = data.totals || {};
+
+          // ── Month-over-month bars (month / quarter / YTD, when trend exists) ──
+          var trend = (wantsTrend && data.trend && data.trend.length) ? data.trend : null;
+          if (trend) {
+              var inPeriod = data.periodKeys || [];
+              var tColor = e.color || '#818cf8';
+              charts[key] = new Chart(el.getContext('2d'), {
+                  type: 'bar',
+                  data: { labels: trend.map(function(m) { return m.label; }),
+                          datasets: [{ label: 'Hours',
+                                       data: trend.map(function(m) { return m.hours || 0; }),
+                                       backgroundColor: trend.map(function(m) { return inPeriod.indexOf(m.key) !== -1 ? tColor : (t.isDark ? 'rgba(255,255,255,0.13)' : 'rgba(15,23,42,0.10)'); }),
+                                       borderRadius: 5, borderSkipped: false, maxBarThickness: 26 }] },
+                  options: { responsive: true, maintainAspectRatio: false,
+                      plugins: { legend: { display: false },
+                          tooltip: { backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10,
+                              callbacks: { label: function(c2) { var m = trend[c2.dataIndex] || {}; var sel = inPeriod.indexOf(m.key) !== -1 ? ' · selected' : ''; return ' ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h' + sel; },
+                                           afterBody: function(items) { var m = trend[items[0].dataIndex] || {}; return (m.weekA != null && m.weekB != null) ? ['Week A ' + (Math.round(m.weekA * 10) / 10) + 'h · Week B ' + (Math.round(m.weekB * 10) / 10) + 'h'] : []; } } } },
+                      scales: { x: { grid: { display: false }, ticks: { color: t.textColor, font: { family: ff, weight: '700', size: 10 } } },
+                                y: { beginAtZero: true, grid: { color: t.gridColor }, ticks: { color: t.textColor, font: { family: ff, weight: '700', size: 10 }, callback: function(v) { return v + 'h'; } } } },
+                      animation: { duration: 500 } }
+              });
+              return;
+          }
+
           var labels, vals, colors;
           if (type === 'safe' && data.coverage && data.coverage.headline) {
               labels = ['Scheduled', 'OT']; vals = [T.sched || 0, T.ot || 0]; colors = ['#6366f1', '#f472b6'];
@@ -3276,7 +3319,8 @@
                   tooltip: { backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, usePointStyle: true, callbacks: { label: function(c2) { var v = c2.parsed || 0; var pct = sum > 0 ? Math.round(v / sum * 100) : 0; return ' ' + c2.label + ': ' + (Math.round(v * 10) / 10) + 'h (' + pct + '%)'; } } } },
               animation: { duration: 500 } };
           if (sum <= 0) {
-              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: ['No hours this week'], datasets: [{ data: [1], backgroundColor: [t.gridColor], borderWidth: 0 }] }, options: Object.assign({}, dOpts, { plugins: { legend: { display: false }, tooltip: { enabled: false } } }) });
+              var noneLbl = 'No hours in ' + (data.label || 'this period');
+              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: [noneLbl], datasets: [{ data: [1], backgroundColor: [t.gridColor], borderWidth: 0 }] }, options: Object.assign({}, dOpts, { plugins: { legend: { display: false }, tooltip: { enabled: false } } }) });
           } else {
               charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: labels, datasets: [{ data: vals, backgroundColor: colors, borderColor: t.isDark ? '#0f172a' : '#fff', borderWidth: 2 }] }, options: dOpts });
           }
