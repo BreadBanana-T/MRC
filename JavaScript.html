@@ -184,7 +184,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -235,7 +235,9 @@
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
     fetchPresenceBootstrap();
+    fetchAlarmCom();
     setInterval(fetchOutages, 300000); // 5 min
+    setInterval(fetchAlarmCom, 300000); // 5 min — matches the server-side probe cadence
     setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
     setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
     setInterval(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
@@ -246,6 +248,22 @@
       google.script.run.withSuccessHandler(function(res) {
           try { state.staffingBalance = JSON.parse(res); if (state.view === 'overview') render(); } catch (e) {}
       }).getStaffingBalance();
+  }
+
+  function fetchAlarmCom() {
+      if (typeof google === 'undefined') return;
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.alarmCom = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getAlarmComStatus();
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.alarmComHistory = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getAlarmComHistory();
   }
 
   function fetchOutages() {
@@ -1396,6 +1414,88 @@
       return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 14px; background:rgba(220,38,38,0.05); display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--status-alert);"><i data-lucide="alert-triangle" width="14"></i> Outage Situational Awareness<span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-left:6px;">Office-region correlation. Not a per-agent alert.</span></div>' + rows + '</div>';
   }
 
+  // Alarm.com standby status — a compact live health tile. Three states, not two:
+  // UP (banner matched), WARN (page answered but the "All systems operational"
+  // banner wasn't in the markup — a wording change looks like this, not like an
+  // outage), and DOWN (unreachable, or the page says it isn't operational).
+  // The "checked" time is the server's absolute stamp on purpose: render()
+  // string-diffs the whole view, so a ticking "2m ago" would tear down and
+  // rebuild the Dashboard every poll.
+  function renderAlarmComTile() {
+      var d = state.alarmCom;
+      var shell = function(inner, extra) {
+          return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; justify-content:center;' + (extra || '') + '">' + inner + '</div>';
+      };
+      if (!d) {
+          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-check" width="12"></i> Alarm.com</div>' +
+                       '<div style="color:var(--text-muted); font-size:0.8rem; font-weight:600;">Checking standby status…</div>', ' opacity:0.6;');
+      }
+      if (d.disabled) {
+          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-off" width="12"></i> Alarm.com</div>' +
+                       '<div style="font-size:1.6rem; font-weight:800; color:var(--text-muted); line-height:1;">—</div>' +
+                       '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Probe disabled — run setAlarmComUrl()</div>');
+      }
+
+      var warn = !!d.isReachable && !d.isOperational;
+      var color = d.up ? 'var(--status-active)' : (warn ? 'var(--status-warn)' : 'var(--status-alert)');
+      var dotCls = d.up ? 'outage-dot pulse-ok' : 'outage-dot pulse';
+      var label = d.up ? 'All systems operational' : (warn ? 'Status unconfirmed' : 'Down');
+
+      var up24 = (d.uptime24h == null) ? '—' : (d.uptime24h + '%');
+      var up7 = (d.uptime7d == null) ? null : (d.uptime7d + '%');
+
+      // Footer facts, only the ones we actually have.
+      var facts = [];
+      if (d.latencyMs) facts.push(d.latencyMs + 'ms');
+      if (up7) facts.push('7d ' + up7);
+      facts.push('checked ' + escapeHTML(d.checked || '--'));
+
+      var why = '';
+      if (!d.up) {
+          var reason = d.error || d.note || ('HTTP ' + d.statusCode);
+          why = '<div style="font-size:0.65rem; font-weight:700; color:' + color + '; margin-top:6px;">' + escapeHTML(reason) + '</div>';
+      }
+
+      // Component detail from the Monitors table. Only meaningful when the page
+      // answered at all, so don't imply a healthy component on an unreachable host.
+      var chip = '';
+      if (d.isReachable) {
+          chip = '<div style="margin-top:10px;"><span class="outage-chip">Partner Portal · ' +
+                 (d.partnerPortalUp ? '<b style="color:var(--status-active);">Up</b>' : '<b style="color:var(--status-warn);">?</b>') +
+                 '</span></div>';
+      }
+
+      // 24 one-hour buckets: red if ANY probe in the hour failed (an outage
+      // should not be averaged away), grey if we never sampled that hour.
+      var strip = '';
+      var hist = state.alarmComHistory || [];
+      if (hist.length) {
+          var nowH = Date.now();
+          var cells = [];
+          for (var h = 23; h >= 0; h--) {
+              var hi = nowH - h * 3600000, lo = hi - 3600000;
+              var seen = 0, bad = 0;
+              for (var i = 0; i < hist.length; i++) {
+                  if (hist[i].t > lo && hist[i].t <= hi) { seen++; if (!hist[i].up) bad++; }
+              }
+              var cls = !seen ? '' : (bad ? 'down' : 'up');
+              cells.push('<span class="' + cls + '"></span>');
+          }
+          strip = '<div class="uptime-strip" title="Last 24 h of probes — one bar per hour">' + cells.join('') + '</div>';
+      }
+
+      return shell(
+          '<div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:7px;">' +
+              '<span class="' + dotCls + '" style="background:' + color + ';"></span> Alarm.com' +
+          '</div>' +
+          '<div style="font-size:2.4rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + up24 + '</div>' +
+          '<div style="font-size:0.7rem; font-weight:800; color:var(--text-main); margin-top:6px;">' + label + '</div>' +
+          why +
+          '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + facts.join(' · ') + '</div>' +
+          chip + strip,
+          ' cursor:default;');
+  }
+
   function renderStaffingTile() {
       var s = state.staffingBalance;
       if (!s || !s.available) {
@@ -1485,6 +1585,7 @@
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
                  '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" class="cnum" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
                  renderStaffingTile() +
+                 renderAlarmComTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div><div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">' + iclCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div><div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">' + ulcCount + '</div></div></div></div>' +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +

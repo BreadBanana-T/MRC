@@ -264,6 +264,14 @@ function getOutageHistory() {
   return (typeof OutageTracker !== 'undefined') ? OutageTracker.getHistorySeries(26) : "[]";
 }
 
+// --- ALARM.COM STANDBY STATUS (operational-system uptime) ---
+function getAlarmComStatus() {
+  return (typeof AlarmComMonitor !== 'undefined') ? AlarmComMonitor.getStatus() : "{}";
+}
+function getAlarmComHistory() {
+  return (typeof AlarmComMonitor !== 'undefined') ? AlarmComMonitor.getHistorySeries(24) : "[]";
+}
+
 // --- STAFFING BALANCE (current 15-min IDP bucket) ---
 function getStaffingBalance() {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getStaffingBalance() : "{}";

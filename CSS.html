@@ -579,6 +579,23 @@
       .outage-cell + .outage-cell { border-left: none; border-top: 1px solid var(--glass-border); }
   }
 
+  /* ── Alarm.com status tile ──────────────────────────────────────────────
+     A 24-bar probe strip (one bar per hour) plus a status-coloured live dot.
+     .outage-dot.pulse hardcodes a red halo for outages, so "healthy" needs
+     its own green pulse rather than borrowing that one. */
+  .uptime-strip { display: flex; align-items: stretch; gap: 2px; height: 20px; margin-top: 14px; width: 100%; }
+  .uptime-strip > span { flex: 1 1 0; min-width: 0; border-radius: 2px; background: rgba(15, 23, 42, 0.07); }
+  body.dark .uptime-strip > span { background: rgba(255, 255, 255, 0.07); }
+  .uptime-strip > span.up   { background: var(--status-active); }
+  .uptime-strip > span.warn { background: var(--status-warn); }
+  .uptime-strip > span.down { background: var(--status-alert); }
+  .outage-dot.pulse-ok { animation: dot-pulse-ok 2.4s ease-out infinite; }
+  @keyframes dot-pulse-ok {
+      0%   { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.45); }
+      70%  { box-shadow: 0 0 0 8px rgba(5, 150, 105, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+  }
+
   /* ─────────────── SEARCH FIELDS ───────────────
      One consistent search treatment: pill, embedded icon, quiet until
      focused. Replaces the bare gray boxes. */
