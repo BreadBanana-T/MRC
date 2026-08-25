@@ -80,6 +80,31 @@ const RoleManager = {
     return "Updated";
   },
 
+  // Set the role string outright, rather than appending to it. This is what
+  // removing ONE role off a stack needs: setStatus is additive by design, and
+  // 'Active' is all-or-nothing, so neither can express "drop SAFE, keep the rest".
+  setRoles: function(name, roleStr) {
+    const cleanName = this._key(name);
+    const legacyName = this._legacyKey(name);
+    const finalValue = String(roleStr == null ? '' : roleStr).trim();
+    try {
+      const props = PropertiesService.getScriptProperties();
+      let map = JSON.parse(props.getProperty(this.PROP_KEY) || "{}");
+      if (!map[cleanName] && legacyName !== cleanName && map[legacyName]) {
+        map[cleanName] = map[legacyName];
+        delete map[legacyName];
+      }
+      if (!map[cleanName]) map[cleanName] = {};
+      map[cleanName].role = finalValue;
+      map[cleanName].timestamp = new Date().getTime();
+      props.setProperty(this.PROP_KEY, JSON.stringify(map));
+    } catch (e) {
+      console.error("Role set failed", e);
+    }
+    if (typeof StatusTracker !== 'undefined') StatusTracker.updateStatus(name, 'role', finalValue);
+    return "Updated";
+  },
+
   // Genesys Cloud manual assignment. channel: 'inbound' | 'outbound' | ''
   // (empty = back to Avaya). Outbound carries no queues. Persists until
   // changed — exempt from the fast-map GC and hard-saved to a dedicated,

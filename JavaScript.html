@@ -798,7 +798,47 @@
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var a=genAgentByName(n); var back=document.getElementById('ctx-back-avaya'); if(back) back.style.display=(a && a.genesys && a.genesys.channel)?'flex':'none'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
   window.closeMenu = function() { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   
-  window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') { render(); flipAgentRow(name); } showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
+  window.setAgentStatus = function(type, val) {
+      closeMenu();
+      var name = state.selectedAgent;
+      if (!name) return;
+      markFloorEdit([name], type, val);
+      moveAgentInMemory(name, type, val);
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      // Don't claim success before the server has taken it — the old code
+      // toasted "Status Updated" unconditionally, before a call with no
+      // handlers at all, so a failed write looked identical to a good one.
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast('Status saved'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Status update'); })
+          .updateAgentStatus(name, type, val);
+  };
+  // Remove ONE role without clearing the rest. Roles stack on the server, so
+  // "Set Active" (which wipes everything) was previously the only way out.
+  window.removeAgentRole = function(name, role) {
+      if (!name || !role) return;
+      markFloorEdit([name], 'role-remove', role);
+      moveAgentInMemory(name, 'role-remove', role);
+      var left = (findAgentCopy(name) || {}).role || '';
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast(role + ' removed'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Removing ' + role); })
+          .setAgentRoles(name, left);
+  };
+  window.clearAgentAbsence = function(name) {
+      if (!name) return;
+      markFloorEdit([name], 'absent-clear', '');
+      moveAgentInMemory(name, 'absent-clear', '');
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast('Absence cleared'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Clearing absence'); })
+          .updateAgentStatus(name, 'absent', '');
+  };
 
   // ======================= GENESYS CLOUD =======================
   // Manual, IT-independent tracking of who's working the Genesys Cloud
@@ -933,10 +973,15 @@
       var names = (state.agents.active || []).filter(function(a) { return a.genesys && a.genesys.channel; }).map(function(a) { return a.name; });
       if (!names.length) { showToast('No one is on Genesys'); return; }
       if (!confirm('Return all ' + names.length + ' agent' + (names.length === 1 ? '' : 's') + ' to Avaya?')) return;
+      markGenesysEdit(names, '', []);
       names.forEach(function(n) { applyGenesysInMemory(n, '', []); });
       if (state.view === 'agents') render();
-      showToast('Returned ' + names.length + ' to Avaya');
-      if (typeof google !== 'undefined') google.script.run.updateAgentGenesysBatch(JSON.stringify(names), '', '[]');
+      if (typeof google !== 'undefined') {
+          google.script.run
+              .withSuccessHandler(function() { ackFloorEdit(names); showToast('Returned ' + names.length + ' to Avaya'); })
+              .withFailureHandler(function(err) { failFloorEdit(names, err, 'Return to Avaya'); })
+              .updateAgentGenesysBatch(JSON.stringify(names), '', '[]');
+      }
   };
 
   window.setGenesysChannel = function(ch) {
@@ -989,12 +1034,20 @@
           var names = d.names || [];
           if (!names.length) { showToast('Pick at least one agent'); return; }
           var queues = d.channel === 'inbound' ? (d.queues || []) : [];
+          markGenesysEdit(names, d.channel, queues);
           names.forEach(function(n) { applyGenesysInMemory(n, d.channel, queues); });
           if (state.view === 'agents') render();
-          showToast(names.length + ' agent' + (names.length === 1 ? '' : 's') + ' → Genesys ' + (d.channel === 'inbound' ? 'Inbound' : 'Outbound'));
           // One server call for the whole group — parallel single saves
           // would race on the shared fast-map property.
-          if (typeof google !== 'undefined') google.script.run.updateAgentGenesysBatch(JSON.stringify(names), d.channel, JSON.stringify(queues));
+          if (typeof google !== 'undefined') {
+              google.script.run
+                  .withSuccessHandler(function() {
+                      ackFloorEdit(names);
+                      showToast(names.length + ' agent' + (names.length === 1 ? '' : 's') + ' → Genesys ' + (d.channel === 'inbound' ? 'Inbound' : 'Outbound'));
+                  })
+                  .withFailureHandler(function(err) { failFloorEdit(names, err, 'Genesys batch assignment'); })
+                  .updateAgentGenesysBatch(JSON.stringify(names), d.channel, JSON.stringify(queues));
+          }
           closeGenesysModal();
           return;
       }
@@ -1006,10 +1059,17 @@
 
   function setAgentGenesys(channel, queues) {
       var name = state.selectedAgent;
+      markGenesysEdit([name], channel || '', queues || []);
       applyGenesysInMemory(name, channel, queues);
       if (state.view === 'agents') render();
-      showToast(channel ? ('On Genesys · ' + (channel === 'inbound' ? 'Inbound' : 'Outbound')) : 'Back on Avaya');
-      if (typeof google !== 'undefined') google.script.run.updateAgentGenesys(name, channel || '', JSON.stringify(queues || []));
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() {
+              ackFloorEdit([name]);
+              showToast(channel ? ('On Genesys · ' + (channel === 'inbound' ? 'Inbound' : 'Outbound')) : 'Back on Avaya');
+          })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Genesys assignment'); })
+          .updateAgentGenesys(name, channel || '', JSON.stringify(queues || []));
   }
   function setGenesysOnAgent(name, channel, queues) {
       var hasIcl = channel === 'inbound' && (queues || []).some(function(q) { return q.indexOf('icl_') === 0; });
@@ -1084,7 +1144,11 @@
 
   function fetchData() {
     if(typeof google==='undefined') return;
-    google.script.run.withSuccessHandler(function(j) { try{ var d = JSON.parse(j); if(d){ for (var k in d) { state.agents[k] = d[k]; } applyPendingUpdates(); if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker' && state.view !== 'analyzer' && state.view !== 'mgmt') render(); } } catch(e){} }).getFloorStatus();
+    // Stamp the request: a payload requested BEFORE the newest local edit can't
+    // be used to retire that edit, or a getFloorStatus already in flight when you
+    // clicked would come back without your change and wipe it.
+    var _atSeq = _floorEditSeq;
+    google.script.run.withSuccessHandler(function(j) { try{ var d = JSON.parse(j); if(d){ for (var k in d) { state.agents[k] = d[k]; } retireAckedEdits(_atSeq); applyPendingUpdates(); if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker' && state.view !== 'analyzer' && state.view !== 'mgmt') render(); } } catch(e){} }).getFloorStatus();
     if(state.view !== 'popout-view') { google.script.run.withSuccessHandler(function(r) { try{ var d = (typeof r==='object'&&r!==null) ? r : JSON.parse(r); state.weather = d.weather || {}; state.alerts = d.alerts || []; if(state.view === 'overview' || state.view === 'weather') render(); }catch(e){} }).getLiveDashboardData(); }
   }
 
@@ -1368,6 +1432,58 @@
       }).getTrainings();
   }
 
+  // ── Optimistic floor edits: acknowledgement, rollback, staleness ──────────
+  // Every local edit bumps _floorEditSeq. A pending entry is only forgotten once
+  // BOTH things are true: the server acknowledged it, and a floor payload
+  // requested *after* the edit has landed. Otherwise a getFloorStatus already in
+  // flight when you clicked would come back without your change and wipe it.
+  var _floorEditSeq = 0;
+
+  function markFloorEdit(names, type, val) {
+      _floorEditSeq++;
+      (names || []).forEach(function(n) {
+          state.pendingUpdates[n] = { type: type, val: val, timestamp: Date.now(), seq: _floorEditSeq, acked: false };
+      });
+      return _floorEditSeq;
+  }
+  function markGenesysEdit(names, channel, queues) {
+      _floorEditSeq++;
+      if (!state.pendingGenesys) state.pendingGenesys = {};
+      (names || []).forEach(function(n) {
+          state.pendingGenesys[n] = { channel: channel, queues: (queues || []).slice(), timestamp: Date.now(), seq: _floorEditSeq, acked: false };
+      });
+      return _floorEditSeq;
+  }
+  function ackFloorEdit(names) {
+      (names || []).forEach(function(n) {
+          if (state.pendingUpdates[n]) state.pendingUpdates[n].acked = true;
+          if (state.pendingGenesys && state.pendingGenesys[n]) state.pendingGenesys[n].acked = true;
+      });
+      fetchData();   // pull the server's truth; the guard below retires the entry
+  }
+  // The server rejected the write (quota, locked sheet, permissions). Drop the
+  // optimistic patch, say so plainly, and refetch rather than leaving a row
+  // showing a change that was never saved.
+  function failFloorEdit(names, err, what) {
+      (names || []).forEach(function(n) {
+          delete state.pendingUpdates[n];
+          if (state.pendingGenesys) delete state.pendingGenesys[n];
+      });
+      showToast((what || 'Change') + ' failed: ' + ((err && err.message) || 'unknown') + ' — reverted');
+      fetchData();
+  }
+  function retireAckedEdits(atSeq) {
+      var n;
+      for (n in state.pendingUpdates) {
+          if (state.pendingUpdates[n].acked && state.pendingUpdates[n].seq <= atSeq) delete state.pendingUpdates[n];
+      }
+      if (state.pendingGenesys) {
+          for (n in state.pendingGenesys) {
+              if (state.pendingGenesys[n].acked && state.pendingGenesys[n].seq <= atSeq) delete state.pendingGenesys[n];
+          }
+      }
+  }
+
   function applyPendingUpdates() {
      var now=Date.now();
      for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); }
@@ -1376,10 +1492,70 @@
      if (state.pendingGenesys) { for(var gn in state.pendingGenesys) { if(now-state.pendingGenesys[gn].timestamp>120000) delete state.pendingGenesys[gn]; else setGenesysOnAgent(gn, state.pendingGenesys[gn].channel, state.pendingGenesys[gn].queues); } }
   }
   
+  // Patch EVERY copy of the agent and actually move them between buckets.
+  // The old version grabbed the first match and `break`ed out — but the server
+  // pushes the same agent into `active` AND `safe` (separate objects after
+  // JSON.parse), so only one copy got patched and the agent rendered with two
+  // different statuses at once. It also never touched bucket membership, so
+  // assigning SAFE didn't add them to the SAFE card and Set Active didn't
+  // remove them.
+  function eachAgentCopy(name, fn) {
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          for (var i = 0; i < state.agents[k].length; i++) {
+              if (state.agents[k][i] && state.agents[k][i].name === name) fn(state.agents[k][i], k, i);
+          }
+      }
+  }
+  function findAgentCopy(name) {
+      var found = null;
+      eachAgentCopy(name, function(a) { if (!found) found = a; });
+      return found;
+  }
+  // Roles are additive on the server (RoleManager.setStatus appends), so the
+  // client has to be additive too or the two disagree the moment a second role
+  // is assigned.
+  function addRoleToken(current, val) {
+      var toks = String(current || '').split(/\s+/).filter(Boolean);
+      if (toks.indexOf(val) === -1) toks.push(val);
+      return toks.join(' ');
+  }
+  function removeRoleToken(current, val) {
+      return String(current || '').split(/\s+/).filter(Boolean).filter(function(t) { return t !== val; }).join(' ');
+  }
+  // Keep the role buckets (currently just SAFE) in step with an agent's roles.
+  function syncRoleBuckets(name) {
+      var a = findAgentCopy(name); if (!a) return;
+      var roles = String(a.role || '').toUpperCase();
+      [['safe', 'SAFE']].forEach(function(pair) {
+          var bucket = pair[0], token = pair[1];
+          if (!Array.isArray(state.agents[bucket])) state.agents[bucket] = [];
+          var arr = state.agents[bucket];
+          var at = -1;
+          for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name === name) { at = i; break; } }
+          var should = roles.indexOf(token) !== -1;
+          if (should && at === -1) arr.push(a);
+          else if (!should && at !== -1) arr.splice(at, 1);
+      });
+  }
+
   function moveAgentInMemory(name, type, val) {
-     var o = null; 
-     for (var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { o = state.agents[k][i]; break; } } if(o) break; }
-     if(o) { if (type === 'role') { o.role = (val === 'Active') ? '' : val; if(val === 'Active') { o.subStatus = ""; } } else if (type === 'absent') { o.subStatus = val; } }
+     var seen = false;
+     eachAgentCopy(name, function(o) {
+        seen = true;
+        if (type === 'role') {
+           if (val === 'Active') { o.role = ''; o.subStatus = ''; }
+           else o.role = addRoleToken(o.role, val);
+        } else if (type === 'role-remove') {
+           o.role = removeRoleToken(o.role, val);
+           if (!o.role) o.subStatus = '';
+        } else if (type === 'absent') {
+           o.subStatus = val;
+        } else if (type === 'absent-clear') {
+           o.subStatus = '';
+        }
+     });
+     if (seen) syncRoleBuckets(name);
   }
 
   function render() {
@@ -5019,8 +5195,8 @@
 
   function formatWindString(val) { if (!val) return ""; var w = val.toString(); if (w.toLowerCase().indexOf("light") !== -1) w = "~5"; if (w.indexOf("G") !== -1) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
   
-  window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
-  window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
+  window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; _floorEditSeq++; if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(){ showToast("Breaks saved"); fetchData(); }).withFailureHandler(function(err){ showToast("Break save failed: " + ((err && err.message) || 'unknown') + " — reverted"); fetchData(); }).updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); render(); };
+  window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; _floorEditSeq++; if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(){ showToast("Overtime logged"); fetchData(); }).withFailureHandler(function(err){ showToast("OT log failed: " + ((err && err.message) || 'unknown') + " — reverted"); fetchData(); }).submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); render(); } };
   
   // Threshold above which the paste won't survive a single google.script.run
   // call (it silently drops with no error). Anything bigger is sent in

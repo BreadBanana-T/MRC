@@ -78,7 +78,11 @@ function compileFloorData() {
     let originalBreaksJson = row ? row[7] : "[]";
     let agentID = row ? row[1] : "";
     
-    if (manualRole && manualRole !== "") absentType = "";
+    // A role used to WIPE the absence here, which made "Mark Sick" a no-op for
+    // anyone holding a role (the next payload threw the absence away) and left no
+    // way to un-mark an absence at all. Role and absence are independent now; the
+    // category decision below already gives absence precedence.
+    
 
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
