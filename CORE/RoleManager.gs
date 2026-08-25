@@ -7,15 +7,37 @@
 const RoleManager = {
   PROP_KEY: "MRC_FLOOR_STATUS_MAP",
 
+  // ── AGENT KEY ─────────────────────────────────────────────────────────────
+  // Everything that stores or reads floor state MUST key on the same thing.
+  // AgentMonitor reads with _normalizeAgentKey (token-SORTED, accent/comma
+  // stripped), so writing a plain lowercase key meant "Bennani, Mohammed" was
+  // saved as `bennani, mohammed` and looked up as `bennani mohammed` — the
+  // assignment was stored fine and then never found again, which is what made
+  // roles and Genesys assignments silently revert a couple of minutes later.
+  _key: function(name) {
+    return (typeof _normalizeAgentKey === 'function')
+      ? _normalizeAgentKey(name)
+      : String(name).trim().toLowerCase();
+  },
+  // The key shape written before that fix, kept so existing assignments in the
+  // property map are migrated instead of being dropped on deploy.
+  _legacyKey: function(name) { return String(name).trim().toLowerCase(); },
+
   setStatus: function(name, type, value) {
-    const cleanName = String(name).trim().toLowerCase();
+    const cleanName = this._key(name);
+    const legacyName = this._legacyKey(name);
     let finalValue = value;
 
     // 1. FAST SAVE (Script Properties)
     try {
       const props = PropertiesService.getScriptProperties();
       let map = JSON.parse(props.getProperty(this.PROP_KEY) || "{}");
-      
+
+      // Carry a pre-fix entry over to the correct key rather than stranding it.
+      if (!map[cleanName] && legacyName !== cleanName && map[legacyName]) {
+        map[cleanName] = map[legacyName];
+        delete map[legacyName];
+      }
       if (!map[cleanName]) map[cleanName] = {};
 
       if (type === 'role') {
@@ -86,8 +108,14 @@ const RoleManager = {
       let map = JSON.parse(props.getProperty(this.PROP_KEY) || "{}");
       const now = new Date().getTime();
 
+      const self = this;
       names.forEach(function(name) {
-        const cleanName = String(name).trim().toLowerCase();
+        const cleanName = self._key(name);
+        const legacyName = self._legacyKey(name);
+        if (!map[cleanName] && legacyName !== cleanName && map[legacyName]) {
+          map[cleanName] = map[legacyName];
+          delete map[legacyName];
+        }
         if (!map[cleanName]) map[cleanName] = {};
         if (!channel) delete map[cleanName].genesys;
         else map[cleanName].genesys = { channel: channel, queues: queues };
@@ -110,10 +138,21 @@ const RoleManager = {
     return "Updated " + names.length;
   },
 
+  // Always hand back a map keyed the way AgentMonitor looks things up. Entries
+  // written before the key fix are re-keyed here on the way out, so an existing
+  // assignment keeps working without needing a write first. If two spellings
+  // collapse onto one key, the more recent entry wins.
   getFastMap: function() {
     try {
       const json = PropertiesService.getScriptProperties().getProperty(this.PROP_KEY);
-      return json ? JSON.parse(json) : {};
+      const raw = json ? JSON.parse(json) : {};
+      const out = {};
+      for (const k in raw) {
+        const nk = this._key(k);
+        const prev = out[nk];
+        if (!prev || (raw[k] && (raw[k].timestamp || 0) >= (prev.timestamp || 0))) out[nk] = raw[k];
+      }
+      return out;
     } catch (e) { return {}; }
   }
 };

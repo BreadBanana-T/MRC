@@ -9,11 +9,21 @@
 
 const StatusTracker = {
 
+  // Same key contract as RoleManager and AgentMonitor — see the note in
+  // RoleManager._key. Sheet rows keep the human-readable display name in the
+  // name column; only the in-memory lookup key is normalized, so legacy rows
+  // are matched correctly with no migration pass over the sheets.
+  _key: function(name) {
+    return (typeof _normalizeAgentKey === 'function')
+      ? _normalizeAgentKey(name)
+      : String(name).trim().toLowerCase();
+  },
+
   // --- 1. ROLES & ABSENCE (Status_Overrides) ---
   updateStatus: function(name, type, value) {
     const sheet = this._getSheet("Status_Overrides", ["Timestamp", "Agent Name", "Role", "Absent Type", "DateStr"]);
     const dateStr = this._getTodayStr();
-    const cleanName = String(name).trim().toLowerCase();
+    const cleanName = this._key(name);
 
     const data = sheet.getDataRange().getValues();
     let foundRow = -1;
@@ -66,7 +76,7 @@ const StatusTracker = {
   updateBreaks: function(name, jsonBreaks) {
     const sheet = this._getSheet("Break_Overrides", ["Timestamp", "Agent Name", "DateStr", "Breaks JSON"]);
     const dateStr = this._getTodayStr();
-    const cleanName = String(name).trim().toLowerCase();
+    const cleanName = this._key(name);
 
     const data = sheet.getDataRange().getValues();
     let foundRow = -1;
@@ -111,12 +121,13 @@ const StatusTracker = {
     const data = sheet.getDataRange().getValues();
     const rowByName = {};
     for (let i = 1; i < data.length; i++) {
-      rowByName[String(data[i][1]).trim().toLowerCase()] = i + 1;
+      rowByName[this._key(data[i][1])] = i + 1;
     }
 
+    const self = this;
     const toAppend = [];
     names.forEach(function(name) {
-      const cleanName = String(name).trim().toLowerCase();
+      const cleanName = self._key(name);
       if (!cleanName) return;
       const row = rowByName[cleanName];
       if (row) sheet.getRange(row, 1, 1, 4).setValues([[now, name, channel || "", q]]);
@@ -136,7 +147,7 @@ const StatusTracker = {
     const map = new Map();
 
     const getEntry = (name) => {
-      const k = String(name).trim().toLowerCase();
+      const k = this._key(name);
       if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [], genesys: null });
       return map.get(k);
     };
@@ -216,8 +227,9 @@ const StatusTracker = {
     return d === targetStr;
   },
 
+  // cleanName is already normalized by the caller; normalize the row too so a
+  // re-spelled name updates the existing row instead of appending a duplicate.
   _matchRow: function(row, cleanName, dateStr, nameIdx, dateIdx) {
-    const rName = String(row[nameIdx]).trim().toLowerCase();
-    return rName === cleanName && this._matchDate(row[dateIdx], dateStr);
+    return this._key(row[nameIdx]) === cleanName && this._matchDate(row[dateIdx], dateStr);
   }
 };
