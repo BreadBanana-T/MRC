@@ -26,6 +26,18 @@ var AssignmentAnalyzer = {
       return s;
   },
 
+  // Roster Language values are exactly: English, French, Bilingual-English,
+  // Bilingual-French. Bilingual must be tested FIRST — "Bilingual-French"
+  // contains "french", which is how ReportImport._langCode mis-coded it as FR.
+  _langFromRoster: function(v) {
+      var s = String(v == null ? '' : v).trim().toLowerCase();
+      if (!s) return "";
+      if (s.indexOf('biling') !== -1 || s.indexOf('bil ') === 0 || s === 'bl') return 'BL';
+      if (s.indexOf('french') !== -1 || s.indexOf('français') !== -1 || s === 'fr') return 'FR';
+      if (s.indexOf('english') !== -1 || s === 'en') return 'EN';
+      return "";
+  },
+
   importMasterList: function(rawText) {
       try {
           rawText = this._sanitizeRaw(rawText);
@@ -40,6 +52,14 @@ var AssignmentAnalyzer = {
           let colJob = headers.findIndex(h => h.toLowerCase().includes('title') || h.toLowerCase().includes('job'));
           let colStatus = headers.findIndex(h => h.toLowerCase().includes('status'));
           let colLevel = headers.findIndex(h => h.toLowerCase().includes('erc_level') || h.toLowerCase().includes('level'));
+          // The roster's own Language column — the real source of EN/FR/BL. It was
+          // never read, which is why every agent fell back to 'EN' everywhere: the
+          // only other signal is SafeTracker._inferLang scanning the Skills string
+          // for language words, and real Skills strings contain none (they hold
+          // SmartWear, Question Line, Video Verification…). Match 'language' but
+          // not 'languages' — the SAFE roster's "AGENT LANGUAGES" is a different
+          // export handled by ReportImport.
+          let colLang = headers.findIndex(h => /(^|_|\s)lang(uage)?(\s|_|$)/i.test(h.trim()));
           
           // NEW: Grab extra metadata
           let colSup = headers.findIndex(h => h.toLowerCase().includes('supervisor'));
@@ -54,7 +74,15 @@ var AssignmentAnalyzer = {
               let job = cols[colJob] || "";
               let status = cols[colStatus] || "";
               
-              let level = colLevel > -1 ? parseInt(cols[colLevel]) || 2 : 2;
+              // parseInt('Trainee') is NaN, and `|| 2` was quietly turning all 11
+              // trainees into indistinguishable L2s. Keep the label.
+              let level = 2;
+              if (colLevel > -1) {
+                  let rawLevel = String(cols[colLevel] == null ? '' : cols[colLevel]).trim();
+                  if (/^trainee/i.test(rawLevel)) level = 'Trainee';
+                  else level = parseInt(rawLevel, 10) || 2;
+              }
+              let lang = colLang > -1 ? this._langFromRoster(cols[colLang]) : "";
               let sup = colSup > -1 ? cols[colSup] : "";
               let skills = colSkills > -1 ? cols[colSkills] : "";
               let loc = colLoc > -1 ? cols[colLoc] : "";
@@ -70,7 +98,7 @@ var AssignmentAnalyzer = {
               let isInactive = s.includes('terminated') || s.includes('resigned') || s.includes('inactive') || s.includes('separated') || s === 'left';
 
               if (name && !isInactive && !isManager) {
-                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI]);
+                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI, lang]);
               }
           }
           
@@ -79,9 +107,20 @@ var AssignmentAnalyzer = {
               let sheet = ss.getSheetByName('WF_MASTERLIST');
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
-              // Save the 6 columns
-              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]);
-              sheet.getRange(2, 1, validAgents.length, 6).setValues(validAgents);
+              // 7 columns now — Language (col 6) is new.
+              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI", "Language"]);
+              sheet.getRange(2, 1, validAgents.length, 7).setValues(validAgents);
+              // Push the roster languages into WF_LANG_MAP so every existing
+              // reader (SafeTracker._loadLangMap and everything built on it) sees
+              // them without each one having to learn about the new column. A
+              // manual per-agent override still wins — _mergeLangMap refuses to
+              // overwrite a row whose Source is 'manual'.
+              if (typeof ReportImport !== 'undefined' && ReportImport._mergeLangMap) {
+                  var langPairs = validAgents
+                      .filter(function(r) { return r[6]; })
+                      .map(function(r) { return [r[0], r[6]]; });
+                  if (langPairs.length) ReportImport._mergeLangMap(langPairs, 'masterlist');
+              }
 
               // Sync to RegionRegistry with source=masterlist so these entries
               // outrank future WFM auto-detection but remain overridable manually.

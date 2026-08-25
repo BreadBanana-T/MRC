@@ -248,6 +248,9 @@ var ReportImport = {
   },
   _langCode: function(s) {
     s = String(s || '').toLowerCase();
+    // "Bilingual-French" contains "french", so bilingual has to be tested FIRST
+    // or a bilingual agent is mis-coded FR. Same trap as _langFromRoster.
+    if (/biling|\bbl\b/.test(s)) return 'BL';
     var en = /english|anglais/.test(s) || /\ben\b/.test(s), fr = /french|fran[cç]ais|fran[cç]/.test(s) || /\bfr\b/.test(s);
     if (en && fr) return 'BL'; if (fr) return 'FR'; if (en) return 'EN'; return '';
   },
@@ -294,12 +297,12 @@ var ReportImport = {
         sh.getDataRange().getDisplayValues().slice(1).forEach(function(r) { if (!(r[0] === startStr && r[1] === endStr)) keep.push(r.slice(0, 7)); });
       }
       this._write('WF_SAFE_AGENT', ['PeriodStart', 'PeriodEnd', 'Label', 'Agent', 'TID', 'Lang', 'ActiveHrs'], keep.concat(rows));
-      var langN = this._mergeLangMap(langPairs);
+      var langN = this._mergeLangMap(langPairs, 'safe-report');
       return 'SAFE roster synced: ' + rows.length + ' agents for ' + label + ' · ' + langN + ' languages mapped.';
     } catch (e) { return 'SAFE import error: ' + e.message; }
   },
   // Bulk upsert into WF_LANG_MAP [Agent Key, Display Name, Lang] in ONE write.
-  _mergeLangMap: function(pairs) {
+  _mergeLangMap: function(pairs, source) {
     if (!pairs || !pairs.length) return 0;
     try {
       var ss = this._ss();
@@ -307,16 +310,22 @@ var ReportImport = {
       var nk = (typeof _normalizeAgentKey === 'function') ? _normalizeAgentKey : function(s) { return String(s).trim().toLowerCase(); };
       var vals = sh.getLastRow() > 0 ? sh.getDataRange().getValues() : [];
       var hasHdr = vals.length && String(vals[0][0]).toLowerCase().indexOf('agent key') !== -1;
-      var body = hasHdr ? vals.slice(1) : vals;
+      var body = (hasHdr ? vals.slice(1) : vals).map(function(r) { return [r[0], r[1], r[2], r[3] || '']; });
       var idx = {};
       body.forEach(function(r, i) { idx[String(r[0])] = i; });
+      // A language set by hand in the UI is authoritative: a bulk import must not
+      // silently undo it. Everything else is overwritten as before.
+      var src = source || '';
       pairs.forEach(function(p) {
         var key = nk(p[0]);
-        if (idx[key] != null) { body[idx[key]][1] = p[0]; body[idx[key]][2] = p[1]; }
-        else { body.push([key, p[0], p[1]]); idx[key] = body.length - 1; }
+        if (idx[key] != null) {
+          if (String(body[idx[key]][3] || '') === 'manual' && src !== 'manual') return;
+          body[idx[key]][1] = p[0]; body[idx[key]][2] = p[1]; body[idx[key]][3] = src;
+        }
+        else { body.push([key, p[0], p[1], src]); idx[key] = body.length - 1; }
       });
-      var out = [['Agent Key', 'Display Name', 'Lang']].concat(body.map(function(r) { return [r[0], r[1], r[2]]; }));
-      sh.getRange(1, 1, out.length, 3).setValues(out);
+      var out = [['Agent Key', 'Display Name', 'Lang', 'Source']].concat(body.map(function(r) { return [r[0], r[1], r[2], r[3] || '']; }));
+      sh.getRange(1, 1, out.length, 4).setValues(out);
       return pairs.length;
     } catch (e) { return 0; }
   },
