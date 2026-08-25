@@ -8,8 +8,27 @@ var AssignmentAnalyzer = {
       return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
+  // The GEM export tool switched to UTF-16: read as plain text, every real
+  // character arrives followed by a NUL byte (shown as "A g e n t" -- some
+  // editors turn the NULs into spaces before the paste). Header detection
+  // like includes('in & out by hr') then never matches and the import dies
+  // with "Invalid data format". Strip BOMs + NULs, and when the telltale
+  // interleaved pattern is present, collapse one space after every char.
+  _sanitizeRaw: function(raw) {
+      if (!raw) return "";
+      let s = String(raw).replace(/[\uFEFF\uFFFE\uFFFD]/g, '');
+      if (s.indexOf('\u0000') !== -1) s = s.replace(/\u0000/g, '');
+      if (/a g e n t|e m p l o y e e _ n a m e|i n   &   o u t/i.test(s)) {
+          s = s.split(/\r?\n/).map(function(line) {
+              return line.replace(/([\s\S]) /g, '$1');
+          }).join('\n');
+      }
+      return s;
+  },
+
   importMasterList: function(rawText) {
       try {
+          rawText = this._sanitizeRaw(rawText);
           if (!rawText || rawText.trim() === "") return "Error: No data pasted.";
           let lines = rawText.split(/\r?\n/).filter(l => l.trim().length > 0);
           
@@ -364,6 +383,7 @@ var AssignmentAnalyzer = {
   },
 
   _parseGEM: function(raw) {
+      raw = this._sanitizeRaw(raw);
       if (!raw || raw.trim() === "") return {};
       let lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let headerIdx = lines.findIndex(l => l.toLowerCase().includes('in & out by hr') || l.toLowerCase().includes('cph'));

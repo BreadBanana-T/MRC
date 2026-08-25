@@ -29,6 +29,13 @@
     --status-warn: #d97706;
     --status-role: #7c3aed;
     --status-ulc: #f97316;
+    /* Genesys Cloud brand orange — official #ff451a from Genesys's design
+       system (genesys-spark-components). The one non-indigo accent, used
+       only to mark agents working on the new platform. */
+    --genesys: #ff451a;
+    --genesys-soft: rgba(255, 69, 26, 0.10);
+    --genesys-border: rgba(255, 69, 26, 0.28);
+    --gen-logo-text: #141929; /* official wordmark color on light */
 
     --region-on: #0ea5e9;
     --region-off: #8b5cf6;
@@ -56,6 +63,10 @@
     --status-warn: #fbbf24;
     --status-role: #c084fc;
     --status-ulc: #fb923c;
+    --genesys: #ff5c33; /* lifted slightly for dark-bg contrast */
+    --genesys-soft: rgba(255, 92, 51, 0.14);
+    --genesys-border: rgba(255, 92, 51, 0.34);
+    --gen-logo-text: #ffffff; /* official wordmark color on dark */
     --region-on: #38bdf8;
     --region-off: #a78bfa;
   }
@@ -148,8 +159,22 @@
   }
   
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
-  .brand-logo-diamond { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 6px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 8px; }
-  .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.9); border-radius: 3px; }
+  /* Logo-only brand mark: the wordmark was dropped, so the diamond gets a
+     slow, alive breathing/glow to carry the header on its own. */
+  .brand-logo-diamond { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 7px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 6px; cursor: pointer; animation: brandBreath 4.5s ease-in-out infinite; }
+  .brand-logo-diamond:hover { animation-duration: 1.6s; }
+  .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.92); border-radius: 3px; transform: rotate(-45deg); animation: brandInner 4.5s ease-in-out infinite; }
+  @keyframes brandBreath {
+      0%, 100% { box-shadow: 0 4px 20px rgba(99, 102, 241, 0.20); transform: rotate(45deg) scale(1); }
+      50%      { box-shadow: 0 6px 30px rgba(99, 102, 241, 0.55); transform: rotate(45deg) scale(1.06); }
+  }
+  @keyframes brandInner {
+      0%, 100% { border-color: rgba(255,255,255,0.70); }
+      50%      { border-color: rgba(255,255,255,1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+      .brand-logo-diamond, .brand-logo-inner { animation: none !important; }
+  }
   
   .kpi-row { display: flex; gap: 24px; text-align: right; height: 100%; align-items: center; flex-shrink: 0; }
   .kpi-box h4 { margin: 0; font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; }
@@ -319,6 +344,99 @@
   .group-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-top: 24px; margin-bottom: 8px; border-radius: 6px; background: rgba(255,255,255,0.03); }
   .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
   .group-header i { opacity: 0.7; }
+
+  /* Floor sub-page switch: Avaya Floor <-> Genesys Cloud */
+  .floor-seg { display: flex; gap: 3px; background: rgba(120,120,140,0.10); padding: 3px; border-radius: 12px; flex-shrink: 0; }
+  .floor-seg button { appearance: none; -webkit-appearance: none; border: none; background: transparent; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 0.85rem; height: 34px; padding: 0 14px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: 0.15s; white-space: nowrap; }
+  .floor-seg button:hover { color: var(--text-main); }
+  .floor-seg button.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .floor-seg button.active.gen { color: var(--genesys); }
+
+  /* ===================== GENESYS CLOUD SECTION ===================== */
+  /* Official logo colorways (paths carry .gcl-mk / .gcl-tx classes). */
+  .gcl-mk { fill: var(--genesys); }
+  .gcl-tx { fill: var(--gen-logo-text); }
+
+  /* KPI strip — same idiom as the header .kpi-box row */
+  .gen-kpis { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+  .gen-kpi h4 { margin: 0; font-size: 0.62rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; letter-spacing: 0.06em; }
+  .gen-kpi div { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2; }
+
+  /* platform share bar */
+  .gen-share { height: 6px; border-radius: 99px; overflow: hidden; display: flex; background: var(--glass-border); margin: 2px 0 20px; }
+  .gen-share i { display: block; height: 100%; transition: width 0.4s ease; }
+
+  /* lanes — inbound needs more room for queue chips */
+  .gen-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .gen-cols { grid-template-columns: 1fr; } }
+  .gen-lane-title { display: flex; align-items: center; justify-content: space-between; font-size: 0.9rem; font-weight: 800; margin-bottom: 10px; border-bottom: 1px solid var(--glass-border); padding-bottom: 6px; }
+  .gen-lane-title .sub { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: 0; margin-left: 6px; }
+  .gen-lane-title .cnt { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; }
+  .gen-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 0.8rem; border: 1px dashed var(--glass-border); border-radius: 10px; }
+
+  /* inbound queue chips — same DNA as .row-time (mono, boxed, subtle) */
+  .qrow { display: flex; gap: 4px; flex-wrap: wrap; }
+  .qchip { font-family: monospace; font-size: 0.68rem; font-weight: 700; color: var(--region-on); background: rgba(14,165,233,0.10); border: 1px solid rgba(14,165,233,0.22); padding: 1px 6px; border-radius: 5px; white-space: nowrap; cursor: copy; transition: 0.12s; }
+  .qchip:hover { border-color: var(--region-on); }
+  body.dark .qchip { color: #7dd3fc; background: rgba(56,189,248,0.12); }
+  .qchip.more { color: var(--text-muted); background: transparent; border-color: var(--glass-border); cursor: help; }
+
+  /* queue coverage panel — spot uncovered queues at a glance */
+  .gen-cov-panel { margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 14px; }
+  .gen-cov-panel summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 10px; }
+  .gen-cov-panel summary::-webkit-details-marker { display: none; }
+  .gen-cov-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 20px; }
+  .gen-cov { font-size: 0.68rem; font-weight: 700; font-family: monospace; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--glass-border); color: var(--text-muted); opacity: 0.55; display: inline-flex; align-items: center; gap: 5px; cursor: copy; user-select: none; transition: 0.12s; }
+  .gen-cov:hover { opacity: 0.85; }
+  .gen-cov.on:hover { opacity: 1; border-color: var(--region-on); }
+  .gen-cov { cursor: pointer; }
+  .gen-cov.open { opacity: 1; border-color: var(--genesys); color: var(--genesys); background: var(--genesys-soft); }
+  .gen-cov.open b { background: var(--genesys); }
+
+  /* inline roster expansion under the clicked queue */
+  .gen-cov-detail { grid-column: 1 / -1; border: 1px solid var(--genesys-border); background: var(--genesys-soft); border-radius: 12px; padding: 12px 14px; margin: 2px 0 6px; }
+  .gen-cov-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .gen-cov-detail-head .full-name { font-family: monospace; font-size: 0.78rem; font-weight: 700; color: var(--text-main); cursor: copy; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gen-cov-detail-head .full-name:hover { color: var(--genesys); }
+  .gen-cov-detail-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 130px; overflow-y: auto; }
+  .gen-cov-agent { display: inline-flex; align-items: center; gap: 6px; font-size: 0.76rem; font-weight: 700; color: var(--text-main); background: var(--glass-surface); border: 1px solid var(--glass-border); border-radius: 8px; padding: 4px 9px; cursor: pointer; transition: 0.12s; }
+  .gen-cov-agent:hover { border-color: var(--genesys); transform: translateY(-1px); }
+  .gen-cov-agent .status-dot { width: 7px; height: 7px; }
+  .gen-cov-agent .id { font-family: monospace; font-size: 0.66rem; color: var(--text-muted); font-weight: 700; }
+  .gen-cov.on { opacity: 1; color: var(--region-on); background: rgba(14,165,233,0.08); border-color: rgba(14,165,233,0.25); }
+  .gen-cov.on b { background: var(--region-on); color: #fff; border-radius: 6px; min-width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.62rem; padding: 0 3px; }
+  .gen-cov .lang { opacity: 0.55; }
+
+  /* the FLOOR flag — sits on the normal Avaya row so everyone knows the
+     agent is working elsewhere. Sibling of the inline OT badge, in orange. */
+  .gen-flag { font-size: 0.62rem; font-weight: 800; border: 1px solid var(--genesys); color: var(--genesys); padding: 1px 5px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0.03em; white-space: nowrap; line-height: 1.3; }
+  .gen-flag svg { flex-shrink: 0; }
+
+  /* queue picker modal internals */
+  .gen-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 18px; }
+  .gen-seg button { appearance: none; -webkit-appearance: none; font-family: inherit; cursor: pointer; padding: 12px; border-radius: 12px; border: 1.5px solid var(--glass-border); background: rgba(120,120,140,0.06); color: var(--text-secondary); font-weight: 800; font-size: 0.88rem; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.15s; }
+  .gen-seg button.sel-in { border-color: var(--region-on); color: var(--region-on); background: rgba(14,165,233,0.10); }
+  .gen-seg button.sel-out { border-color: var(--status-break); color: var(--status-break); background: rgba(217,119,6,0.10); }
+  .gen-mlabel { font-size: 0.66rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }
+  .gen-qgroup { margin-bottom: 12px; }
+  .gen-qgroup h5 { margin: 0 0 7px; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+  .gen-qlist { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gen-qopt { font-size: 0.7rem; font-weight: 700; font-family: monospace; cursor: pointer; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(120,120,140,0.06); color: var(--text-secondary); user-select: none; transition: 0.12s; }
+  .gen-qopt:hover { border-color: var(--region-on); }
+  .gen-qopt.on { background: rgba(14,165,233,0.12); color: var(--region-on); border-color: var(--region-on); }
+  .gen-qopt .lang { opacity: 0.55; }
+  .gen-qbody { max-height: 42vh; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+
+  /* batch mode: agent multi-picker inside the assign modal */
+  .gen-batch-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; max-height: 200px; overflow-y: auto; padding-right: 4px; }
+  @media (max-width: 560px) { .gen-batch-list { grid-template-columns: 1fr; } }
+  .gen-agent-opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--glass-border); background: rgba(120,120,140,0.06); cursor: pointer; user-select: none; transition: 0.12s; min-width: 0; }
+  .gen-agent-opt:hover { border-color: var(--genesys-border); }
+  .gen-agent-opt.on { background: var(--genesys-soft); border-color: var(--genesys); }
+  .gen-agent-opt .status-dot { width: 8px; height: 8px; flex-shrink: 0; }
+  .gen-agent-opt .nm { font-weight: 700; font-size: 0.8rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .gen-agent-opt .id { font-family: monospace; font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
+  .gen-agent-opt .gen-cur { font-size: 0.6rem; font-weight: 800; color: var(--genesys); border: 1px solid var(--genesys-border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
 
   .break-card { background: var(--glass-surface); border: 1px solid var(--glass-border); padding: 24px; border-radius: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: 0.2s; cursor: pointer; position: relative; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
   .break-card:hover { transform: translateY(-4px); box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
