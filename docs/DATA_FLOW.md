@@ -197,9 +197,10 @@ client-rendered status page would fail the regex on a healthy site.
 | **WF_IDP** | 0 Day, 1 Interval `HH:mm`, 2 Required, 3 Open | `WorkforceTracker.importData` |
 | **WF_OVERTIME** | 0 Agent, 1 Date, 2 Code, 3 Rate, 4 Bucket, 5 IsBreak, 6 Start, 7 End, 8 Region | `OvertimeTracker.importFromSchedule` |
 | **WF_OT_OPEN** | 0 Date, 1 Start, 2 End, 3 Slots, 4 Activity, 5 MinLen, 6 ADG, 7 ADValues, 8 Type, 9 Rate, 10 ReqGroup, 11 WindowHrs, 12 OpenHrs, 13 Visible(`N`=hidden), 14 OID | `OvertimeTracker.importOpenSlots` |
-| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (`Name;#Lvl;#…`), 4 Location, 5 Email | manual |
+| **WF_MASTERLIST** | 0 Agent, 1 **ERC Level (`1`–`4` or the string `Trainee`)**, 2 Supervisor, 3 Skills (`Name;#N` — **`;#N` is a SharePoint item id, NOT a proficiency level**), 4 Location, 5 Email_TI (empty in practice), **6 Language (EN/FR/BL)** | `AssignmentAnalyzer.importMasterList` (roster paste) |
+| **Genesys_Assignments** | 0 Timestamp, 1 Agent Name, 2 Channel (`inbound`/`outbound`/`''`=Avaya), 3 Queues JSON — one row per agent, latest wins, **no date stamp**: persists until explicitly cleared | `StatusTracker.setGenesysBatch` |
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
-| **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
+| **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL), **3 Source** — `manual` outranks `masterlist` / `safe-report`, so a hand-set language survives a re-import | `SafeTracker.setAgentLang` (manual) · `ReportImport._mergeLangMap` (bulk) |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
 | **Stats History** | 0 DateTime, 1 SVL%, 2 Ack | external/digest |
 | **DB_Sessions** | 1 Agent, 2 Role, 3 Start, 4 End, 6 Hours | external |
@@ -273,6 +274,32 @@ used by the SAFE board where the epoch columns exist.
 
 ---
 
+## 4b. The floor (Genesys page) — one agent key, and how state is written
+
+> **THE key rule.** Anything that stores or reads floor state keys the agent with
+> **`_normalizeAgentKey`** (`WorkforceTracker.gs:15`) — accent/comma-stripped and
+> **token-sorted**. Writing a plain `String(name).trim().toLowerCase()` key is the bug
+> that made role and Genesys assignments silently revert after ~2 minutes: the write
+> landed under `bennani, mohammed` while the read looked for `bennani mohammed`, so the
+> optimistic UI held for the client's 120 s TTL and then snapped back. It only ever
+> resolved by luck — never for comma-form names. Enforced in `RoleManager._key` and
+> `StatusTracker._key`, read by `AgentMonitor` (`:56-60`). `RoleManager.getFastMap`
+> re-keys pre-fix property entries on read so old assignments keep working. Sheets still
+> store the human-readable display name in the name column.
+
+| Concern | Contract |
+|---|---|
+| Floor payload | `AgentMonitor.getPayload` → `compileFloorData` — **20 s `CacheService` cache, busted by every write** (`setStatus` / `setRoles` / `setGenesys*` / `updateBreaks` / `logOvertime`) |
+| Roles | **Additive.** `RoleManager.setStatus` appends, `setRoles` replaces outright (drops one role off a stack), `'Active'` clears all. The client mirrors this and renders each role as its own removable chip |
+| Absence | Independent of role. A role no longer wipes `absentType` — that made "Mark Sick" a no-op for anyone holding a role and left no way to un-mark it |
+| Genesys assignment | `Genesys_Assignments` + the Script-Properties fast map, date-agnostic, exempt from the fast-map 24 h GC. 46 queues in 14 groups (client registry `GENESYS_QUEUES`); queue names copy with the `acd_tel_sec_monit_` prefix |
+| Retired | **ICL** and **ULC FIRE** as roles, plus their cards and buckets. The Genesys `icl_*` **queues** remain (queues, not the legacy role) and no longer synthesize an `ICL` role token. Schedule-derived ICL/ULC activity blocks still display as a status |
+| Optimistic edits | A pending edit retires only once the server acknowledged it **and** a payload requested *after* the edit has landed — an in-flight `getFloorStatus` cannot wipe a change. Failures roll back and say so; the 120 s TTL is a backstop, not the mechanism |
+| Override sheets | `Status_Overrides` / `Break_Overrides` / `Overtime_Tracking` self-prune to 7 days (`StatusTracker._prune`), dropping only a clean prefix |
+| Language | `WF_LANG_MAP` wins over the masterlist column (it carries the manual overrides). **Never** infer it from Skills — `SafeTracker._inferLang` scans Skills for language words and real Skills strings contain none, so it returns `EN` for everyone |
+
+---
+
 ## 5. Known divergences → impact → fix (the roadmap)
 
 | # | Status | Divergence | Impact | Resolution |
@@ -311,7 +338,8 @@ Less likely: a name‑key typo (D2) hides an agent, or a region/registry overrid
 
 ## 7. Rule of thumb when adding/editing a tool
 - Read times via the **epoch‑first** path; never trust text time columns alone (D1/D3).
-- Key agents with **`_normalizeAgentKey`** (D2).
+- Key agents with **`_normalizeAgentKey`** (D2) — floor state included (see §4b).
+- Language comes from **`WF_LANG_MAP`** (`SafeTracker._loadLangMap`), never from Skills.
 - Decide explicitly: is this metric an **actual** (cap at today) or **plan/forecast** (full period)? (D4)
 - Never `clearContents()` before you have the new rows ready — overwrite in place (D5).
 - Resolve region only through **RegionRegistry** (D8).
