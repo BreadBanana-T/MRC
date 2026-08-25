@@ -61,14 +61,17 @@ const StatusTracker = {
     }
 
     if (foundRow > -1) {
-      sheet.getRange(foundRow, 1).setValue(now);
-      if (type === 'role') sheet.getRange(foundRow, 3).setValue(value);
-      if (type === 'absent') sheet.getRange(foundRow, 4).setValue(value);
+      // One setValues instead of up to three single-cell setValue round-trips.
+      const cur = data[foundRow - 1];
+      const roleVal = (type === 'role') ? value : (cur[2] || "");
+      const absentVal = (type === 'absent') ? value : (cur[3] || "");
+      sheet.getRange(foundRow, 1, 1, 5).setValues([[now, name, roleVal, absentVal, dateStr]]);
     } else {
       let roleVal = type === 'role' ? value : "";
       let absentVal = type === 'absent' ? value : "";
       sheet.appendRow([now, name, roleVal, absentVal, dateStr]);
     }
+    this._prune(sheet, 4);
     return "Status Saved";
   },
 
@@ -93,6 +96,7 @@ const StatusTracker = {
     } else {
       sheet.appendRow([new Date(), name, dateStr, jsonBreaks]);
     }
+    this._prune(sheet, 2);
     return "Breaks Saved";
   },
 
@@ -101,6 +105,7 @@ const StatusTracker = {
     const sheet = this._getSheet("Overtime_Tracking", ["Timestamp", "Agent Name", "OT Start", "OT End", "Break Start", "Break End", "DateStr"]);
     const dateStr = this._getTodayStr();
     sheet.appendRow([new Date(), name, start, end, bStart || "-", bEnd || "-", dateStr]);
+    this._prune(sheet, 6);
     return "OT Logged";
   },
 
@@ -198,6 +203,34 @@ const StatusTracker = {
   },
 
   // --- HELPERS ---
+  // Status_Overrides / Break_Overrides / Overtime_Tracking are appended to and
+  // never pruned, yet getConsolidatedData reads each one IN FULL on every poll
+  // and filters to today/yesterday in JS — so the floor got slower every day it
+  // ran. Drop rows older than the read window (with slack), the same way
+  // Schedule_History already self-prunes. dateIdx is the DateStr column.
+  PRUNE_KEEP_DAYS: 7,
+  _prune: function(sheet, dateIdx) {
+    try {
+      const last = sheet.getLastRow();
+      if (last < 400) return 0;   // don't pay for this on a small sheet
+      const cutoff = Utilities.formatDate(
+        new Date(Date.now() - this.PRUNE_KEEP_DAYS * 86400000), "America/Toronto", "yyyy-MM-dd");
+      const data = sheet.getDataRange().getValues();
+      let firstKeep = 1;
+      while (firstKeep < data.length) {
+        let d = data[firstKeep][dateIdx];
+        if (d instanceof Date) d = Utilities.formatDate(d, "America/Toronto", "yyyy-MM-dd");
+        if (String(d || '') >= cutoff) break;
+        firstKeep++;
+      }
+      // Rows are appended in time order, so everything before the first row we
+      // want to keep is stale. Bail out if that isn't a clean prefix.
+      const drop = firstKeep - 1;
+      if (drop > 0) { sheet.deleteRows(2, drop); return drop; }
+      return 0;
+    } catch (e) { return 0; }
+  },
+
   _getSheet: function(name, headers) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(name);

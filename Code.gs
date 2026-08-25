@@ -79,11 +79,11 @@ function fetchLogs(filterFn) {
 // --- ACTIONS ---
 function updateAgentStatus(n, t, v) { _stampAction('agent_status', 'Agent status update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(n, t, v); }
 // Genesys Cloud manual assignment: channel = 'inbound' | 'outbound' | '' (back to Avaya), queuesJson = JSON array of queue ids (inbound only).
-function updateAgentGenesys(n, channel, queuesJson) { _stampAction('agent_status', 'Genesys assignment'); if(typeof RoleManager!=='undefined') return RoleManager.setGenesys(n, channel, queuesJson); }
+function updateAgentGenesys(n, channel, queuesJson) { _stampAction('agent_status', 'Genesys assignment'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setGenesys(n, channel, queuesJson); }
 // Batch variant: namesJson = JSON array of agent names, one save for the whole group.
-function updateAgentGenesysBatch(namesJson, channel, queuesJson) { _stampAction('agent_status', 'Genesys batch assignment'); if(typeof RoleManager!=='undefined') return RoleManager.setGenesysBatch(namesJson, channel, queuesJson); }
+function updateAgentGenesysBatch(namesJson, channel, queuesJson) { _stampAction('agent_status', 'Genesys batch assignment'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setGenesysBatch(namesJson, channel, queuesJson); }
 // Replace an agent's whole role string (used to remove one role off a stack).
-function setAgentRoles(n, roleStr) { _stampAction('agent_status', 'Agent role update'); if(typeof RoleManager!=='undefined') return RoleManager.setRoles(n, roleStr); }
+function setAgentRoles(n, roleStr) { _stampAction('agent_status', 'Agent role update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setRoles(n, roleStr); }
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }

@@ -3,12 +3,40 @@
  */
 
 var AgentMonitor = {
-  getPayload: function() { return compileFloorData(); },
-  setStatus: function(n, t, v) { return RoleManager.setStatus(n, t, v); },
-  updateAgentBreaks: function(n, j) { return StatusTracker.updateBreaks(n, j); },
+  // ── Payload cache ─────────────────────────────────────────────────────────
+  // compileFloorData re-reads Raw Schedule, WF_MASTERLIST, WF_LANG_MAP,
+  // WF_REGION_MAP and three override sheets IN FULL, every poll, for every open
+  // tab (60s in the app, 30s in a popout, plus a notification-triggered
+  // refetch). Nothing was cached, unlike OutageTracker and AlarmComMonitor
+  // which both do exactly this. 20s is deliberately short — this is live floor
+  // state, not a report — and ANY write busts it, so an assignment still shows
+  // up immediately instead of waiting out the TTL.
+  CACHE_KEY: 'MRC_FLOOR_V1',
+  CACHE_TTL_SECONDS: 20,
+
+  _bust: function() {
+    try { CacheService.getScriptCache().remove(this.CACHE_KEY); } catch (e) {}
+  },
+
+  getPayload: function() {
+    try {
+      const hit = CacheService.getScriptCache().get(this.CACHE_KEY);
+      if (hit) return hit;
+    } catch (e) {}
+    const payload = compileFloorData();
+    try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
+    return payload;
+  },
+
+  setStatus: function(n, t, v) { const r = RoleManager.setStatus(n, t, v); this._bust(); return r; },
+  setRoles: function(n, roleStr) { const r = RoleManager.setRoles(n, roleStr); this._bust(); return r; },
+  setGenesys: function(n, ch, q) { const r = RoleManager.setGenesys(n, ch, q); this._bust(); return r; },
+  setGenesysBatch: function(nJson, ch, q) { const r = RoleManager.setGenesysBatch(nJson, ch, q); this._bust(); return r; },
+  updateAgentBreaks: function(n, j) { const r = StatusTracker.updateBreaks(n, j); this._bust(); return r; },
   logOvertime: function(n, s, e, bs, be) { 
       const res = StatusTracker.logOvertime(n, s, e, bs, be);
       if(typeof NotificationHandler !== 'undefined') NotificationHandler.add(n, `OVERTIME: ${s}-${e}`);
+      this._bust();
       return res;
   },
   syncFromRaw: function() { return "Synced"; }
