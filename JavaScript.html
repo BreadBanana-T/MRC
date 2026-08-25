@@ -1,8 +1,8 @@
 <style>
   .row-name { position: relative; cursor: help; }
-  .agent-tooltip { position: absolute; left: 0; bottom: 100%; margin-bottom: 8px; background: var(--bg-root); border: 1px solid var(--glass-border); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); opacity: 0; visibility: hidden; transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index: 1000; width: max-content; max-width: 250px; pointer-events: none; white-space: normal; }
-  body.dark .agent-tooltip { background: #1e293b; border-color: rgba(255,255,255,0.1); }
-  .row-name:hover .agent-tooltip { opacity: 1; visibility: visible; transform: translateY(-4px); }
+  /* unused: the hover card was replaced by on-row .row-attrs chips */
+  .agent-tooltip-legacy { position: absolute; left: 0; bottom: 100%; margin-bottom: 8px; background: var(--bg-root); border: 1px solid var(--glass-border); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); opacity: 0; visibility: hidden; transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index: 1000; width: max-content; max-width: 250px; pointer-events: none; white-space: normal; }
+  body.dark .agent-tooltip-legacy { background: #1e293b; border-color: rgba(255,255,255,0.1); }
   .row-name:hover::after { display: none !important; }
   .custom-scrollbar::-webkit-scrollbar { width: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -1659,11 +1659,13 @@
       var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
       for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
 
-      var tab = state.floorTab || 'avaya';
-      // Sub-page switch: Avaya (the current floor) vs Genesys Cloud.
+      // Genesys is the whole page now, so the old Avaya/Genesys sub-tab switch is
+      // gone — but keep both layouts: "Queues" is the Genesys queue board and
+      // "Roster" is the shift/roles view, which is still how you find someone.
+      var tab = state.floorTab || 'queues';
       var seg = '<div class="floor-seg">' +
-                '<button class="' + (tab==='avaya'?'active':'') + '" onclick="setFloorTab(\'avaya\')"><i data-lucide="users" width="15"></i> Avaya Floor</button>' +
-                '<button class="' + (tab==='genesys'?'active gen':'') + '" onclick="setFloorTab(\'genesys\')">' + genLogoSvg(16) + ' Genesys Cloud</button>' +
+                '<button class="' + (tab==='queues'?'active gen':'') + '" onclick="setFloorTab(\'queues\')">' + genLogoSvg(16) + ' Queues</button>' +
+                '<button class="' + (tab==='roster'?'active':'') + '" onclick="setFloorTab(\'roster\')"><i data-lucide="users" width="15"></i> Roster</button>' +
                 '</div>';
 
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
@@ -1675,7 +1677,7 @@
                  '<button class="btn ' + (state.regionFilter==='Onshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Onshore\')">On</button>' +
                  '<button class="btn ' + (state.regionFilter==='Offshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Offshore\')">Off</button>' +
                  '</div></div></div>' +
-                 (tab==='genesys' ? renderGenesysPage() : renderFloorLayout(upMap));
+                 (tab==='roster' ? renderFloorLayout(upMap) : renderGenesysPage());
       return html;
   }
   window.setFloorTab = function(t) { state.floorTab = t; render(); };
@@ -1699,9 +1701,15 @@
       // floor) — the lane header already says Inbound/Outbound.
       var timeDisplay = 'OFF';
       if (a.shift && a.shift.indexOf('?') === -1) { var parts = a.shift.split(' - '); if (parts.length === 2) timeDisplay = escapeHTML(parts[0]) + '-' + escapeHTML(parts[1]); }
-      return '<div class="agent-row" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
+      var gAttrTitle = [];
+      if (a.level) gAttrTitle.push('Level ' + a.level);
+      if (a.lang) gAttrTitle.push(a.lang);
+      if (a.manager) gAttrTitle.push('Sup: ' + a.manager);
+      if (a.skills) gAttrTitle.push(prettySkills(a.skills));
+      return '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
              '<div class="status-dot ' + stripClass + '"></div>' +
              '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
+             '<div class="row-attrs" title="' + escapeHTML(gAttrTitle.join(' · ')) + '">' + agentLvlChip(a.level) + agentLangChip(a.lang) + '</div>' +
              '<div class="row-id" style="padding-left:4px;">' + fid + '</div>' +
              '<div class="row-status">' + mid + '</div>' +
              '<div class="row-time">' + timeDisplay + '</div></div>';
@@ -1738,7 +1746,7 @@
               var who = (holders[openQ] || []).map(function(a) {
                   var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
                   var dot = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
-                  return '<span class="gen-cov-agent" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')"><span class="status-dot ' + dot + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span></span>';
+                  return '<span class="gen-cov-agent" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)"><span class="status-dot ' + dot + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span></span>';
               }).join('');
               html += '<div class="gen-cov-detail">' +
                       '<div class="gen-cov-detail-head">' +
@@ -1877,7 +1885,7 @@
      }
      
      var html = startingHtml +
-         '<div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div><div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-role);">ICL</div><div class="agent-list-view">' + renderGroup(state.agents.icl||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-active);">SAFE</div><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div><div class="agent-list-view">' + renderGroup(state.agents.ulc||[], upMap) + '</div></div></div>' +
+         '<div class="group-header"><i data-lucide="shield" width="14"></i> SAFE</div><div style="margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div></div>' +
          '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
          '<div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div><div class="agent-list-view" style="margin-bottom:30px;">' + (renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>') + '</div>' + offHtml;
@@ -1887,6 +1895,41 @@
   // One matcher for every Floor list, so the search box and the On/Off toggle
   // narrow the whole page consistently. Previously each list rolled its own and
   // the Upcoming Shifts chips consulted neither.
+  // Level / language chips. These lived as locals inside the SAFE renderer and had
+  // already been copy-pasted once; hoisted here so the Floor, SAFE board and the
+  // read-only copy all render an agent's attributes identically.
+  // Level can be the string 'Trainee' as well as 1-4, so don't assume a number.
+  function agentLvlChip(lv) {
+      if (lv === null || lv === undefined || lv === '') return '';
+      var isTrainee = /^trainee$/i.test(String(lv));
+      var n = parseInt(lv, 10);
+      var senior = !isTrainee && n >= 4;
+      var label = isTrainee ? 'TRAINEE' : ('L' + (isFinite(n) ? n : lv));
+      var col = isTrainee ? 'var(--status-warn)' : (senior ? 'var(--status-role)' : 'var(--text-secondary)');
+      var bg = isTrainee ? 'rgba(217,119,6,0.12)' : (senior ? 'rgba(124,58,237,0.12)' : 'rgba(0,0,0,0.05)');
+      return '<span class="attr-chip" style="color:' + col + '; background:' + bg + ';" title="' + (isTrainee ? 'Trainee' : ('ERC level ' + lv)) + '">' + label + '</span>';
+  }
+  function agentLangChip(lang) {
+      var l = String(lang || '').toUpperCase();
+      if (['EN','FR','BL'].indexOf(l) === -1) return '';
+      var col = l === 'BL' ? 'var(--status-active)' : (l === 'FR' ? 'var(--accent-primary)' : 'var(--text-secondary)');
+      var bg = l === 'BL' ? 'rgba(5,150,105,0.12)' : (l === 'FR' ? 'rgba(79,70,229,0.12)' : 'rgba(0,0,0,0.05)');
+      var full = l === 'BL' ? 'Bilingual' : (l === 'FR' ? 'French' : 'English');
+      return '<span class="attr-chip" style="color:' + col + '; background:' + bg + ';" title="' + full + '">' + l + '</span>';
+  }
+  // Each role gets its own chip with an × — roles stack on the server, and
+  // "Set Active" (which wipes them all) used to be the only way to remove one.
+  function agentRoleChips(a) {
+      var toks = String((a && a.role) || '').split(/\s+/).filter(Boolean);
+      if (!toks.length) return '';
+      // The role travels in a data attribute and the agent is read off the
+      // enclosing row, so no name is ever interpolated into the handler.
+      return toks.map(function(t) {
+          return '<span class="attr-chip role" title="' + escapeHTML(t) + '">' + escapeHTML(t) +
+                 '<button class="attr-x" data-role="' + encodeURIComponent(t) + '" title="Remove ' + escapeHTML(t) + '" onclick="removeAgentRoleFromEl(event, this)">&times;</button></span>';
+      }).join('');
+  }
+
   function floorMatch(a) {
       if (!a) return false;
       var reg = a.region || '';
@@ -1975,21 +2018,51 @@
          timeStyle = 'color: var(--status-break); background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.18);';
      }
 
-     var hoverCardHtml = '<div class="agent-tooltip"><div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">' + escapeHTML(a.name || '') + '</div>';
-     if (a.level) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ' + escapeHTML(a.level) + '</div>';
-     if (a.manager) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">' + escapeHTML(a.manager) + '</span></div>';
-     if (a.skills) hoverCardHtml += '<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">' + escapeHTML(prettySkills(a.skills)) + '</div>';
-     hoverCardHtml += '</div>';
+     // The old hover card was unreachable: .agent-tooltip is absolutely positioned
+     // inside .row-name, which is overflow:hidden, so it was always clipped. The
+     // attributes now render on the row itself, and the title attribute carries
+     // the detail (supervisor, skills) that doesn't fit.
+     var attrTitle = [];
+     if (a.level) attrTitle.push('Level ' + a.level);
+     if (a.lang) attrTitle.push(a.lang);
+     if (a.manager) attrTitle.push('Sup: ' + a.manager);
+     if (a.region) attrTitle.push(a.region);
+     if (a.skills) attrTitle.push(prettySkills(a.skills));
+     var attrsHtml = '<div class="row-attrs" title="' + escapeHTML(attrTitle.join(' · ')) + '">' +
+                     agentLvlChip(a.level) + agentLangChip(a.lang) + agentRoleChips(a) +
+                     ((a.manager) ? '<span class="attr-chip sup" title="Supervisor: ' + escapeHTML(a.manager) + '">' + escapeHTML(String(a.manager).split(/[ ,]/)[0]) + '</span>' : '') +
+                     '</div>';
 
-     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
+     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
                 '<div class="status-dot ' + stripClass + '"></div>' +
-                '<div class="row-name">' + escapeHTML(a.name || '') + hoverCardHtml + '</div>' +
+                '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
+                attrsHtml +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
                 '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + ((a.genesys && a.genesys.channel) ? '<div style="margin-top:3px;"><span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span></div>' : '') + breakHtml + '</div>' +
                 '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
      return html;
   }
   
+  // Read the agent off the element instead of interpolating the name into an
+  // inline handler — that was a SyntaxError for any name with an apostrophe.
+  window.openMenuFromRow = function(e, el) {
+      var raw = el && el.getAttribute('data-agent');
+      var name = '';
+      try { name = decodeURIComponent(raw || ''); } catch (err) { name = raw || ''; }
+      openMenu(e, name);
+  };
+
+  window.removeAgentRoleFromEl = function(e, el) {
+      e.stopPropagation();
+      var row = el;
+      while (row && !row.getAttribute('data-agent')) row = row.parentElement;
+      if (!row) return;
+      var name = '', role = '';
+      try { name = decodeURIComponent(row.getAttribute('data-agent') || ''); } catch (err) { name = ''; }
+      try { role = decodeURIComponent(el.getAttribute('data-role') || ''); } catch (err) { role = ''; }
+      if (name && role) removeAgentRole(name, role);
+  };
+
   window.copyAgentInfo = function(e, idText) { e.stopPropagation(); fallbackCopyTextToClipboard(idText, "Copied: " + idText); }
   window.openBreakModal = function() { closeMenu(); var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(!agent) { showToast("Agent data not found"); return; } var container = document.getElementById('break-editor'); container.innerHTML = ""; (agent.rawBreaks || []).forEach(function(b, i) { container.innerHTML += '<div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;"><div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">' + escapeHTML(b.type) + '</div><div style="display:flex; gap:8px;"><input id="bs-' + i + '" class="input-aether" value="' + escapeHTML(b.start || '') + '" style="font-size:0.85rem;"><input id="be-' + i + '" class="input-aether" value="' + escapeHTML(b.end || '') + '" style="font-size:0.85rem;"></div></div>'; }); document.getElementById('break-modal').classList.add('open'); };
   window.openOtModal = function() { closeMenu(); document.getElementById('ot-start').value = ""; document.getElementById('ot-end').value = ""; document.getElementById('ot-modal').classList.add('open'); };
@@ -2170,7 +2243,12 @@
       // Real off-floor %: off-floor agents / total-scheduled. No artificial padding.
       var totalScheduled = activeCount + unplanCount + planCount;
       var offFloorPct = totalScheduled > 0 ? Math.round(((unplanCount + planCount) / totalScheduled) * 100) : 0;
-      var safeCount = (state.agents.safe||[]).length; var iclCount = (state.agents.icl||[]).length; var ulcCount = (state.agents.ulc||[]).length;
+      // ICL / ULC FIRE are retired; the floor is Genesys now, so the tile reports
+      // SAFE plus the live inbound/outbound split.
+      var safeCount = (state.agents.safe||[]).length;
+      var _act = state.agents.active || [];
+      var genInCount = _act.filter(function(a){ return a.genesys && a.genesys.channel === 'inbound'; }).length;
+      var genOutCount = _act.filter(function(a){ return a.genesys && a.genesys.channel === 'outbound'; }).length;
 
       var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
       if (state.calendarError) {
@@ -2189,7 +2267,7 @@
                  renderStaffingTile() +
                  renderAlarmComTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
-                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div><div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">' + iclCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div><div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">' + ulcCount + '</div></div></div></div>' +
+                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--region-on); margin-bottom:4px; letter-spacing:1px;">GEN IN</div><div id="ov-genin" style="font-size:1.8rem; font-weight:800; line-height:1;">' + genInCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-break); margin-bottom:4px; letter-spacing:1px;">GEN OUT</div><div id="ov-genout" style="font-size:1.8rem; font-weight:800; line-height:1;">' + genOutCount + '</div></div></div></div>' +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +
                  mgmtLunchTile() + '</div>';
       return html;

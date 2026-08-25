@@ -23,7 +23,7 @@ function compileFloorData() {
   let sheet = localSS.getSheetByName("Raw Schedule");
   
   const emptyFloor = {
-    active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
+    active: [], startingSoon: [], safe: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
 
@@ -41,9 +41,25 @@ function compileFloorData() {
               level: r[1],
               manager: r[2],
               skills: r[3],
+              lang: r[6] || "",   // Language, added by the roster import
               isOffshore: isOffshore
           };
       });
+  }
+
+  // WF_LANG_MAP is the authoritative language store — it holds the manual
+  // per-agent overrides as well as the bulk imports — so it wins over the
+  // masterlist column, which is only the roster's own value.
+  let langMap = {};
+  {
+      const dbLang = localSS.getSheetByName('WF_LANG_MAP');
+      if (dbLang && dbLang.getLastRow() > 1) {
+          dbLang.getDataRange().getDisplayValues().slice(1).forEach(r => {
+              const k = String(r[0] || '').trim();
+              const lv = String(r[2] || '').trim().toUpperCase();
+              if (k && lv) langMap[k] = lv;
+          });
+      }
   }
 
   const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
@@ -219,14 +235,10 @@ function compileFloorData() {
        });
     }
 
+    // ICL and ULC FIRE are retired as roles. The Genesys icl_* QUEUES remain —
+    // they're queues, not the legacy role — but they no longer synthesize an
+    // 'ICL' role token, because there's no ICL card left to surface it in.
     let effectiveRole = manualRole || dynamicRoleNow;
-    // Genesys inbound agents holding an ICL queue ARE the ICL role, just on
-    // the other platform — surface them in the floor's ICL card too.
-    if (genesysData && genesysData.channel === 'inbound' &&
-        (genesysData.queues || []).some(q => String(q).indexOf('icl_') === 0) &&
-        effectiveRole.indexOf('ICL') === -1) {
-      effectiveRole = (effectiveRole + ' ICL').trim();
-    }
     let category = "active";
     let subStatus = effectiveRole || "";
 
@@ -243,7 +255,7 @@ function compileFloorData() {
             else { category = "vacation"; subStatus = absentType; }
         } 
 
-        if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
+        if (['active', 'safe'].includes(category)) {
             if (startEpoch && startEpoch > now) {
                  category = "startingSoon";
                  const diff = startEpoch - now;
@@ -277,6 +289,7 @@ function compileFloorData() {
       level: ml ? ml.level : null,
       manager: ml ? ml.manager : null,
       skills: ml ? ml.skills : null,
+      lang: langMap[cleanNameKey] || (ml ? ml.lang : "") || "",
       genesys: genesysData
     };
 
@@ -307,10 +320,11 @@ function compileFloorData() {
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
       if (targetCat === "active" || targetCat === "startingSoon") {
+          // SAFE is the only special role still tracked on the floor. ICL and
+          // ULC FIRE were retired (the SAFE Compare board and the trackers had
+          // already dropped them); Genesys queues cover that work now.
           const r = (item.agent.role || "").toUpperCase();
           if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
-          if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
-          if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
       }
   });
 

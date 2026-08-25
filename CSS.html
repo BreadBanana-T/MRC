@@ -303,7 +303,7 @@
   
   .agent-row {
       display: grid;
-      grid-template-columns: 26px minmax(100px, 1.2fr) 70px minmax(120px, 2fr) 90px;
+      grid-template-columns: 26px minmax(100px, 1.2fr) minmax(0, auto) 70px minmax(120px, 1.6fr) 90px;
       align-items: center;
       background: var(--glass-surface);
       border: 1px solid var(--glass-border);
@@ -335,8 +335,30 @@
       100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
   }
 
-  .row-name { font-weight: 700; color: var(--text-main); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; cursor: help; position: relative; }
-  .row-name:hover::after { content: attr(data-full-name); position: absolute; left: 10px; top: -28px; background: var(--text-main); color: var(--bg-root); padding: 6px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.2); pointer-events: none; }
+  .row-name { font-weight: 700; color: var(--text-main); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; position: relative; }
+
+  /* Per-agent attributes, on the row rather than in a hover card. The old
+     .agent-tooltip was absolutely positioned inside .row-name, which is
+     overflow:hidden, so it was clipped and could never be read. */
+  .row-attrs { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow: hidden; padding-right: 6px; }
+  .attr-chip {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 0.62rem; font-weight: 800; letter-spacing: 0.03em;
+      padding: 2px 6px; border-radius: 5px;
+      background: rgba(0,0,0,0.05); color: var(--text-secondary);
+      white-space: nowrap; flex-shrink: 0;
+  }
+  body.dark .attr-chip { background: rgba(255,255,255,0.06); }
+  .attr-chip.role { color: var(--status-active); background: rgba(5,150,105,0.12); padding-right: 2px; }
+  .attr-chip.sup { color: var(--text-muted); font-weight: 700; text-transform: none; letter-spacing: 0; }
+  .attr-x {
+      appearance: none; -webkit-appearance: none; border: none; background: transparent;
+      color: inherit; opacity: 0.55; cursor: pointer; font-size: 0.85rem; line-height: 1;
+      padding: 0 3px; border-radius: 3px;
+  }
+  .attr-x:hover { opacity: 1; background: rgba(220,38,38,0.18); color: var(--status-alert); }
+  @media (max-width: 1100px) { .row-attrs .attr-chip.sup { display: none; } }
+  @media (max-width: 860px) { .row-attrs { display: none; } }
   .row-id { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); opacity: 0.7; }
   .row-status { font-weight: 600; font-size: 0.85rem; color: var(--text-secondary); display: flex; flex-direction: column; justify-content: center; line-height: 1.2; white-space: normal; word-wrap: break-word; padding: 4px 0; }
   .row-time { font-family: monospace; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-align: right; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; justify-self: end; }

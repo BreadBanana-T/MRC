@@ -34,7 +34,7 @@
 
             <nav class="nav-island">
                 <button class="nav-btn active" id="btn-overview" onclick="setView('overview')"><i data-lucide="layout-dashboard" width="16"></i><span>Dashboard</span></button>
-                <button class="nav-btn" id="btn-agents" onclick="setView('agents')"><i data-lucide="users" width="16"></i><span>Floor</span></button>
+                <button class="nav-btn" id="btn-agents" onclick="setView('agents')"><i data-lucide="headphones" width="16"></i><span>Genesys</span></button>
                 <button class="nav-btn" id="btn-scripts" onclick="setView('scripts')"><i data-lucide="file-text" width="16"></i><span>Scripts</span></button>
                 <button class="nav-btn" id="btn-weather" onclick="setView('weather')"><i data-lucide="cloud" width="16"></i><span>Weather</span></button>
                 <button class="nav-btn" id="btn-calc" onclick="setView('calc')"><i data-lucide="calculator" width="16"></i><span>Calculator</span></button>
@@ -81,9 +81,7 @@
     </div>
 
     <div id="agent-menu" class="ctx-menu">
-        <button class="ctx-item" onclick="setAgentStatus('role', 'ICL')">Assign ICL</button>
         <button class="ctx-item" onclick="setAgentStatus('role', 'SAFE')">Assign SAFE</button>
-        <button class="ctx-item" onclick="setAgentStatus('role', 'ULC FIRE')" style="color:var(--status-ulc);">Assign ULC FIRE</button>
         <div style="height:1px; background:var(--glass-border); margin:4px 0;"></div>
         <button class="ctx-item" onclick="setAgentStatus('role', 'Active')">Set Active</button>
         <div style="height:1px; background:var(--glass-border); margin:4px 0;"></div>
@@ -92,6 +90,7 @@
         <button class="ctx-item" id="ctx-back-avaya" onclick="removeGenesys()"><i data-lucide="corner-up-left" width="15"></i> Back to Avaya</button>
         <div style="height:1px; background:var(--glass-border); margin:4px 0;"></div>
         <button class="ctx-item" style="color:var(--status-alert);" onclick="setAgentStatus('absent', 'SICK')">Mark Sick</button>
+        <button class="ctx-item" id="ctx-clear-absence" onclick="clearAgentAbsence(state.selectedAgent)">Clear Absence</button>
         <button class="ctx-item" onclick="openBreakModal()">Edit Schedule</button>
         <button class="ctx-item" onclick="openOtModal()">Log Overtime</button>
     </div>
