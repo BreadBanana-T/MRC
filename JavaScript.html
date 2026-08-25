@@ -184,7 +184,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -1106,11 +1106,21 @@
   }
   function updateClock() { var el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
-  var searchTimeout;
-  window.handleSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
-  window.handleScriptSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
-  window.handleTrackerSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.trackerSearch = val; render(); }, 200); };
-  window.handleInsightSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.insightSearch = val; render(); }, 200); };
+  // One timer PER FIELD. A single shared `searchTimeout` meant any two search
+  // boxes cancelled each other's pending render.
+  var _searchTimers = {};
+  // The term is stored IMMEDIATELY and only the re-render is debounced. The old
+  // order deferred the assignment by 200ms, so a poll landing inside that window
+  // rebuilt the input from the stale value and visibly ate the keystroke.
+  function _debouncedSearch(field, val) {
+      state[field] = val;
+      clearTimeout(_searchTimers[field]);
+      _searchTimers[field] = setTimeout(function() { render(); }, 200);
+  }
+  window.handleSearch = function(val) { _debouncedSearch('floorSearch', val); };
+  window.handleScriptSearch = function(val) { _debouncedSearch('searchTerm', val); };
+  window.handleTrackerSearch = function(val) { _debouncedSearch('trackerSearch', val); };
+  window.handleInsightSearch = function(val) { _debouncedSearch('insightSearch', val); };
 
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
@@ -1658,7 +1668,7 @@
 
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
                  seg +
-                 '' + searchBox('agent-search', 'Search agents...', escapeHTML(state.searchTerm || ''), 'handleSearch(this.value)', 'width:200px;', 'height:34px; font-size:0.85rem;') + '' +
+                 '' + searchBox('agent-search', 'Search name, ID, supervisor, language…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:200px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
                  '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
                  '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
@@ -1760,12 +1770,7 @@
   // platform breakdown reads at a glance. Reached via the Floor sub-tab.
   function renderGenesysPage() {
       var active = state.agents.active || [];
-      function match(a) {
-          var mName = !state.searchTerm || (a.name || '').toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1;
-          var mReg = state.regionFilter === 'All' || (a.region || '').indexOf(state.regionFilter) !== -1;
-          return mName && mReg;
-      }
-      var visible = active.filter(match);
+      var visible = active.filter(floorMatch);
       var inbound = [], outbound = [], avaya = [];
       visible.forEach(function(a) {
           if (a.genesys && a.genesys.channel === 'inbound') inbound.push(a);
@@ -1830,9 +1835,12 @@
      // collapsible blocks — a preview of the next shift(s) coming in. Blocks
      // starting within 30m auto-expand; each block can be copied on its own.
      var startingHtml = '';
-     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
+     // Filter FIRST, so a search that matches nobody upcoming collapses the card
+     // instead of rendering an empty shell.
+     var soonMatched = (state.agents.startingSoon || []).filter(floorMatch);
+     if (soonMatched.length > 0) {
          var groupsMap = {};
-         state.agents.startingSoon.forEach(function(a) {
+         soonMatched.forEach(function(a) {
              var st = (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : (a.subStatus || 'Soon');
              if (!groupsMap[st]) groupsMap[st] = { start: st, epoch: a.startEpoch || 0, agents: [] };
              if (a.startEpoch && (!groupsMap[st].epoch || a.startEpoch < groupsMap[st].epoch)) groupsMap[st].epoch = a.startEpoch;
@@ -1863,7 +1871,7 @@
          startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Upcoming Shifts (later today)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + ' · tap a block to expand</span></div>' + blocks + '</div>';
      }
      var offHtml = '';
-     if (state.searchTerm && state.searchTerm.trim() !== '') { 
+     if (state.floorSearch && state.floorSearch.trim() !== '') { 
          var offAgents = state.agents.off || []; var offRendered = renderGroup(offAgents, upMap); 
          if (offRendered) { offHtml = '<div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div><div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">' + offRendered + '</div>'; } 
      }
@@ -1876,9 +1884,25 @@
      return html;
   }
   
+  // One matcher for every Floor list, so the search box and the On/Off toggle
+  // narrow the whole page consistently. Previously each list rolled its own and
+  // the Upcoming Shifts chips consulted neither.
+  function floorMatch(a) {
+      if (!a) return false;
+      var reg = a.region || '';
+      if (state.regionFilter !== 'All' && reg.indexOf(state.regionFilter) === -1) return false;
+      var term = (state.floorSearch || '').trim().toLowerCase();
+      if (!term) return true;
+      // Search across the things actually shown on the row, not just the name.
+      var hay = [a.name, a.id, a.tid, a.manager, a.lang, a.level, a.role, a.subStatus, a.shift, reg]
+          .map(function(v) { return v == null ? '' : String(v); })
+          .join(' ').toLowerCase();
+      return hay.indexOf(term) !== -1;
+  }
+
   function renderGroup(list, upMap) {
       if (!list) return '';
-      var filtered = list.filter(function(a) { var safeName = a.name || ''; var safeReg = a.region || ''; var mName = !state.searchTerm || safeName.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1; var mReg = state.regionFilter === 'All' || safeReg.indexOf(state.regionFilter) !== -1; return mName && mReg; });
+      var filtered = list.filter(floorMatch);
       if(!filtered.length) return '';
       return filtered.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('');
   }
