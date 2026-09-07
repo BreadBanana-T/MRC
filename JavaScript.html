@@ -19,7 +19,17 @@
       return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
 
-  var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
+  // Materialise every <i data-lucide> into an <svg>. This used to fail in total silence when
+  // the Lucide CDN was blocked: no else, no warning, so "all the icons went blank" looked
+  // like an app bug with nothing in the console. Warn once instead.
+  var _lucideWarned = false;
+  var refreshIcons = function() {
+      if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (e) { console.warn('[icons] createIcons failed:', e); } return; }
+      if (!_lucideWarned) {
+          _lucideWarned = true;
+          console.warn('[icons] Lucide is not loaded — every icon will render blank. Check whether the CDN in Index.html is reachable from this network (see the loader comment there).');
+      }
+  };
 
   // ── GSAP view entrances ──────────────────────────────────────────────────
   // One-shot, GPU-friendly (y + opacity only — no scale, so Chart.js canvases
