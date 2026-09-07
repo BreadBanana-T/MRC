@@ -276,10 +276,18 @@ function compileFloorData() {
         effectiveRole = ""; 
     } else {
         if (absentType) {
-            const upper = absentType.toUpperCase();
-            if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
-            // NEW: Push PW/ALT and Personal into the Unplanned / Needs Attention bucket
-            else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP|PW\/ALT|PERSONAL|WELLNESS/)) { category = "unplanned"; subStatus = absentType; }
+            // A real absence ALWAYS lands in Needs Attention — an agent coded UNAB or
+            // TI LOA must be visible. There used to be an escape hatch here that sent
+            // them back to "active" whenever they had more than one break row, which
+            // hid 157 of 208 real UNAB agent-days (offshore agents keep their TI
+            // break/lunch rows on an absence day). The intent behind it was real —
+            // someone can be UNAB for a few hours and present for the rest — so that
+            // nuance now lives in the LABEL, not in the bucket: the importer marks a
+            // worked absence day "(part day)". Nobody gets hidden.
+            var _unplanned = (typeof isUnplannedAbsenceType === 'function')
+                ? isUnplannedAbsenceType(absentType)
+                : /SICK|NCNS|UNAB|AWOL|COMP|ALU|LOA|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/.test(absentType.toUpperCase());
+            if (_unplanned) { category = "unplanned"; subStatus = absentType; }
             else { category = "vacation"; subStatus = absentType; }
         } 
 

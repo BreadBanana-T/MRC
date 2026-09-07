@@ -1995,7 +1995,10 @@
      var start = "00:00", end = "00:00";
      if (a.shift && a.shift.indexOf("?") === -1) { var parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
-     if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL|PW\/ALT|PERSONAL/i)) stripClass = 'alert';
+     // Same absence list as the server's Needs Attention rule — this was missing
+     // UNAB, COMP, ALU, LOA and BEREAVEMENT, so even a correctly-bucketed UNAB or
+     // TI LOA row rendered without the red alert strip.
+     if(a.subStatus && a.subStatus.match(/SICK|NCNS|\bUNAB\b|AWOL|\bCOMPU?\b|\bALU\b|\bLOA\b|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/i)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
      var statusText = escapeHTML(a.subStatus) || "Active";
      var statusColor = "var(--text-secondary)";
