@@ -194,7 +194,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -243,21 +243,15 @@
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
     fetchPresenceBootstrap();
     fetchAlarmCom();
+    fetchOverviewIdp();
+    setInterval(fetchOverviewIdp, 60000); // 1 min — matches the 15-min IDP bucket granularity
     setInterval(fetchOutages, 300000); // 5 min
     setInterval(fetchAlarmCom, 300000); // 5 min — matches the server-side probe cadence
-    setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
     setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
     setInterval(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
-  }
-
-  function fetchStaffingBalance() {
-      if (typeof google === 'undefined') return;
-      google.script.run.withSuccessHandler(function(res) {
-          try { state.staffingBalance = JSON.parse(res); if (state.view === 'overview') render(); } catch (e) {}
-      }).getStaffingBalance();
   }
 
   function fetchAlarmCom() {
@@ -2184,16 +2178,6 @@
           ' cursor:default;');
   }
 
-  function renderStaffingTile() {
-      var s = state.staffingBalance;
-      if (!s || !s.available) {
-          var reason = s && s.reason ? s.reason : 'Loading…';
-          return '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; opacity:0.6;"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Net Staffing</h4><div style="font-size:1.8rem; font-weight:800; color:var(--text-muted);">—</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;" title="' + escapeHTML(reason) + '">' + escapeHTML(reason.length > 22 ? reason.substring(0, 20) + '…' : reason) + '</div></div>';
-      }
-      var color = s.status === 'critical' ? 'var(--status-alert)' : (s.status === 'warn' ? 'var(--status-warn)' : (s.status === 'surplus' ? 'var(--status-active)' : 'var(--text-main)'));
-      var sign = s.net > 0 ? '+' : '';
-      return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Net = Open seats − Required for current 15-min IDP bucket"><div class="aurora-label" style="margin-bottom:10px;">Net Staffing</div><div style="font-size:2.8rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + sign + s.net + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + s.supply + ' open / ' + s.demand + ' req @ ' + escapeHTML(s.bucket) + '</div></div>';
-  }
 
   function renderOutageTile() {
       var d = state.outagesData;
@@ -2256,12 +2240,6 @@
       // Real off-floor %: off-floor agents / total-scheduled. No artificial padding.
       var totalScheduled = activeCount + unplanCount + planCount;
       var offFloorPct = totalScheduled > 0 ? Math.round(((unplanCount + planCount) / totalScheduled) * 100) : 0;
-      // ICL / ULC FIRE are retired; the floor is Genesys now, so the tile reports
-      // SAFE plus the live inbound/outbound split.
-      var safeCount = (state.agents.safe||[]).length;
-      var _act = state.agents.active || [];
-      var genInCount = _act.filter(function(a){ return a.genesys && a.genesys.channel === 'inbound'; }).length;
-      var genOutCount = _act.filter(function(a){ return a.genesys && a.genesys.channel === 'outbound'; }).length;
 
       var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
       if (state.calendarError) {
@@ -2277,12 +2255,43 @@
                  '<div class="aether-card tile-aurora" data-aurora-tile="sl" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px; padding:28px;"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;"><div><div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;"><span class="aurora-pulse"></span> Service Level</div><div class="aurora-num cnum" data-aurora-num="sl" style="font-size:3.8rem; font-weight:800; line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div class="aurora-label" style="margin-bottom:10px;">Response Time</div><div data-aurora-num="ack" class="cnum" style="font-size:2.2rem; font-weight:800; color:var(--text-main); line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:130px; width:100%; margin-top:24px;"><canvas id="chart-overview" style="display:block;"></canvas></div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
                  '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" class="cnum" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
-                 renderStaffingTile() +
                  renderAlarmComTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
-                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--region-on); margin-bottom:4px; letter-spacing:1px;">GEN IN</div><div id="ov-genin" style="font-size:1.8rem; font-weight:800; line-height:1;">' + genInCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-break); margin-bottom:4px; letter-spacing:1px;">GEN OUT</div><div id="ov-genout" style="font-size:1.8rem; font-weight:800; line-height:1;">' + genOutCount + '</div></div></div></div>' +
+                 overviewIdpTile() +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +
                  mgmtLunchTile() + '</div>';
+      return html;
+  }
+
+  // Intraday IDP on the Dashboard. Deliberately does NOT read state.trackerData:
+  // that is populated at boot, but it is replaced the moment someone switches the
+  // tracker to coaching or a monthly range, and `.grid` disappears — so the tile
+  // would blank out depending on where the user had last been. Its own key, its own
+  // fetch, same shape as fetchOverviewLunch below.
+  function fetchOverviewIdp() {
+      if (typeof google === 'undefined') return;
+      state.overviewIdpLoading = true;
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.overviewIdp = JSON.parse(res); } catch (e) { state.overviewIdp = { error: 'Could not read IDP data.' }; }
+          state.overviewIdpLoading = false;
+          if (state.view === 'overview') render();
+      }).withFailureHandler(function(err) {
+          state.overviewIdp = { error: (err && err.message) || 'IDP backend error.' };
+          state.overviewIdpLoading = false;
+          if (state.view === 'overview') render();
+      }).getWorkforceAnalytics('day', localDateStr(), 'furlough', 'All', 'ALL');
+  }
+
+  function overviewIdpTile() {
+      var o = state.overviewIdp;
+      var shell = function(inner) {
+          return '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header">Intraday IDP<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">net staffing per 15 min · today</span></div>' + inner + '</div>';
+      };
+      if (state.overviewIdpLoading || !o) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading IDP…</div>');
+      if (o.error) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(o.error) + '</div>');
+      // Same renderer the Furlough tracker uses, so the two always agree.
+      var html = renderIdpHeatmapTile(o.grid, (state.syncMeta && state.syncMeta.idp) || '', (state.syncMeta && state.syncMeta.muSet) || '');
+      if (!html) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">No IDP data imported for today.</div>');
       return html;
   }
 
@@ -2659,6 +2668,52 @@
       return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:0.66rem; font-weight:800; color:var(--text-secondary); background:rgba(0,0,0,0.04); padding:2px 8px; border-radius:99px; white-space:nowrap;"><span style="width:7px; height:7px; border-radius:50%; background:' + m.color + ';"></span>' + escapeHTML(m.label) + (count != null ? ' <b style="color:var(--text-main);">' + count + '</b>' : '') + '</span>';
   }
 
+  // ── Intraday IDP heatmap ────────────────────────────────────────────────────
+  // 24 hour-columns x 4 fifteen-minute cells, per-hour AVG and a DAY AVERAGE IDP
+  // footer. Hoisted out of renderTracker() so the Dashboard and the Furlough
+  // tracker render the SAME widget from the same code and can never disagree.
+  // `net` is furlough-adjusted supply minus IDP demand (WorkforceTracker.gs:875),
+  // which is exactly what the tracker shows.
+  function renderIdpHeatmapTile(gridIn, idpTextIn, muTextIn) {
+      idpTextIn = idpTextIn || '';
+      muTextIn = muTextIn || '';
+      if (!gridIn || !gridIn.length) return '';
+          var hourColsHtml = '';
+          var grid = gridIn || [];
+          var dayNetSum = 0, dayNetCount = 0;
+          for (var h = 0; h < 24; h++) {
+              var cells = '';
+              var sum = 0, count = 0;
+              for (var q = 0; q < 4; q++) {
+                  var b = grid[h*4 + q];
+                  if (!b) continue;
+                  var cls = 'status-neutral';
+                  if (b.net >= 2) cls = 'status-surplus';
+                  if (b.net < 0) cls = 'status-risk';
+                  sum += b.net; count++;
+                  dayNetSum += b.net; dayNetCount++;
+                  cells += '<div class="heatmap-cell idp-static ' + cls + '" style="padding:4px 1px;"><span style="font-size:0.62rem; opacity:0.8; font-weight:700;">' + escapeHTML(b.label || '') + '</span><span style="font-size:0.8rem; font-weight:800; font-family:monospace;">' + (b.net>0?'+'+b.net:b.net) + '</span></div>';
+              }
+              var avg = count ? (sum / count) : 0;
+              var avgRounded = Math.round(avg * 10) / 10;
+              var avgCls = 'status-neutral';
+              if (avg >= 2) avgCls = 'status-surplus';
+              if (avg < 0) avgCls = 'status-risk';
+              var hourLabel = (h < 10 ? '0' : '') + h + 'h';
+              var bgAlt = h % 2 === 0 ? 'rgba(99, 102, 241, 0.04)' : 'transparent';
+              hourColsHtml += '<div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 0; padding:3px 2px; background:' + bgAlt + '; border-radius:6px;">' +
+                          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-main); text-align:center; padding:3px 0; border-bottom:1px solid var(--glass-border); letter-spacing:0.3px;">' + hourLabel + '</div>' +
+                          cells +
+                          '<div class="heatmap-cell idp-static ' + avgCls + '" style="margin-top:4px; border:2px solid var(--glass-border); border-radius:6px; padding:5px 0; box-shadow:0 1px 3px rgba(0,0,0,0.06);"><span style="font-size:0.55rem; opacity:0.9; font-weight:800; letter-spacing:1px;">AVG</span><span style="font-size:0.85rem; font-weight:800; font-family:monospace;">' + (avgRounded>0?'+'+avgRounded:avgRounded) + '</span></div>' +
+                      '</div>';
+          }
+          var dayAvg = dayNetCount ? Math.round((dayNetSum / dayNetCount) * 10) / 10 : 0;
+          var dayAvgCls = dayAvg >= 2 ? 'status-surplus' : (dayAvg < 0 ? 'status-risk' : 'status-neutral');
+          var dayAvgHtml = '<div class="heatmap-cell idp-static ' + dayAvgCls + '" style="margin-top:14px; padding:14px 24px; border-radius:12px; flex-direction:row; gap:16px; justify-content:center; border:2px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.08);"><span style="font-size:0.75rem; font-weight:800; letter-spacing:2px; opacity:0.9;">DAY AVERAGE IDP</span><span style="font-size:1.6rem; font-weight:800; font-family:monospace;">' + (dayAvg>0?'+'+dayAvg:dayAvg) + '</span></div>';
+          var gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muTextIn ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muTextIn + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpTextIn + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
+      return gridHtml;
+  }
+
   function renderTracker() {
       var isCoach = state.trackerMode === 'coaching';
       var isAbsences = state.trackerMode === 'absences';
@@ -2876,39 +2931,7 @@
 
       var gridHtml = '';
       if (!isCoach && state.trackerMode === 'furlough' && d.mode === 'day') {
-          var hourColsHtml = '';
-          var grid = d.grid || [];
-          var dayNetSum = 0, dayNetCount = 0;
-          for (var h = 0; h < 24; h++) {
-              var cells = '';
-              var sum = 0, count = 0;
-              for (var q = 0; q < 4; q++) {
-                  var b = grid[h*4 + q];
-                  if (!b) continue;
-                  var cls = 'status-neutral';
-                  if (b.net >= 2) cls = 'status-surplus';
-                  if (b.net < 0) cls = 'status-risk';
-                  sum += b.net; count++;
-                  dayNetSum += b.net; dayNetCount++;
-                  cells += '<div class="heatmap-cell idp-static ' + cls + '" style="padding:4px 1px;"><span style="font-size:0.62rem; opacity:0.8; font-weight:700;">' + escapeHTML(b.label || '') + '</span><span style="font-size:0.8rem; font-weight:800; font-family:monospace;">' + (b.net>0?'+'+b.net:b.net) + '</span></div>';
-              }
-              var avg = count ? (sum / count) : 0;
-              var avgRounded = Math.round(avg * 10) / 10;
-              var avgCls = 'status-neutral';
-              if (avg >= 2) avgCls = 'status-surplus';
-              if (avg < 0) avgCls = 'status-risk';
-              var hourLabel = (h < 10 ? '0' : '') + h + 'h';
-              var bgAlt = h % 2 === 0 ? 'rgba(99, 102, 241, 0.04)' : 'transparent';
-              hourColsHtml += '<div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 0; padding:3px 2px; background:' + bgAlt + '; border-radius:6px;">' +
-                          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-main); text-align:center; padding:3px 0; border-bottom:1px solid var(--glass-border); letter-spacing:0.3px;">' + hourLabel + '</div>' +
-                          cells +
-                          '<div class="heatmap-cell idp-static ' + avgCls + '" style="margin-top:4px; border:2px solid var(--glass-border); border-radius:6px; padding:5px 0; box-shadow:0 1px 3px rgba(0,0,0,0.06);"><span style="font-size:0.55rem; opacity:0.9; font-weight:800; letter-spacing:1px;">AVG</span><span style="font-size:0.85rem; font-weight:800; font-family:monospace;">' + (avgRounded>0?'+'+avgRounded:avgRounded) + '</span></div>' +
-                      '</div>';
-          }
-          var dayAvg = dayNetCount ? Math.round((dayNetSum / dayNetCount) * 10) / 10 : 0;
-          var dayAvgCls = dayAvg >= 2 ? 'status-surplus' : (dayAvg < 0 ? 'status-risk' : 'status-neutral');
-          var dayAvgHtml = '<div class="heatmap-cell idp-static ' + dayAvgCls + '" style="margin-top:14px; padding:14px 24px; border-radius:12px; flex-direction:row; gap:16px; justify-content:center; border:2px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.08);"><span style="font-size:0.75rem; font-weight:800; letter-spacing:2px; opacity:0.9;">DAY AVERAGE IDP</span><span style="font-size:1.6rem; font-weight:800; font-family:monospace;">' + (dayAvg>0?'+'+dayAvg:dayAvg) + '</span></div>';
-          gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muText ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muText + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpText + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
+          gridHtml = renderIdpHeatmapTile(d.grid, idpText, muText);
       }
 
       // ───────── SAFE MODE: forensic scheduler ─────────

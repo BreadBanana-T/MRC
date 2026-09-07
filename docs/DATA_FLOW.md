@@ -214,6 +214,7 @@ client-rendered status page would fail the regex on a healthy site.
 | **WF_AGENT_IDS** | 0 Key (normalized), 1 Name, 2 TID (WFM `Agent: NNNNN`) | `WorkforceTracker.importData` (merge-upsert) |
 | **WF_GENESYS_AGENT** | 0 PeriodStart, 1 PeriodEnd, 2 Label, 3 AgentId (Genesys GUID), 4 AgentKey, 5 Agent, 6 MediaType, 7 Answered, 8 Handled, 9 AvgHandleSec, 10 AvgTalkSec, 11 AvgHoldSec, 12 AvgAcwSec, 13 Held, 14 Transferred, 15 NoAnswer, 16 MinTalkSec, 17 AvgRingSec — **all durations in SECONDS** (exported as ms); blank duration = no sample | `ReportImport.importGenesysAgents` |
 | **WF_GENESYS_IDS** | 0 Agent Key (normalized), 1 Agent Id (Genesys GUID), 2 Display Name | `ReportImport._mergeGenesysIds` (merge-upsert) |
+| **Overview IDP tile** | reads its own `state.overviewIdp` via `getWorkforceAnalytics('day', today, 'furlough', …)`, **not** `state.trackerData` — that key is replaced when the tracker switches mode/range, which would blank the tile. Renders through the shared `renderIdpHeatmapTile()` so Dashboard and Furlough tracker cannot disagree | — |
 | **WF_ALARMCOM_UPTIME** (hidden) | 0 Timestamp, 1 Up (1/0), 2 LatencyMs, 3 HttpCode, 4 PartnerPortalUp (1/0), 5 Note | `AlarmComMonitor._logHistory` (5-min trigger, ring-buffered) |
 
 > **SAFE matching on Employee ID (this build).** The schedule import now stores the
@@ -297,6 +298,41 @@ used by the SAFE board where the epoch columns exist.
 | Optimistic edits | A pending edit retires only once the server acknowledged it **and** a payload requested *after* the edit has landed — an in-flight `getFloorStatus` cannot wipe a change. Failures roll back and say so; the 120 s TTL is a backstop, not the mechanism |
 | Override sheets | `Status_Overrides` / `Break_Overrides` / `Overtime_Tracking` self-prune to 7 days (`StatusTracker._prune`), dropping only a clean prefix |
 | Language | `WF_LANG_MAP` wins over the masterlist column (it carries the manual overrides). **Never** infer it from Skills — `SafeTracker._inferLang` scans Skills for language words and real Skills strings contain none, so it returns `EN` for everyone |
+
+---
+
+## 4c. Absence vocabulary — ONE classifier
+
+> **`classifyAbsenceActivity(activityName)`** (`WorkforceTracker.gs`) is the single
+> source of truth, called by **both** `ImportHandler` (the Floor) and
+> `WorkforceTracker` (reporting). There used to be two copies: the reporting one
+> correct, the Floor one missing `UNAB` and `LOA` entirely — so 208 UNAB agent-days
+> and 40 LOA/TI LOA agent-days reached the Floor with no absence type and rendered
+> as if those people were working. **That divergence was the bug. Do not fork it again.**
+
+| Rule | Why |
+|---|---|
+| `LOA` matched as **`\bloa\b`**, never a substring | the export has **187** rows of `LFQI (OPEX) En prêt Hors file / On Loan **Loa**n Off Queue` |
+| `COMP` / `COMPU` / `ALU` / `UNAB` also `\b`-anchored | "Compliance" → COMP and "Evaluation" → ALU inflated counts before |
+| ACSU / solicited / voluntary / furlough → **not an absence** | approved released time; tracked as furlough and its own break type. "Solicited Time Off" would otherwise hit the vacation branch |
+| PW/ALT tested **before** vacation | the real string is `PW Congé bien-être personnel / Personal Wellness`; matching `congé` first made the PW/ALT branch unreachable |
+| `looksLikeAbsenceWording` is for the importer's `hasWork` guard **only** | the guard tested `"ABSENT"` but the strings say `"ABSENCE"`, so absences were counted as worked days. Never use it to label or count — it would turn `HABS Férié absence` into an absence and move the reported totals |
+| Reporting maps `Medical Leave` → `SICK` and ignores PW/ALT · BEREAVEMENT · VACATION | preserves the published numbers exactly (verified identical across all 31 activity strings) |
+
+**Needs Attention** = `isUnplannedAbsenceType`: `SICK` · `NCNS` · `UNAB` · `AWOL` ·
+`COMP`/`COMPU` · `ALU` · `LOA` · `PW/ALT` · `BEREAVEMENT`. `VACATION` and
+`Medical Leave` are planned and belong in Planned / Support.
+
+**Partial days.** An agent can be absent for part of a day and work the rest. The
+importer appends **`(part day)`** to the type (`UNAB (part day)`) rather than adding a
+`Raw Schedule` column; every matcher is `\b`-anchored so it still reads as `UNAB`.
+This replaced an escape hatch in `AgentMonitor` that sent such agents back to `active`
+and hid 157 of 208 real UNAB days — the nuance is in the label now, never the bucket.
+
+**Real vocabulary** (`WF_ABSENCES`, 1,835 rows): `SICK` 741 · `TI AWOL` 484 ·
+`UNAB` 233 · `ALU` 231 · `COMPU` 141 · `COMP` 5. The WFM strings are **`TI LOA`**
+(space, no hyphen) and **`LOA Absence / Leave of Absence`**; `UNAB` is always a
+leading token, never `UNABLE`.
 
 ---
 
