@@ -11,6 +11,10 @@ Mapping used by the calculator:
   SAFE         -> N/A (read from a separate tableau, filled in manually)
   Inbound trend-> N/A (not available from Genesys yet, filled in manually)
 
+When the Current interval has no data yet (blank, "-", "--" or "N/A", or the
+blank cell simply missing from the copy), ASA and SVL IN still use Today and
+LCW Interval shows N/A — it never falls back to Today's max wait.
+
 RAW Inbound stats (Genesys);
 External ASA
 Today
