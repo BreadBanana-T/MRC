@@ -1001,4 +1001,96 @@
   .notif-maint .nm-sub { font-size: 0.76rem; color: var(--mb-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
   .notif-maint .nm-rail { margin-top: 10px; height: 4px; }
   .notif-maint .nm-desc { font-size: 0.76rem; color: var(--mb-muted); margin-top: 10px; line-height: 1.45; max-height: 4.4em; overflow: hidden; }
+  /* ===================== DATA COVERAGE (calendar overlay) ===================== */
+  .cov-chip { appearance: none; border: 1px solid var(--glass-border); background: var(--card-bg); color: var(--text-muted); font-family: inherit; font-size: 0.7rem; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; border-radius: 99px; cursor: pointer; transition: border-color 0.2s, color 0.2s, transform 0.2s; max-width: 100%; }
+  .cov-chip:hover { border-color: var(--accent-primary); color: var(--text-main); transform: translateY(-1px); }
+  .cov-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cov-chip-badge { flex-shrink: 0; font-size: 0.6rem; font-weight: 800; padding: 2px 8px; border-radius: 99px; letter-spacing: 0.02em; }
+  .cov-chip-badge.bad { color: #fff; background: var(--status-alert); }
+  .cov-chip-badge.warn { color: #fff; background: var(--status-warn); }
+  .cov-chip-badge.ok { color: var(--status-active); background: rgba(5, 150, 105, 0.12); }
+
+  .cov-overlay { position: fixed; inset: 0; z-index: 1500; display: grid; place-items: center; padding: 24px; background: rgba(8, 11, 22, 0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .cov-panel { width: min(1320px, 100%); height: min(92vh, 940px); display: flex; flex-direction: column; gap: 16px; padding: 22px 24px; border-radius: 24px;
+      background: var(--bg-root); border: 1px solid var(--glass-border); box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.45); overflow: hidden; color: var(--text-main); }
+  .cov-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .cov-title { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; }
+  .cov-sub { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; margin-top: 3px; max-width: 720px; }
+  .cov-head-r { display: flex; align-items: center; gap: 10px; }
+  .cov-year { display: flex; align-items: center; gap: 4px; background: var(--card-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 3px; }
+  .cov-year span { font-weight: 800; font-variant-numeric: tabular-nums; padding: 0 10px; }
+  .cov-year button, .cov-x { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.2rem; line-height: 1; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; }
+  .cov-year button:hover, .cov-x:hover { background: rgba(120, 120, 140, 0.12); color: var(--text-main); }
+  .cov-loading { padding: 40px; text-align: center; color: var(--text-muted); font-weight: 700; }
+
+  .cov-top { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; max-height: 270px; overflow-y: auto; padding: 2px; }
+  .cov-sec-title { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+  .cov-sec-title.ok { color: var(--status-active); }
+  .cov-sec-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; display: inline-grid; place-items: center; font-size: 0.7rem; color: #fff; background: var(--status-alert); letter-spacing: 0; }
+  .cov-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .cov-okrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .cov-ok-title { font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-right: 4px; }
+  .cov-okchip { appearance: none; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; cursor: pointer; font-size: 0.72rem; font-weight: 700; color: var(--text-main); background: var(--card-bg); border: 1px solid var(--glass-border); transition: border-color 0.2s, transform 0.2s; }
+  .cov-okchip:hover { transform: translateY(-1px); border-color: var(--c); }
+  .cov-okchip.on { border-color: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 35%, transparent); }
+  .cov-okchip.never { color: var(--text-muted); }
+  .cov-ok-mark { color: var(--status-active); font-weight: 800; }
+  .cov-okchip.never .cov-ok-mark { color: var(--text-muted); }
+  .cov-card { --lvl: var(--text-muted); appearance: none; text-align: left; font-family: inherit; color: inherit; cursor: pointer; position: relative; overflow: hidden;
+      background: var(--card-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 10px 12px 10px 15px; transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; }
+  .cov-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--lvl); }
+  .cov-card:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -14px rgba(15, 23, 42, 0.4); }
+  .cov-card.on { border-color: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 35%, transparent); }
+  .cov-card.lvl-bad { --lvl: var(--status-alert); } .cov-card.lvl-warn { --lvl: var(--status-warn); } .cov-card.lvl-ok { --lvl: var(--status-active); }
+  .cov-card-top { display: flex; align-items: center; gap: 7px; }
+  .cov-card-label { font-size: 0.82rem; font-weight: 800; line-height: 1.2; }
+  .cov-pill { display: none; margin-left: auto; flex-shrink: 0; font-size: 0.56rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border-radius: 99px; color: var(--lvl); background: color-mix(in srgb, var(--lvl) 12%, transparent); }
+  .cov-card-txt { font-size: 0.72rem; font-weight: 700; margin-top: 6px; color: var(--text-main); line-height: 1.3; }
+  .cov-card-how { font-size: 0.66rem; font-weight: 600; color: var(--text-secondary); margin-top: 4px; line-height: 1.3; }
+  .cov-card-sync { font-size: 0.62rem; font-weight: 600; color: var(--text-muted); margin-top: 3px; }
+  .cov-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  .cov-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+  .cov-cal-wrap { min-height: 0; display: flex; flex-direction: column; gap: 10px; background: var(--card-bg); border: 1px solid var(--glass-border); border-radius: 18px; padding: 14px 16px; }
+  .cov-cal-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cov-focus { display: inline-flex; align-items: center; gap: 7px; font-size: 0.78rem; font-weight: 800; padding: 3px 4px 3px 10px; border-radius: 99px; border: 1px solid var(--c, var(--glass-border)); }
+  .cov-focus.all { padding: 3px 10px; color: var(--text-muted); border-color: var(--glass-border); }
+  .cov-focus button { appearance: none; border: none; background: rgba(120, 120, 140, 0.12); color: var(--text-muted); width: 20px; height: 20px; border-radius: 50%; cursor: pointer; line-height: 1; }
+  .cov-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.66rem; font-weight: 700; color: var(--text-muted); }
+  .cov-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .cov-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .cov-cal { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px 16px; align-content: start; padding: 2px; }
+  @media (max-width: 1360px) { .cov-cal { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 1100px) { .cov-cal { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .cov-month-name { font-size: 0.74rem; font-weight: 800; margin-bottom: 4px; }
+  .cov-wk, .cov-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cov-wk span { font-size: 0.55rem; font-weight: 700; color: var(--text-muted); text-align: center; }
+  .cov-day { appearance: none; font-family: inherit; aspect-ratio: 1; min-width: 0; border-radius: 6px; border: 1px solid transparent; font-size: 0.6rem; font-weight: 700; cursor: pointer; padding: 0;
+      font-variant-numeric: tabular-nums; transition: background 0.25s, color 0.25s, transform 0.15s, box-shadow 0.15s; }
+  .cov-day:hover { transform: scale(1.15); z-index: 1; }
+  /* --c is the focused dataset's colour (green for "all data"). */
+  .cov-day.full, .cov-legend .full { background: var(--c, var(--status-active)); color: #fff; }
+  .cov-day.part, .cov-legend .part { background: linear-gradient(135deg, var(--c, var(--status-active)) 50%, color-mix(in srgb, var(--c, var(--status-active)) 22%, transparent) 50%); color: var(--text-main); }
+  .cov-day.miss, .cov-legend .miss { background: rgba(220, 38, 38, 0.1); border: 1px dashed rgba(220, 38, 38, 0.6); color: var(--status-alert); }
+  .cov-day.ahead, .cov-legend .ahead { background: color-mix(in srgb, var(--c, var(--status-active)) 12%, transparent); border: 1px solid var(--c, var(--status-active)); color: var(--text-main); }
+  .cov-day.none, .cov-legend .none { background: rgba(120, 120, 140, 0.07); color: var(--text-muted); }
+  .cov-legend i { --c: var(--status-active); }
+  .cov-day.today { box-shadow: 0 0 0 2px var(--text-main); }
+  .cov-day.sel { box-shadow: 0 0 0 2px var(--bg-root), 0 0 0 4px var(--accent-primary); transform: scale(1.12); z-index: 2; }
+
+  .cov-side { min-height: 0; overflow-y: auto; background: var(--card-bg); border: 1px solid var(--glass-border); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .cov-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; margin-bottom: 2px; border-bottom: 1px solid var(--glass-border); }
+  .cov-side-date { font-size: 0.86rem; font-weight: 800; }
+  .cov-today-pill { font-size: 0.58rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #fff; background: var(--accent-primary); padding: 2px 8px; border-radius: 99px; }
+  .cov-side-row { display: grid; grid-template-columns: 8px 1fr auto; gap: 9px; align-items: start; padding: 7px 8px; border-radius: 10px; }
+  .cov-side-row .cov-dot { margin-top: 5px; }
+  .cov-side-row.miss { background: rgba(220, 38, 38, 0.07); }
+  .cov-side-row.none { opacity: 0.6; }
+  .cov-side-label { font-size: 0.76rem; font-weight: 800; }
+  .cov-side-txt { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); line-height: 1.35; margin-top: 1px; }
+  .cov-side-row.miss .cov-side-txt { color: var(--status-alert); }
+  .cov-side-mark { font-size: 0.8rem; font-weight: 800; color: var(--text-muted); }
+  .cov-side-row.full .cov-side-mark { color: var(--status-active); } .cov-side-row.part .cov-side-mark { color: var(--status-warn); } .cov-side-row.miss .cov-side-mark { color: var(--status-alert); }
+  @media (max-width: 900px) { .cov-body { grid-template-columns: 1fr; overflow-y: auto; } .cov-cal { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; } .cov-panel { height: 96vh; padding: 16px; } }
 </style>

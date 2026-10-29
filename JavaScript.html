@@ -257,6 +257,7 @@
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(updateMaintenance, 20000);
+    fetchCoverage(); setInterval(fetchCoverage, 600000);   // data coverage badge (10 min)
     setInterval(function() { maintTick(true); }, 1000);   // countdown digits + rail
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
@@ -1252,6 +1253,7 @@
                   if(!state.knownNotifs.has(n.id)) {
                       state.knownNotifs.add(n.id);
                       showToast("🔔 " + escapeHTML(n.text)); 
+                      if (n.text.indexOf("Global Update") !== -1) fetchCoverage();
                       if (n.text.indexOf("Dashboards refreshed") !== -1) { fetchData(); fetchMetadata(); if (state.view === 'tracker') fetchTrackerData(); if (state.view === 'insights') fetchInsightData(); }
                   }
               });
@@ -2881,7 +2883,7 @@
       };
       var cycleToggleHtml = '<div style="display:flex; gap:8px; flex-shrink:0;">' + cycleBtn('WEEK A', 'WEEK A') + cycleBtn('WEEK B', 'WEEK B') + (curCycle !== 'ALL' ? '<button onclick="toggleInsightCycle(\'' + curCycle + '\');" style="background:transparent; color:var(--text-muted); border:none; padding:4px 8px; font-size:0.7rem; cursor:pointer; text-decoration:underline;">Clear</button>' : '') + '</div>';
 
-      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;"><i data-lucide="calendar-check" width="10" style="vertical-align:middle;"></i> ' + schedText + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;">' + searchBox('insight-search', 'Search agent...', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:180px;', 'height:32px; font-size:0.8rem;') + '</div></div>';
+      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">' + coverageChip(schedText) + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;">' + searchBox('insight-search', 'Search agent...', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:180px;', 'height:32px; font-size:0.8rem;') + '</div></div>';
 
       if (!u.data) {
           return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;"><div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Schedule and deep GEM metrics.</p></div>';
@@ -3074,7 +3076,7 @@
       }
 
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center;">' +
-                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;"><span><i data-lucide="calendar-check" width="10"></i> ' + schedText + '</span><span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
+                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">' + coverageChip(schedText) + '<span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
 
       if (!isAbsences && !isTraining) {
           headerHtml += '<div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">';
@@ -6347,6 +6349,282 @@
               animation: { duration: fpChanged ? 1100 : 0, easing: 'easeOutQuart', delay: fpChanged ? 150 : 0 }
           }
       });
+  }
+
+
+  // ───────────────────────────── Data coverage ─────────────────────────────
+  // Interactive year calendar of which days each imported dataset covers
+  // (filled / partial / missing / not tracked / ahead), plus a "needs
+  // updating" strip. Data: getDataCoverage() (CORE/DataCoverage.gs). Lives in
+  // its own overlay outside #content, so the 60s floor/tracker polls never
+  // re-render it under the user. Entry: the sync chip in the Tracker and
+  // Insights headers (coverageChip).
+  var COV_COLORS = { wfm: '#6366f1', idp: '#10b981', calc: '#38bdf8', forecast: '#f59e0b', otopen: '#f472b6', safe: '#22c55e', genesys: '#ff5c33', activity: '#a78bfa', gem: '#ec4899', alarms: '#ef4444' };
+  var COV_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var cov = { year: new Date().getFullYear(), focus: 'all', day: null };
+
+  function covAdd(day, n) { var p = day.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2] + n, 12); return localDateStr(d); }
+  function covSunday(day) { var p = day.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2], 12); return covAdd(day, -d.getDay()); }
+  function covFmt(day) { if (!day) return '—'; var p = day.split('-'); return COV_MONTHS[+p[1] - 1] + ' ' + (+p[2]); }
+  function covFmtLong(day) { var p = day.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2], 12); return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()] + ', ' + COV_MONTHS[+p[1] - 1] + ' ' + (+p[2]) + ', ' + p[0]; }
+
+  // day → { n, partial, via, p } for every grain, memoised on the dataset.
+  function covExpand(ds) {
+      if (ds._exp) return ds._exp;
+      var m = {};
+      var put = function(day, v) { if (!m[day]) m[day] = v; };
+      Object.keys(ds.days || {}).forEach(function(d) { var n = ds.days[d]; m[d] = { n: n, partial: !!(ds.perDay && n < ds.perDay), via: 'day' }; });
+      Object.keys(ds.weeks || {}).forEach(function(w) { for (var i = 0; i < 7; i++) put(covAdd(w, i), { n: ds.weeks[w], via: 'week', p: { s: w, e: covAdd(w, 6) } }); });
+      (ds.periods || []).forEach(function(pr) { for (var d = pr.s, g = 0; d <= pr.e && g < 400; d = covAdd(d, 1), g++) put(d, { n: pr.n, via: 'period', p: pr }); });
+      Object.keys(ds.months || {}).forEach(function(mk) {
+          var y = +mk.substring(0, 4), mo = +mk.substring(5, 7), last = new Date(y, mo, 0).getDate();
+          for (var i = 1; i <= last; i++) put(mk + '-' + (i < 10 ? '0' : '') + i, { n: ds.months[mk], via: 'month', p: { s: mk + '-01', e: mk + '-' + last } });
+      });
+      var keys = Object.keys(m).sort();
+      ds._exp = m; ds._first = keys[0] || null; ds._last = keys[keys.length - 1] || null;
+      return m;
+  }
+
+  // Is `day` expected to have data for this dataset? (Only from its first
+  // ever day — before that it simply wasn't tracked yet.)
+  function covExpected(ds, day, today) {
+      covExpand(ds);
+      if (!ds._first || day < ds._first || ds.key === 'otopen') return false;
+      switch (ds.key) {
+          case 'wfm': return day <= covAdd(today, 6);              // a week of schedule ahead
+          case 'idp': return day <= today;
+          case 'calc': case 'forecast': return day < today;
+          case 'safe': case 'genesys': case 'activity': return day < covSunday(today);   // complete weeks
+          case 'gem': case 'alarms': return day < today.substring(0, 7) + '-01';        // complete months
+      }
+      return day <= today;
+  }
+
+  // { level: ok|warn|bad|none, text, missing30 }
+  function covStatus(ds, today) {
+      var m = covExpand(ds);
+      if (!ds._first) return { level: 'none', text: 'Never imported', missing30: 0 };
+      var missing30 = 0;
+      for (var d = covAdd(today, -30); d <= covAdd(today, 6); d = covAdd(d, 1)) if (covExpected(ds, d, today) && !m[d]) missing30++;
+      var last = ds._last, t = m[today];
+      var gaps = missing30 ? ' · ' + missing30 + ' day' + (missing30 === 1 ? '' : 's') + ' missing (30d)' : '';
+      switch (ds.key) {
+          case 'wfm':
+              if (!t) return { level: 'bad', text: 'No schedule for today', missing30: missing30 };
+              if (last < covAdd(today, 6)) return { level: 'warn', text: 'Schedule ends ' + covFmt(last) + ' — paste next week', missing30: missing30 };
+              break;
+          case 'idp':
+              if (!t) return { level: 'bad', text: "Today's IDP not imported", missing30: missing30 };
+              if (t.partial) return { level: 'warn', text: 'Today ' + t.n + ' of ' + ds.perDay + ' intervals', missing30: missing30 };
+              break;
+          case 'calc':
+              var hrs = (ds.hours && ds.hours[today]) || [];
+              var now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
+              if (!hrs.length) return { level: mins > 90 ? 'warn' : 'ok', text: mins > 90 ? 'No calculator run today yet' : 'First run of the day pending', missing30: missing30 };
+              var lastH = hrs.slice().sort().pop(), lm = +lastH.substring(0, 2) * 60 + +lastH.substring(3, 5);
+              if (mins - lm > 90) return { level: 'warn', text: 'Last run ' + lastH + ' (' + hrs.length + ' today)', missing30: missing30 };
+              return { level: 'ok', text: hrs.length + ' run' + (hrs.length === 1 ? '' : 's') + ' today · last ' + lastH, missing30: missing30 };
+          case 'otopen':
+              if (last < today) return { level: 'warn', text: 'Nothing posted from today — latest ' + covFmt(last), missing30: 0 };
+              return { level: 'ok', text: 'Slots through ' + covFmt(last), missing30: 0 };
+          case 'gem': case 'alarms':
+              var prev = new Date(+today.substring(0, 4), +today.substring(5, 7) - 2, 1, 12), pk = localDateStr(prev).substring(0, 7);
+              if (last.substring(0, 7) < pk) return { level: 'warn', text: COV_MONTHS[prev.getMonth()] + ' ' + prev.getFullYear() + ' not imported', missing30: missing30 };
+              return { level: 'ok', text: 'Through ' + COV_MONTHS[+last.substring(5, 7) - 1] + ' ' + last.substring(0, 4), missing30: missing30 };
+      }
+      if (missing30) return { level: 'warn', text: 'Covers to ' + covFmt(last) + gaps, missing30: missing30 };
+      return { level: 'ok', text: 'Up to date · through ' + covFmt(last), missing30: 0 };
+  }
+
+  function covAll() { return (state.coverage && state.coverage.datasets) || []; }
+  function covSummary() {
+      var today = localDateStr(new Date()), list = covAll(), bad = 0, warn = 0;
+      list.forEach(function(ds) { var st = covStatus(ds, today); if (st.level === 'bad') bad++; else if (st.level === 'warn') warn++; });
+      return { bad: bad, warn: warn, n: list.length };
+  }
+
+  function fetchCoverage(cb) {
+      if (typeof google === 'undefined') { if (cb) cb(); return; }
+      google.script.run.withSuccessHandler(function(r) {
+          try { var d = JSON.parse(r); if (d && d.datasets) state.coverage = d; } catch (e) {}
+          if (cb) cb();
+          if (state.view === 'tracker' || state.view === 'insights') render();
+          if (document.getElementById('cov-overlay')) renderCoverage(false);
+      }).withFailureHandler(function() { if (cb) cb(); }).getDataCoverage();
+  }
+
+  // The header chip: the old "WFM: … (Sync: …)" text, now a button with a
+  // needs-updating badge.
+  function coverageChip(text) {
+      var badge = '';
+      if (state.coverage) {
+          var s = covSummary(), n = s.bad + s.warn;
+          badge = n ? '<span class="cov-chip-badge ' + (s.bad ? 'bad' : 'warn') + '">' + n + ' need' + (n === 1 ? 's' : '') + ' updating</span>'
+                    : '<span class="cov-chip-badge ok">All up to date</span>';
+      }
+      return '<button class="cov-chip" onclick="openCoverage()" title="Open the data coverage calendar"><i data-lucide="calendar-range" width="11"></i><span class="cov-chip-text">' + text + '</span>' + badge + '</button>';
+  }
+
+  function covMotion() { return typeof gsap !== 'undefined' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+
+  window.openCoverage = function() {
+      if (document.getElementById('cov-overlay')) return;
+      cov.day = cov.day || localDateStr(new Date());
+      cov.year = +cov.day.substring(0, 4);
+      var ov = document.createElement('div');
+      ov.id = 'cov-overlay'; ov.className = 'cov-overlay';
+      ov.innerHTML = '<div class="cov-panel" role="dialog" aria-label="Data coverage" onclick="event.stopPropagation()"></div>';
+      ov.addEventListener('click', closeCoverage);
+      document.body.appendChild(ov);
+      document.addEventListener('keydown', covKeys);
+      renderCoverage(true);
+      fetchCoverage();   // refresh while open
+  };
+  window.closeCoverage = function() {
+      var ov = document.getElementById('cov-overlay'); if (!ov) return;
+      document.removeEventListener('keydown', covKeys);
+      ov.id = ''; ov.style.pointerEvents = 'none';   // gone for interaction immediately
+      var done = function() { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+      if (covMotion()) { gsap.to(ov, { opacity: 0, duration: 0.2, onComplete: done }); setTimeout(done, 400); }
+      else done();
+  };
+  function covKeys(e) {
+      if (e.key === 'Escape') { closeCoverage(); return; }
+      var step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+      if (step && cov.day) { e.preventDefault(); covPickDay(covAdd(cov.day, step)); }
+  }
+  window.covSetFocus = function(k) { cov.focus = (cov.focus === k) ? 'all' : k; renderCoverage(false, 'focus'); };
+  window.covSetYear = function(dy) { cov.year += dy; renderCoverage(false, dy < 0 ? 'prev' : 'next'); };
+  window.covPickDay = function(day) {
+      if (+day.substring(0, 4) !== cov.year) { cov.year = +day.substring(0, 4); cov.day = day; renderCoverage(false, 'year'); return; }
+      var prev = document.querySelector('.cov-day.sel'); if (prev) prev.classList.remove('sel');
+      cov.day = day;
+      var el = document.querySelector('.cov-day[data-d="' + day + '"]'); if (el) el.classList.add('sel');
+      var side = document.getElementById('cov-side'); if (side) { side.innerHTML = covSideHtml(day); if (covMotion()) gsap.from(side.children, { x: 10, opacity: 0, duration: 0.25, stagger: 0.03, ease: 'power2.out' }); }
+  };
+
+  // Cell state for one day: 'full' | 'part' | 'miss' | 'none' (nothing
+  // expected, nothing there) | 'ahead' (data for a future day).
+  function covCell(day, today, list) {
+      if (cov.focus !== 'all') {
+          var ds = list.filter(function(x) { return x.key === cov.focus; })[0]; if (!ds) return 'none';
+          var v = covExpand(ds)[day], ex = covExpected(ds, day, today);
+          if (v) return day > today ? 'ahead' : (v.partial ? 'part' : 'full');
+          return ex ? 'miss' : 'none';
+      }
+      var exp = 0, have = 0, any = false;
+      list.forEach(function(ds) {
+          var v = covExpand(ds)[day]; if (v) any = true;
+          if (covExpected(ds, day, today)) { exp++; if (v && !v.partial) have++; else if (v) have += 0.5; }
+      });
+      if (!exp) return (any && day > today) ? 'ahead' : 'none';
+      if (day > today) return have ? 'ahead' : 'none';
+      return have >= exp ? 'full' : (have > 0 ? 'part' : 'miss');
+  }
+
+  function covDayTitle(day, today, list) {
+      return covFmtLong(day) + '\n' + list.map(function(ds) {
+          var v = covExpand(ds)[day];
+          return (v ? '✓ ' : (covExpected(ds, day, today) ? '✗ ' : '· ')) + ds.label;
+      }).join('\n');
+  }
+
+  function covSideHtml(day) {
+      var today = localDateStr(new Date()), list = covAll();
+      var rows = list.map(function(ds) {
+          var v = covExpand(ds)[day], ex = covExpected(ds, day, today), col = COV_COLORS[ds.key] || '#94a3b8', txt, cls;
+          if (v) {
+              cls = v.partial ? 'part' : 'full';
+              if (ds.key === 'wfm') txt = v.n + ' agent-day' + (v.n === 1 ? '' : 's') + ' scheduled';
+              else if (ds.key === 'idp') txt = v.n + ' of ' + ds.perDay + ' intervals';
+              else if (ds.key === 'calc') { var h = (ds.hours && ds.hours[day]) || []; txt = v.n + ' run' + (v.n === 1 ? '' : 's') + (h.length ? ' · ' + h.slice().sort().join(', ') : ''); }
+              else if (ds.key === 'otopen') txt = v.n + ' slot window' + (v.n === 1 ? '' : 's');
+              else if (v.via === 'period') txt = 'Period ' + covFmt(v.p.s) + ' – ' + covFmt(v.p.e) + ' · ' + v.n + ' agents';
+              else if (v.via === 'week') txt = 'Week of ' + covFmt(v.p.s) + ' · ' + v.n + ' rows';
+              else if (v.via === 'month') txt = 'Monthly report · ' + COV_MONTHS[+day.substring(5, 7) - 1] + ' ' + day.substring(0, 4);
+              else txt = v.n + ' row' + (v.n === 1 ? '' : 's');
+          } else if (ex) { cls = 'miss'; txt = 'Missing — ' + escapeHTML(ds.how); }
+          else { cls = 'none'; txt = !ds._first ? 'Never imported' : (day > today ? 'Not expected yet' : (day < ds._first ? 'Before tracking began' : 'Not expected for this day')); }
+          return '<div class="cov-side-row ' + cls + '"><span class="cov-dot" style="background:' + col + ';"></span><div style="min-width:0;"><div class="cov-side-label">' + escapeHTML(ds.label) + '</div><div class="cov-side-txt">' + (v ? escapeHTML(txt) : txt) + '</div></div><span class="cov-side-mark">' + (cls === 'full' ? '✓' : cls === 'part' ? '◐' : cls === 'miss' ? '✗' : '–') + '</span></div>';
+      }).join('');
+      return '<div class="cov-side-head"><div class="cov-side-date">' + covFmtLong(day) + '</div>' + (day === today ? '<span class="cov-today-pill">Today</span>' : '') + '</div>' + rows;
+  }
+
+  function renderCoverage(entrance, change) {
+      var ov = document.getElementById('cov-overlay'); if (!ov) return;
+      var panel = ov.querySelector('.cov-panel');
+      var today = localDateStr(new Date()), list = covAll();
+      var loading = !state.coverage;
+
+      // What needs updating gets a full card (worst first; the left bar's colour
+      // is the urgency). Everything up to date collapses into one row of chips.
+      // Clicking either focuses the calendar on that dataset.
+      var order = { bad: 0, warn: 1, ok: 2, none: 3 };
+      var rated = list.map(function(ds) { return { ds: ds, st: covStatus(ds, today) }; }).sort(function(a, b) { return order[a.st.level] - order[b.st.level]; });
+      var need = rated.filter(function(x) { return x.st.level === 'bad' || x.st.level === 'warn'; });
+      var fine = rated.filter(function(x) { return x.st.level === 'ok' || x.st.level === 'none'; });
+      var cards = need.map(function(x) {
+          var ds = x.ds, st = x.st, col = COV_COLORS[ds.key] || '#94a3b8';
+          var sync = ds.lastSync ? 'Last import ' + escapeHTML(ds.lastSync.text) : (ds.key === 'calc' ? 'Logged on each calculator run' : 'No import on record');
+          return '<button class="cov-card lvl-' + st.level + (cov.focus === ds.key ? ' on' : '') + '" style="--c:' + col + ';" onclick="covSetFocus(\'' + ds.key + '\')">' +
+                 '<div class="cov-card-top"><span class="cov-dot" style="background:' + col + ';"></span><span class="cov-card-label">' + escapeHTML(ds.label) + '</span></div>' +
+                 '<div class="cov-card-txt">' + escapeHTML(st.text) + '</div>' +
+                 '<div class="cov-card-how">' + escapeHTML(ds.how) + '</div>' +
+                 '<div class="cov-card-sync">' + sync + '</div></button>';
+      }).join('');
+      var chips = fine.map(function(x) {
+          var ds = x.ds, col = COV_COLORS[ds.key] || '#94a3b8';
+          return '<button class="cov-okchip' + (x.st.level === 'none' ? ' never' : '') + (cov.focus === ds.key ? ' on' : '') + '" style="--c:' + col + ';" onclick="covSetFocus(\'' + ds.key + '\')" title="' + escapeHTML(x.st.text + (ds.lastSync ? ' · last import ' + ds.lastSync.text : '')) + '">' +
+                 '<span class="cov-dot" style="background:' + col + ';"></span>' + escapeHTML(ds.label) + '<span class="cov-ok-mark">' + (x.st.level === 'none' ? '—' : '✓') + '</span></button>';
+      }).join('');
+      var topHtml = (need.length ? '<div class="cov-sec-title"><span class="cov-sec-count">' + need.length + '</span> Needs updating</div><div class="cov-cards">' + cards + '</div>' : '<div class="cov-sec-title ok">Everything is up to date</div>') +
+                    (chips ? '<div class="cov-okrow"><span class="cov-ok-title">Up to date</span>' + chips + '</div>' : '');
+
+      var months = '';
+      for (var mo = 0; mo < 12; mo++) {
+          var first = new Date(cov.year, mo, 1, 12), dim = new Date(cov.year, mo + 1, 0).getDate(), lead = first.getDay();
+          var cells = '';
+          for (var b = 0; b < lead; b++) cells += '<span class="cov-blank"></span>';
+          for (var dd = 1; dd <= dim; dd++) {
+              var day = cov.year + '-' + (mo < 9 ? '0' : '') + (mo + 1) + '-' + (dd < 10 ? '0' : '') + dd;
+              var st2 = loading ? 'none' : covCell(day, today, list);
+              cells += '<button class="cov-day ' + st2 + (day === today ? ' today' : '') + (day === cov.day ? ' sel' : '') + '" data-d="' + day + '" onclick="covPickDay(\'' + day + '\')" title="' + (loading ? '' : escapeHTML(covDayTitle(day, today, list))) + '">' + dd + '</button>';
+          }
+          months += '<div class="cov-month"><div class="cov-month-name">' + COV_MONTHS[mo] + '</div><div class="cov-wk"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="cov-grid">' + cells + '</div></div>';
+      }
+
+      var focusDs = list.filter(function(x) { return x.key === cov.focus; })[0];
+      var focusLbl = focusDs ? '<span class="cov-focus" style="--c:' + (COV_COLORS[focusDs.key] || '#94a3b8') + ';"><span class="cov-dot" style="background:var(--c);"></span>' + escapeHTML(focusDs.label) + '<button onclick="covSetFocus(\'' + focusDs.key + '\')" title="Show all data">&times;</button></span>' : '<span class="cov-focus all">All data types</span>';
+
+      panel.innerHTML =
+          '<div class="cov-head">' +
+            '<div><div class="cov-title">Data coverage</div><div class="cov-sub">What has been imported, day by day — and what needs updating. Click a card to focus the calendar on it; click a day for detail (arrow keys move).</div></div>' +
+            '<div class="cov-head-r"><div class="cov-year"><button onclick="covSetYear(-1)" aria-label="Previous year">‹</button><span>' + cov.year + '</span><button onclick="covSetYear(1)" aria-label="Next year">›</button></div>' +
+            '<button class="cov-x" onclick="closeCoverage()" aria-label="Close">&times;</button></div>' +
+          '</div>' +
+          (loading ? '<div class="cov-loading">Reading every dataset…</div>' : '<div class="cov-top">' + topHtml + '</div>') +
+          '<div class="cov-body">' +
+            '<div class="cov-cal-wrap"><div class="cov-cal-top">' + focusLbl + '<div class="cov-legend"><span><i class="full"></i>Complete</span><span><i class="part"></i>Partial</span><span><i class="miss"></i>Missing</span><span><i class="ahead"></i>Ahead</span><span><i class="none"></i>Not tracked</span></div></div>' +
+              '<div class="cov-cal' + (focusDs ? ' focus' : '') + '" style="--c:' + (focusDs ? (COV_COLORS[focusDs.key] || '#94a3b8') : 'var(--status-active)') + ';">' + months + '</div></div>' +
+            '<aside class="cov-side custom-scrollbar" id="cov-side">' + (loading ? '' : covSideHtml(cov.day)) + '</aside>' +
+          '</div>';
+
+      var selEl = panel.querySelector('.cov-day.sel');
+      if (selEl && (entrance || change === 'year')) { var calEl = panel.querySelector('.cov-cal'); var mEl = selEl.closest('.cov-month'); if (calEl && mEl) calEl.scrollTop = Math.max(0, mEl.offsetTop - calEl.offsetTop - 8); }
+      if (!covMotion()) return;
+      var q = function(s) { return panel.querySelectorAll(s); };
+      if (entrance) {
+          gsap.fromTo(ov, { opacity: 0 }, { opacity: 1, duration: 0.25 });
+          gsap.from(panel, { y: 28, scale: 0.975, opacity: 0, duration: 0.5, ease: 'power3.out' });
+          gsap.from(q('.cov-card, .cov-okchip'), { y: 14, opacity: 0, duration: 0.4, stagger: 0.035, delay: 0.15, ease: 'power2.out' });
+          gsap.from(q('.cov-month'), { y: 16, opacity: 0, duration: 0.45, stagger: 0.035, delay: 0.2, ease: 'power2.out' });
+          gsap.from(q('.cov-day'), { scale: 0.3, opacity: 0, duration: 0.35, stagger: { each: 0.0022, from: 'start' }, delay: 0.3, ease: 'back.out(2)' });
+      } else if (change === 'focus') {
+          gsap.from(q('.cov-day'), { scale: 0.7, opacity: 0.2, duration: 0.3, stagger: { each: 0.0012, from: 'start' }, ease: 'power2.out' });
+          gsap.from(q('.cov-card.on, .cov-okchip.on'), { scale: 0.94, duration: 0.35, ease: 'back.out(3)' });
+      } else if (change === 'prev' || change === 'next' || change === 'year') {
+          gsap.from(q('.cov-month'), { x: change === 'prev' ? -24 : 24, opacity: 0, duration: 0.35, stagger: 0.02, ease: 'power2.out' });
+      }
   }
 
 

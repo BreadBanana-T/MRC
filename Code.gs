@@ -289,6 +289,11 @@ function getAlarmComHistory() {
   return (typeof AlarmComMonitor !== 'undefined') ? AlarmComMonitor.getHistorySeries(24) : "[]";
 }
 
+// --- DATA COVERAGE (which days each imported dataset covers) ---
+function getDataCoverage() {
+  return (typeof DataCoverage !== 'undefined') ? DataCoverage.get() : "{}";
+}
+
 // --- STAFFING BALANCE (current 15-min IDP bucket) ---
 function getStaffingBalance() {
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.getStaffingBalance() : "{}";
