@@ -735,7 +735,7 @@ var SafeTracker = {
     //    is already "full" from history is never overwritten.
     var anyFull = false;
     var BRK = { 'LUNCH': ['LUNCH', 'Lunch'], 'BREAK': ['BREAK', 'Break'], 'TRAINING': ['COACH', 'Training'],
-                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'] };
+                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'], 'ABSENCE': ['ABS', 'Absence'] };
     var readFull = function (sheetName) {
       var rs = WT._getDB(sheetName);
       if (!rs || rs.getLastRow() < 2) return;
@@ -858,7 +858,7 @@ var SafeTracker = {
       day.segments.push({ type: type, label: label, startMin: sm % 1440, endMin: em, time: WT._minsToTime(sm) + ' - ' + WT._minsToTime(em) });
     };
     var BRK = { 'LUNCH': ['LUNCH', 'Lunch'], 'BREAK': ['BREAK', 'Break'], 'TRAINING': ['COACH', 'Training'],
-                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'] };
+                'ACSU': ['ACSU', 'ACSU'], 'SAFE': ['SAFE', 'SAFE'], 'ICL': ['ICL', 'ICL'], 'ULC FIRE': ['ULC', 'ULC FIRE'], 'ABSENCE': ['ABS', 'Absence'] };
     var readFull = function (sheetName) {
       var rs = WT._getDB(sheetName); if (!rs || rs.getLastRow() < 2) return;
       rs.getDataRange().getDisplayValues().slice(1).forEach(function (row) {

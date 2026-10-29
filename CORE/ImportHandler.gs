@@ -111,13 +111,19 @@ function processWFMImport(rawText, forcedDate) {
            else if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
                buffer.breaks.push({ type: "ULC FIRE", start: actStart, end: actEnd });
            }
+           // Absence blocks are kept with their times (type 'Absence') so the Floor
+           // can put a part-day absence in Needs Attention only WHILE it runs, and
+           // the SAFE day board can draw it.
+           else if (classifyAbsenceActivity(line) || looksLikeAbsenceWording(line)) {
+               buffer.breaks.push({ type: "Absence", start: actStart, end: actEnd, abs: classifyAbsenceActivity(line) || 'Absence' });
+           }
            // Anything that isn't a recognised absence, isn't worded as an absence, and
            // isn't an "Off" line counts as real work. The old guard tested for
            // "ABSENT", but the real strings say "ABSENCE" ("UNAB Absence non
            // autorisée…", "LOA Absence / Leave of Absence") — and "ABSENT" is not a
            // substring of "ABSENCE", so the importer positively concluded those agents
            // had worked.
-           else if (!classifyAbsenceActivity(line) && !looksLikeAbsenceWording(line) && !upper.includes("OFF")) {
+           else if (!upper.includes("OFF")) {
                buffer.hasWork = true;
            }
 

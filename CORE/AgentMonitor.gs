@@ -193,6 +193,26 @@ function compileFloorData() {
        });
     }
 
+    // Absence blocks from the schedule (the importer stores them as type
+    // 'Absence'). A "(part day)" absence belongs in Needs Attention only while
+    // one of its blocks is running. Resolved before the inactive check below
+    // because a leave-early block runs past the (trimmed) shift end.
+    let absentNow = false, hasAbsBlocks = false;
+    if (startEpoch) {
+       const absDate = Utilities.formatDate(new Date(startEpoch), "America/Toronto", "yyyy-MM-dd");
+       rawBreaks.forEach(b => {
+          if (b.type !== 'Absence') return;
+          hasAbsBlocks = true;
+          const iv = blockEpochs(absDate, startEpoch, b);
+          if (iv && now >= iv[0] && now < iv[1]) absentNow = true;
+       });
+    }
+    const partDayAbsence = hasAbsBlocks && /\(part day\)/i.test(String(absentType || ''));
+    // Left early: the importer trims the shift to the absence start, so the
+    // agent would read "Shift Ended" — keep them on the floor (as absent) until
+    // the block ends.
+    if (partDayAbsence && absentNow && isInactiveTime && inactiveReason === "Shift Ended") isInactiveTime = false;
+
     const enrichedBreaks = [];
     let nextBreakStr = null;
     let nextBreakType = null;
@@ -235,6 +255,7 @@ function compileFloorData() {
 
           if(bs > 0) {
              enrichedBreaks.push({ type: displayLabel, start: b.start, end: b.end, epochStart: bs, epochEnd: be });
+             if (b.type === 'Absence') return;   // handled above, never a break
              
              if (now >= bs && now <= be) {
                  if (b.type === "Training") {
@@ -287,7 +308,10 @@ function compileFloorData() {
             var _unplanned = (typeof isUnplannedAbsenceType === 'function')
                 ? isUnplannedAbsenceType(absentType)
                 : /SICK|NCNS|UNAB|AWOL|COMP|ALU|LOA|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/.test(absentType.toUpperCase());
-            if (_unplanned) { category = "unplanned"; subStatus = absentType; }
+            // Part-day absence (late, left early, absent mid-shift): Needs Attention
+            // only while the absence block is running; working otherwise.
+            if (partDayAbsence && !absentNow) { /* stays active */ }
+            else if (_unplanned) { category = "unplanned"; subStatus = absentType; }
             else { category = "vacation"; subStatus = absentType; }
         } 
 
@@ -368,6 +392,17 @@ function compileFloorData() {
 }
 
 function parseBreaksSafe(j) { try { return JSON.parse(j); } catch(e){return[];} }
+// [startMs, endMs] of a schedule block on the shift's date (rolled past
+// midnight for overnight shifts), same rules as the break loop.
+function blockEpochs(shiftDateStr, startEpoch, b) {
+   const pS = parseTime(b.start), pE = parseTime(b.end);
+   if (!pS || !pE) return null;
+   const [y, mo, d] = shiftDateStr.split('-').map(Number);
+   let bs = new Date(y, mo - 1, d, pS.h, pS.m, 0).getTime(), be = new Date(y, mo - 1, d, pE.h, pE.m, 0).getTime();
+   if (startEpoch && bs < startEpoch) { bs += 86400000; be += 86400000; }
+   if (be < bs) be += 86400000;
+   return [bs, be];
+}
 function parseTimeValue(tStr) {
    if(!tStr) return 9999;
    const match = tStr.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);

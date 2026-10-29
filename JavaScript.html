@@ -873,7 +873,7 @@
   window.setAgentTab = function(tab) { state.agentTab = tab; render(); };
   window.handleDateChange = function(val) { state.selectedDate = val; fetchInsightData(); render(); };
   window.toggleTheme = function() { document.body.classList.toggle('dark'); try{ localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }catch(e){} render(); };
-  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
+  window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); renderImportHealth(); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
   window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var a=genAgentByName(n); var back=document.getElementById('ctx-back-avaya'); if(back) back.style.display=(a && a.genesys && a.genesys.channel)?'flex':'none'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
@@ -5804,22 +5804,10 @@
       if (hint) hint.textContent = range ? 'pick the report’s start and end dates' : 'used only when pasting a SAFE roster (it has no dates)';
   };
 
-  window.runImportAction = function() {
-      console.log('[sync] click');
-      var t = document.getElementById('import-text').value; if(!t) { console.warn('[sync] empty text'); return; }
-      var btn = event.target;
-      var originalText = btn.innerText;
-      btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
-      btn.disabled = true;
-      closeImportModal();
-      console.log('[sync] text length=' + t.length + ', google=' + (typeof google));
-      if (typeof google === 'undefined') {
-          btn.innerHTML = originalText; btn.disabled = false;
-          showToast('google.script.run unavailable — preview mode?');
-          return;
-      }
-      var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
-
+  // Which report a pasted blob is: genesys | activity | forecast | safe |
+  // alarms | otopen | idp | sched. Shared by the Sync button and the Import
+  // window's live "this looks like…" preview, so the two can never disagree.
+  function detectImportKind(t) {
       // Detect kind so we don't waste the wire by sending the same blob as
       // both schedule AND IDP. WFM open-OT slot JSON is recognized by its
       // shape ({"slots":[... or bare [{..."slotCount"...).
@@ -5843,7 +5831,28 @@
       var isAlarms = !isGenesys && !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
       // SAFE / SmartWear per-agent export (ACTIVE TIME + AGENT LANGUAGES / SOS volume).
       var isSafe = !isGenesys && !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
-      var kind = isGenesys ? 'genesys' : (isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))))));
+      return isGenesys ? 'genesys' : (isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))))));
+  }
+
+  window.runImportAction = function() {
+      console.log('[sync] click');
+      var t = document.getElementById('import-text').value; if(!t) { console.warn('[sync] empty text'); return; }
+      var btn = event.target;
+      var originalText = btn.innerText;
+      btn.innerHTML = '<i data-lucide="loader" class="spin"></i> Syncing...';
+      btn.disabled = true;
+      closeImportModal();
+      console.log('[sync] text length=' + t.length + ', google=' + (typeof google));
+      if (typeof google === 'undefined') {
+          btn.innerHTML = originalText; btn.disabled = false;
+          showToast('google.script.run unavailable — preview mode?');
+          return;
+      }
+      var resetBtn = function() { btn.innerHTML = originalText; btn.disabled = false; };
+
+      var kind = detectImportKind(t);
+      var isGenesys = kind === 'genesys', isActivity = kind === 'activity', isForecast = kind === 'forecast', isSafe = kind === 'safe',
+          isAlarms = kind === 'alarms', isOtOpen = kind === 'otopen', isIdp = kind === 'idp';
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -6353,15 +6362,13 @@
 
 
   // ───────────────────────────── Data coverage ─────────────────────────────
-  // Interactive year calendar of which days each imported dataset covers
-  // (filled / partial / missing / not tracked / ahead), plus a "needs
-  // updating" strip. Data: getDataCoverage() (CORE/DataCoverage.gs). Lives in
+  // Which days each imported dataset covers (imported / partial / missing /
+  // not expected / already in for the future) and what needs updating. Data: getDataCoverage() (CORE/DataCoverage.gs). Lives in
   // its own overlay outside #content, so the 60s floor/tracker polls never
   // re-render it under the user. Entry: the sync chip in the Tracker and
   // Insights headers (coverageChip).
-  var COV_COLORS = { wfm: '#6366f1', idp: '#10b981', calc: '#38bdf8', forecast: '#f59e0b', otopen: '#f472b6', safe: '#22c55e', genesys: '#ff5c33', activity: '#a78bfa', gem: '#ec4899', alarms: '#ef4444' };
   var COV_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var cov = { year: new Date().getFullYear(), focus: 'all', day: null };
+  var cov = { range: '90', year: new Date().getFullYear(), day: null, days: null };
 
   function covAdd(day, n) { var p = day.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2] + n, 12); return localDateStr(d); }
   function covSunday(day) { var p = day.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2], 12); return covAdd(day, -d.getDay()); }
@@ -6450,6 +6457,7 @@
           if (cb) cb();
           if (state.view === 'tracker' || state.view === 'insights') render();
           if (document.getElementById('cov-overlay')) renderCoverage(false);
+          var im = document.getElementById('import-modal'); if (im && im.classList.contains('open')) renderImportHealth();
       }).withFailureHandler(function() { if (cb) cb(); }).getDataCoverage();
   }
 
@@ -6467,22 +6475,76 @@
 
   function covMotion() { return typeof gsap !== 'undefined' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
 
+  // ── Coverage view (timeline) ──────────────────────────────────────────────
+  // One row per dataset, days left → right. Each row is drawn ONCE as a single
+  // SVG (one rect per day); hover and click never re-render — they only move
+  // the crosshair / tooltip and fill the detail panel — so interaction is
+  // instant even for a full year. One ink colour for data, red only for gaps.
+  var COV_ACTION = {
+      calc: ['Open calculator', function() { closeCoverage(); setView('calc'); }],
+      gem:  ['Open Red Flags',  function() { closeCoverage(); setView('analyzer'); setTimeout(function() { var m = document.getElementById('gem-modal'); if (m) m.classList.add('open'); }, 350); }]
+  };
+  window.covAction = function(key) {
+      var a = COV_ACTION[key];
+      if (a) a[1](); else { closeCoverage(); openImportModal(); }
+  };
+
+  function covRangeDays() {
+      var today = localDateStr(new Date()), out = [], d, end;
+      if (cov.range === 'year') { d = cov.year + '-01-01'; end = cov.year + '-12-31'; }
+      else { d = covAdd(today, -(+cov.range - 1)); end = covAdd(today, 14); }   // two weeks ahead: schedule / OT slots
+      for (var g = 0; d <= end && g < 400; d = covAdd(d, 1), g++) out.push(d);
+      return out;
+  }
+  function covState(ds, day, today) {
+      var v = covExpand(ds)[day];
+      if (v) return day > today ? 'ahead' : (v.partial ? 'part' : 'full');
+      if (!covExpected(ds, day, today)) return 'none';
+      return day > today ? 'due' : 'miss';   // due = expected ahead of time (next week's schedule), not yet a gap
+  }
+  // Share of expected days (to today) that are covered, in the visible range.
+  function covPct(ds, days, today) {
+      var exp = 0, have = 0;
+      days.forEach(function(d) { if (d > today || !covExpected(ds, d, today)) return; exp++; var st = covState(ds, d, today); if (st === 'full') have++; else if (st === 'part') have += 0.5; });
+      return exp ? Math.round(have / exp * 100) : null;
+  }
+  // One line describing a dataset on a day (detail panel + tooltip).
+  function covDayText(ds, day, today) {
+      var v = covExpand(ds)[day];
+      if (v) {
+          if (ds.key === 'wfm') return v.n + ' agent-day' + (v.n === 1 ? '' : 's') + ' scheduled';
+          if (ds.key === 'idp') return v.n + ' of ' + ds.perDay + ' intervals';
+          if (ds.key === 'calc') { var h = (ds.hours && ds.hours[day]) || []; return v.n + ' run' + (v.n === 1 ? '' : 's') + (h.length ? ' · ' + h.slice().sort().join(', ') : ''); }
+          if (ds.key === 'otopen') return v.n + ' slot window' + (v.n === 1 ? '' : 's');
+          if (ds.key === 'forecast') return v.via === 'month' ? 'Monthly forecast' : 'Daily forecast';
+          if (v.via === 'period') return 'Period ' + covFmt(v.p.s) + ' – ' + covFmt(v.p.e) + ' · ' + v.n + ' agents';
+          if (v.via === 'week') return 'Week of ' + covFmt(v.p.s);
+          if (v.via === 'month') return COV_MONTHS[+day.substring(5, 7) - 1] + ' ' + day.substring(0, 4) + ' monthly report';
+          return v.n + ' row' + (v.n === 1 ? '' : 's');
+      }
+      if (covExpected(ds, day, today)) return day > today ? 'Due — not imported yet' : 'Missing';
+      if (!ds._first) return 'Never imported';
+      if (day < ds._first) return 'Not tracked yet';
+      return day > today ? 'Not expected yet' : 'Not expected';
+  }
+
   window.openCoverage = function() {
       if (document.getElementById('cov-overlay')) return;
       cov.day = cov.day || localDateStr(new Date());
-      cov.year = +cov.day.substring(0, 4);
       var ov = document.createElement('div');
       ov.id = 'cov-overlay'; ov.className = 'cov-overlay';
       ov.innerHTML = '<div class="cov-panel" role="dialog" aria-label="Data coverage" onclick="event.stopPropagation()"></div>';
       ov.addEventListener('click', closeCoverage);
       document.body.appendChild(ov);
       document.addEventListener('keydown', covKeys);
+      window.addEventListener('resize', covPlaceOverlays);
       renderCoverage(true);
       fetchCoverage();   // refresh while open
   };
   window.closeCoverage = function() {
       var ov = document.getElementById('cov-overlay'); if (!ov) return;
       document.removeEventListener('keydown', covKeys);
+      window.removeEventListener('resize', covPlaceOverlays);
       ov.id = ''; ov.style.pointerEvents = 'none';   // gone for interaction immediately
       var done = function() { if (ov.parentNode) ov.parentNode.removeChild(ov); };
       if (covMotion()) { gsap.to(ov, { opacity: 0, duration: 0.2, onComplete: done }); setTimeout(done, 400); }
@@ -6493,139 +6555,214 @@
       var step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
       if (step && cov.day) { e.preventDefault(); covPickDay(covAdd(cov.day, step)); }
   }
-  window.covSetFocus = function(k) { cov.focus = (cov.focus === k) ? 'all' : k; renderCoverage(false, 'focus'); };
-  window.covSetYear = function(dy) { cov.year += dy; renderCoverage(false, dy < 0 ? 'prev' : 'next'); };
-  window.covPickDay = function(day) {
-      if (+day.substring(0, 4) !== cov.year) { cov.year = +day.substring(0, 4); cov.day = day; renderCoverage(false, 'year'); return; }
-      var prev = document.querySelector('.cov-day.sel'); if (prev) prev.classList.remove('sel');
-      cov.day = day;
-      var el = document.querySelector('.cov-day[data-d="' + day + '"]'); if (el) el.classList.add('sel');
-      var side = document.getElementById('cov-side'); if (side) { side.innerHTML = covSideHtml(day); if (covMotion()) gsap.from(side.children, { x: 10, opacity: 0, duration: 0.25, stagger: 0.03, ease: 'power2.out' }); }
-  };
+  window.covSetRange = function(r) { cov.range = r; if (r === 'year') cov.year = +(cov.day || localDateStr(new Date())).substring(0, 4); renderCoverage(false, 'range'); };
+  window.covSetYear = function(dy) { cov.year += dy; renderCoverage(false, 'range'); };
 
-  // Cell state for one day: 'full' | 'part' | 'miss' | 'none' (nothing
-  // expected, nothing there) | 'ahead' (data for a future day).
-  function covCell(day, today, list) {
-      if (cov.focus !== 'all') {
-          var ds = list.filter(function(x) { return x.key === cov.focus; })[0]; if (!ds) return 'none';
-          var v = covExpand(ds)[day], ex = covExpected(ds, day, today);
-          if (v) return day > today ? 'ahead' : (v.partial ? 'part' : 'full');
-          return ex ? 'miss' : 'none';
+  // Crosshair + tooltip follow the pointer; nothing re-renders.
+  function covIndexAt(clientX) {
+      var strip = document.querySelector('#cov-overlay .cvm-strip'); if (!strip || !cov.days) return -1;
+      var r = strip.getBoundingClientRect(), i = Math.floor((clientX - r.left) / (r.width / cov.days.length));
+      return (i >= 0 && i < cov.days.length) ? i : -1;
+  }
+  function covColumnBox(i) {
+      var rows = document.getElementById('cvm-rows'), strip = rows && rows.querySelector('.cvm-strip'); if (!strip) return null;
+      var cw = strip.clientWidth / cov.days.length;
+      return { left: strip.offsetLeft + i * cw, width: Math.max(cw, 2) };
+  }
+  window.covHover = function(e) {
+      var i = covIndexAt(e.clientX), cross = document.getElementById('cvm-cross'), tip = document.getElementById('cvm-tip');
+      if (i < 0) { covLeave(); return; }
+      var box = covColumnBox(i), day = cov.days[i], today = localDateStr(new Date());
+      cross.style.display = 'block'; cross.style.left = box.left + 'px'; cross.style.width = box.width + 'px';
+      if (tip.getAttribute('data-d') !== day) {
+          tip.setAttribute('data-d', day);
+          tip.innerHTML = '<div class="cvm-tip-date">' + covFmtLong(day) + '</div>' + covAll().map(function(ds) {
+              var st = covState(ds, day, today);
+              return '<div class="cvm-tip-row s-' + st + '"><i></i><span>' + escapeHTML(ds.label) + '</span><em>' + escapeHTML(covDayText(ds, day, today)) + '</em></div>';
+          }).join('');
       }
-      var exp = 0, have = 0, any = false;
-      list.forEach(function(ds) {
-          var v = covExpand(ds)[day]; if (v) any = true;
-          if (covExpected(ds, day, today)) { exp++; if (v && !v.partial) have++; else if (v) have += 0.5; }
-      });
-      if (!exp) return (any && day > today) ? 'ahead' : 'none';
-      if (day > today) return have ? 'ahead' : 'none';
-      return have >= exp ? 'full' : (have > 0 ? 'part' : 'miss');
+      var wrap = document.getElementById('cvm-rows').getBoundingClientRect();
+      var x = e.clientX - wrap.left + 16, maxX = wrap.width - tip.offsetWidth - 8;
+      tip.style.display = 'block';
+      tip.style.left = Math.max(8, x > maxX ? x - tip.offsetWidth - 32 : x) + 'px';
+      tip.style.top = Math.max(0, Math.min(e.clientY - wrap.top - 20, wrap.height - tip.offsetHeight)) + 'px';
+  };
+  window.covLeave = function() {
+      var c = document.getElementById('cvm-cross'), t = document.getElementById('cvm-tip');
+      if (c) c.style.display = 'none'; if (t) t.style.display = 'none';
+  };
+  window.covClick = function(e) { var i = covIndexAt(e.clientX); if (i >= 0) covPickDay(cov.days[i]); };
+  window.covPickDay = function(day) {
+      cov.day = day;
+      // Stepped outside the visible range (arrow keys): show that day's year.
+      if (cov.days && cov.days.indexOf(day) === -1) { cov.range = 'year'; cov.year = +day.substring(0, 4); renderCoverage(false, 'range'); return; }
+      covPlaceOverlays();
+      var det = document.getElementById('cvm-detail'); if (!det) return;
+      det.innerHTML = covDetailHtml(day);
+      if (covMotion()) gsap.from(det.querySelectorAll('.cvm-d-item'), { y: 6, opacity: 0, duration: 0.25, stagger: 0.02, ease: 'power2.out' });
+  };
+  function covDetailHtml(day) {
+      var today = localDateStr(new Date());
+      return '<div class="cvm-d-head"><span class="cvm-d-date">' + covFmtLong(day) + '</span>' + (day === today ? '<span class="cvm-d-today">Today</span>' : '') + '</div>' +
+             '<div class="cvm-d-grid">' + covAll().map(function(ds) {
+                 var st = covState(ds, day, today), miss = st === 'miss' || st === 'due';
+                 return '<div class="cvm-d-item s-' + st + '"><i></i><div><div class="cvm-d-name">' + escapeHTML(ds.label) + '</div><div class="cvm-d-txt">' + escapeHTML(covDayText(ds, day, today)) + (miss ? ' — ' + escapeHTML(ds.how) : '') + '</div></div></div>';
+             }).join('') + '</div>';
   }
-
-  function covDayTitle(day, today, list) {
-      return covFmtLong(day) + '\n' + list.map(function(ds) {
-          var v = covExpand(ds)[day];
-          return (v ? '✓ ' : (covExpected(ds, day, today) ? '✗ ' : '· ')) + ds.label;
-      }).join('\n');
-  }
-
-  function covSideHtml(day) {
-      var today = localDateStr(new Date()), list = covAll();
-      var rows = list.map(function(ds) {
-          var v = covExpand(ds)[day], ex = covExpected(ds, day, today), col = COV_COLORS[ds.key] || '#94a3b8', txt, cls;
-          if (v) {
-              cls = v.partial ? 'part' : 'full';
-              if (ds.key === 'wfm') txt = v.n + ' agent-day' + (v.n === 1 ? '' : 's') + ' scheduled';
-              else if (ds.key === 'idp') txt = v.n + ' of ' + ds.perDay + ' intervals';
-              else if (ds.key === 'calc') { var h = (ds.hours && ds.hours[day]) || []; txt = v.n + ' run' + (v.n === 1 ? '' : 's') + (h.length ? ' · ' + h.slice().sort().join(', ') : ''); }
-              else if (ds.key === 'otopen') txt = v.n + ' slot window' + (v.n === 1 ? '' : 's');
-              else if (v.via === 'period') txt = 'Period ' + covFmt(v.p.s) + ' – ' + covFmt(v.p.e) + ' · ' + v.n + ' agents';
-              else if (v.via === 'week') txt = 'Week of ' + covFmt(v.p.s) + ' · ' + v.n + ' rows';
-              else if (v.via === 'month') txt = 'Monthly report · ' + COV_MONTHS[+day.substring(5, 7) - 1] + ' ' + day.substring(0, 4);
-              else txt = v.n + ' row' + (v.n === 1 ? '' : 's');
-          } else if (ex) { cls = 'miss'; txt = 'Missing — ' + escapeHTML(ds.how); }
-          else { cls = 'none'; txt = !ds._first ? 'Never imported' : (day > today ? 'Not expected yet' : (day < ds._first ? 'Before tracking began' : 'Not expected for this day')); }
-          return '<div class="cov-side-row ' + cls + '"><span class="cov-dot" style="background:' + col + ';"></span><div style="min-width:0;"><div class="cov-side-label">' + escapeHTML(ds.label) + '</div><div class="cov-side-txt">' + (v ? escapeHTML(txt) : txt) + '</div></div><span class="cov-side-mark">' + (cls === 'full' ? '✓' : cls === 'part' ? '◐' : cls === 'miss' ? '✗' : '–') + '</span></div>';
-      }).join('');
-      return '<div class="cov-side-head"><div class="cov-side-date">' + covFmtLong(day) + '</div>' + (day === today ? '<span class="cov-today-pill">Today</span>' : '') + '</div>' + rows;
+  // Today line + selected-day marker sit over the strips column.
+  function covPlaceOverlays() {
+      if (!cov.days) return;
+      var today = localDateStr(new Date());
+      var put = function(id, day) {
+          var el = document.getElementById(id); if (!el) return;
+          var i = cov.days.indexOf(day), box = i >= 0 ? covColumnBox(i) : null;
+          if (!box) { el.style.display = 'none'; return; }
+          el.style.display = 'block'; el.style.left = box.left + 'px'; el.style.width = box.width + 'px';
+      };
+      put('cvm-today', today); put('cvm-sel', cov.day);
   }
 
   function renderCoverage(entrance, change) {
       var ov = document.getElementById('cov-overlay'); if (!ov) return;
       var panel = ov.querySelector('.cov-panel');
-      var today = localDateStr(new Date()), list = covAll();
-      var loading = !state.coverage;
-
-      // What needs updating gets a full card (worst first; the left bar's colour
-      // is the urgency). Everything up to date collapses into one row of chips.
-      // Clicking either focuses the calendar on that dataset.
+      var today = localDateStr(new Date()), list = covAll(), loading = !state.coverage;
+      var days = covRangeDays(); cov.days = days;
       var order = { bad: 0, warn: 1, ok: 2, none: 3 };
       var rated = list.map(function(ds) { return { ds: ds, st: covStatus(ds, today) }; }).sort(function(a, b) { return order[a.st.level] - order[b.st.level]; });
       var need = rated.filter(function(x) { return x.st.level === 'bad' || x.st.level === 'warn'; });
-      var fine = rated.filter(function(x) { return x.st.level === 'ok' || x.st.level === 'none'; });
-      var cards = need.map(function(x) {
-          var ds = x.ds, st = x.st, col = COV_COLORS[ds.key] || '#94a3b8';
-          var sync = ds.lastSync ? 'Last import ' + escapeHTML(ds.lastSync.text) : (ds.key === 'calc' ? 'Logged on each calculator run' : 'No import on record');
-          return '<button class="cov-card lvl-' + st.level + (cov.focus === ds.key ? ' on' : '') + '" style="--c:' + col + ';" onclick="covSetFocus(\'' + ds.key + '\')">' +
-                 '<div class="cov-card-top"><span class="cov-dot" style="background:' + col + ';"></span><span class="cov-card-label">' + escapeHTML(ds.label) + '</span></div>' +
-                 '<div class="cov-card-txt">' + escapeHTML(st.text) + '</div>' +
-                 '<div class="cov-card-how">' + escapeHTML(ds.how) + '</div>' +
-                 '<div class="cov-card-sync">' + sync + '</div></button>';
+
+      // Plain-language summary instead of a wall of cards.
+      var summary = loading ? 'Reading every dataset…'
+          : !need.length ? 'Everything is up to date.'
+          : need.length + ' of ' + list.length + ' datasets need attention' + (need.filter(function(x) { return x.st.level === 'bad'; }).length ? ' — ' + need.filter(function(x) { return x.st.level === 'bad'; }).map(function(x) { return x.ds.label; }).join(', ') + ' missing today.' : '.');
+
+      // Month ticks along the top of the strips column (in %).
+      var ticks = '';
+      days.forEach(function(d, i) {
+          if (d.substring(8) === '01' || i === 0) ticks += '<span class="cvm-tick" style="left:' + (i / days.length * 100).toFixed(3) + '%;">' + COV_MONTHS[+d.substring(5, 7) - 1] + (d.substring(5, 7) === '01' || i === 0 ? ' ' + d.substring(0, 4) : '') + '</span>';
+      });
+
+      var rows = rated.map(function(x) {
+          var ds = x.ds, st = x.st, n = days.length, rects = '';
+          for (var i = 0; i < n; i++) rects += '<rect class="k-' + covState(ds, days[i], today) + '" x="' + i + '" y="0" width="0.82" height="1"/>';
+          var pct = covPct(ds, days, today);
+          var act = COV_ACTION[ds.key] ? COV_ACTION[ds.key][0] : 'Import';
+          var sync = ds.lastSync ? 'last import ' + escapeHTML(ds.lastSync.text) : (ds.key === 'calc' ? 'logged each calculator run' : 'no import on record');
+          return '<div class="cvm-row">' +
+                 '<div class="cvm-meta"><div class="cvm-name">' + escapeHTML(ds.label) + '</div>' +
+                   '<div class="cvm-status"><span class="lv-' + st.level + '">' + escapeHTML(st.text) + '</span></div><div class="cvm-sync">' + sync + '</div></div>' +
+                 '<div class="cvm-strip"><svg viewBox="0 0 ' + n + ' 1" preserveAspectRatio="none" shape-rendering="crispEdges">' + rects + '</svg></div>' +
+                 '<div class="cvm-side"><span class="cvm-pct" title="Expected days covered in this range">' + (pct == null ? '—' : pct + '%') + '</span>' +
+                   ((st.level === 'bad' || st.level === 'warn' || st.level === 'none') ? '<button class="cvm-btn" onclick="covAction(\'' + ds.key + '\')">' + act + '</button>' : '<span class="cvm-btn-ghost"></span>') + '</div>' +
+                 '</div>';
       }).join('');
-      var chips = fine.map(function(x) {
-          var ds = x.ds, col = COV_COLORS[ds.key] || '#94a3b8';
-          return '<button class="cov-okchip' + (x.st.level === 'none' ? ' never' : '') + (cov.focus === ds.key ? ' on' : '') + '" style="--c:' + col + ';" onclick="covSetFocus(\'' + ds.key + '\')" title="' + escapeHTML(x.st.text + (ds.lastSync ? ' · last import ' + ds.lastSync.text : '')) + '">' +
-                 '<span class="cov-dot" style="background:' + col + ';"></span>' + escapeHTML(ds.label) + '<span class="cov-ok-mark">' + (x.st.level === 'none' ? '—' : '✓') + '</span></button>';
-      }).join('');
-      var topHtml = (need.length ? '<div class="cov-sec-title"><span class="cov-sec-count">' + need.length + '</span> Needs updating</div><div class="cov-cards">' + cards + '</div>' : '<div class="cov-sec-title ok">Everything is up to date</div>') +
-                    (chips ? '<div class="cov-okrow"><span class="cov-ok-title">Up to date</span>' + chips + '</div>' : '');
 
-      var months = '';
-      for (var mo = 0; mo < 12; mo++) {
-          var first = new Date(cov.year, mo, 1, 12), dim = new Date(cov.year, mo + 1, 0).getDate(), lead = first.getDay();
-          var cells = '';
-          for (var b = 0; b < lead; b++) cells += '<span class="cov-blank"></span>';
-          for (var dd = 1; dd <= dim; dd++) {
-              var day = cov.year + '-' + (mo < 9 ? '0' : '') + (mo + 1) + '-' + (dd < 10 ? '0' : '') + dd;
-              var st2 = loading ? 'none' : covCell(day, today, list);
-              cells += '<button class="cov-day ' + st2 + (day === today ? ' today' : '') + (day === cov.day ? ' sel' : '') + '" data-d="' + day + '" onclick="covPickDay(\'' + day + '\')" title="' + (loading ? '' : escapeHTML(covDayTitle(day, today, list))) + '">' + dd + '</button>';
-          }
-          months += '<div class="cov-month"><div class="cov-month-name">' + COV_MONTHS[mo] + '</div><div class="cov-wk"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div class="cov-grid">' + cells + '</div></div>';
-      }
-
-      var focusDs = list.filter(function(x) { return x.key === cov.focus; })[0];
-      var focusLbl = focusDs ? '<span class="cov-focus" style="--c:' + (COV_COLORS[focusDs.key] || '#94a3b8') + ';"><span class="cov-dot" style="background:var(--c);"></span>' + escapeHTML(focusDs.label) + '<button onclick="covSetFocus(\'' + focusDs.key + '\')" title="Show all data">&times;</button></span>' : '<span class="cov-focus all">All data types</span>';
-
+      var seg = function(r, label) { return '<button class="' + (cov.range === r ? 'on' : '') + '" onclick="covSetRange(\'' + r + '\')">' + label + '</button>'; };
       panel.innerHTML =
           '<div class="cov-head">' +
-            '<div><div class="cov-title">Data coverage</div><div class="cov-sub">What has been imported, day by day — and what needs updating. Click a card to focus the calendar on it; click a day for detail (arrow keys move).</div></div>' +
-            '<div class="cov-head-r"><div class="cov-year"><button onclick="covSetYear(-1)" aria-label="Previous year">‹</button><span>' + cov.year + '</span><button onclick="covSetYear(1)" aria-label="Next year">›</button></div>' +
-            '<button class="cov-x" onclick="closeCoverage()" aria-label="Close">&times;</button></div>' +
+            '<div><div class="cov-title">Data coverage</div><div class="cov-sub">' + escapeHTML(summary) + '</div></div>' +
+            '<div class="cov-head-r">' +
+              '<div class="cvm-seg">' + seg('30', '30 days') + seg('90', '90 days') + seg('year', 'Year') + '</div>' +
+              (cov.range === 'year' ? '<div class="cov-year"><button onclick="covSetYear(-1)" aria-label="Previous year">‹</button><span>' + cov.year + '</span><button onclick="covSetYear(1)" aria-label="Next year">›</button></div>' : '') +
+              '<button class="cov-x" onclick="closeCoverage()" aria-label="Close">&times;</button>' +
+            '</div>' +
           '</div>' +
-          (loading ? '<div class="cov-loading">Reading every dataset…</div>' : '<div class="cov-top">' + topHtml + '</div>') +
-          '<div class="cov-body">' +
-            '<div class="cov-cal-wrap"><div class="cov-cal-top">' + focusLbl + '<div class="cov-legend"><span><i class="full"></i>Complete</span><span><i class="part"></i>Partial</span><span><i class="miss"></i>Missing</span><span><i class="ahead"></i>Ahead</span><span><i class="none"></i>Not tracked</span></div></div>' +
-              '<div class="cov-cal' + (focusDs ? ' focus' : '') + '" style="--c:' + (focusDs ? (COV_COLORS[focusDs.key] || '#94a3b8') : 'var(--status-active)') + ';">' + months + '</div></div>' +
-            '<aside class="cov-side custom-scrollbar" id="cov-side">' + (loading ? '' : covSideHtml(cov.day)) + '</aside>' +
-          '</div>';
+          '<div class="cvm">' +
+            '<div class="cvm-axis"><div class="cvm-meta"></div><div class="cvm-ticks">' + ticks + '</div><div class="cvm-side"></div></div>' +
+            '<div class="cvm-rows custom-scrollbar" id="cvm-rows" onmousemove="covHover(event)" onmouseleave="covLeave()" onclick="covClick(event)">' + rows +
+              '<div class="cvm-line cvm-today-line" id="cvm-today"></div><div class="cvm-line cvm-sel-line" id="cvm-sel"></div><div class="cvm-cross" id="cvm-cross"></div><div class="cvm-tip" id="cvm-tip"></div>' +
+            '</div>' +
+            '<div class="cvm-legend"><span><i class="k-full"></i>Imported</span><span><i class="k-part"></i>Partial</span><span><i class="k-miss"></i>Missing</span><span><i class="k-due"></i>Due</span><span><i class="k-ahead"></i>Already in (future)</span><span><i class="k-none"></i>Not expected</span><span class="cvm-legend-today"><i></i>Today</span></div>' +
+          '</div>' +
+          '<div class="cvm-detail" id="cvm-detail">' + (loading ? '' : covDetailHtml(cov.day)) + '</div>';
 
-      var selEl = panel.querySelector('.cov-day.sel');
-      if (selEl && (entrance || change === 'year')) { var calEl = panel.querySelector('.cov-cal'); var mEl = selEl.closest('.cov-month'); if (calEl && mEl) calEl.scrollTop = Math.max(0, mEl.offsetTop - calEl.offsetTop - 8); }
+      covPlaceOverlays();
       if (!covMotion()) return;
       var q = function(s) { return panel.querySelectorAll(s); };
       if (entrance) {
           gsap.fromTo(ov, { opacity: 0 }, { opacity: 1, duration: 0.25 });
-          gsap.from(panel, { y: 28, scale: 0.975, opacity: 0, duration: 0.5, ease: 'power3.out' });
-          gsap.from(q('.cov-card, .cov-okchip'), { y: 14, opacity: 0, duration: 0.4, stagger: 0.035, delay: 0.15, ease: 'power2.out' });
-          gsap.from(q('.cov-month'), { y: 16, opacity: 0, duration: 0.45, stagger: 0.035, delay: 0.2, ease: 'power2.out' });
-          gsap.from(q('.cov-day'), { scale: 0.3, opacity: 0, duration: 0.35, stagger: { each: 0.0022, from: 'start' }, delay: 0.3, ease: 'back.out(2)' });
-      } else if (change === 'focus') {
-          gsap.from(q('.cov-day'), { scale: 0.7, opacity: 0.2, duration: 0.3, stagger: { each: 0.0012, from: 'start' }, ease: 'power2.out' });
-          gsap.from(q('.cov-card.on, .cov-okchip.on'), { scale: 0.94, duration: 0.35, ease: 'back.out(3)' });
-      } else if (change === 'prev' || change === 'next' || change === 'year') {
-          gsap.from(q('.cov-month'), { x: change === 'prev' ? -24 : 24, opacity: 0, duration: 0.35, stagger: 0.02, ease: 'power2.out' });
+          gsap.from(panel, { y: 24, scale: 0.98, opacity: 0, duration: 0.45, ease: 'power3.out' });
+      }
+      if (entrance || change === 'range') {
+          // Each row's timeline draws left → right, staggered down the list.
+          gsap.fromTo(q('.cvm-strip svg'), { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: entrance ? 0.9 : 0.6, stagger: 0.05, ease: 'power2.inOut', delay: entrance ? 0.15 : 0, clearProps: 'clipPath' });
+          gsap.from(q('.cvm-meta, .cvm-side'), { opacity: 0, x: -6, duration: 0.35, stagger: 0.02, delay: entrance ? 0.15 : 0, ease: 'power2.out' });
+          gsap.from(q('.cvm-today-line'), { scaleY: 0, transformOrigin: '50% 0%', duration: 0.6, delay: entrance ? 0.6 : 0.3, ease: 'power3.out' });
       }
   }
 
+
+
+  // ── Import window: what needs importing + what this paste is ──────────────
+  // Lists the datasets that need updating (from the coverage data) with a
+  // 14-day strip each, and as text is pasted names the report it recognises
+  // (detectImportKind — the same sniffer the Sync button uses) and, for WFM /
+  // IDP pastes, the dates it covers. The matching row is highlighted.
+  var IMPORT_KIND_TO_DS = { sched: 'wfm', idp: 'idp', forecast: 'forecast', otopen: 'otopen', safe: 'safe', genesys: 'genesys', activity: 'activity', alarms: 'alarms' };
+  var importInputTimer = null;
+  window.onImportInput = function() { clearTimeout(importInputTimer); importInputTimer = setTimeout(renderImportHealth, 160); };
+
+  // Dates a paste covers, when the report says so (WFM "Date Range:", IDP
+  // column headers "Oct 29, 2026").
+  function importPasteRange(kind, t) {
+      var head = t.substring(0, 20000);
+      if (kind === 'sched') {
+          var m = head.match(/Date Range:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+          if (m) { var f = function(x) { var p = x.split('/'), y = +p[2]; if (y < 100) y += 2000; return y + '-' + (+p[0] < 10 ? '0' : '') + +p[0] + '-' + (+p[1] < 10 ? '0' : '') + +p[1]; }; return [f(m[1]), f(m[2])]; }
+      }
+      if (kind === 'idp') {
+          var ds = [], re = /\b([A-Z][a-z]{2,8}\.?\s\d{1,2},?\s\d{4})\b/g, x;
+          while ((x = re.exec(head)) && ds.length < 400) { var d = new Date(x[1].replace('.', '')); if (!isNaN(d)) ds.push(localDateStr(d)); }
+          ds.sort(); if (ds.length) return [ds[0], ds[ds.length - 1]];
+      }
+      return null;
+  }
+
+  function importStrip(ds, today) {
+      var rects = '';
+      for (var i = 13; i >= 0; i--) { var d = covAdd(today, -i); rects += '<rect class="k-' + covState(ds, d, today) + '" x="' + (13 - i) + '" y="0" width="0.8" height="1"/>'; }
+      return '<svg viewBox="0 0 14 1" preserveAspectRatio="none" shape-rendering="crispEdges">' + rects + '</svg>';
+  }
+
+  function renderImportHealth() {
+      var box = document.getElementById('import-health'), det = document.getElementById('import-detect');
+      if (!box || !det) return;
+      var ta = document.getElementById('import-text'), t = ta ? ta.value : '';
+      var kind = t.trim() ? detectImportKind(t) : '';
+      // "sched" is the Sync fallback for anything unrecognised — only claim it
+      // when the paste actually looks like the WFM Agent Schedules report.
+      if (kind === 'sched' && !/agent schedules|agent:\s*\d+/i.test(t.substring(0, 20000))) kind = 'unknown';
+      var dsKey = IMPORT_KIND_TO_DS[kind] || '';
+      var list = covAll(), today = localDateStr(new Date());
+      var match = list.filter(function(x) { return x.key === dsKey; })[0];
+
+      if (!kind) det.innerHTML = '';
+      else if (kind === 'unknown') det.innerHTML = '<span class="imp-det-k">Not recognised</span><span class="imp-det-t">Sync will try it as a WFM schedule.</span>';
+      else {
+          var rng = importPasteRange(kind, t);
+          det.innerHTML = '<span class="imp-det-k">This looks like</span><span class="imp-det-name">' + escapeHTML(match ? match.label : kind) + '</span>' +
+              (rng ? '<span class="imp-det-t">' + covFmt(rng[0]) + (rng[1] !== rng[0] ? ' – ' + covFmt(rng[1]) + ', ' + rng[1].substring(0, 4) : ', ' + rng[0].substring(0, 4)) + '</span>' : '') +
+              ((kind === 'safe' || kind === 'genesys') ? '<span class="imp-det-t">· pick its period below</span>' : '');
+      }
+
+      if (!state.coverage) { box.innerHTML = ''; return; }
+      var need = list.map(function(ds) { return { ds: ds, st: covStatus(ds, today) }; })
+          .filter(function(x) { return (x.st.level === 'bad' || x.st.level === 'warn') && x.ds.key !== 'calc' && x.ds.key !== 'gem'; });   // calc / GEM aren't fed from here
+      var okN = list.length - need.length;
+      var prevMatch = box.getAttribute('data-match') || '';
+      box.setAttribute('data-match', dsKey);
+      box.innerHTML = '<div class="imp-h-head"><span>' + (need.length ? 'Needs importing' : 'Nothing needs importing') + '</span>' +
+              '<button class="imp-h-all" onclick="closeImportModal(); openCoverage();">All data coverage</button></div>' +
+          need.map(function(x) {
+              return '<div class="imp-h-row' + (x.ds.key === dsKey ? ' match' : '') + '"><div class="imp-h-name">' + escapeHTML(x.ds.label) + '</div>' +
+                     '<div class="imp-h-st lv-' + x.st.level + '">' + escapeHTML(x.st.text) + '</div>' +
+                     '<div class="imp-h-strip" title="Last 14 days">' + importStrip(x.ds, today) + '</div></div>';
+          }).join('') +
+          (need.length && okN > 0 ? '<div class="imp-h-ok">' + okN + ' other dataset' + (okN === 1 ? ' is' : 's are') + ' up to date</div>' : '');
+      if (dsKey && dsKey !== prevMatch && typeof gsap !== 'undefined') {
+          var row = box.querySelector('.imp-h-row.match');
+          if (row) gsap.fromTo(row, { backgroundColor: 'rgba(79,70,229,0.22)' }, { backgroundColor: 'rgba(79,70,229,0.07)', duration: 0.8, ease: 'power2.out', clearProps: 'backgroundColor' });
+      }
+  }
 
 </script>
