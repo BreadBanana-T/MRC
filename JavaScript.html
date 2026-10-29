@@ -2478,6 +2478,7 @@
   // prefers-reduced-motion. Shared by the outage cells and the Alarm.com tile.
   var SOURCE_ISSUES = {
       geo:         { label: 'Blocked by location', tone: 'alert' },
+      blocked:     { label: 'Blocked by the utility', tone: 'alert' },
       unreachable: { label: 'No response',         tone: 'alert' },
       http:        { label: 'Server error',        tone: 'alert' },
       issue:       { label: 'Issue reported',      tone: 'alert' },
@@ -2495,7 +2496,7 @@
           format: '<path d="M11 7c-3 0-3 2-3 4v2c0 2-1 3-3 3 2 0 3 1 3 3v2c0 2 0 4 3 4M21 7c3 0 3 2 3 4v2c0 2 1 3 3 3-2 0-3 1-3 3v2c0 2 0 4-3 4" class="s-ln"/><g class="s-bob"><path d="M14 13a2.2 2.2 0 1 1 3 2c-.8.4-1 1-1 1.8" class="s-ln s-thin"/><circle cx="16" cy="20" r="1.1" class="s-fill"/></g>',
           unreadable: '<path d="M4 16s4.5-7 12-7 12 7 12 7-4.5 7-12 7S4 16 4 16z" class="s-ln"/><circle cx="16" cy="16" r="3.2" class="s-ln"/><path d="M5 12h22" class="s-ln s-thin s-scan"/>',
           config: '<g class="s-swing"><path d="M16 3v6M12 9h8v5a4 4 0 0 1-8 0z" class="s-ln"/></g><path d="M16 29v-5M12.5 24h7v-3h-7z" class="s-ln"/><path d="M13.5 19.5l5-3" class="s-ln s-thin s-dash"/>'
-      }[code] || '';
+      }[code === 'blocked' ? 'geo' : code] || '';
       var tone = (SOURCE_ISSUES[code] || {}).tone || 'muted';
       return '<svg class="src-sign tone-' + tone + '" width="' + size + '" height="' + size + '" viewBox="0 0 32 32" aria-hidden="true">' + svg + '</svg>';
   }
@@ -2505,8 +2506,9 @@
       if (d.issues && d.issues[p]) return d.issues[p];
       var err = (d.errors || []).find(function(e) { return e.indexOf(p + ':') === 0; }) || '';
       var t = err.replace(/^\w+:\s*/, '');
-      var code = /not configured/i.test(t) ? 'config' : /geo|location|restreint|restricted/i.test(t) ? 'geo' : /HTTP \d{3}/.test(t) ? 'http' : /JSON|Unexpected token/i.test(t) ? 'format' : 'unreachable';
-      return { code: code, detail: t || 'No data' };
+      var code = /not configured/i.test(t) ? 'config' : /geo|location|restreint|restricted/i.test(t) ? 'geo' : /<!DOCTYPE|<html/i.test(t) ? 'blocked' : /HTTP \d{3}/.test(t) ? 'http' : /JSON|Unexpected token/i.test(t) ? 'format' : 'unreachable';
+      var friendly = { blocked: 'The feed answered with a web page instead of data', format: 'The feed answered, but not with data we can read' }[code];
+      return { code: code, detail: friendly || t || 'No data' };
   }
   window.showOutageIssue = function(p) {
       var d = state.outagesData || {}, iss = outageIssue(d, p);

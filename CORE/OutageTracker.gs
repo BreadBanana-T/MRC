@@ -111,9 +111,12 @@ var OutageTracker = {
     if (outcome.skipped) return { code: 'config', detail: 'No feed URL set — Outage URL Settings (⚡)' };
     var e = String(outcome.error || '');
     if (outcome.geo) return { code: 'geo', detail: e };
+    if (outcome.blocked) return { code: 'blocked', detail: e };
+    if (outcome.format) return { code: 'format', detail: 'The feed answered, but not with data we can read' };
     var http = e.match(/HTTP (\d{3})/);
     if (http) return { code: 'http', detail: 'The utility\'s server answered ' + http[0] };
-    if (/JSON|Unexpected token|is not valid|undefined|Cannot read/i.test(e)) return { code: 'format', detail: 'The feed answered but its format changed — ' + e };
+    if (/<!DOCTYPE|<html/i.test(e)) return { code: 'blocked', detail: 'The feed answered with a web page instead of data' };
+    if (/JSON|Unexpected token|is not valid|undefined|Cannot read/i.test(e)) return { code: 'format', detail: 'The feed answered, but not with data we can read' };
     return { code: 'unreachable', detail: e || 'No response from the feed' };
   },
 
@@ -486,42 +489,50 @@ var OutageTracker = {
   // Hydro-Québec answers requests from outside Québec/Canada (which includes
   // Google's Apps Script servers) with an HTML "Accès restreint | Restricted
   // access" page instead of JSON.
-  _isHQRestricted: function(res) {
-    var code = res.getResponseCode();
-    var text = String(res.getContentText() || '').slice(0, 4000);
-    return code === 403 || code === 451 || /Acc[eè]s restreint|Restricted access/i.test(text);
+  // Hydro-Québec restricts access by location: some requests (Google's
+  // servers are outside Québec) get an HTML page ("Accès restreint |
+  // Restricted access") instead of JSON. Any HTML answer from the JSON feed is
+  // reported as "blocked", never as a format change, with the page's title.
+  // One request → { data } | { blocked, geo, title } | { error } | { format }.
+  _hqTry: function(url) {
+    try {
+      var res = UrlFetchApp.fetch(url, this._commonHeaders());
+      var code = res.getResponseCode(), text = String(res.getContentText() || '');
+      var ctype = String((res.getHeaders() || {})['Content-Type'] || '');
+      if (/^\s*</.test(text) || /text\/html/i.test(ctype) || code === 403 || code === 451) {
+        var t = text.match(/<title[^>]*>([^<]*)<\/title>/i);
+        return { blocked: true, geo: /restreint|restricted|emplacement|location/i.test(text.slice(0, 20000)), title: t ? t[1].replace(/\s+/g, ' ').trim() : '' };
+      }
+      if (code !== 200) return { error: 'HTTP ' + code };
+      try { return this._parseHQ(JSON.parse(text)); }
+      catch (e) { return { format: true, error: 'unreadable' }; }
+    } catch (e) {
+      return { error: e.message };
+    }
   },
 
   _fetchHQ: function() {
     var url = this._getUrl('HYDRO_QUEBEC_URL', this._DEFAULT_HQ_URL);
     if (!url) return { skipped: true };
-    var restricted = false;
-    // Two tries: Apps Script's egress IPs vary between requests, and only some
-    // of them are geo-blocked, so a second attempt often gets through.
-    for (var attempt = 0; attempt < 2; attempt++) {
-      restricted = false;
-      try {
-        var res = UrlFetchApp.fetch(url, this._commonHeaders());
-        if (this._isHQRestricted(res)) { restricted = true; continue; }
-        if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
-        return this._parseHQ(JSON.parse(res.getContentText()));
-      } catch (e) {
-        if (!restricted) return { error: e.message, clientUrl: url };
-      }
-    }
-    // Restricted: try the public Info-pannes markers feed before giving up.
+    var r = this._hqTry(url);
+    if (r.data) return r;
+    // The public Info-pannes map feed is a separate source; use it if it answers.
     try {
       var ver = UrlFetchApp.fetch(this._HQ_MARKERS_BASE + 'bisversion.json', this._commonHeaders());
-      if (ver.getResponseCode() === 200 && !this._isHQRestricted(ver)) {
-        var v = String(JSON.parse(ver.getContentText())).replace(/[^\w.-]/g, '');
-        var mk = UrlFetchApp.fetch(this._HQ_MARKERS_BASE + 'bismarkers' + v + '.json', this._commonHeaders());
-        if (mk.getResponseCode() === 200 && !this._isHQRestricted(mk)) {
-          var parsed = this._parseHQ(JSON.parse(mk.getContentText()));
-          if (parsed.data) return parsed;
-        }
+      var vt = String(ver.getContentText() || '');
+      if (ver.getResponseCode() === 200 && !/^\s*</.test(vt)) {
+        var mk = this._hqTry(this._HQ_MARKERS_BASE + 'bismarkers' + String(JSON.parse(vt)).replace(/[^\w.-]/g, '') + '.json');
+        if (mk.data) return mk;
       }
     } catch (e2) {}
-    return { geo: true, error: "Hydro-Québec blocked the request by location (Google's servers are outside Québec)", clientUrl: url };
+    // clientUrl: the dashboard retries from the viewer's browser (in Canada).
+    if (r.blocked) {
+      return { blocked: true, geo: r.geo, clientUrl: url,
+               error: r.geo ? "Hydro-Québec restricts access from outside Québec, which includes Google's servers"
+                            : 'Hydro-Québec answered with a web page' + (r.title ? ' ("' + r.title + '")' : '') + ' instead of outage data' };
+    }
+    if (r.format) return { format: true, error: 'unreadable', clientUrl: url };
+    return { error: r.error, clientUrl: url };
   },
 
   _parseHQ: function(body) {
