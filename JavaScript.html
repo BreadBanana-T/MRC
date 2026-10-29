@@ -123,6 +123,20 @@
       animateCountUps();
   }
   
+  // The view's .sticky-header docks flush to the top of the scroll area. Once
+  // docked it gets .is-stuck (square top corners, firmer shadow) so nothing
+  // can show above or around it. Checked on scroll and after each render.
+  function updateStickyHeader() {
+      var c = document.getElementById('content'); if (!c) return;
+      var hd = c.querySelector('.sticky-header'); if (!hd) return;
+      var stuck = c.scrollTop > 0 && (hd.getBoundingClientRect().top - c.getBoundingClientRect().top) <= 1;
+      hd.classList.toggle('is-stuck', stuck);
+  }
+  (function() {
+      var bind = function() { var c = document.getElementById('content'); if (c) c.addEventListener('scroll', updateStickyHeader, { passive: true }); };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind); else bind();
+  })();
+
   document.addEventListener('click', function(e) {
       var panel = document.getElementById('notif-panel');
       var bellBtn = document.getElementById('btn-bell');
@@ -300,19 +314,35 @@
       d.byProvince = d.byProvince || {};
       d.byProvince.QC = qc;
       d.errors = (d.errors || []).filter(function(e) { return e.indexOf('QC:') !== 0; });
+      if (d.issues) delete d.issues.QC;
   }
 
+  // state.hqBrowser = { status: 'trying'|'ok'|'failed', reason } — shown on the
+  // Québec cell so it's clear whether the browser fallback was tried and why
+  // it didn't work.
   function fetchHQFromBrowser(d) {
       if (typeof fetch === 'undefined') return;
       if (hqBrowserCache && Date.now() - hqBrowserCache.at < 300000) { applyHQBrowser(d, hqBrowserCache.data); return; }
+      state.hqBrowser = { status: 'trying', reason: '' };
       fetch(d.qcClientUrl, { headers: { 'Accept': 'application/json' } })
-          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-          .then(function(body) {
-              var qc = parseHQBrowser(body); if (!qc) return;
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+          .then(function(t) {
+              var body; try { body = JSON.parse(t); } catch (e) { throw new Error(/restreint|restricted/i.test(t) ? 'geo' : 'format'); }
+              var qc = parseHQBrowser(body); if (!qc) throw new Error('format');
               hqBrowserCache = { at: Date.now(), data: qc };
+              state.hqBrowser = { status: 'ok', reason: '' };
               if (state.outagesData === d) { applyHQBrowser(d, qc); if (state.view === 'overview') render(); }
           })
-          .catch(function(e) { console.warn('[outages] Hydro-Québec browser fetch failed:', e && e.message); });
+          .catch(function(e) {
+              var m = (e && e.message) || '';
+              var reason = m === 'geo' ? 'blocked by location here too'
+                         : m === 'format' ? 'answered, but not with outage data'
+                         : /^HTTP/.test(m) ? 'refused (' + m + ')'
+                         : "blocked — Hydro-Québec doesn't let other sites read its feed";
+              state.hqBrowser = { status: 'failed', reason: reason };
+              console.warn('[outages] Hydro-Québec browser fetch failed:', m);
+              if (state.view === 'overview') render();
+          });
   }
 
   function fetchOutages() {
@@ -320,7 +350,7 @@
       google.script.run.withSuccessHandler(function(res) {
           try {
               state.outagesData = JSON.parse(res);
-              if (state.outagesData && state.outagesData.qcClientUrl && !(state.outagesData.byProvince || {}).QC) fetchHQFromBrowser(state.outagesData);
+              if (state.outagesData && state.outagesData.qcClientUrl && (!(state.outagesData.byProvince || {}).QC || state.outagesData.byProvince.QC.stale)) fetchHQFromBrowser(state.outagesData);
               if (state.view === 'overview') render();
           } catch (e) {}
       }).withFailureHandler(function() {}).getPowerOutages();
@@ -1322,7 +1352,8 @@
       return {
           // The eyebrow already says "Scheduled maintenance", so drop that prefix
           // from the calendar title ("Scheduled Maintenance - MAS" → "MAS").
-          title: escapeHTML(String(m.ev.title || '').replace(/^\s*scheduled maintenance\s*[-–—:|·]*\s*/i, '') || 'Maintenance window'),
+          // Also tolerates markdown-ish wrappers: "*Scheduled Maintenance* - X".
+          title: escapeHTML(String(m.ev.title || '').replace(/^[\s*_~]*scheduled maintenance[\s*_~]*[-–—:|·]*\s*/i, '') || 'Maintenance window'),
           start: escapeHTML(m.ev.startTime || ''),
           end: escapeHTML(m.ev.endTime || ''),
           pill: m.live ? 'In progress' : 'Upcoming',
@@ -1379,10 +1410,16 @@
       for (var i = 0; i < str.length; i++) {
           var ch = str.charAt(i), slot = kids[i];
           if (ch === ':' || !slot || slot.className !== 'mb-slot') continue;
+          // Settle the slot first: any roll still in flight (or queued up while
+          // the tab was in the background, where animation frames pause but the
+          // 1s timer keeps firing) is finished and its leftovers dropped, so a
+          // slot never shows two digits at once.
           var cur = slot.lastElementChild;
+          while (slot.children.length > 1) { if (typeof gsap !== 'undefined') gsap.killTweensOf(slot.firstElementChild); slot.removeChild(slot.firstElementChild); }
+          if (cur && typeof gsap !== 'undefined') { gsap.killTweensOf(cur); gsap.set(cur, { yPercent: 0, opacity: 1 }); }
           if (cur && cur.textContent === ch) continue;
           var nu = document.createElement('span'); nu.textContent = ch; slot.appendChild(nu);
-          if (animate && cur) {
+          if (animate && cur && !document.hidden) {
               gsap.fromTo(nu, { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: 'power3.out' });
               gsap.to(cur, { yPercent: -100, opacity: 0, duration: 0.45, ease: 'power3.out', onComplete: function() { if (this.targets()[0].parentNode) this.targets()[0].parentNode.removeChild(this.targets()[0]); } });
           } else if (cur) { slot.removeChild(cur); }
@@ -1903,6 +1940,7 @@
           c.innerHTML = h; 
           refreshIcons();
           animateViewEntrance();
+          updateStickyHeader();
 
           var newAbsencesLeft = document.getElementById('absences-left-pane');
           if (newAbsencesLeft) newAbsencesLeft.scrollTop = leftScroll;
@@ -2423,13 +2461,56 @@
               '<span class="' + dotCls + '" style="background:' + color + ';"></span> Alarm.com' +
           '</div>' +
           '<div style="font-size:2.4rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + up24 + '</div>' +
-          '<div style="font-size:0.7rem; font-weight:800; color:var(--text-main); margin-top:6px;">' + label + '</div>' +
+          (st === 'up' ? '<div style="font-size:0.7rem; font-weight:800; color:var(--text-main); margin-top:6px;">' + label + '</div>'
+              : '<div style="display:flex; align-items:center; gap:8px; margin-top:8px;">' + sourceSign(st === 'unknown' ? 'unreadable' : (st === 'issue' ? 'issue' : (d.statusCode ? 'http' : 'unreachable')), 24) + '<span style="font-size:0.72rem; font-weight:800; color:var(--text-main); line-height:1.25;">' + label + '</span></div>') +
           why +
           '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + facts.join(' · ') + '</div>' +
           chip + strip,
           ' cursor:default;');
   }
 
+
+  // ── "Source down" signs ────────────────────────────────────────────────────
+  // One small animated mark per failure cause, so a dead feed says WHY at a
+  // glance instead of a generic "offline". CSS-animated (.sign-*), static with
+  // prefers-reduced-motion. Shared by the outage cells and the Alarm.com tile.
+  var SOURCE_ISSUES = {
+      geo:         { label: 'Blocked by location', tone: 'alert' },
+      unreachable: { label: 'No response',         tone: 'alert' },
+      http:        { label: 'Server error',        tone: 'alert' },
+      issue:       { label: 'Issue reported',      tone: 'alert' },
+      format:      { label: 'Feed format changed', tone: 'warn' },
+      unreadable:  { label: 'Status unreadable',   tone: 'warn' },
+      config:      { label: 'Not set up',          tone: 'muted' }
+  };
+  function sourceSign(code, size) {
+      size = size || 34;
+      var svg = {
+          geo: '<circle cx="16" cy="16" r="10.5" class="s-ln"/><g class="s-spin"><ellipse cx="16" cy="16" rx="4.5" ry="10.5" class="s-ln"/></g><path d="M5.5 16h21M7.5 10.5h17M7.5 21.5h17" class="s-ln s-thin"/><path d="M6 26L26 6" class="s-ln s-hot s-bar"/>',
+          unreachable: '<path d="M6 13a14 14 0 0 1 20 0" class="s-ln s-arc s-a3"/><path d="M9.5 17a9 9 0 0 1 13 0" class="s-ln s-arc s-a2"/><path d="M13 21a4 4 0 0 1 6 0" class="s-ln s-arc s-a1"/><circle cx="16" cy="25" r="1.6" class="s-fill"/><path d="M22 22l6 6M28 22l-6 6" class="s-ln s-hot"/>',
+          http: '<rect x="6" y="6" width="20" height="8" rx="2" class="s-ln"/><rect x="6" y="18" width="20" height="8" rx="2" class="s-ln"/><circle cx="10.5" cy="10" r="1.4" class="s-fill s-hotf s-blink"/><circle cx="10.5" cy="22" r="1.4" class="s-fill s-hotf s-blink s-d2"/><path d="M15 10h7M15 22h7" class="s-ln s-thin"/>',
+          issue: '<path d="M16 5L28 26H4z" class="s-ln s-pulse"/><path d="M16 12v7" class="s-ln"/><circle cx="16" cy="22.5" r="1.4" class="s-fill"/>',
+          format: '<path d="M11 7c-3 0-3 2-3 4v2c0 2-1 3-3 3 2 0 3 1 3 3v2c0 2 0 4 3 4M21 7c3 0 3 2 3 4v2c0 2 1 3 3 3-2 0-3 1-3 3v2c0 2 0 4-3 4" class="s-ln"/><g class="s-bob"><path d="M14 13a2.2 2.2 0 1 1 3 2c-.8.4-1 1-1 1.8" class="s-ln s-thin"/><circle cx="16" cy="20" r="1.1" class="s-fill"/></g>',
+          unreadable: '<path d="M4 16s4.5-7 12-7 12 7 12 7-4.5 7-12 7S4 16 4 16z" class="s-ln"/><circle cx="16" cy="16" r="3.2" class="s-ln"/><path d="M5 12h22" class="s-ln s-thin s-scan"/>',
+          config: '<g class="s-swing"><path d="M16 3v6M12 9h8v5a4 4 0 0 1-8 0z" class="s-ln"/></g><path d="M16 29v-5M12.5 24h7v-3h-7z" class="s-ln"/><path d="M13.5 19.5l5-3" class="s-ln s-thin s-dash"/>'
+      }[code] || '';
+      var tone = (SOURCE_ISSUES[code] || {}).tone || 'muted';
+      return '<svg class="src-sign tone-' + tone + '" width="' + size + '" height="' + size + '" viewBox="0 0 32 32" aria-hidden="true">' + svg + '</svg>';
+  }
+  // Server sends issues[prov] = {code, detail}; older payloads only have the
+  // "QC: …" error text, so derive a code from that.
+  function outageIssue(d, p) {
+      if (d.issues && d.issues[p]) return d.issues[p];
+      var err = (d.errors || []).find(function(e) { return e.indexOf(p + ':') === 0; }) || '';
+      var t = err.replace(/^\w+:\s*/, '');
+      var code = /not configured/i.test(t) ? 'config' : /geo|location|restreint|restricted/i.test(t) ? 'geo' : /HTTP \d{3}/.test(t) ? 'http' : /JSON|Unexpected token/i.test(t) ? 'format' : 'unreachable';
+      return { code: code, detail: t || 'No data' };
+  }
+  window.showOutageIssue = function(p) {
+      var d = state.outagesData || {}, iss = outageIssue(d, p);
+      var extra = (p === 'QC' && state.hqBrowser && state.hqBrowser.status === 'failed') ? ' · Browser fallback: ' + state.hqBrowser.reason : '';
+      showToast((SOURCE_ISSUES[iss.code] || {}).label + ': ' + iss.detail + extra);
+  };
 
   function renderOutageTile() {
       var d = state.outagesData;
@@ -2443,16 +2524,25 @@
       var maxCust = provs.reduce(function(m, p) { var s = d.byProvince[p]; return Math.max(m, (s && s.customers) || 0); }, 0);
       var cols = provs.map(function(p) {
           var stats = d.byProvince[p];
-          var err = (d.errors || []).find(function(e) { return e.indexOf(p + ':') === 0; });
+          var iss = stats && !stats.stale ? null : outageIssue(d, p);
+          var meta = iss ? (SOURCE_ISSUES[iss.code] || SOURCE_ISSUES.unreachable) : null;
+          // Québec only: say what the browser fallback did.
+          var hqNote = '';
+          if (p === 'QC' && iss && state.hqBrowser) {
+              hqNote = state.hqBrowser.status === 'trying' ? 'Trying from your browser…'
+                     : state.hqBrowser.status === 'failed' ? 'Browser fallback ' + escapeHTML(state.hqBrowser.reason) : '';
+          }
           if (!stats) {
-              var errMsg = escapeHTML(err || 'Unknown').replace(/'/g, "\\'");
-              return '<div class="outage-cell offline" onclick="showToast(\'Source offline: ' + errMsg + '\');">' +
-                     '<div style="display:flex; align-items:center; gap:8px; min-width:0;"><div class="outage-dot" style="background:var(--text-muted);"></div><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(provLabels[p]) + '</div><span style="margin-left:auto; flex-shrink:0; font-size:0.62rem; font-weight:800; color:var(--status-alert); text-transform:uppercase; letter-spacing:1px; background:rgba(220,38,38,0.08); padding:2px 8px; border-radius:99px;">offline</span></div>' +
-                     '<div style="display:flex; align-items:baseline; gap:6px; margin-top:10px;"><span style="font-size:1.9rem; font-weight:800; color:var(--text-muted); line-height:1;">—</span></div>' +
-                     '<div class="outage-meter"><div style="width:0;"></div></div>' +
-                     '<div style="margin-top:10px; font-size:0.7rem; color:var(--text-muted); font-weight:600;">Feed unreachable — click for details</div>' +
+              return '<div class="outage-cell down tone-' + meta.tone + '" onclick="showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' +
+                     '<div style="display:flex; align-items:center; gap:8px; min-width:0;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(provLabels[p]) + '</div><span class="src-badge">feed down</span></div>' +
+                     '<div class="src-down">' + sourceSign(iss.code, 38) +
+                       '<div style="min-width:0;"><div class="src-down-title">' + meta.label + '</div>' +
+                       '<div class="src-down-detail">' + escapeHTML(iss.detail) + '</div>' +
+                       (hqNote ? '<div class="src-down-detail" style="margin-top:3px;">' + hqNote + '</div>' : '') + '</div></div>' +
                      '</div>';
           }
+          // Stale: last good numbers, clearly labelled, with the live feed's issue.
+          var staleTag = stats.stale ? '<div class="src-stale" onclick="event.stopPropagation(); showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' + sourceSign(iss.code, 16) + '<span>as of ' + escapeHTML(stats.staleAt || '?') + ' · live feed ' + meta.label.toLowerCase() + '</span></div>' : '';
           var n = stats.customers || 0;
           var nOut = stats.outages || 0;
           var sev = n > 10000 ? 'var(--status-alert)' : (n > 1000 ? 'var(--status-warn)' : 'var(--status-active)');
@@ -2462,15 +2552,17 @@
           var footer;
           if (n === 0) footer = '<span style="font-size:0.7rem; color:var(--status-active); font-weight:700; display:inline-flex; align-items:center; gap:5px;"><i data-lucide="check-circle" width="12"></i> All clear</span>';
           else footer = chips || '<span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">No region breakdown from this feed</span>';
-          return '<div class="outage-cell" onclick="openOutageDrawer(\'' + p + '\');" title="' + escapeHTML(stats.source || '') + '">' +
+          return '<div class="outage-cell' + (stats.stale ? ' stale' : '') + '" onclick="openOutageDrawer(\'' + p + '\');" title="' + escapeHTML(stats.source || '') + '">' +
                  '<div style="display:flex; align-items:center; gap:8px; min-width:0;"><div class="outage-dot' + (n > 10000 ? ' pulse' : '') + '" style="background:' + sev + ';"></div><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(provLabels[p]) + '</div><span style="margin-left:auto; flex-shrink:0; font-size:0.65rem; color:var(--text-muted); font-weight:700; font-variant-numeric:tabular-nums;">' + nOut.toLocaleString() + ' outage' + (nOut === 1 ? '' : 's') + '</span></div>' +
                  '<div style="display:flex; align-items:baseline; gap:6px; margin-top:10px;"><span style="font-size:1.9rem; font-weight:800; color:' + numColor + '; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + n.toLocaleString() + '</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">customers</span></div>' +
                  '<div class="outage-meter"><div style="width:' + pct + '%; background:' + sev + ';"></div></div>' +
                  '<div style="display:flex; gap:6px; margin-top:10px; min-width:0; overflow:hidden;">' + footer + '</div>' +
+                 staleTag +
                  '</div>';
       }).join('');
       var updated = d.updated ? 'updated ' + escapeHTML(d.updated) : '';
-      var errBadge = (d.errors && d.errors.length) ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:99px; font-weight:700;" title="' + escapeHTML(d.errors.join(' | ')) + '">' + d.errors.length + ' source' + (d.errors.length > 1 ? 's' : '') + ' offline</span>' : '';
+      var downProvs = provs.filter(function(p) { return !d.byProvince[p] || d.byProvince[p].stale; });
+      var errBadge = downProvs.length ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:99px; font-weight:700;" title="' + escapeHTML((d.errors || []).join(' | ')) + '">' + downProvs.join(' · ') + ' feed' + (downProvs.length > 1 ? 's' : '') + ' down</span>' : '';
       // External redirect to the full TELUS Tableau Power Outage Playbook.
       var tableauBtn = '<a href="https://prod-ca-a.online.tableau.com/#/site/telus-comm/views/PowerOutagePlaybook_17616695939000/DivisionPowerOutage?:iid=1" target="_blank" rel="noopener noreferrer" class="btn btn-glass" style="height:28px; font-size:0.7rem; font-weight:700; text-decoration:none; padding:0 10px; display:inline-flex; align-items:center; gap:6px;" title="Opens the full TELUS Power Outage Playbook in Tableau (external site, new tab)"><i data-lucide="external-link" width="13"></i> Tableau Playbook <i data-lucide="arrow-up-right" width="12" style="opacity:0.7;"></i></a>';
       return '<div class="aether-card tile-aurora" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:12px 20px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages <span class="aurora-label" style="font-size:0.6rem; letter-spacing:0.14em;">Real-time</span>' + errBadge + '</div><div style="display:flex; align-items:center; gap:12px;"><span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</span>' + tableauBtn + '</div></div><div class="outage-grid">' + cols + '</div></div>';
@@ -2746,7 +2838,7 @@
                  '<span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clock" width="18" style="color:var(--status-warn);"></i> Coaching Cadence<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:6px;">no session in ' + threshold + '+ days</span></span>' +
                  '<span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05);">' + (c.flags || []).length + '</span>' +
                  '</div>' +
-                 '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+                 '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
       }
 
       return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + (d.genesys && d.genesys.has
@@ -2860,7 +2952,7 @@
           return '<tr class="hover-bg insight-row" style="border-bottom:1px solid var(--glass-border); cursor:pointer; animation-delay:' + (idx * 0.02) + 's;" onclick="toggleInsightRow(\'' + safeId + '\')">' + cellData + '</tr><tr id="details-' + safeId + '" style="display:' + displayStyle + '; background:rgba(0,0,0,0.015);">' + expandHtml + '</tr>';
       }).join('') || '<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>';
 
-      return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); padding:16px 20px; margin-bottom:24px; border-radius:14px; border:1px solid rgba(99,102,241,0.12); display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown, Avaya GEM metrics and Genesys call performance.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
+      return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); padding:16px 20px; margin-bottom:24px; border-radius:14px; border:1px solid rgba(99,102,241,0.12); display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown, Avaya GEM metrics and Genesys call performance.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
   }
 
   // Resolved-range chip for the ops trackers: spells out the exact days the
@@ -2981,7 +3073,7 @@
           if (state.syncMeta.muSet) muText = escapeHTML(state.syncMeta.muSet);
       }
 
-      var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center; margin-bottom: ' + (isAbsences ? '24px' : '0') + ';">' +
+      var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center;">' +
                        '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;"><span><i data-lucide="calendar-check" width="10"></i> ' + schedText + '</span><span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
 
       if (!isAbsences && !isTraining) {

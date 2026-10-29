@@ -75,23 +75,18 @@ var OutageTracker = {
       errors: []
     };
 
-    var bc = this._fetchBCHydro();
-    if (bc.error) result.errors.push('BC: ' + bc.error);
-    else if (bc.skipped) result.errors.push('BC: not configured');
-    else result.byProvince.BC = bc.data;
-
-    var on = this._fetchHydroOne();
-    if (on.error) result.errors.push('ON: ' + on.error);
-    else if (on.skipped) result.errors.push('ON: URL not configured — run setOutageUrl("ON", "...")');
-    else result.byProvince.ON = on.data;
-
+    // Each feed: live data, or — when it fails — its last good data (≤ 6h old,
+    // flagged stale) so the tile keeps showing numbers instead of a blank.
+    // result.issues[prov] says WHY a feed failed, so the UI can show a specific
+    // sign (geo-blocked / unreachable / server error / format / not set up).
+    result.issues = {};
+    this._settle(result, 'BC', this._fetchBCHydro());
+    this._settle(result, 'ON', this._fetchHydroOne());
     var qc = this._fetchHQ();
-    // Hydro-Québec geo-blocks Google's servers; hand the URL to the browser
-    // (which is in Canada) so the client can try fetching it directly.
+    // Hydro-Québec geo-blocks some Google egress IPs; hand the URL to the
+    // browser (which is in Canada) so the client can try it directly too.
     if (qc.clientUrl) result.qcClientUrl = qc.clientUrl;
-    if (qc.error) result.errors.push('QC: ' + qc.error);
-    else if (qc.skipped) result.errors.push('QC: not configured');
-    else result.byProvince.QC = qc.data;
+    this._settle(result, 'QC', qc);
 
     var payload = JSON.stringify(result);
     try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
@@ -101,11 +96,50 @@ var OutageTracker = {
     // _logHistory itself throttles to one row per 10 minutes.
     try {
       var total = 0;
-      for (var prov in result.byProvince) total += (result.byProvince[prov].customers || 0);
+      for (var prov in result.byProvince) if (!result.byProvince[prov].stale) total += (result.byProvince[prov].customers || 0);
       this._logHistory(total);
     } catch (e) {}
 
     return payload;
+  },
+
+  LAST_GOOD_PREFIX: 'OUTAGE_LASTGOOD_',
+  LAST_GOOD_MAX_AGE_MS: 6 * 3600 * 1000,
+
+  // Why a feed failed, from its error text. Codes drive the UI's signs.
+  _classify: function(outcome) {
+    if (outcome.skipped) return { code: 'config', detail: 'No feed URL set — Outage URL Settings (⚡)' };
+    var e = String(outcome.error || '');
+    if (outcome.geo) return { code: 'geo', detail: e };
+    var http = e.match(/HTTP (\d{3})/);
+    if (http) return { code: 'http', detail: 'The utility\'s server answered ' + http[0] };
+    if (/JSON|Unexpected token|is not valid|undefined|Cannot read/i.test(e)) return { code: 'format', detail: 'The feed answered but its format changed — ' + e };
+    return { code: 'unreachable', detail: e || 'No response from the feed' };
+  },
+
+  // Record one feed's outcome on the result: live data (and remember it as the
+  // last good), or the classified issue plus last good data if recent enough.
+  _settle: function(result, prov, outcome) {
+    var props = null;
+    try { props = PropertiesService.getScriptProperties(); } catch (e) {}
+    if (outcome && outcome.data) {
+      result.byProvince[prov] = outcome.data;
+      if (props) { try { props.setProperty(this.LAST_GOOD_PREFIX + prov, JSON.stringify({ at: Date.now(), data: outcome.data })); } catch (e) {} }
+      return;
+    }
+    var issue = this._classify(outcome || {});
+    result.issues[prov] = issue;
+    result.errors.push(prov + ': ' + (outcome && outcome.skipped ? 'not configured' : issue.detail));
+    if (!props || issue.code === 'config') return;
+    try {
+      var lg = JSON.parse(props.getProperty(this.LAST_GOOD_PREFIX + prov) || 'null');
+      if (lg && lg.data && (Date.now() - lg.at) < this.LAST_GOOD_MAX_AGE_MS) {
+        var d = {}; for (var k in lg.data) d[k] = lg.data[k];
+        d.stale = true;
+        d.staleAt = Utilities.formatDate(new Date(lg.at), 'America/Toronto', 'HH:mm');
+        result.byProvince[prov] = d;
+      }
+    } catch (e) {}
   },
 
   // ── Outage history (for the SL-chart overlay) ──────────────────────────
@@ -462,15 +496,18 @@ var OutageTracker = {
     var url = this._getUrl('HYDRO_QUEBEC_URL', this._DEFAULT_HQ_URL);
     if (!url) return { skipped: true };
     var restricted = false;
-    try {
-      var res = UrlFetchApp.fetch(url, this._commonHeaders());
-      if (this._isHQRestricted(res)) restricted = true;
-      else {
+    // Two tries: Apps Script's egress IPs vary between requests, and only some
+    // of them are geo-blocked, so a second attempt often gets through.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      restricted = false;
+      try {
+        var res = UrlFetchApp.fetch(url, this._commonHeaders());
+        if (this._isHQRestricted(res)) { restricted = true; continue; }
         if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
         return this._parseHQ(JSON.parse(res.getContentText()));
+      } catch (e) {
+        if (!restricted) return { error: e.message, clientUrl: url };
       }
-    } catch (e) {
-      if (!restricted) return { error: e.message, clientUrl: url };
     }
     // Restricted: try the public Info-pannes markers feed before giving up.
     try {
@@ -484,7 +521,7 @@ var OutageTracker = {
         }
       }
     } catch (e2) {}
-    return { error: "Hydro-Québec blocks Google's servers (geo-restricted) — loading from the browser instead", clientUrl: url };
+    return { geo: true, error: "Hydro-Québec blocked the request by location (Google's servers are outside Québec)", clientUrl: url };
   },
 
   _parseHQ: function(body) {
