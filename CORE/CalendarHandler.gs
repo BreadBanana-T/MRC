@@ -84,6 +84,10 @@ const CalendarHandler = {
       startTime: Utilities.formatDate(e.start, "America/Toronto", "HH:mm"),
       endTime: Utilities.formatDate(e.end, "America/Toronto", "HH:mm"),
       isAllDay: e.isAllDay,
+      // Absolute times so the client can count down / detect "in progress"
+      // without guessing the date from the display strings.
+      startMs: e.start.getTime(),
+      endMs: e.end.getTime(),
       type: (e.title || "").toLowerCase().includes("maintenance") ? "maintenance" : "meeting"
     }));
 

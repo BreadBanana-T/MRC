@@ -232,6 +232,7 @@
     setInterval(fetchData, 60000); 
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
+    setInterval(updateMaintenance, 20000);
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
     fetchPresenceBootstrap();
@@ -248,11 +249,55 @@
       }).getStaffingBalance();
   }
 
+  // Hydro-Québec geo-blocks Google's servers, so when the server reports QC
+  // as restricted we fetch the same feed from the browser (in Canada). Works
+  // only if Hydro-Québec allows the cross-origin request; otherwise QC stays
+  // "source offline" as before. Result reused for 5 min like the server cache.
+  var hqBrowserCache = null;   // { at, data }
+  var HQ_REGION_NAMES = { '01': 'Bas-Saint-Laurent', '02': 'Saguenay – Lac-Saint-Jean', '03': 'Capitale-Nationale', '04': 'Mauricie', '05': 'Estrie', '06': 'Montréal', '07': 'Outaouais', '08': 'Abitibi-Témiscamingue', '09': 'Côte-Nord', '10': 'Nord-du-Québec', '11': 'Gaspésie – Îles-de-la-Madeleine', '12': 'Chaudière-Appalaches', '13': 'Laval', '14': 'Lanaudière', '15': 'Laurentides', '16': 'Montérégie', '17': 'Centre-du-Québec' };
+
+  function parseHQBrowser(body) {
+      var n = function(v) { v = parseInt(v, 10); return isNaN(v) ? 0 : v; };
+      if (body && Array.isArray(body.pannes)) {
+          var c = 0; body.pannes.forEach(function(r) { c += n(Array.isArray(r) ? r[0] : (r && (r.nbClient || r.nbClients))); });
+          return { outages: body.pannes.length, customers: c, top: [], source: 'Hydro-Québec (via browser)' };
+      }
+      if (!Array.isArray(body)) return null;
+      var glob = null, top = [], tc = 0, tp = 0;
+      body.forEach(function(e) {
+          e = e || {}; var id = String(e.id == null ? '' : e.id), c = n(e.nbClientInterrompu), p = n(e.nbPanne);
+          if (id.toUpperCase() === 'HQ') { glob = { customers: c, outages: p }; return; }
+          if (/^\d{2}$/.test(id)) { tc += c; tp += p; if (c > 0 || p > 0) top.push({ region: HQ_REGION_NAMES[id] || ('Region ' + id), customers: c, cause: '—', eta: null }); }
+      });
+      top.sort(function(a, b) { return b.customers - a.customers; });
+      return { outages: glob ? glob.outages : tp, customers: glob ? glob.customers : tc, top: top.slice(0, 10), source: 'Hydro-Québec (via browser)' };
+  }
+
+  function applyHQBrowser(d, qc) {
+      d.byProvince = d.byProvince || {};
+      d.byProvince.QC = qc;
+      d.errors = (d.errors || []).filter(function(e) { return e.indexOf('QC:') !== 0; });
+  }
+
+  function fetchHQFromBrowser(d) {
+      if (typeof fetch === 'undefined') return;
+      if (hqBrowserCache && Date.now() - hqBrowserCache.at < 300000) { applyHQBrowser(d, hqBrowserCache.data); return; }
+      fetch(d.qcClientUrl, { headers: { 'Accept': 'application/json' } })
+          .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function(body) {
+              var qc = parseHQBrowser(body); if (!qc) return;
+              hqBrowserCache = { at: Date.now(), data: qc };
+              if (state.outagesData === d) { applyHQBrowser(d, qc); if (state.view === 'overview') render(); }
+          })
+          .catch(function(e) { console.warn('[outages] Hydro-Québec browser fetch failed:', e && e.message); });
+  }
+
   function fetchOutages() {
       if (typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(function(res) {
           try {
               state.outagesData = JSON.parse(res);
+              if (state.outagesData && state.outagesData.qcClientUrl && !(state.outagesData.byProvince || {}).QC) fetchHQFromBrowser(state.outagesData);
               if (state.view === 'overview') render();
           } catch (e) {}
       }).withFailureHandler(function() {}).getPowerOutages();
@@ -853,8 +898,7 @@
                   }
               });
               state.notifications = activeNotifs;
-              var dot = document.getElementById('notif-dot'); 
-              if(dot) dot.style.display = state.notifications.length ? 'block' : 'none'; 
+              updateNotifDot();
               if(state.notifOpen) renderNotifList(); 
           } catch(e) {}
       }).getSystemNotifications(); 
@@ -877,10 +921,10 @@
                      '<div style="display:flex; justify-content:flex-end;"><button class="btn btn-glass" style="font-size:0.72rem; padding:4px 14px; height:26px;" onclick="dismissNotif(event, \'' + escapeHTML(n.id) + '\')">Dismiss</button></div>' +
                      '</div>';
           }).join('');
-      } else {
+      } else if (!activeMaintenance().length) {
           html = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No new notifications.</div>';
       }
-      list.innerHTML = html;
+      list.innerHTML = maintNotifCards() + html;
   };
 
   // stopPropagation: without it, re-rendering the list detaches the clicked
@@ -891,7 +935,7 @@
       state.dismissedNotifs.add(String(id));
       renderNotifList();
       if (typeof google !== 'undefined') google.script.run.dismissSystemNotification(id);
-      var dot = document.getElementById('notif-dot'); var count = state.notifications.filter(function(n){return !state.dismissedNotifs.has(String(n.id));}).length; if(dot) dot.style.display = count ? 'block' : 'none';
+      updateNotifDot();
   };
   window.dismissAllNotifs = function(ev) {
       if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -899,8 +943,124 @@
           if (!state.dismissedNotifs.has(String(n.id))) { state.dismissedNotifs.add(String(n.id)); if (typeof google !== 'undefined') google.script.run.dismissSystemNotification(n.id); }
       });
       renderNotifList();
-      var dot = document.getElementById('notif-dot'); if (dot) dot.style.display = 'none';
+      updateNotifDot();
   };
+
+  // ───────────────────────── Scheduled maintenance ─────────────────────────
+  // A persistent banner above every view (from MAINT_LEAD_MIN before start
+  // until the window ends), a pinned card at the top of the notifications
+  // panel, and a toast at 60 / 15 / 5 min and at start. Driven off the
+  // calendar feed ("Scheduled Maintenance" events), re-evaluated every 20s.
+  var MAINT_LEAD_MIN = 120;
+  var MAINT_TOAST_AT = [60, 15, 5, 0];
+  var maintToasted = {};   // "<key>|<threshold>" → already toasted this session
+  var maintHidden = {};    // key → phase the banner was hidden in ('soon'|'live')
+
+  function maintEventMs(e, which) {
+      var ms = Number(which === 'end' ? e.endMs : e.startMs);
+      if (ms > 0) return ms;
+      // Older backend without startMs/endMs: rebuild from "MMM dd" + "HH:mm".
+      var t = (which === 'end' ? e.endTime : e.startTime) || '';
+      var d = new Date((e.date || '') + ' ' + new Date().getFullYear() + ' ' + t);
+      if (isNaN(d.getTime())) return 0;
+      if (which === 'end' && e.startTime && t < e.startTime) d.setDate(d.getDate() + 1);
+      return d.getTime();
+  }
+
+  function fmtMaintDur(min) {
+      min = Math.max(0, Math.ceil(min));
+      if (min < 60) return min + ' min';
+      var h = Math.floor(min / 60), m = min % 60;
+      return h + 'h' + (m ? ' ' + m + 'm' : '');
+  }
+
+  // Maintenance windows that are upcoming (within the lead) or in progress.
+  function activeMaintenance() {
+      var now = Date.now(), out = [];
+      (state.calendarEvents || []).forEach(function(e) {
+          if (e.type !== 'maintenance') return;
+          var s = maintEventMs(e, 'start'), en = maintEventMs(e, 'end');
+          if (!s || !en || en <= now) return;
+          var minsTo = (s - now) / 60000;
+          if (minsTo > MAINT_LEAD_MIN) return;
+          out.push({ ev: e, key: (e.title || '') + '|' + s, start: s, end: en, live: minsTo <= 0, minsTo: minsTo, minsLeft: (en - now) / 60000 });
+      });
+      out.sort(function(a, b) { return a.start - b.start; });
+      return out;
+  }
+
+  function maintLines(m) {
+      var title = escapeHTML(m.ev.title || 'Scheduled Maintenance');
+      var when = escapeHTML((m.ev.startTime || '') + ' – ' + (m.ev.endTime || ''));
+      return m.live
+          ? { head: '🔧 ' + title + ' — IN PROGRESS', sub: when + ' · ends in ' + fmtMaintDur(m.minsLeft), count: fmtMaintDur(m.minsLeft) + ' left' }
+          : { head: '⚠️ ' + title + ' starting soon', sub: when + ' · starts at ' + escapeHTML(m.ev.startTime || ''), count: 'in ' + fmtMaintDur(m.minsTo) };
+  }
+
+  window.hideMaintBanner = function(startMs) {
+      var m = activeMaintenance().filter(function(x) { return x.start === startMs; })[0];
+      if (m) maintHidden[m.key] = m.live ? 'live' : 'soon';
+      updateMaintenance();
+  };
+
+  function updateNotifDot() {
+      var dot = document.getElementById('notif-dot'); if (!dot) return;
+      var count = (state.notifications || []).filter(function(n) { return !state.dismissedNotifs.has(String(n.id)); }).length;
+      dot.style.display = (count || activeMaintenance().length) ? 'block' : 'none';
+  }
+
+  function updateMaintenance() {
+      var list = activeMaintenance();
+
+      // Toasts at fixed thresholds, once each per event.
+      list.forEach(function(m) {
+          MAINT_TOAST_AT.forEach(function(th) {
+              var k = m.key + '|' + th;
+              if (maintToasted[k]) return;
+              if (m.minsTo <= th && m.minsTo > th - 5) {
+                  maintToasted[k] = true;
+                  showToast(th === 0 ? '🔧 Maintenance has started (' + (m.ev.startTime || '') + ' – ' + (m.ev.endTime || '') + ')' : '⚠️ Maintenance starts in ' + fmtMaintDur(m.minsTo) + ' (' + (m.ev.startTime || '') + ')');
+              } else if (m.minsTo <= th - 5) {
+                  maintToasted[k] = true;   // passed while the page was closed — don't replay
+              }
+          });
+      });
+
+      // Banner: the nearest window not hidden in its current phase. Hiding
+      // "starting soon" brings it back once it goes live.
+      var el = document.getElementById('maint-banner');
+      if (el) {
+          var show = list.filter(function(m) { return maintHidden[m.key] !== (m.live ? 'live' : 'soon'); })[0];
+          if (!show || state.view === 'popout-view') { el.style.display = 'none'; el.innerHTML = ''; }
+          else {
+              var L = maintLines(show);
+              el.className = 'maint-banner' + (show.live ? ' live' : '');
+              el.innerHTML = '<div class="mb-icon"><i data-lucide="' + (show.live ? 'wrench' : 'alert-triangle') + '" width="18"></i></div>' +
+                  '<div class="mb-text"><div class="mb-title">' + L.head + '</div><div class="mb-sub">' + L.sub + (list.length > 1 ? ' · +' + (list.length - 1) + ' more' : '') + '</div></div>' +
+                  '<div class="mb-count">' + L.count + '</div>' +
+                  '<button class="btn btn-glass" style="font-size:0.72rem; padding:4px 14px; height:28px;" onclick="hideMaintBanner(' + show.start + ')">Hide</button>';
+              el.style.display = 'flex';
+              if (typeof lucide !== 'undefined') lucide.createIcons();
+          }
+      }
+
+      updateNotifDot();
+      if (state.notifOpen) renderNotifList();
+  }
+
+  // Pinned maintenance cards for the notifications panel (not dismissable —
+  // they leave on their own when the window ends).
+  function maintNotifCards() {
+      return activeMaintenance().map(function(m) {
+          var L = maintLines(m);
+          return '<div class="notif-maint' + (m.live ? ' live' : '') + '">' +
+                 '<div style="display:flex; justify-content:space-between; gap:10px; font-size:0.72rem; font-weight:800; color:' + (m.live ? 'var(--status-alert)' : 'var(--status-warn)') + '; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;"><span>' + (m.live ? 'Maintenance in progress' : 'Upcoming maintenance') + '</span><span>' + L.count + '</span></div>' +
+                 '<div style="font-weight:700; font-size:0.9rem; color:var(--text-main); line-height:1.4;">' + escapeHTML(m.ev.title || 'Scheduled Maintenance') + '</div>' +
+                 '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; margin-top:2px;">' + L.sub + '</div>' +
+                 (m.ev.description ? '<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:6px; line-height:1.4; max-height:4.2em; overflow:hidden;">' + escapeHTML(String(m.ev.description).replace(/<[^>]*>/g, ' ')) + '</div>' : '') +
+                 '</div>';
+      }).join('');
+  }
 
   function fetchCalendar() {
       if(typeof google==='undefined') return;
@@ -916,14 +1076,7 @@
               state.calendarError = null;
               state.calendarEvents = Array.isArray(parsed) ? parsed : [];
               if(state.view === 'overview') render();
-              var now = new Date();
-              for (var i = 0; i < state.calendarEvents.length; i++) {
-                  var e = state.calendarEvents[i];
-                  if(e.type === 'maintenance') {
-                      var parts = (e.startTime || "").match(/(\d{1,2}):(\d{2})/);
-                      if(parts) { var evTime = new Date(); evTime.setHours(parseInt(parts[1], 10), parseInt(parts[2], 10), 0, 0); var diffMins = (evTime - now) / 60000; if(diffMins > 0 && diffMins <= 15) showToast("⚠️ Maintenance starts in " + Math.ceil(diffMins) + " mins!"); }
-                  }
-              }
+              updateMaintenance();
           } catch(e) {}
       }).getDailyCalendarEvents();
   }
@@ -4156,7 +4309,7 @@
         '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…"></textarea>' +
         '<label class="paste-label" style="margin-top:16px;"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
         '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…"></textarea>' +
-        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><button class="btn btn-glass" style="width:100%; margin-top:20px;" onclick="copyReport()">Copy Report</button></div></div></div>' + renderCalcTemplateEditor();
+        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><div style="display:flex; gap:10px; margin-top:20px;"><button class="btn btn-glass" style="flex:1;" onclick="copyReport()" title="For Google Chat: exact spacing, section headers in bold (Chat can\'t show colours)"><i data-lucide="message-square" width="15"></i> Copy for Chat</button><button class="btn btn-glass" style="flex:1;" onclick="copyReportRich()" title="For Gmail / Docs: section headers in red"><i data-lucide="mail" width="15"></i> Copy Rich (email)</button></div></div></div></div>' + renderCalcTemplateEditor();
   }
 
   // Client-side token fill — mirrors buildCalcReport() in CORE/Calculator.gs so
@@ -4331,49 +4484,75 @@
      if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; state.lastCalc = d; fetchStats(); render(); }).runCalculator(i, o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
   };
 
-  // Section headers copied in red; the ":" and everything else keep the normal
-  // (theme) colour. Only these exact leading labels turn red — the metric rows
+  // Section headers that get emphasis on copy; the ":" and everything else keep
+  // the normal colour. Only these exact leading labels — the metric rows
   // (SVL OUT, ACK, …) stay normal even though they're uppercase too.
   var CALC_RED_HEADERS = ["STATS UPDATE", "TRENDS", "DELAYS", "NOTES"];
   var CALC_RED = "#E5484D";
 
   function calcEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  function reportToColoredHtml(text) {
-     var lines = String(text).split('\n');
-     var out = lines.map(function(line) {
-        var ci = line.indexOf(':');
-        var head = (ci >= 0 ? line.slice(0, ci) : line);
-        if(CALC_RED_HEADERS.indexOf(head.trim().toUpperCase()) >= 0) {
-           var rest = (ci >= 0 ? line.slice(ci) : "");
-           return '<span style="color:' + CALC_RED + ';font-weight:bold;">' + calcEsc(head) + '</span>' + calcEsc(rest);
-        }
-        return calcEsc(line);
-     });
-     return '<div style="font-family:Arial,Helvetica,sans-serif;white-space:pre-wrap;">' + out.join('<br>') + '</div>';
+  // Splits a report line into its header label and the rest when the label is
+  // one of CALC_RED_HEADERS, else null.
+  function calcHeaderSplit(line) {
+     var ci = line.indexOf(':');
+     var head = (ci >= 0 ? line.slice(0, ci) : line);
+     if(CALC_RED_HEADERS.indexOf(head.trim().toUpperCase()) < 0 || !head.trim()) return null;
+     return { head: head, rest: (ci >= 0 ? line.slice(ci) : "") };
   }
 
-  // Copy rich HTML (red headers) with a plain-text fallback in the same clipboard
-  // write, so apps that honour pasted colour show red and the rest stay plain.
-  function copyRichReport(html, plain, successMsg) {
-     try {
-        var box = document.createElement('div');
-        box.setAttribute('contenteditable', 'true');
-        box.style.position = 'fixed'; box.style.left = '-9999px'; box.style.top = '0'; box.style.whiteSpace = 'pre-wrap';
-        box.innerHTML = html;
-        document.body.appendChild(box);
-        var range = document.createRange(); range.selectNodeContents(box);
-        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-        var ok = document.execCommand('copy');
-        sel.removeAllRanges(); document.body.removeChild(box);
-        if(ok) { showToast(successMsg || "Copied"); return; }
-     } catch(e) {}
-     fallbackCopyTextToClipboard(plain, successMsg);   // plain-text safety net
+  // Google Chat can't show colour (only *bold* _italic_ ~strike~ `mono`), so
+  // the Chat copy is plain text with the headers wrapped in *…* — Chat renders
+  // them bold on send. Every line and blank line is kept exactly.
+  function reportToChatText(text) {
+     return String(text).split('\n').map(function(line) {
+        var h = calcHeaderSplit(line);
+        if(!h) return line;
+        var lead = h.head.match(/^\s*/)[0];
+        return lead + '*' + h.head.trim() + (h.rest.charAt(0) === ':' ? ':' : '') + '*' + (h.rest.charAt(0) === ':' ? h.rest.slice(1) : h.rest);
+     }).join('\n');
   }
+
+  // One block element per line, and an explicit <div><br></div> for blank
+  // lines — the same shape rich editors produce, so pasting keeps the spacing
+  // (a single div of <br>s gets its blank lines collapsed).
+  function reportToColoredHtml(text) {
+     var out = String(text).split('\n').map(function(line) {
+        if(line.trim() === '') return '<div><br></div>';
+        var h = calcHeaderSplit(line);
+        var inner = h ? '<span style="color:' + CALC_RED + ';font-weight:bold;">' + calcEsc(h.head) + '</span>' + calcEsc(h.rest) : calcEsc(line);
+        return '<div>' + inner + '</div>';
+     });
+     return '<div style="font-family:Arial,Helvetica,sans-serif;">' + out.join('') + '</div>';
+  }
+
+  // Writes the exact plain text (and optional HTML) through a copy event, so
+  // the clipboard holds precisely what we built rather than the browser's
+  // re-serialisation of a selection. Falls back to the textarea copy.
+  function copyToClipboard(plain, html, successMsg) {
+     var done = false;
+     var onCopy = function(e) {
+        if(!e.clipboardData) return;
+        e.clipboardData.setData('text/plain', plain);
+        if(html) e.clipboardData.setData('text/html', html);
+        e.preventDefault(); done = true;
+     };
+     document.addEventListener('copy', onCopy);
+     try { document.execCommand('copy'); } catch(e) {}
+     document.removeEventListener('copy', onCopy);
+     if(done) showToast(successMsg || "Copied");
+     else fallbackCopyTextToClipboard(plain, successMsg);
+  }
+
+  function calcReportText() { return String(state.currentReport || document.getElementById('report-content').innerText || ''); }
 
   window.copyReport = function() {
-     var text = document.getElementById('report-content').innerText;
-     copyRichReport(reportToColoredHtml(text), text, "Report Copied");
+     copyToClipboard(reportToChatText(calcReportText()), null, "Copied for Chat");
+  };
+
+  window.copyReportRich = function() {
+     var text = calcReportText();
+     copyToClipboard(text, reportToColoredHtml(text), "Copied (red headers)");
   };
 
   window.copyWindTemplate = function() {

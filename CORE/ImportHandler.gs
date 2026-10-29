@@ -73,20 +73,25 @@ function processWFMImport(rawText, forcedDate) {
        }
 
        let shiftMatch = line.match(rgxShiftLine);
-       if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.isOff = false; } 
+       if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.shiftEnd = shiftMatch[3]; buffer.isOff = false; }
        else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
        const upper = line.toUpperCase();
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
 
+       // Order matters: PW / ALT / PDO lines are "… Congé …" in French, so they
+       // must be tested before the generic CONGÉ → VACATION catch.
        if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
            if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) buffer.absentType = "Medical Leave";
            else buffer.absentType = "SICK";
        }
        else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
-       else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
-       // NEW: Explicitly catch Personal Wellness / ALT
+       else if (upper.match(/\bUNAB\b/) || upper.includes("UNAUTHORIZED ABSENCE") || upper.includes("ABSENCE NON AUTORIS")) buffer.absentType = "UNAB";
+       else if (upper.match(/\bPDO\b/) || upper.includes("PERSONAL DAY OFF")) buffer.absentType = "VACATION";
+       // Personal Wellness / ALT go to the Unplanned / Needs Attention bucket.
        else if (upper.match(/\bPW\b/) || upper.match(/\bALT\b/) || upper.includes("PERSONAL") || upper.includes("WELLNESS")) buffer.absentType = "PW/ALT";
+       else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
+       else if (upper.match(/\bLOA\b/) || upper.includes("LEAVE OF ABSENCE")) buffer.absentType = "LOA";
 
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
@@ -111,12 +116,16 @@ function processWFMImport(rawText, forcedDate) {
            else if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
                buffer.breaks.push({ type: "ULC FIRE", start: actStart, end: actEnd });
            }
-           // NEW: Prevent PW/ALT from making the engine think the agent is actively working
-           else if (!upper.includes("VACATION") && !upper.includes("SICK") && !upper.includes("ABSENT") && !upper.includes("VACP") && !upper.includes("OFF") && !upper.match(/\bPW\b/) && !upper.match(/\bALT\b/) && !upper.includes("PERSONAL") && !upper.includes("WELLNESS")) {
+           // Absence lines (sick, AWOL, UNAB, PW/ALT, LOA, …) must not make the
+           // engine think the agent is actively working.
+           else if (!RGX_ABSENCE_ACTIVITY.test(upper) && !upper.includes("OFF")) {
                buffer.hasWork = true;
            }
 
-           if (buffer.end && (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("SICK") || upper.includes("PERSONAL") || upper.match(/\bPW\b/) || upper.match(/\bALT\b/))) {
+           // Leaving early: an absence that runs to the end of the shift pulls
+           // the shift end back to when it starts. A whole-shift absence is
+           // restored in pushAgent (otherwise end == start → "Shift Ended").
+           if (buffer.end && RGX_ABSENCE_ACTIVITY.test(upper)) {
                if (compareTimeStrings(actEnd, buffer.end)) buffer.end = actStart;
            }
        }
@@ -163,12 +172,19 @@ function processWFMImport(rawText, forcedDate) {
   }
 }
 
-function resetBuffer() { return { breaks: [], start: null, end: null, dateStr: null, absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false }; }
+// Scheduled activities that mean the agent is NOT working (whole or partial
+// shift). "ABSEN" covers both "Absent" and "Absence non autorisée".
+const RGX_ABSENCE_ACTIVITY = /VACATION|VACP|SICK|SICU|MALADIE|ABSEN|AWOL|NCNS|\bUNAB\b|\bPW\b|\bALT\b|PERSONAL|WELLNESS|\bLOA\b|\bPDO\b/;
+
+function resetBuffer() { return { breaks: [], start: null, end: null, shiftEnd: null, dateStr: null, absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false }; }
 
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
   if (!buf.start && !buf.isOff && !buf.absentType) return;
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
+  // Absent for the whole shift (no working activity at all): keep the full
+  // scheduled shift so the agent shows in Unplanned / Vacation while it runs.
+  if (!buf.hasWork && buf.absentType && buf.shiftEnd && !buf.isOff) buf.end = buf.shiftEnd;
 
   if (buf.hasWork) {
       if (buf.absentType === "VACATION") buf.absentType = "";

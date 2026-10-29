@@ -722,4 +722,17 @@
       70%  { box-shadow: 0 0 0 12px rgba(56, 189, 248, 0); }
       100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
   }
+  /* Scheduled-maintenance banner (above the viewport, every view). Amber when
+     upcoming, red + pulsing dot while in progress. */
+  .maint-banner { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; padding: 12px 18px; border-radius: 16px; border: 1px solid rgba(217, 119, 6, 0.45); background: rgba(245, 158, 11, 0.12); color: var(--text-main); font-weight: 600; flex-shrink: 0; flex-wrap: wrap; }
+  .maint-banner.live { border-color: rgba(220, 38, 38, 0.5); background: rgba(220, 38, 38, 0.12); }
+  .maint-banner .mb-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--status-warn); color: #fff; flex-shrink: 0; }
+  .maint-banner.live .mb-icon { background: var(--status-alert); animation: outage-pulse 2s ease-out infinite; }
+  .maint-banner .mb-text { flex: 1; min-width: 200px; line-height: 1.35; }
+  .maint-banner .mb-title { font-weight: 800; font-size: 0.95rem; }
+  .maint-banner .mb-sub { font-size: 0.78rem; color: var(--text-muted); font-weight: 700; }
+  .maint-banner .mb-count { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--status-warn); }
+  .maint-banner.live .mb-count { color: var(--status-alert); }
+  .notif-maint { padding: 14px 16px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(217, 119, 6, 0.45); background: rgba(245, 158, 11, 0.12); }
+  .notif-maint.live { border-color: rgba(220, 38, 38, 0.5); background: rgba(220, 38, 38, 0.12); }
 </style>

@@ -86,6 +86,9 @@ var OutageTracker = {
     else result.byProvince.ON = on.data;
 
     var qc = this._fetchHQ();
+    // Hydro-Québec geo-blocks Google's servers; hand the URL to the browser
+    // (which is in Canada) so the client can try fetching it directly.
+    if (qc.clientUrl) result.qcClientUrl = qc.clientUrl;
     if (qc.error) result.errors.push('QC: ' + qc.error);
     else if (qc.skipped) result.errors.push('QC: not configured');
     else result.byProvince.QC = qc.data;
@@ -442,13 +445,60 @@ var OutageTracker = {
     }
   },
 
+  // Public Info-pannes map feed (separate host from the services-bs API),
+  // tried when the configured URL is geo-restricted.
+  _HQ_MARKERS_BASE: 'https://pannes.hydroquebec.com/pannes/donnees/v3_0/',
+
+  // Hydro-Québec answers requests from outside Québec/Canada (which includes
+  // Google's Apps Script servers) with an HTML "Accès restreint | Restricted
+  // access" page instead of JSON.
+  _isHQRestricted: function(res) {
+    var code = res.getResponseCode();
+    var text = String(res.getContentText() || '').slice(0, 4000);
+    return code === 403 || code === 451 || /Acc[eè]s restreint|Restricted access/i.test(text);
+  },
+
   _fetchHQ: function() {
+    var url = this._getUrl('HYDRO_QUEBEC_URL', this._DEFAULT_HQ_URL);
+    if (!url) return { skipped: true };
+    var restricted = false;
     try {
-      var url = this._getUrl('HYDRO_QUEBEC_URL', this._DEFAULT_HQ_URL);
-      if (!url) return { skipped: true };
       var res = UrlFetchApp.fetch(url, this._commonHeaders());
-      if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
-      var body = JSON.parse(res.getContentText());
+      if (this._isHQRestricted(res)) restricted = true;
+      else {
+        if (res.getResponseCode() !== 200) throw new Error('HTTP ' + res.getResponseCode());
+        return this._parseHQ(JSON.parse(res.getContentText()));
+      }
+    } catch (e) {
+      if (!restricted) return { error: e.message, clientUrl: url };
+    }
+    // Restricted: try the public Info-pannes markers feed before giving up.
+    try {
+      var ver = UrlFetchApp.fetch(this._HQ_MARKERS_BASE + 'bisversion.json', this._commonHeaders());
+      if (ver.getResponseCode() === 200 && !this._isHQRestricted(ver)) {
+        var v = String(JSON.parse(ver.getContentText())).replace(/[^\w.-]/g, '');
+        var mk = UrlFetchApp.fetch(this._HQ_MARKERS_BASE + 'bismarkers' + v + '.json', this._commonHeaders());
+        if (mk.getResponseCode() === 200 && !this._isHQRestricted(mk)) {
+          var parsed = this._parseHQ(JSON.parse(mk.getContentText()));
+          if (parsed.data) return parsed;
+        }
+      }
+    } catch (e2) {}
+    return { error: "Hydro-Québec blocks Google's servers (geo-restricted) — loading from the browser instead", clientUrl: url };
+  },
+
+  _parseHQ: function(body) {
+    try {
+      // Info-pannes markers feed: { pannes: [[nbClients, start, eta, …], …] },
+      // one entry per outage. No region names in this feed.
+      if (body && Array.isArray(body.pannes)) {
+        var cust = 0;
+        for (var k = 0; k < body.pannes.length; k++) {
+          var row = body.pannes[k];
+          cust += this._safeInt(Array.isArray(row) ? row[0] : (row && (row.nbClient || row.nbClients)));
+        }
+        return { data: { outages: body.pannes.length, customers: cust, top: [], source: 'Hydro-Québec (Info-pannes)' } };
+      }
 
       // New `bis` endpoint: top-level array of {id, nbClientInterrompu,
       // nbPanne, nbClientRaccorde}. The same outage is reported at every
