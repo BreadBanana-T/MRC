@@ -12,6 +12,90 @@
  * + hyphens, lowercase, and SORT the tokens alphabetically. Order-agnostic
  * so any combination of first/last + comma yes/no produces the same hash.
  */
+/**
+ * ONE absence classifier for the whole app.
+ *
+ * There used to be two: this taxonomy (correct, word-boundary matched) for the
+ * reporting pipeline, and a weaker copy in ImportHandler that fed the Floor. The
+ * copy had no UNAB and no LOA branch, so 208 UNAB agent-days and 40 LOA/TI LOA
+ * agent-days reached the Floor with no absence type at all and rendered as if
+ * those people were working. That divergence WAS the bug — so both pipelines now
+ * call this.
+ *
+ * Returns '' when the activity is not an absence, else the canonical type:
+ *   SICK | Medical Leave | UNAB | COMPU | COMP | ALU | LOA | TI AWOL | PW/ALT |
+ *   BEREAVEMENT | VACATION
+ *
+ * ⚠️ LOA is matched on a WORD BOUNDARY, never as a substring: the real WFM export
+ * contains 187 rows of "LFQI (OPEX) En prêt Hors file / On Loan Off Queue", and a
+ * substring check turns every one of them into an absence. Same reason COMP/ALU
+ * are \b-anchored (see the note that used to live inline: "Compliance" became
+ * COMP and "Evaluation" became ALU).
+ */
+function classifyAbsenceActivity(activityName) {
+  var a = String(activityName == null ? '' : activityName).toLowerCase();
+  if (!a) return '';
+
+  // ACSU / solicited / voluntary released time is APPROVED time off the phones,
+  // not an absence — it is tracked as furlough and as its own break type. Guard it
+  // first: "ACSU Libération volontaire / Solicited Time Off" would otherwise be
+  // caught by the vacation branch's "time off".
+  if (/\bacsu\b|\bslu\b|\basclu\b/.test(a) || a.indexOf('solicited') !== -1
+      || a.indexOf('lib\u00e9ration') !== -1 || a.indexOf('liberation') !== -1
+      || a.indexOf('voluntary') !== -1 || a.indexOf('volontaire') !== -1
+      || a.indexOf('furlough') !== -1) return '';
+
+  // Sick first, and split off the long-term/planned variants before the generic
+  // sick match can claim them.
+  if (a.indexOf('sick') !== -1 || a.indexOf('maladie') !== -1 || a.indexOf('sicu') !== -1) {
+    if (/\bstdp?\b|\bltd\b|long term|longue dur/.test(a) || a.indexOf('planned') !== -1) return 'Medical Leave';
+    return 'SICK';
+  }
+  if (/\bunab\b/.test(a)) return 'UNAB';
+  if (/\bcompu\b/.test(a)) return 'COMPU';
+  if (/\bcomp\b/.test(a)) return 'COMP';
+  if (/\balu\b/.test(a)) return 'ALU';
+  if (/\bloa\b/.test(a)) return 'LOA';
+  if (a.indexOf('awol') !== -1 || a.indexOf('ncns') !== -1) return 'TI AWOL';
+  // Personal Wellness / Alternate Time Off. This MUST be tested before the
+  // vacation branch: the real string is "PW Congé bien-être personnel / Personal
+  // Wellness", and matching 'congé' first meant the PW/ALT branch was
+  // unreachable and those agents were filed as VACATION.
+  if (/\bpw\b/.test(a) || /\balt\b/.test(a) || a.indexOf('personal wellness') !== -1 || a.indexOf('bien-être') !== -1 || a.indexOf('bien-etre') !== -1) return 'PW/ALT';
+  if (/\bblp\b/.test(a) || a.indexOf('bereavement') !== -1 || a.indexOf('décès') !== -1 || a.indexOf('deces') !== -1) return 'BEREAVEMENT';
+  if (a.indexOf('vacation') !== -1 || a.indexOf('vacances') !== -1 || /\bvacp\b/.test(a) || /\bpdo\b/.test(a)
+      || /\bauth\b/.test(a) || /\bareq\b/.test(a) || a.indexOf('congé') !== -1 || a.indexOf('conge') !== -1
+      || a.indexOf('time off') !== -1) return 'VACATION';
+  return '';
+}
+
+/**
+ * Does this activity NAME say the agent is absent, without naming a code we
+ * recognise? Used only by the importer's "did they actually work?" guard — never
+ * to label or count an absence, because a generic match here would inflate the
+ * reported totals (e.g. "HABS Férié absence / Stat Holiday Absence").
+ *
+ * The guard used to test for "ABSENT", but the real strings say "ABSENCE" —
+ * "UNAB Absence non autorisée / Unauthorized Absence", "LOA Absence / Leave of
+ * Absence" — and "ABSENT" is not a substring of "ABSENCE", so the importer
+ * concluded those agents had worked.
+ */
+function looksLikeAbsenceWording(activityName) {
+  var a = String(activityName == null ? '' : activityName).toLowerCase();
+  return a.indexOf('absen') !== -1 || a.indexOf('leave of') !== -1;
+}
+
+/**
+ * Absence types that mean "this person is not where they should be" — the Floor's
+ * Needs Attention bucket and the red row strip. Planned/approved leave (VACATION,
+ * Medical Leave) is deliberately NOT here; it belongs in Planned / Support.
+ */
+function isUnplannedAbsenceType(absType) {
+  var t = String(absType == null ? '' : absType).toUpperCase();
+  if (!t) return false;
+  return /\bSICK\b|NCNS|\bUNAB\b|AWOL|\bCOMPU?\b|\bALU\b|\bLOA\b|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/.test(t);
+}
+
 function _normalizeAgentKey(s) {
   var raw = String(s == null ? '' : s).trim();
   if (!raw) return '';
@@ -200,18 +284,16 @@ var WorkforceTracker = {
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_RGX.test(actLower);
               
-              let isAbsence = false;
-              let absType = "";
-              if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
-              else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
-              else if (/\bcompu\b/.test(actLower)) { isAbsence = true; absType = 'COMPU'; }
-              // Whole-word matches only: a bare substring check turned activities
-              // like "Compliance" into COMP and "Evaluation" into ALU absences,
-              // silently inflating absence counts.
-              else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
-              else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
-              else if (/\bloa\b/.test(actLower)) { isAbsence = true; absType = 'LOA'; }
-              else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
+              // Shared taxonomy — see classifyAbsenceActivity above. Only the types
+              // this pipeline has always reported are treated as absences here, so
+              // the reported numbers do not move.
+              let absType = classifyAbsenceActivity(actLower);
+              // This pipeline has always reported long-term/planned sick as SICK,
+              // and has never counted PW/ALT, bereavement or vacation as absences.
+              // Preserved exactly, so the published numbers don't move.
+              if (absType === 'Medical Leave') absType = 'SICK';
+              if (['PW/ALT', 'BEREAVEMENT', 'VACATION'].indexOf(absType) !== -1) absType = '';
+              let isAbsence = !!absType;
 
               let roleType = "";
               if (isRole) {
@@ -257,18 +339,16 @@ var WorkforceTracker = {
               let isFurlough = ACSU_CODES.some(c => actLower.includes(c));
               let isRole = ROLE_RGX.test(actLower);
 
-              let isAbsence = false;
-              let absType = "";
-              if (actLower.includes('sick') || actLower.includes('maladie') || actLower.includes('sicu')) { isAbsence = true; absType = 'SICK'; }
-              else if (actLower.includes('unab')) { isAbsence = true; absType = 'UNAB'; }
-              else if (/\bcompu\b/.test(actLower)) { isAbsence = true; absType = 'COMPU'; }
-              // Whole-word matches only: a bare substring check turned activities
-              // like "Compliance" into COMP and "Evaluation" into ALU absences,
-              // silently inflating absence counts.
-              else if (/\bcomp\b/.test(actLower)) { isAbsence = true; absType = 'COMP'; }
-              else if (/\balu\b/.test(actLower)) { isAbsence = true; absType = 'ALU'; }
-              else if (/\bloa\b/.test(actLower)) { isAbsence = true; absType = 'LOA'; }
-              else if (actLower.includes('awol') || actLower.includes('ncns')) { isAbsence = true; absType = 'TI AWOL'; }
+              // Shared taxonomy — see classifyAbsenceActivity above. Only the types
+              // this pipeline has always reported are treated as absences here, so
+              // the reported numbers do not move.
+              let absType = classifyAbsenceActivity(actLower);
+              // This pipeline has always reported long-term/planned sick as SICK,
+              // and has never counted PW/ALT, bereavement or vacation as absences.
+              // Preserved exactly, so the published numbers don't move.
+              if (absType === 'Medical Leave') absType = 'SICK';
+              if (['PW/ALT', 'BEREAVEMENT', 'VACATION'].indexOf(absType) !== -1) absType = '';
+              let isAbsence = !!absType;
               
               let roleType = "";
               if (isRole) {
@@ -1180,6 +1260,12 @@ var WorkforceTracker = {
         var _safeStartStr = Utilities.formatDate(new Date(bounds.start), "America/Toronto", "yyyy-MM-dd");
         var _safeRpt = (typeof ReportImport !== 'undefined' && ReportImport.getSafeForPeriod) ? ReportImport.getSafeForPeriod(_safeStartStr, eStr) : { has: false };
         var _tidMap = this._agentTidMap();   // normalized name → WFM Employee ID
+        // Genesys Cloud per-agent phone metrics for the same window. Deliberately
+        // kept SEPARATE from the Avaya GEM feed above: nothing here overwrites
+        // a.gem / a.cph / a.aht / a.inOut. The two sources are displayed side by
+        // side and labelled, so a number can always be traced to its origin.
+        var _genRpt = (typeof ReportImport !== 'undefined' && ReportImport.getGenesysForPeriod) ? ReportImport.getGenesysForPeriod(_safeStartStr, eStr) : { has: false };
+        report.genesys = { has: !!_genRpt.has, label: _genRpt.label || '', totals: _genRpt.totals || null };
         finalArr.forEach(a => {
             let aKey = _normalizeAgentKey(a.name);
             if (_safeRpt.has) {
@@ -1225,6 +1311,15 @@ var WorkforceTracker = {
                  }
             }
 
+            // Genesys join: the Genesys GUID is the stable key, so prefer the WFM
+            // Employee-ID-free path of matching on the normalized name, then on
+            // any Genesys id we have already mapped for that name.
+            a.genesys = null;
+            if (_genRpt.has) {
+                var _g = _genRpt.byKey[aKey] || null;
+                if (_g) a.genesys = _g;
+            }
+
             if (matchedGem) {
                 a.gem = matchedGem;
                 a.cph = parseFloat(matchedGem.cph).toFixed(2);
@@ -1235,7 +1330,7 @@ var WorkforceTracker = {
                 a.cph = '-'; a.aht = '-'; a.inOut = '-';
             }
         });
-        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.isBackupMRC === true);
+        finalArr = finalArr.filter(a => a.total > 0 || a.gem !== null || a.genesys !== null || a.isBackupMRC === true);
         report.data = finalArr.sort((a,b) => b.total - a.total);
         return JSON.stringify(report);
   },

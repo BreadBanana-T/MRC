@@ -8,8 +8,39 @@ var AssignmentAnalyzer = {
       return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   },
 
+  // The GEM export tool switched to UTF-16: read as plain text, every real
+  // character arrives followed by a NUL byte (shown as "A g e n t" -- some
+  // editors turn the NULs into spaces before the paste). Header detection
+  // like includes('in & out by hr') then never matches and the import dies
+  // with "Invalid data format". Strip BOMs + NULs, and when the telltale
+  // interleaved pattern is present, collapse one space after every char.
+  _sanitizeRaw: function(raw) {
+      if (!raw) return "";
+      let s = String(raw).replace(/[\uFEFF\uFFFE\uFFFD]/g, '');
+      if (s.indexOf('\u0000') !== -1) s = s.replace(/\u0000/g, '');
+      if (/a g e n t|e m p l o y e e _ n a m e|i n   &   o u t/i.test(s)) {
+          s = s.split(/\r?\n/).map(function(line) {
+              return line.replace(/([\s\S]) /g, '$1');
+          }).join('\n');
+      }
+      return s;
+  },
+
+  // Roster Language values are exactly: English, French, Bilingual-English,
+  // Bilingual-French. Bilingual must be tested FIRST — "Bilingual-French"
+  // contains "french", which is how ReportImport._langCode mis-coded it as FR.
+  _langFromRoster: function(v) {
+      var s = String(v == null ? '' : v).trim().toLowerCase();
+      if (!s) return "";
+      if (s.indexOf('biling') !== -1 || s.indexOf('bil ') === 0 || s === 'bl') return 'BL';
+      if (s.indexOf('french') !== -1 || s.indexOf('français') !== -1 || s === 'fr') return 'FR';
+      if (s.indexOf('english') !== -1 || s === 'en') return 'EN';
+      return "";
+  },
+
   importMasterList: function(rawText) {
       try {
+          rawText = this._sanitizeRaw(rawText);
           if (!rawText || rawText.trim() === "") return "Error: No data pasted.";
           let lines = rawText.split(/\r?\n/).filter(l => l.trim().length > 0);
           
@@ -21,6 +52,14 @@ var AssignmentAnalyzer = {
           let colJob = headers.findIndex(h => h.toLowerCase().includes('title') || h.toLowerCase().includes('job'));
           let colStatus = headers.findIndex(h => h.toLowerCase().includes('status'));
           let colLevel = headers.findIndex(h => h.toLowerCase().includes('erc_level') || h.toLowerCase().includes('level'));
+          // The roster's own Language column — the real source of EN/FR/BL. It was
+          // never read, which is why every agent fell back to 'EN' everywhere: the
+          // only other signal is SafeTracker._inferLang scanning the Skills string
+          // for language words, and real Skills strings contain none (they hold
+          // SmartWear, Question Line, Video Verification…). Match 'language' but
+          // not 'languages' — the SAFE roster's "AGENT LANGUAGES" is a different
+          // export handled by ReportImport.
+          let colLang = headers.findIndex(h => /(^|_|\s)lang(uage)?(\s|_|$)/i.test(h.trim()));
           
           // NEW: Grab extra metadata
           let colSup = headers.findIndex(h => h.toLowerCase().includes('supervisor'));
@@ -35,7 +74,15 @@ var AssignmentAnalyzer = {
               let job = cols[colJob] || "";
               let status = cols[colStatus] || "";
               
-              let level = colLevel > -1 ? parseInt(cols[colLevel]) || 2 : 2;
+              // parseInt('Trainee') is NaN, and `|| 2` was quietly turning all 11
+              // trainees into indistinguishable L2s. Keep the label.
+              let level = 2;
+              if (colLevel > -1) {
+                  let rawLevel = String(cols[colLevel] == null ? '' : cols[colLevel]).trim();
+                  if (/^trainee/i.test(rawLevel)) level = 'Trainee';
+                  else level = parseInt(rawLevel, 10) || 2;
+              }
+              let lang = colLang > -1 ? this._langFromRoster(cols[colLang]) : "";
               let sup = colSup > -1 ? cols[colSup] : "";
               let skills = colSkills > -1 ? cols[colSkills] : "";
               let loc = colLoc > -1 ? cols[colLoc] : "";
@@ -51,7 +98,7 @@ var AssignmentAnalyzer = {
               let isInactive = s.includes('terminated') || s.includes('resigned') || s.includes('inactive') || s.includes('separated') || s === 'left';
 
               if (name && !isInactive && !isManager) {
-                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI]);
+                  validAgents.push([name.replace(/(^"|"$)/g, '').trim(), level, sup, skills, loc, emailTI, lang]);
               }
           }
           
@@ -60,9 +107,20 @@ var AssignmentAnalyzer = {
               let sheet = ss.getSheetByName('WF_MASTERLIST');
               if (!sheet) sheet = ss.insertSheet('WF_MASTERLIST');
               sheet.clearContents();
-              // Save the 6 columns
-              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI"]);
-              sheet.getRange(2, 1, validAgents.length, 6).setValues(validAgents);
+              // 7 columns now — Language (col 6) is new.
+              sheet.appendRow(["Agent Name", "ERC Level", "Supervisor", "Skills", "Location", "Email_TI", "Language"]);
+              sheet.getRange(2, 1, validAgents.length, 7).setValues(validAgents);
+              // Push the roster languages into WF_LANG_MAP so every existing
+              // reader (SafeTracker._loadLangMap and everything built on it) sees
+              // them without each one having to learn about the new column. A
+              // manual per-agent override still wins — _mergeLangMap refuses to
+              // overwrite a row whose Source is 'manual'.
+              if (typeof ReportImport !== 'undefined' && ReportImport._mergeLangMap) {
+                  var langPairs = validAgents
+                      .filter(function(r) { return r[6]; })
+                      .map(function(r) { return [r[0], r[6]]; });
+                  if (langPairs.length) ReportImport._mergeLangMap(langPairs, 'masterlist');
+              }
 
               // Sync to RegionRegistry with source=masterlist so these entries
               // outrank future WFM auto-detection but remain overridable manually.
@@ -112,12 +170,98 @@ var AssignmentAnalyzer = {
       } catch (e) { return "Error dismissing agent."; }
   },
 
+  // ── Genesys Cloud flag thresholds ────────────────────────────────────────
+  // Tunable in one place. The dropped-call rule is a RATE, not a raw count, so it
+  // surfaces agents who miss a disproportionate share of their calls rather than
+  // simply ranking the busiest people on the floor.
+  GENESYS_DROP_RATE: 0.05,          // Alert-No-Answer ÷ Answered
+  GENESYS_DROP_MIN_ANSWERED: 50,    // ignore tiny samples
+  // Short calls are flagged on AVG talk time against the floor median, not on Min
+  // Talk. Min Talk is a single minimum over the whole period, so across hundreds
+  // of calls virtually everyone has one near-instant call — on the real export a
+  // "Min Talk ≤ 5s" rule flagged 215 of 254 agents, i.e. no signal at all. Avg
+  // Talk relative to the floor separates the genuinely short-call agents (8 of
+  // 254 at 60%), and Min Talk is still shown alongside as corroboration.
+  GENESYS_SHORT_TALK_FACTOR: 0.6,   // avg talk ≤ this × the floor median
+  GENESYS_SHORT_MIN_HANDLED: 50,    // ignore tiny samples
+
+  // Flags derived from the Genesys agent report overlapping `monthStr`
+  // ("yyyy-MM-dd", the analyzer's first-of-month key). Entirely independent of
+  // the Avaya GEM feed — no GEM value is read, combined or overridden here.
+  _genesysFlags: function(monthStr, exclusions) {
+      var out = { has: false, label: '', month: '', noAnswer: [], shortCalls: [] };
+      try {
+          if (typeof ReportImport === 'undefined' || !ReportImport.getGenesysForPeriod) return out;
+          var ym = String(monthStr || '').substring(0, 7);
+          if (!/^20\d\d-\d\d$/.test(ym)) {
+              ym = Utilities.formatDate(new Date(), 'America/Toronto', 'yyyy-MM');
+          }
+          var y = parseInt(ym.substring(0, 4), 10), m = parseInt(ym.substring(5, 7), 10);
+          var start = ym + '-01';
+          var end = Utilities.formatDate(new Date(y, m, 0), 'America/Toronto', 'yyyy-MM-dd');
+          var rpt = ReportImport.getGenesysForPeriod(start, end);
+          if (!rpt.has) return out;
+
+          out.has = true; out.label = rpt.label || (start + ' → ' + end); out.month = ym;
+          var self = this;
+          var excl = exclusions || new Set();
+
+          // Floor median avg-talk over agents with enough volume — the yardstick
+          // the short-call rule is measured against.
+          var talk = [];
+          rpt.rows.forEach(function(r) {
+              if (r.avgTalk != null && r.handled >= self.GENESYS_SHORT_MIN_HANDLED) talk.push(r.avgTalk);
+          });
+          talk.sort(function(a, b) { return a - b; });
+          var medTalk = talk.length ? talk[Math.floor(talk.length / 2)] : null;
+          out.medianTalk = medTalk == null ? null : Math.round(medTalk * 10) / 10;
+          var shortCut = medTalk == null ? null : medTalk * self.GENESYS_SHORT_TALK_FACTOR;
+          out.shortTalkCutoff = shortCut == null ? null : Math.round(shortCut * 10) / 10;
+
+          rpt.rows.forEach(function(r) {
+              if (excl.has(String(r.name).trim()) || excl.has(r.key)) return;
+              var rate = r.answered > 0 ? (r.noAnswer / r.answered) : 0;
+              var payload = {
+                  name: r.name, answered: r.answered, handled: r.handled,
+                  noAnswer: r.noAnswer, dropRate: Math.round(rate * 1000) / 1000,
+                  minTalk: r.minTalk, avgTalk: r.avgTalk, avgRing: r.avgRing, avgHandle: r.avgHandle
+              };
+              if (r.answered >= self.GENESYS_DROP_MIN_ANSWERED && rate >= self.GENESYS_DROP_RATE) out.noAnswer.push(payload);
+              if (shortCut != null && r.handled >= self.GENESYS_SHORT_MIN_HANDLED
+                  && r.avgTalk != null && r.avgTalk <= shortCut) out.shortCalls.push(payload);
+          });
+          out.noAnswer.sort(function(a, b) { return b.dropRate - a.dropRate; });
+          out.shortCalls.sort(function(a, b) { return (a.avgTalk || 0) - (b.avgTalk || 0); });
+      } catch (e) {}
+      return out;
+  },
+
   getAnalyzerData: function(targetMonth) {
       try {
+          // Read exclusions first: they apply to Genesys flags too, so a dismissed
+          // agent cannot come back through the new sections.
+          let earlyExcl = new Set();
+          let earlyExclSheet = this._getDB('WF_EXCLUSIONS');
+          if (earlyExclSheet && earlyExclSheet.getLastRow() > 1) {
+              earlyExclSheet.getDataRange().getValues().slice(1).forEach(r => earlyExcl.add(String(r[0]).trim()));
+          }
+
           let db = this._getDB('WF_GEM_DATA_V3');
           if (!db || db.getLastRow() < 2) {
               db = this._getDB('WF_GEM_DATA_V2');
-              if (!db || db.getLastRow() < 2) return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+              if (!db || db.getLastRow() < 2) {
+                  // The two feeds are independent: a Genesys-only shop still gets
+                  // its Genesys flags instead of a hard "import GEM first" wall.
+                  let genOnly = this._genesysFlags(targetMonth, earlyExcl);
+                  if (genOnly.has) {
+                      return JSON.stringify({
+                          selectedMonth: genOnly.month + '-01', availableMonths: [genOnly.month + '-01'],
+                          usingMasterList: false, inbound: [], outOfScope: [], outbound: [], cph: [],
+                          genesys: genOnly
+                      });
+                  }
+                  return JSON.stringify({ error: "No GEM data available. Please import your report.", months: [] });
+              }
           }
           
           let validAgents = new Map();
@@ -269,7 +413,8 @@ var AssignmentAnalyzer = {
           
           return JSON.stringify({
               selectedMonth: targetMonth, availableMonths: months, usingMasterList: useMasterList,
-              inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList
+              inbound: inboundList, outOfScope: outOfScopeList, outbound: outboundList, cph: cphList,
+              genesys: this._genesysFlags(targetMonth, exclusions)
           });
       } catch (e) {
           return JSON.stringify({ error: "Data generation failed: " + e.message });
@@ -277,6 +422,7 @@ var AssignmentAnalyzer = {
   },
 
   _parseGEM: function(raw) {
+      raw = this._sanitizeRaw(raw);
       if (!raw || raw.trim() === "") return {};
       let lines = raw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let headerIdx = lines.findIndex(l => l.toLowerCase().includes('in & out by hr') || l.toLowerCase().includes('cph'));

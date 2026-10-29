@@ -67,7 +67,7 @@ flowchart TD
   GEM[("WF_GEM_DATA_V3")] --> UNI
 ```
 
-**Report pastes (Management View feeds).** Two IEX/BI exports are pasted into the
+**Report pastes (Management View feeds).** Several exports are pasted into the
 same Import box and auto-detected (`JavaScript.html: runImportAction`), then parsed by
 `CORE/ReportImport.gs`:
 - **Activity loading hours** (`Exception Grp`/`Activity Name`/week-of-Sunday cols) →
@@ -141,6 +141,51 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 - **WF_FEEDBACK** — `FeedbackTracker.submit` (suggestion/idea/bug), best-effort email to
   Script Property `FEEDBACK_NOTIFY_EMAIL` (falls back to the deploying owner).
 
+- **Genesys Cloud "Agent Performance Summary"** (`Alert - No Answer`, or
+  `Interval Start` + `Avg Handle`) → `WF_GENESYS_AGENT`, period-scoped replace
+  (`ReportImport.importGenesysAgents`). The **only real comma-CSV import** — it has its
+  own quote-aware `_splitRow` (tab-first, else comma, handling `""` escapes, which
+  `AssignmentAnalyzer._parseCSVLine` does not). Columns are located **by header name**,
+  which absorbs the real export's `Average Ring Time * ` (trailing asterisk *and* space).
+  - **Units.** Durations export in **milliseconds** and are stored in **seconds**
+    (`_msToSec`). `Average Ring Time` is a derived column that does **not** honour that
+    setting — real exports send it in seconds (values of 4–16) — so the unit is decided
+    **per import off the column median** (`< 1000` → seconds), and the resolved unit is
+    named in the import's result message.
+  - **Blanks are meaningful.** Blank *counts* (`Answered`, `Held`, `Transferred`,
+    `Alert - No Answer`) mean zero events → `0`. Blank *durations* mean *no sample* and
+    stay **blank** — never `0`, or an agent who never used hold would read as 0s holds.
+  - **Period.** The file's own `Interval Start` is **not trustworthy** (a real export
+    stamps `2008-01-26` against an `Interval End` of `8/22/26`), so the manager tags the
+    paste with the Import modal's grain+date picker, exactly as the dateless SAFE roster
+    does (`safePeriodBounds`). Only when the picker is empty does `_genesysPeriod` derive
+    from the file, treating a midnight `Interval End` as exclusive and falling back to the
+    **calendar month of the interval end** when the start is implausible (pre-2020, or
+    >800 days before the end). A 2008 window is never stored.
+  - **Keys.** Names are stripped of environment tags (`*PROD*`) then keyed with
+    `_normalizeAgentKey`; the Genesys user GUID is upserted into `WF_GENESYS_IDS` so a
+    display-name change cannot orphan an agent's history.
+  - **Read back** with `getGenesysForPeriod(viewStart, viewEnd)` — largest-overlap period
+    selection, same contract as `getSafeForPeriod`.
+  - **Deliberately NOT merged with `WF_GEM_DATA_V3`.** The Avaya GEM feed and Genesys are
+    displayed side by side as separate, labelled sources: `getUnifiedReport` sets
+    `a.genesys` and touches none of `a.gem` / `a.cph` / `a.aht` / `a.inOut`. Surfaces: two
+    columns (**Dropped**, **Ring**) plus a "Genesys Call Performance" card in the Insights
+    per-agent table, and two **Red Flags** sections (`AssignmentAnalyzer._genesysFlags`).
+    Red Flags stays usable with Genesys alone — no GEM import required.
+  - **Fixture:** `example_genesys_agents.csv` (anonymized, every structural quirk kept).
+
+**Alarm.com standby status.** `CORE/AlarmComMonitor.gs` probes
+`https://standby.alarm.com/` every 5 min from a time-driven trigger
+(`setupAlarmComTrigger`), logging one row per probe to the hidden
+`WF_ALARMCOM_UPTIME` sheet (throttled, ring-buffered to ~9 days) so uptime % is real
+whether or not anyone has the Dashboard open. `getStatus()` is cache-first (5 min) so N
+viewers cause at most one probe. `isUp` = HTTP 200–399 **and** `/All systems
+operational/i` in the body; a valid response *without* the banner is a **warn** state
+noted `banner text not matched`, never a flat outage. `debugAlarmCom()` is the read-only
+diagnostic — run it first, because `UrlFetchApp` executes no JavaScript, so a
+client-rendered status page would fail the regex on a healthy site.
+
 ---
 
 ## 2. Sheet schema (column index → meaning)
@@ -152,9 +197,10 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_IDP** | 0 Day, 1 Interval `HH:mm`, 2 Required, 3 Open | `WorkforceTracker.importData` |
 | **WF_OVERTIME** | 0 Agent, 1 Date, 2 Code, 3 Rate, 4 Bucket, 5 IsBreak, 6 Start, 7 End, 8 Region | `OvertimeTracker.importFromSchedule` |
 | **WF_OT_OPEN** | 0 Date, 1 Start, 2 End, 3 Slots, 4 Activity, 5 MinLen, 6 ADG, 7 ADValues, 8 Type, 9 Rate, 10 ReqGroup, 11 WindowHrs, 12 OpenHrs, 13 Visible(`N`=hidden), 14 OID | `OvertimeTracker.importOpenSlots` |
-| **WF_MASTERLIST** | 0 Agent, 1 Level, 2 Supervisor, 3 Skills (`Name;#Lvl;#…`), 4 Location, 5 Email | manual |
+| **WF_MASTERLIST** | 0 Agent, 1 **ERC Level (`1`–`4` or the string `Trainee`)**, 2 Supervisor, 3 Skills (`Name;#N` — **`;#N` is a SharePoint item id, NOT a proficiency level**), 4 Location, 5 Email_TI (empty in practice), **6 Language (EN/FR/BL)** | `AssignmentAnalyzer.importMasterList` (roster paste) |
+| **Genesys_Assignments** | 0 Timestamp, 1 Agent Name, 2 Channel (`inbound`/`outbound`/`''`=Avaya), 3 Queues JSON — one row per agent, latest wins, **no date stamp**: persists until explicitly cleared | `StatusTracker.setGenesysBatch` |
 | **WF_REGION_MAP** | 0 Key, 1 Display, 2 Region, 3 Source, 4 LastConfirmed | `RegionRegistry` |
-| **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL) | `SafeTracker.setAgentLang` |
+| **WF_LANG_MAP** | 0 Key, 1 Display, 2 Lang(EN/FR/BL), **3 Source** — `manual` outranks `masterlist` / `safe-report`, so a hand-set language survives a re-import | `SafeTracker.setAgentLang` (manual) · `ReportImport._mergeLangMap` (bulk) |
 | **Weekly_Archives_V3** | 0 Timestamp, 1 Cycle, 2 Period, 3 Agent, 4 Region, 5 TotalOffPhone, 6 JSON | `archiveUnifiedReport` |
 | **Stats History** | 0 DateTime, 1 SVL%, 2 Ack | external/digest |
 | **DB_Sessions** | 1 Agent, 2 Role, 3 Start, 4 End, 6 Hours | external |
@@ -166,6 +212,10 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | **WF_ACTIONS** | 0 Action, 1 Label, 2 Email, 3 Name, 4 Timestamp | `Presence.recordAction` |
 | **WF_FEEDBACK** | 0 Timestamp, 1 User, 2 Type, 3 Message, 4 Page, 5 Status | `FeedbackTracker.submit` |
 | **WF_AGENT_IDS** | 0 Key (normalized), 1 Name, 2 TID (WFM `Agent: NNNNN`) | `WorkforceTracker.importData` (merge-upsert) |
+| **WF_GENESYS_AGENT** | 0 PeriodStart, 1 PeriodEnd, 2 Label, 3 AgentId (Genesys GUID), 4 AgentKey, 5 Agent, 6 MediaType, 7 Answered, 8 Handled, 9 AvgHandleSec, 10 AvgTalkSec, 11 AvgHoldSec, 12 AvgAcwSec, 13 Held, 14 Transferred, 15 NoAnswer, 16 MinTalkSec, 17 AvgRingSec — **all durations in SECONDS** (exported as ms); blank duration = no sample | `ReportImport.importGenesysAgents` |
+| **WF_GENESYS_IDS** | 0 Agent Key (normalized), 1 Agent Id (Genesys GUID), 2 Display Name | `ReportImport._mergeGenesysIds` (merge-upsert) |
+| **Overview IDP tile** | reads its own `state.overviewIdp` via `getWorkforceAnalytics('day', today, 'furlough', …)`, **not** `state.trackerData` — that key is replaced when the tracker switches mode/range, which would blank the tile. Renders through the shared `renderIdpHeatmapTile()` so Dashboard and Furlough tracker cannot disagree | — |
+| **WF_ALARMCOM_UPTIME** (hidden) | 0 Timestamp, 1 Up (1/0), 2 LatencyMs, 3 HttpCode, 4 PartnerPortalUp (1/0), 5 Note | `AlarmComMonitor._logHistory` (5-min trigger, ring-buffered) |
 
 > **SAFE matching on Employee ID (this build).** The schedule import now stores the
 > WFM agent ID (`Agent: NNNNN`) in `WF_AGENT_IDS`. SAFE-report hours match on
@@ -189,6 +239,7 @@ same Import box and auto-detected (`JavaScript.html: runImportAction`), then par
 | `_getCycleForEpoch` (`:585`) | — | Week A/B (anchor 2026‑01‑29) |
 | `_calculateEpochBoundaries` (`:593`) | — | day/week/month/quarter/ytd window for the **trackers** |
 | `ManagementView._periodBounds` (`:48`) | — | **separate** calendar window for Mgmt View (Sun–Sat weeks) |
+| `mgmtGrainToTrackerMode` (`JavaScript.html`) | — | Mgmt grain → tracker mode for **embedded trackers** (Customize → "Bring in a tracker"). Only `week` differs: a Mgmt week is Sun–Sat = `week_sun`; plain `week` is the Wed→Wed operational week. The embed cache key includes the grain, or a Weekly→Monthly switch (which does not change `mgmtDate`) would serve the stale weekly payload |
 | `_batchDisplayValues` | `{}` / per-sheet fallback | Mgmt `getDashboard` — reads N sheets in one Sheets-API `batchGet`, padded rectangular to match `getDisplayValues` |
 
 **The big parser split (NARROWED, SAFE21):** `_timeToMins` now parses fr‑CA `"13 h 30"`, meridian‑anywhere
@@ -221,6 +272,67 @@ used by the SAFE board where the epoch columns exist.
 > also returns a monthly `trend` (hours + `weekA`/`weekB`) + `periodKeys` for the tracker's
 > month-over-month and Week A·B views, and a per-event `cycle`. Helper:
 > `_computeTrendMonthly`.
+
+---
+
+## 4b. The floor (Genesys page) — one agent key, and how state is written
+
+> **THE key rule.** Anything that stores or reads floor state keys the agent with
+> **`_normalizeAgentKey`** (`WorkforceTracker.gs:15`) — accent/comma-stripped and
+> **token-sorted**. Writing a plain `String(name).trim().toLowerCase()` key is the bug
+> that made role and Genesys assignments silently revert after ~2 minutes: the write
+> landed under `bennani, mohammed` while the read looked for `bennani mohammed`, so the
+> optimistic UI held for the client's 120 s TTL and then snapped back. It only ever
+> resolved by luck — never for comma-form names. Enforced in `RoleManager._key` and
+> `StatusTracker._key`, read by `AgentMonitor` (`:56-60`). `RoleManager.getFastMap`
+> re-keys pre-fix property entries on read so old assignments keep working. Sheets still
+> store the human-readable display name in the name column.
+
+| Concern | Contract |
+|---|---|
+| Floor payload | `AgentMonitor.getPayload` → `compileFloorData` — **20 s `CacheService` cache, busted by every write** (`setStatus` / `setRoles` / `setGenesys*` / `updateBreaks` / `logOvertime`) |
+| Roles | **Additive.** `RoleManager.setStatus` appends, `setRoles` replaces outright (drops one role off a stack), `'Active'` clears all. The client mirrors this and renders each role as its own removable chip |
+| Absence | Independent of role. A role no longer wipes `absentType` — that made "Mark Sick" a no-op for anyone holding a role and left no way to un-mark it |
+| Genesys assignment | `Genesys_Assignments` + the Script-Properties fast map, date-agnostic, exempt from the fast-map 24 h GC. 46 queues in 14 groups (client registry `GENESYS_QUEUES`); queue names copy with the `acd_tel_sec_monit_` prefix |
+| Retired | **ICL** and **ULC FIRE** as roles, plus their cards and buckets. The Genesys `icl_*` **queues** remain (queues, not the legacy role) and no longer synthesize an `ICL` role token. Schedule-derived ICL/ULC activity blocks still display as a status |
+| Optimistic edits | A pending edit retires only once the server acknowledged it **and** a payload requested *after* the edit has landed — an in-flight `getFloorStatus` cannot wipe a change. Failures roll back and say so; the 120 s TTL is a backstop, not the mechanism |
+| Override sheets | `Status_Overrides` / `Break_Overrides` / `Overtime_Tracking` self-prune to 7 days (`StatusTracker._prune`), dropping only a clean prefix |
+| Language | `WF_LANG_MAP` wins over the masterlist column (it carries the manual overrides). **Never** infer it from Skills — `SafeTracker._inferLang` scans Skills for language words and real Skills strings contain none, so it returns `EN` for everyone |
+
+---
+
+## 4c. Absence vocabulary — ONE classifier
+
+> **`classifyAbsenceActivity(activityName)`** (`WorkforceTracker.gs`) is the single
+> source of truth, called by **both** `ImportHandler` (the Floor) and
+> `WorkforceTracker` (reporting). There used to be two copies: the reporting one
+> correct, the Floor one missing `UNAB` and `LOA` entirely — so 208 UNAB agent-days
+> and 40 LOA/TI LOA agent-days reached the Floor with no absence type and rendered
+> as if those people were working. **That divergence was the bug. Do not fork it again.**
+
+| Rule | Why |
+|---|---|
+| `LOA` matched as **`\bloa\b`**, never a substring | the export has **187** rows of `LFQI (OPEX) En prêt Hors file / On Loan **Loa**n Off Queue` |
+| `COMP` / `COMPU` / `ALU` / `UNAB` also `\b`-anchored | "Compliance" → COMP and "Evaluation" → ALU inflated counts before |
+| ACSU / solicited / voluntary / furlough → **not an absence** | approved released time; tracked as furlough and its own break type. "Solicited Time Off" would otherwise hit the vacation branch |
+| PW/ALT tested **before** vacation | the real string is `PW Congé bien-être personnel / Personal Wellness`; matching `congé` first made the PW/ALT branch unreachable |
+| `looksLikeAbsenceWording` is for the importer's `hasWork` guard **only** | the guard tested `"ABSENT"` but the strings say `"ABSENCE"`, so absences were counted as worked days. Never use it to label or count — it would turn `HABS Férié absence` into an absence and move the reported totals |
+| Reporting maps `Medical Leave` → `SICK` and ignores PW/ALT · BEREAVEMENT · VACATION | preserves the published numbers exactly (verified identical across all 31 activity strings) |
+
+**Needs Attention** = `isUnplannedAbsenceType`: `SICK` · `NCNS` · `UNAB` · `AWOL` ·
+`COMP`/`COMPU` · `ALU` · `LOA` · `PW/ALT` · `BEREAVEMENT`. `VACATION` and
+`Medical Leave` are planned and belong in Planned / Support.
+
+**Partial days.** An agent can be absent for part of a day and work the rest. The
+importer appends **`(part day)`** to the type (`UNAB (part day)`) rather than adding a
+`Raw Schedule` column; every matcher is `\b`-anchored so it still reads as `UNAB`.
+This replaced an escape hatch in `AgentMonitor` that sent such agents back to `active`
+and hid 157 of 208 real UNAB days — the nuance is in the label now, never the bucket.
+
+**Real vocabulary** (`WF_ABSENCES`, 1,835 rows): `SICK` 741 · `TI AWOL` 484 ·
+`UNAB` 233 · `ALU` 231 · `COMPU` 141 · `COMP` 5. The WFM strings are **`TI LOA`**
+(space, no hyphen) and **`LOA Absence / Leave of Absence`**; `UNAB` is always a
+leading token, never `UNABLE`.
 
 ---
 
@@ -262,7 +374,8 @@ Less likely: a name‑key typo (D2) hides an agent, or a region/registry overrid
 
 ## 7. Rule of thumb when adding/editing a tool
 - Read times via the **epoch‑first** path; never trust text time columns alone (D1/D3).
-- Key agents with **`_normalizeAgentKey`** (D2).
+- Key agents with **`_normalizeAgentKey`** (D2) — floor state included (see §4b).
+- Language comes from **`WF_LANG_MAP`** (`SafeTracker._loadLangMap`), never from Skills.
 - Decide explicitly: is this metric an **actual** (cap at today) or **plan/forecast** (full period)? (D4)
 - Never `clearContents()` before you have the new rows ready — overwrite in place (D5).
 - Resolve region only through **RegionRegistry** (D8).

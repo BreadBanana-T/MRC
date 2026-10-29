@@ -1,8 +1,8 @@
 <style>
   .row-name { position: relative; cursor: help; }
-  .agent-tooltip { position: absolute; left: 0; bottom: 100%; margin-bottom: 8px; background: var(--bg-root); border: 1px solid var(--glass-border); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); opacity: 0; visibility: hidden; transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index: 1000; width: max-content; max-width: 250px; pointer-events: none; white-space: normal; }
-  body.dark .agent-tooltip { background: #1e293b; border-color: rgba(255,255,255,0.1); }
-  .row-name:hover .agent-tooltip { opacity: 1; visibility: visible; transform: translateY(-4px); }
+  /* unused: the hover card was replaced by on-row .row-attrs chips */
+  .agent-tooltip-legacy { position: absolute; left: 0; bottom: 100%; margin-bottom: 8px; background: var(--bg-root); border: 1px solid var(--glass-border); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); opacity: 0; visibility: hidden; transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index: 1000; width: max-content; max-width: 250px; pointer-events: none; white-space: normal; }
+  body.dark .agent-tooltip-legacy { background: #1e293b; border-color: rgba(255,255,255,0.1); }
   .row-name:hover::after { display: none !important; }
   .custom-scrollbar::-webkit-scrollbar { width: 6px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -19,7 +19,17 @@
       return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
 
-  var refreshIcons = function() { if(typeof lucide !== 'undefined') lucide.createIcons(); };
+  // Materialise every <i data-lucide> into an <svg>. This used to fail in total silence when
+  // the Lucide CDN was blocked: no else, no warning, so "all the icons went blank" looked
+  // like an app bug with nothing in the console. Warn once instead.
+  var _lucideWarned = false;
+  var refreshIcons = function() {
+      if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (e) { console.warn('[icons] createIcons failed:', e); } return; }
+      if (!_lucideWarned) {
+          _lucideWarned = true;
+          console.warn('[icons] Lucide is not loaded — every icon will render blank. Check whether the CDN in Index.html is reachable from this network (see the loader comment there).');
+      }
+  };
 
   // ── GSAP view entrances ──────────────────────────────────────────────────
   // One-shot, GPU-friendly (y + opacity only — no scale, so Chart.js canvases
@@ -184,7 +194,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, regionRegistry: null, regionManagerFilter: 'ALL', staffingBalance: null, outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -234,19 +244,31 @@
     setInterval(fetchCalendar, 300000); 
     setInterval(updateMaintenance, 20000);
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
-    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages(); fetchStaffingBalance();
+    fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
     fetchPresenceBootstrap();
+    fetchAlarmCom();
+    fetchOverviewIdp();
+    setInterval(fetchOverviewIdp, 60000); // 1 min — matches the 15-min IDP bucket granularity
     setInterval(fetchOutages, 300000); // 5 min
-    setInterval(fetchStaffingBalance, 60000); // 1 min — aligned with IDP bucket granularity
+    setInterval(fetchAlarmCom, 300000); // 5 min — matches the server-side probe cadence
     setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
     setInterval(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
   }
 
-  function fetchStaffingBalance() {
+  function fetchAlarmCom() {
       if (typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(function(res) {
-          try { state.staffingBalance = JSON.parse(res); if (state.view === 'overview') render(); } catch (e) {}
-      }).getStaffingBalance();
+          try {
+              state.alarmCom = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getAlarmComStatus();
+      google.script.run.withSuccessHandler(function(res) {
+          try {
+              state.alarmComHistory = JSON.parse(res);
+              if (state.view === 'overview') render();
+          } catch (e) {}
+      }).withFailureHandler(function() {}).getAlarmComHistory();
   }
 
   // Hydro-Québec geo-blocks Google's servers, so when the server reports QC
@@ -822,10 +844,301 @@
   window.openImportModal = function() { document.getElementById('import-modal').classList.add('open'); var sd = document.getElementById('safe-period-date'); if (sd && !sd.value) sd.value = localDateStr(new Date()); var se = document.getElementById('safe-period-end'); if (se && !se.value) se.value = localDateStr(new Date()); if (window.onSafeGrainChange) onSafeGrainChange(); };
   window.closeImportModal = function() { document.getElementById('import-modal').classList.remove('open'); };
   window.toggleNotifPanel = function() { var p=document.getElementById('notif-panel'); state.notifOpen=!state.notifOpen; p.classList.toggle('open'); if(state.notifOpen) renderNotifList(); };
-  window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
+  window.openMenu = function(e, n) { state.selectedAgent=n; var m=document.getElementById('agent-menu'), o=document.getElementById('overlay'); o.style.display='block'; m.style.display='flex'; var a=genAgentByName(n); var back=document.getElementById('ctx-back-avaya'); if(back) back.style.display=(a && a.genesys && a.genesys.channel)?'flex':'none'; var r=e.currentTarget.getBoundingClientRect(); m.style.top=(r.bottom+10)+'px'; m.style.left=(r.left)+'px'; };
   window.closeMenu = function() { document.getElementById('agent-menu').style.display='none'; document.getElementById('overlay').style.display='none'; };
   
-  window.setAgentStatus = function(type, val) { closeMenu(); var name=state.selectedAgent; state.pendingUpdates[name]={type: type, val: val, timestamp:Date.now()}; moveAgentInMemory(name,type,val); if(state.view==='agents') { render(); flipAgentRow(name); } showToast("Status Updated"); if(typeof google!=='undefined') google.script.run.updateAgentStatus(name,type,val); };
+  window.setAgentStatus = function(type, val) {
+      closeMenu();
+      var name = state.selectedAgent;
+      if (!name) return;
+      markFloorEdit([name], type, val);
+      moveAgentInMemory(name, type, val);
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      // Don't claim success before the server has taken it — the old code
+      // toasted "Status Updated" unconditionally, before a call with no
+      // handlers at all, so a failed write looked identical to a good one.
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast('Status saved'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Status update'); })
+          .updateAgentStatus(name, type, val);
+  };
+  // Remove ONE role without clearing the rest. Roles stack on the server, so
+  // "Set Active" (which wipes everything) was previously the only way out.
+  window.removeAgentRole = function(name, role) {
+      if (!name || !role) return;
+      markFloorEdit([name], 'role-remove', role);
+      moveAgentInMemory(name, 'role-remove', role);
+      var left = (findAgentCopy(name) || {}).role || '';
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast(role + ' removed'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Removing ' + role); })
+          .setAgentRoles(name, left);
+  };
+  window.clearAgentAbsence = function(name) {
+      if (!name) return;
+      markFloorEdit([name], 'absent-clear', '');
+      moveAgentInMemory(name, 'absent-clear', '');
+      if (state.view === 'agents') { render(); flipAgentRow(name); }
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() { ackFloorEdit([name]); showToast('Absence cleared'); })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Clearing absence'); })
+          .updateAgentStatus(name, 'absent', '');
+  };
+
+  // ======================= GENESYS CLOUD =======================
+  // Manual, IT-independent tracking of who's working the Genesys Cloud
+  // platform (Inbound = queue-assigned, Outbound = callbacks) vs everyone
+  // still on the Avaya floor. Persists until an agent is moved back.
+  // Logo path data is the OFFICIAL artwork, extracted from Genesys's own
+  // design system (npm: genesys-spark-components, gux-logomark /
+  // gux-cloud-logo). Brand orange #ff451a; wordmark #141929 / #fff.
+  var GENESYS_LOGOMARK_PATHS = '<path d=\'M21.7947 34.7408H16.7148C14.6475 34.7408 12.6648 35.5446 11.203 36.9754C9.74117 38.4061 8.91992 40.3466 8.91992 42.37C8.91992 44.3933 9.74117 46.3338 11.203 47.7645C12.6648 49.1953 14.6475 49.9991 16.7148 49.9991H21.7947C23.862 49.9991 25.8447 49.1953 27.3065 47.7645C28.7683 46.3338 29.5896 44.3933 29.5896 42.37C29.5896 40.3466 28.7683 38.4061 27.3065 36.9754C25.8447 35.5446 23.862 34.7408 21.7947 34.7408Z\'/><path d=\'M21.3004 15.0225H8.38053C6.15787 15.0225 4.02625 15.8881 2.4546 17.4289C0.882946 18.9697 0 21.0594 0 23.2384C0 25.4174 0.882946 27.5072 2.4546 29.048C4.02625 30.5888 6.15787 31.4544 8.38053 31.4544H21.3004C22.401 31.4544 23.4907 31.2419 24.5075 30.829C25.5243 30.4161 26.4481 29.8109 27.2264 29.048C28.0046 28.2851 28.6219 27.3793 29.043 26.3825C29.4642 25.3857 29.681 24.3174 29.681 23.2384C29.681 22.1595 29.4642 21.0911 29.043 20.0943C28.6219 19.0975 28.0046 18.1918 27.2264 17.4289C26.4481 16.6659 25.5243 16.0608 24.5075 15.6479C23.4907 15.235 22.401 15.0225 21.3004 15.0225Z\'/><path d=\'M17.8403 5.8683C17.8403 2.62719 20.4678 -0.000244141 23.7089 -0.000244141C26.95 -0.000244141 29.5774 2.62719 29.5774 5.8683C29.5774 9.10941 26.95 11.7368 23.7089 11.7368C20.4678 11.7368 17.8403 9.10941 17.8403 5.8683Z\'/>'; // viewBox 0 0 30 50
+  var GENESYS_CLOUD_LOGO_PATHS = '<path class=\'gcl-mk\' d=\'M16.0469 18.2857C16.0469 15.6897 18.1514 13.5852 20.7474 13.5852H29.9236C32.5196 13.5852 34.6241 15.6897 34.6241 18.2857V18.2857C34.6241 20.8817 32.5196 22.9862 29.9236 22.9862H20.7474C18.1514 22.9862 16.0469 20.8817 16.0469 18.2857V18.2857Z\'/><path class=\'gcl-mk\' d=\'M0.00268555 18.2857C0.00268555 15.6897 2.10716 13.5852 4.70317 13.5852H9.18626C11.7823 13.5852 13.8867 15.6897 13.8867 18.2857V18.2857C13.8867 20.8817 11.7823 22.9862 9.18626 22.9862H4.70317C2.10716 22.9862 0.00268555 20.8817 0.00268555 18.2857V18.2857Z\'/><path class=\'gcl-tx\' d=\'M53.1955 1.82976C54.9653 1.82976 56.4287 2.11629 57.5856 2.68926C58.7523 3.25268 59.6521 4.03571 60.2849 5.03841C60.9177 6.04111 61.3182 7.18707 61.4863 8.47625H57.8377C57.719 7.75049 57.4867 7.1011 57.1407 6.52813C56.8045 5.95517 56.32 5.50634 55.6872 5.18166C55.0643 4.84743 54.2534 4.68029 53.2548 4.68029C52.3946 4.68029 51.6382 4.83788 50.9856 5.15301C50.3331 5.46814 49.7892 5.9313 49.3542 6.54246C48.929 7.15363 48.6076 7.89852 48.3901 8.77708C48.1726 9.65563 48.0638 10.6583 48.0638 11.7852V13.2606C48.0638 14.4065 48.1874 15.4235 48.4346 16.3116C48.6917 17.1997 49.0575 17.9494 49.5322 18.5605C50.0166 19.1717 50.6049 19.6348 51.297 19.95C51.9892 20.2556 52.7703 20.4084 53.6404 20.4084C54.4908 20.4084 55.1879 20.3415 55.7317 20.2078C56.2755 20.0646 56.7056 19.8974 57.022 19.7064C57.3483 19.5059 57.6004 19.3149 57.7784 19.1335V14.9938H53.2845V12.3151H61.4863V20.2794C61.1797 20.671 60.7002 21.1007 60.0476 21.5686C59.4049 22.027 58.5496 22.4233 57.4817 22.7575C56.4139 23.0917 55.084 23.2589 53.4921 23.2589C52.1375 23.2589 50.8966 23.0392 49.7694 22.5999C48.6422 22.1511 47.6683 21.497 46.8476 20.6376C46.0368 19.7781 45.409 18.7324 44.9641 17.5005C44.5191 16.2591 44.2966 14.8458 44.2966 13.2606V11.8138C44.2966 10.2382 44.4994 8.83438 44.9047 7.6025C45.32 6.36108 45.9132 5.31061 46.6845 4.45116C47.4557 3.5917 48.3852 2.94231 49.4728 2.50304C50.5703 2.05422 51.8112 1.82976 53.1955 1.82976Z\'/><path class=\'gcl-tx\' d=\'M71.5941 7.18708C72.7411 7.18708 73.7447 7.37326 74.6049 7.74568C75.4651 8.11811 76.1771 8.64335 76.7407 9.32136C77.3141 9.98982 77.7393 10.7872 78.0161 11.7135C78.3029 12.6398 78.4463 13.6617 78.4463 14.7789V16.2543H67.9189C67.9542 16.7443 68.0422 17.2074 68.1829 17.6438C68.3806 18.2168 68.6674 18.7181 69.0431 19.1478C69.4189 19.5776 69.8737 19.9166 70.4076 20.1648C70.9416 20.4036 71.5497 20.523 72.2319 20.523C73.0921 20.523 73.8584 20.3558 74.5307 20.0216C75.2031 19.6874 75.7865 19.2147 76.2809 18.6035L78.1645 20.3654C77.8184 20.8524 77.3685 21.3203 76.8148 21.7692C76.2611 22.2084 75.5838 22.5665 74.7829 22.8435C73.9919 23.1204 73.0723 23.2589 72.0243 23.2589C70.8377 23.2589 69.7649 23.0726 68.8058 22.7002C67.8566 22.3182 67.0459 21.7882 66.3735 21.1102C65.711 20.4322 65.2018 19.6348 64.8459 18.7181C64.4899 17.8013 64.3119 16.813 64.3119 15.753V15.18C64.3119 13.9672 64.4949 12.869 64.8607 11.8854C65.2265 10.9019 65.7358 10.0614 66.3883 9.36433C67.0409 8.65768 67.8121 8.11811 68.702 7.74568C69.5919 7.37325 70.5559 7.18708 71.5941 7.18708ZM71.5793 9.93733C70.986 9.93733 70.457 10.0615 69.9923 10.3098C69.5375 10.5485 69.1568 10.8971 68.8503 11.3554C68.5438 11.8138 68.3065 12.3677 68.1385 13.017C68.0787 13.2585 68.0303 13.5116 67.9931 13.7762H74.9164V13.5041C74.8966 12.8834 74.768 12.3008 74.5307 11.7565C74.3033 11.2122 73.9523 10.7729 73.4777 10.4387C73.0031 10.1045 72.3703 9.93733 71.5793 9.93733Z\' fill-rule=\'evenodd\' clip-rule=\'evenodd\'/><path class=\'gcl-tx\' d=\'M89.0881 7.18708C89.8593 7.18708 90.5564 7.29214 91.1794 7.50223C91.8121 7.70277 92.351 8.03222 92.7959 8.49058C93.2507 8.94896 93.5969 9.54581 93.8342 10.2811C94.0715 11.0069 94.1901 11.8998 94.1901 12.9597V22.9724H90.6009V12.9454C90.6009 12.2006 90.4872 11.6133 90.2598 11.1835C90.0422 10.7443 89.7209 10.4339 89.2957 10.2525C88.8805 10.0615 88.3614 9.96598 87.7384 9.96598C87.1254 9.96598 86.5766 10.0901 86.0922 10.3384C85.6077 10.5867 85.1973 10.9257 84.8612 11.3554C84.7184 11.5434 84.5899 11.7442 84.4755 11.9577V22.9724H80.9011V7.47358H84.2679L84.3851 9.34159C84.4101 9.31073 84.4352 9.28005 84.4607 9.24973C85.0243 8.59082 85.6967 8.08469 86.4778 7.73136C87.2589 7.36849 88.129 7.18708 89.0881 7.18708Z\'/><path class=\'gcl-tx\' d=\'M104.179 7.18708C105.326 7.18708 106.33 7.37326 107.19 7.74568C108.023 8.10648 108.718 8.6107 109.273 9.25828L109.379 9.38443C109.926 10.0398 110.333 10.8162 110.601 11.7135C110.888 12.6398 111.031 13.6617 111.031 14.7789V16.2543H100.504C100.539 16.7443 100.627 17.2074 100.768 17.6438C100.966 18.2168 101.253 18.7181 101.628 19.1478C102.004 19.5776 102.459 19.9166 102.993 20.1648C103.527 20.4036 104.135 20.523 104.817 20.523C105.677 20.523 106.444 20.3558 107.116 20.0216C107.788 19.6874 108.372 19.2147 108.866 18.6035L110.75 20.3654C110.404 20.8524 109.954 21.3203 109.4 21.7692C108.846 22.2084 108.169 22.5665 107.368 22.8435C106.577 23.1204 105.658 23.2589 104.609 23.2589C103.423 23.2589 102.35 23.0726 101.391 22.7002C100.442 22.3182 99.6311 21.7882 98.9587 21.1102C98.2963 20.4322 97.787 19.6348 97.4311 18.7181C97.0751 17.8013 96.8971 16.813 96.8971 15.753V15.18C96.8971 13.9672 97.0801 12.869 97.4459 11.8854C97.8118 10.9019 98.321 10.0614 98.9736 9.36433C99.6261 8.65768 100.397 8.11811 101.287 7.74568C102.177 7.37326 103.141 7.18708 104.179 7.18708ZM104.165 9.93733C103.571 9.93733 103.042 10.0615 102.578 10.3098C102.123 10.5485 101.742 10.8971 101.436 11.3554C101.129 11.8138 100.892 12.3677 100.724 13.017C100.664 13.2585 100.615 13.5116 100.578 13.7762H107.502V13.5041C107.482 12.8834 107.353 12.3008 107.116 11.7565C106.889 11.2122 106.538 10.7729 106.063 10.4387C105.588 10.1045 104.956 9.93733 104.165 9.93733Z\' fill-rule=\'evenodd\' clip-rule=\'evenodd\'/><path class=\'gcl-tx\' d=\'M119.478 7.18708C120.823 7.18708 121.975 7.40668 122.934 7.84596C123.903 8.27568 124.645 8.86299 125.159 9.60785C125.673 10.3432 125.93 11.174 125.93 12.1003H122.356C122.356 11.6896 122.247 11.3077 122.029 10.9543C121.822 10.5914 121.505 10.3002 121.08 10.0806C120.655 9.85139 120.121 9.73678 119.478 9.73678C118.865 9.73678 118.356 9.83229 117.951 10.0233C117.555 10.2047 117.258 10.4434 117.061 10.7395C116.873 11.0355 116.779 11.3602 116.779 11.7135C116.779 11.9714 116.828 12.2053 116.927 12.4154C117.036 12.6159 117.214 12.8022 117.461 12.9741C117.708 13.1364 118.045 13.2892 118.47 13.4325C118.905 13.5757 119.449 13.7141 120.101 13.8478C121.327 14.0961 122.38 14.4161 123.26 14.8076C124.15 15.1896 124.832 15.6862 125.307 16.2973C125.782 16.8989 126.019 17.6629 126.019 18.5892C126.019 19.2767 125.866 19.907 125.559 20.48C125.262 21.0434 124.827 21.5352 124.254 21.9554C123.68 22.366 122.993 22.6859 122.192 22.9151C121.401 23.1443 120.511 23.2589 119.523 23.2589C118.069 23.2589 116.838 23.0106 115.83 22.514C114.821 22.0079 114.055 21.3633 113.531 20.5803C113.017 19.7877 112.76 18.9664 112.76 18.1164H116.215C116.255 18.7563 116.438 19.2672 116.764 19.6491C117.1 20.0216 117.516 20.2938 118.01 20.4657C118.514 20.628 119.033 20.7092 119.567 20.7092C120.21 20.7092 120.749 20.628 121.184 20.4657C121.619 20.2938 121.95 20.0646 122.178 19.7781C122.405 19.482 122.519 19.1478 122.519 18.7754C122.519 18.4316 122.43 18.1213 122.252 17.8443C122.074 17.5579 121.733 17.3 121.228 17.0708C120.734 16.8416 120.002 16.6316 119.033 16.4406C118.183 16.2591 117.402 16.0442 116.69 15.7959C115.988 15.5381 115.385 15.2278 114.88 14.8649C114.376 14.502 113.986 14.0722 113.709 13.5757C113.432 13.0791 113.294 12.5061 113.294 11.8568C113.294 11.2265 113.437 10.6297 113.724 10.0663C114.01 9.50284 114.421 9.00625 114.955 8.57653C115.489 8.1468 116.136 7.80781 116.898 7.55953C117.669 7.31124 118.529 7.18708 119.478 7.18708Z\'/><path class=\'gcl-tx\' d=\'M134.518 18.0626L137.862 7.47358H141.689L135.252 25.3359C135.103 25.7178 134.911 26.1333 134.673 26.5821C134.436 27.031 134.125 27.4559 133.739 27.857C133.363 28.2676 132.894 28.5971 132.33 28.8453C131.766 29.1032 131.084 29.2321 130.283 29.2321C129.967 29.2321 129.66 29.2035 129.364 29.1462C129.077 29.0984 128.805 29.0459 128.548 28.9886L128.533 26.3529C128.632 26.3625 128.751 26.372 128.889 26.3816C129.037 26.3911 129.156 26.3959 129.245 26.3959C129.838 26.3959 130.333 26.3243 130.728 26.181C131.124 26.0473 131.445 25.8277 131.692 25.5221C131.949 25.2165 132.167 24.8059 132.345 24.2902L132.866 22.9338L127.183 7.47358H131.04L134.518 18.0626Z\'/><path class=\'gcl-tx\' d=\'M149.394 7.18708C150.739 7.18708 151.89 7.40668 152.85 7.84596C153.819 8.27568 154.56 8.863 155.074 9.60785C155.588 10.3432 155.845 11.174 155.845 12.1003H152.271C152.271 11.6896 152.162 11.3077 151.945 10.9543C151.737 10.5915 151.421 10.3002 150.996 10.0806C150.57 9.85139 150.036 9.73678 149.394 9.73678C148.781 9.73678 148.272 9.83229 147.866 10.0233C147.471 10.2047 147.174 10.4434 146.976 10.7395C146.788 11.0355 146.695 11.3602 146.695 11.7135C146.695 11.9714 146.744 12.2053 146.843 12.4154C146.952 12.6159 147.13 12.8022 147.377 12.9741C147.624 13.1364 147.96 13.2892 148.385 13.4325C148.82 13.5757 149.364 13.7141 150.017 13.8478C151.243 14.0961 152.296 14.4161 153.176 14.8076C154.066 15.1896 154.748 15.6862 155.223 16.2973C155.697 16.8989 155.934 17.6629 155.934 18.5892C155.934 19.2767 155.781 19.907 155.475 20.48C155.178 21.0434 154.743 21.5352 154.17 21.9554C153.596 22.366 152.909 22.6859 152.108 22.9151C151.317 23.1443 150.427 23.2589 149.438 23.2589C147.985 23.2589 146.754 23.0106 145.745 22.514C144.737 22.0079 143.97 21.3633 143.446 20.5803C142.932 19.7877 142.675 18.9664 142.675 18.1164H146.131C146.17 18.7563 146.353 19.2672 146.68 19.6491C147.016 20.0216 147.431 20.2938 147.925 20.4657C148.43 20.628 148.949 20.7092 149.483 20.7092C150.125 20.7092 150.664 20.628 151.099 20.4657C151.534 20.2938 151.866 20.0646 152.093 19.7781C152.321 19.482 152.434 19.1478 152.434 18.7754C152.434 18.4316 152.345 18.1213 152.167 17.8443C151.989 17.5579 151.648 17.3 151.144 17.0708C150.65 16.8416 149.918 16.6316 148.949 16.4406C148.099 16.2591 147.317 16.0442 146.606 15.7959C145.904 15.5381 145.3 15.2278 144.796 14.8649C144.292 14.502 143.901 14.0722 143.624 13.5757C143.348 13.0791 143.209 12.5061 143.209 11.8568C143.209 11.2265 143.352 10.6297 143.639 10.0663C143.926 9.50283 144.336 9.00626 144.87 8.57653C145.404 8.1468 146.052 7.80781 146.813 7.55953C147.584 7.31125 148.445 7.18708 149.394 7.18708Z\'/><path class=\'gcl-tx\' d=\'M174.519 1.82976C176.239 1.82977 177.693 2.13539 178.879 2.74656C180.066 3.35773 180.985 4.20285 181.638 5.28193C182.3 6.36103 182.706 7.59772 182.854 8.99195H179.146C179.047 8.0943 178.83 7.32552 178.494 6.68571C178.167 6.04589 177.683 5.55886 177.04 5.22463C176.397 4.88086 175.557 4.70894 174.519 4.70894C173.668 4.70894 172.927 4.86175 172.294 5.16733C171.661 5.47292 171.132 5.92174 170.707 6.51381C170.282 7.10588 169.961 7.83645 169.743 8.70545C169.535 9.56491 169.432 10.5485 169.432 11.6563V13.4181C169.432 14.4686 169.526 15.4235 169.713 16.283C169.911 17.1329 170.208 17.8634 170.603 18.4746C171.009 19.0857 171.523 19.5584 172.146 19.8927C172.769 20.2269 173.515 20.394 174.385 20.394C175.443 20.394 176.299 20.2317 176.951 19.907C177.614 19.5823 178.113 19.1096 178.449 18.4889C178.795 17.8586 179.023 17.0899 179.131 16.1827H182.839C182.721 17.5483 182.325 18.7658 181.653 19.8354C180.98 20.8954 180.036 21.731 178.82 22.3422C177.604 22.9533 176.126 23.2589 174.385 23.2589C173.051 23.2589 171.849 23.0297 170.781 22.5713C169.713 22.1034 168.799 21.4445 168.037 20.5946C167.276 19.7351 166.693 18.699 166.287 17.4862C165.892 16.2734 165.694 14.9174 165.694 13.4181V11.6849C165.694 10.1856 165.897 8.82955 166.302 7.61676C166.717 6.40399 167.311 5.3679 168.082 4.50846C168.853 3.63945 169.778 2.97574 170.855 2.51736C171.943 2.05898 173.164 1.82976 174.519 1.82976Z\'/><path class=\'gcl-tx\' d=\'M189.388 22.9724H185.798V0.970337H189.388V22.9724Z\'/><path class=\'gcl-tx\' d=\'M199.762 7.18708C200.939 7.18708 201.987 7.38759 202.907 7.78866C203.836 8.18019 204.622 8.73407 205.265 9.45028C205.908 10.1569 206.397 10.9926 206.733 11.9571C207.069 12.912 207.238 13.9481 207.238 15.0654V15.3948C207.238 16.5121 207.069 17.5483 206.733 18.5032C206.397 19.4582 205.908 20.2937 205.265 21.0099C204.622 21.7166 203.841 22.2705 202.922 22.6716C202.002 23.0631 200.959 23.2589 199.792 23.2589C198.615 23.2589 197.562 23.0631 196.633 22.6716C195.713 22.2705 194.932 21.7166 194.29 21.0099C193.647 20.2937 193.158 19.4582 192.821 18.5032C192.485 17.5483 192.317 16.5121 192.317 15.3948V15.0654C192.317 13.9481 192.485 12.912 192.821 11.9571C193.158 10.9926 193.642 10.1569 194.275 9.45028C194.918 8.73408 195.699 8.18018 196.618 7.78866C197.548 7.38758 198.596 7.18708 199.762 7.18708ZM199.762 9.93733C199.09 9.93733 198.507 10.0758 198.012 10.3528C197.528 10.6201 197.127 10.9926 196.811 11.47C196.495 11.9475 196.262 12.4966 196.114 13.1173C195.966 13.7285 195.891 14.3778 195.891 15.0654V15.3948C195.891 16.092 195.966 16.7509 196.114 17.3716C196.262 17.9923 196.495 18.5367 196.811 19.0046C197.127 19.4725 197.533 19.8402 198.027 20.1075C198.522 20.3749 199.11 20.5086 199.792 20.5086C200.455 20.5086 201.028 20.3749 201.513 20.1075C202.007 19.8402 202.412 19.4725 202.729 19.0046C203.045 18.5367 203.278 17.9923 203.426 17.3716C203.584 16.7509 203.663 16.092 203.663 15.3948V15.0654C203.663 14.3778 203.584 13.7285 203.426 13.1173C203.278 12.4966 203.04 11.9475 202.714 11.47C202.397 10.9926 201.992 10.6201 201.498 10.3528C201.013 10.0758 200.435 9.93733 199.762 9.93733Z\' fill-rule=\'evenodd\' clip-rule=\'evenodd\'/><path class=\'gcl-tx\' d=\'M213.43 17.5149C213.43 18.0783 213.499 18.551 213.638 18.933C213.776 19.3054 213.964 19.6062 214.201 19.8354C214.438 20.0646 214.715 20.2269 215.032 20.3224C215.348 20.4179 215.684 20.4657 216.04 20.4657C217.059 20.4657 217.86 20.2746 218.443 19.8927C218.95 19.5579 219.331 19.1254 219.585 18.5952V7.47358H223.174V22.9724H219.793L219.703 21.3912C219.23 21.9521 218.642 22.3981 217.939 22.7289C217.167 23.0822 216.243 23.2589 215.165 23.2589C214.384 23.2589 213.667 23.1491 213.015 22.9294C212.362 22.7098 211.798 22.3708 211.324 21.9124C210.859 21.454 210.498 20.8572 210.241 20.1219C209.984 19.3866 209.856 18.508 209.856 17.4862V7.47358H213.43V17.5149Z\'/><path class=\'gcl-tx\' d=\'M239.912 22.9724H236.664L236.487 21.3143C235.996 21.9119 235.407 22.3787 234.721 22.7145C233.989 23.0774 233.134 23.2589 232.155 23.2589C231.186 23.2589 230.311 23.0631 229.53 22.6716C228.758 22.28 228.101 21.7309 227.557 21.0243C227.013 20.3176 226.598 19.4868 226.311 18.5319C226.025 17.5674 225.881 16.5217 225.881 15.3948V15.094C225.881 13.9195 226.025 12.8499 226.311 11.8854C226.598 10.9114 227.013 10.0758 227.557 9.37866C228.101 8.67199 228.763 8.13244 229.545 7.76001C230.326 7.37803 231.206 7.18708 232.184 7.18708C233.153 7.18708 234.004 7.36848 234.736 7.73136C235.338 8.03036 235.867 8.43645 236.323 8.94939V0.970337H239.912V22.9724ZM233.089 9.96598C232.437 9.96598 231.883 10.0997 231.428 10.3671C230.973 10.6345 230.598 11.0021 230.301 11.47C230.014 11.938 229.802 12.4823 229.663 13.103C229.525 13.7237 229.456 14.3874 229.456 15.094V15.3948C229.456 16.1015 229.52 16.7605 229.648 17.3716C229.787 17.9828 229.999 18.5223 230.286 18.9903C230.573 19.4486 230.944 19.8115 231.398 20.0789C231.863 20.3367 232.417 20.4657 233.06 20.4657C233.87 20.4657 234.538 20.2937 235.062 19.95C235.586 19.6062 235.996 19.143 236.293 18.5605C236.303 18.5412 236.313 18.5218 236.323 18.5023V11.9035C236.18 11.6244 236.012 11.37 235.818 11.1406C235.512 10.7681 235.131 10.4817 234.676 10.2811C234.231 10.071 233.702 9.96598 233.089 9.96598Z\' fill-rule=\'evenodd\' clip-rule=\'evenodd\'/><path class=\'gcl-tx\' d=\'M243.039 1.26781H242.496V2.70892H242.2V1.26781H241.662V1.03833H243.039V1.26781Z\'/><path class=\'gcl-tx\' d=\'M243.63 1.03833L244.13 2.32688L244.629 1.03833H245.017V2.70892H244.719V2.15359L244.749 1.40869L244.235 2.70892H244.023L243.51 1.40946L243.54 2.15359V2.70892H243.243V1.03833H243.63Z\'/>'; // viewBox 0 0 246 30
+  // Standalone logomark (three-element mark), height in px.
+  function genLogoSvg(h) {
+      var w = Math.round(h * 30 / 50);
+      return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 30 50" aria-label="Genesys" style="flex-shrink:0; fill:var(--genesys);">' + GENESYS_LOGOMARK_PATHS + '</svg>';
+  }
+  // Full horizontal "Genesys Cloud" product logo, height in px.
+  function genCloudLogoSvg(h) {
+      var w = Math.round(h * 246 / 30);
+      return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 246 30" aria-label="Genesys Cloud" style="flex-shrink:0;">' + GENESYS_CLOUD_LOGO_PATHS + '</svg>';
+  }
+
+  // Genesys ACD queue names all share this prefix; the UI shows the short
+  // form and copies the full name (Genesys admin needs it verbatim).
+  var GENESYS_QUEUE_PREFIX = 'acd_tel_sec_monit_';
+  window.copyQueueName = function(e, q) {
+      e.stopPropagation();
+      fallbackCopyTextToClipboard(GENESYS_QUEUE_PREFIX + q, 'Copied: ' + GENESYS_QUEUE_PREFIX + q);
+  };
+  // Inbound agents holding an ICL queue count as ICL for the floor's
+  // Special Roles card — same duty, different platform.
+  function genHasIclQueue(g) {
+      return !!(g && g.channel === 'inbound' && (g.queues || []).some(function(q) { return q.indexOf('icl_') === 0; }));
+  }
+
+  // Queues from the provided list, grouped by service type (EN/FR + tcan).
+  var GENESYS_QUEUES = [
+      ['Urgent', ['urgent_en','urgent_fr','urgent_tcan_en','urgent_tcan_fr']],
+      ['ICL — Standard', ['icl_std_en','icl_std_fr','icl_std_tcan_en','icl_std_tcan_fr']],
+      ['ICL — Fallback', ['icl_fallback_en','icl_fallback_fr','icl_fallback_tcan_en','icl_fallback_tcan_fr']],
+      ['Standard', ['std_en','std_fr','std_tcan_en','std_tcan_fr']],
+      ['Transfer', ['transfer_en','transfer_fr','transfer_tcan_en','transfer_tcan_fr']],
+      ['IVR', ['ivr_default_en','ivr_default_fr']],
+      ['MRC', ['mrc_en','mrc_fr']],
+      ['Escalation', ['escalation_tcan_en','escalation_tcan_fr']],
+      ['Questions', ['questions_tcan_en','questions_tcan_fr']],
+      ['Patrol', ['patrol_tcan_en','patrol_tcan_fr']],
+      ['Special assistance', ['special_assistance_en','special_assistance_fr']],
+      ['Tech support overflow', ['tech_support_overflow_en','tech_support_overflow_fr']],
+      ['Smartwear', ['smartwear_tcan_en']],
+      ['Hotline', ['hotline_tcan_en']]
+  ];
+
+  function genAgentByName(name) {
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          for (var i = 0; i < state.agents[k].length; i++) { if (state.agents[k][i].name === name) return state.agents[k][i]; }
+      }
+      return null;
+  }
+
+  // Open the Inbound picker (also used by "Assign queues"). Prefills queues.
+  window.openGenesysPicker = function(channel) {
+      var name = state.selectedAgent; closeMenu();
+      var a = genAgentByName(name);
+      var pre = (a && a.genesys && a.genesys.channel === 'inbound' && a.genesys.queues) ? a.genesys.queues.slice() : [];
+      state.genesysDraft = { name: name, channel: channel || 'inbound', queues: pre };
+      document.getElementById('genesys-agent-name').textContent = name;
+      var meta = '';
+      if (a) { var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T'; meta = (a.region || '') + (a.id ? ' · ' + pfx + a.id : ''); }
+      document.getElementById('genesys-agent-meta').textContent = meta;
+      document.getElementById('genesys-mark').innerHTML = genLogoSvg(34);
+      document.getElementById('genesys-batch-panel').style.display = 'none';
+      document.getElementById('genesys-qsearch').value = '';
+      renderGenesysQueues();
+      setGenesysChannel(state.genesysDraft.channel);
+      document.getElementById('genesys-modal').classList.add('open');
+      refreshIcons();
+  };
+  // Outbound has no queue — assign straight from the menu.
+  window.assignGenesysOutbound = function() { closeMenu(); setAgentGenesys('outbound', []); };
+  window.removeGenesys = function() { closeMenu(); setAgentGenesys('', []); };
+
+  // ---- Batch assignment: same modal, plus an agent multi-picker ----
+  window.openGenesysBatch = function() {
+      state.genesysDraft = { batch: true, names: [], channel: 'inbound', queues: [] };
+      document.getElementById('genesys-agent-name').textContent = 'Batch assign';
+      document.getElementById('genesys-agent-meta').textContent = 'Pick agents, then a channel';
+      document.getElementById('genesys-mark').innerHTML = genLogoSvg(34);
+      document.getElementById('genesys-batch-panel').style.display = '';
+      document.getElementById('genesys-batch-search').value = '';
+      document.getElementById('genesys-qsearch').value = '';
+      renderGenesysBatchList('');
+      renderGenesysQueues();
+      setGenesysChannel('inbound');
+      document.getElementById('genesys-modal').classList.add('open');
+      refreshIcons();
+  };
+  function renderGenesysBatchList(filter) {
+      filter = (filter || '').toLowerCase();
+      var sel = {}; (state.genesysDraft.names || []).forEach(function(n) { sel[n] = 1; });
+      var list = (state.agents.active || []).slice().sort(function(x, y) { return (x.name || '').localeCompare(y.name || ''); });
+      var h = list.map(function(a) {
+          var name = a.name || '';
+          if (filter && name.toLowerCase().indexOf(filter) === -1) return '';
+          var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+          var cur = (a.genesys && a.genesys.channel) ? '<span class="gen-cur">' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span>' : '';
+          return '<div class="gen-agent-opt' + (sel[name] ? ' on' : '') + '" data-n="' + escapeHTML(name) + '" onclick="toggleGenesysBatchAgent(this)">' +
+                 '<span class="status-dot ' + ((a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on') + '"></span>' +
+                 '<span class="nm">' + escapeHTML(name) + '</span>' +
+                 '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span>' + cur + '</div>';
+      }).join('');
+      document.getElementById('genesys-batch-list').innerHTML = h || '<div class="gen-empty" style="grid-column:1/-1;">No matching active agents.</div>';
+      updateGenesysBatchCount();
+  }
+  window.toggleGenesysBatchAgent = function(el) {
+      var name = el.getAttribute('data-n');
+      var arr = state.genesysDraft.names || [];
+      var idx = arr.indexOf(name);
+      if (idx === -1) arr.push(name); else arr.splice(idx, 1);
+      state.genesysDraft.names = arr;
+      el.classList.toggle('on');
+      updateGenesysBatchCount();
+  };
+  function updateGenesysBatchCount() {
+      var el = document.getElementById('genesys-batch-count');
+      if (el) el.textContent = '(' + (state.genesysDraft.names || []).length + ' selected)';
+  }
+  window.filterGenesysBatch = function(v) { renderGenesysBatchList(v); };
+
+  // Move every currently-assigned agent back to Avaya in one save.
+  window.returnAllGenesys = function() {
+      var names = (state.agents.active || []).filter(function(a) { return a.genesys && a.genesys.channel; }).map(function(a) { return a.name; });
+      if (!names.length) { showToast('No one is on Genesys'); return; }
+      if (!confirm('Return all ' + names.length + ' agent' + (names.length === 1 ? '' : 's') + ' to Avaya?')) return;
+      markGenesysEdit(names, '', []);
+      names.forEach(function(n) { applyGenesysInMemory(n, '', []); });
+      if (state.view === 'agents') render();
+      if (typeof google !== 'undefined') {
+          google.script.run
+              .withSuccessHandler(function() { ackFloorEdit(names); showToast('Returned ' + names.length + ' to Avaya'); })
+              .withFailureHandler(function(err) { failFloorEdit(names, err, 'Return to Avaya'); })
+              .updateAgentGenesysBatch(JSON.stringify(names), '', '[]');
+      }
+  };
+
+  window.setGenesysChannel = function(ch) {
+      if (!state.genesysDraft) state.genesysDraft = { channel: ch, queues: [] };
+      state.genesysDraft.channel = ch;
+      var din = document.getElementById('genesys-seg-in'), dout = document.getElementById('genesys-seg-out');
+      var inP = document.getElementById('genesys-inbound-panel'), outP = document.getElementById('genesys-outbound-panel');
+      if (ch === 'inbound') { din.className = 'sel-in'; dout.className = ''; inP.style.display = ''; outP.style.display = 'none'; }
+      else { dout.className = 'sel-out'; din.className = ''; inP.style.display = 'none'; outP.style.display = ''; }
+  };
+
+  function renderGenesysQueues() {
+      var picked = {}; (state.genesysDraft.queues || []).forEach(function(q){ picked[q] = 1; });
+      var h = GENESYS_QUEUES.map(function(g) {
+          var opts = g[1].map(function(q) {
+              var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
+              return '<div class="gen-qopt' + (picked[q] ? ' on' : '') + '" data-q="' + escapeHTML(q) + '" onclick="toggleGenesysQueue(\'' + q + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span></div>';
+          }).join('');
+          return '<div class="gen-qgroup" data-g="' + escapeHTML(g[0].toLowerCase()) + '"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + opts + '</div></div>';
+      }).join('');
+      document.getElementById('genesys-qgroups').innerHTML = h;
+      updateGenesysCount();
+  }
+  window.toggleGenesysQueue = function(q) {
+      var arr = state.genesysDraft.queues || [];
+      var idx = arr.indexOf(q);
+      if (idx === -1) arr.push(q); else arr.splice(idx, 1);
+      state.genesysDraft.queues = arr;
+      var el = document.querySelector('#genesys-qgroups .gen-qopt[data-q="' + q + '"]');
+      if (el) el.classList.toggle('on');
+      updateGenesysCount();
+  };
+  function updateGenesysCount() { var el = document.getElementById('genesys-qcount'); if (el) el.textContent = '(' + (state.genesysDraft.queues || []).length + ')'; }
+  window.filterGenesysQueues = function(v) {
+      v = (v || '').toLowerCase();
+      var groups = document.querySelectorAll('#genesys-qgroups .gen-qgroup');
+      for (var i = 0; i < groups.length; i++) {
+          var g = groups[i], any = false, opts = g.querySelectorAll('.gen-qopt');
+          for (var j = 0; j < opts.length; j++) {
+              var hit = opts[j].getAttribute('data-q').indexOf(v) !== -1 || g.getAttribute('data-g').indexOf(v) !== -1;
+              opts[j].style.display = hit ? '' : 'none'; if (hit) any = true;
+          }
+          g.style.display = any ? '' : 'none';
+      }
+  };
+  window.closeGenesysModal = function() { document.getElementById('genesys-modal').classList.remove('open'); };
+  window.saveGenesysAssignment = function() {
+      var d = state.genesysDraft; if (!d) return;
+      if (d.batch) {
+          var names = d.names || [];
+          if (!names.length) { showToast('Pick at least one agent'); return; }
+          var queues = d.channel === 'inbound' ? (d.queues || []) : [];
+          markGenesysEdit(names, d.channel, queues);
+          names.forEach(function(n) { applyGenesysInMemory(n, d.channel, queues); });
+          if (state.view === 'agents') render();
+          // One server call for the whole group — parallel single saves
+          // would race on the shared fast-map property.
+          if (typeof google !== 'undefined') {
+              google.script.run
+                  .withSuccessHandler(function() {
+                      ackFloorEdit(names);
+                      showToast(names.length + ' agent' + (names.length === 1 ? '' : 's') + ' → Genesys ' + (d.channel === 'inbound' ? 'Inbound' : 'Outbound'));
+                  })
+                  .withFailureHandler(function(err) { failFloorEdit(names, err, 'Genesys batch assignment'); })
+                  .updateAgentGenesysBatch(JSON.stringify(names), d.channel, JSON.stringify(queues));
+          }
+          closeGenesysModal();
+          return;
+      }
+      state.selectedAgent = d.name;
+      if (d.channel === 'inbound') setAgentGenesys('inbound', d.queues || []);
+      else setAgentGenesys('outbound', []);
+      closeGenesysModal();
+  };
+
+  function setAgentGenesys(channel, queues) {
+      var name = state.selectedAgent;
+      markGenesysEdit([name], channel || '', queues || []);
+      applyGenesysInMemory(name, channel, queues);
+      if (state.view === 'agents') render();
+      if (typeof google === 'undefined') return;
+      google.script.run
+          .withSuccessHandler(function() {
+              ackFloorEdit([name]);
+              showToast(channel ? ('On Genesys · ' + (channel === 'inbound' ? 'Inbound' : 'Outbound')) : 'Back on Avaya');
+          })
+          .withFailureHandler(function(err) { failFloorEdit([name], err, 'Genesys assignment'); })
+          .updateAgentGenesys(name, channel || '', JSON.stringify(queues || []));
+  }
+  function setGenesysOnAgent(name, channel, queues) {
+      var hasIcl = channel === 'inbound' && (queues || []).some(function(q) { return q.indexOf('icl_') === 0; });
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          state.agents[k].forEach(function(a) {
+              if (a.name !== name) return;
+              a.genesys = channel ? { channel: channel, queues: (queues || []).slice() } : null;
+              // Mirror the server rule: ICL queues on Genesys = ICL role on the
+              // floor. _genIcl marks roles we derived so we can undo only ours.
+              if (hasIcl && (a.role || '').indexOf('ICL') === -1) { a.role = ((a.role || '') + ' ICL').trim(); a._genIcl = true; }
+              else if (!hasIcl && a._genIcl) { a.role = (a.role || '').split(/\s+/).filter(function(t) { return t !== 'ICL'; }).join(' '); delete a._genIcl; }
+          });
+      }
+  }
+  function applyGenesysInMemory(name, channel, queues) {
+      state.pendingGenesys = state.pendingGenesys || {};
+      state.pendingGenesys[name] = { channel: channel || '', queues: (queues || []).slice(), timestamp: Date.now() };
+      setGenesysOnAgent(name, channel, queues);
+  }
   window.openPopout = function(mode) { var baseUrl = state.appUrl || window.location.href.split('?')[0]; var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); };
 
   function showToast(m) {
@@ -842,11 +1155,21 @@
   }
   function updateClock() { var el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
   
-  var searchTimeout;
-  window.handleSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
-  window.handleScriptSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.searchTerm = val; render(); }, 200); };
-  window.handleTrackerSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.trackerSearch = val; render(); }, 200); };
-  window.handleInsightSearch = function(val) { clearTimeout(searchTimeout); searchTimeout = setTimeout(function() { state.insightSearch = val; render(); }, 200); };
+  // One timer PER FIELD. A single shared `searchTimeout` meant any two search
+  // boxes cancelled each other's pending render.
+  var _searchTimers = {};
+  // The term is stored IMMEDIATELY and only the re-render is debounced. The old
+  // order deferred the assignment by 200ms, so a poll landing inside that window
+  // rebuilt the input from the stale value and visibly ate the keystroke.
+  function _debouncedSearch(field, val) {
+      state[field] = val;
+      clearTimeout(_searchTimers[field]);
+      _searchTimers[field] = setTimeout(function() { render(); }, 200);
+  }
+  window.handleSearch = function(val) { _debouncedSearch('floorSearch', val); };
+  window.handleScriptSearch = function(val) { _debouncedSearch('searchTerm', val); };
+  window.handleTrackerSearch = function(val) { _debouncedSearch('trackerSearch', val); };
+  window.handleInsightSearch = function(val) { _debouncedSearch('insightSearch', val); };
 
   function setRegionFilter(v) { state.regionFilter=v; render(); }
 
@@ -880,7 +1203,11 @@
 
   function fetchData() {
     if(typeof google==='undefined') return;
-    google.script.run.withSuccessHandler(function(j) { try{ var d = JSON.parse(j); if(d){ for (var k in d) { state.agents[k] = d[k]; } applyPendingUpdates(); if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker' && state.view !== 'analyzer' && state.view !== 'mgmt') render(); } } catch(e){} }).getFloorStatus();
+    // Stamp the request: a payload requested BEFORE the newest local edit can't
+    // be used to retire that edit, or a getFloorStatus already in flight when you
+    // clicked would come back without your change and wipe it.
+    var _atSeq = _floorEditSeq;
+    google.script.run.withSuccessHandler(function(j) { try{ var d = JSON.parse(j); if(d){ for (var k in d) { state.agents[k] = d[k]; } retireAckedEdits(_atSeq); applyPendingUpdates(); if(state.view !== 'scripts' && state.view !== 'calc' && state.view !== 'insights' && state.view !== 'tracker' && state.view !== 'analyzer' && state.view !== 'mgmt') render(); } } catch(e){} }).getFloorStatus();
     if(state.view !== 'popout-view') { google.script.run.withSuccessHandler(function(r) { try{ var d = (typeof r==='object'&&r!==null) ? r : JSON.parse(r); state.weather = d.weather || {}; state.alerts = d.alerts || []; if(state.view === 'overview' || state.view === 'weather') render(); }catch(e){} }).getLiveDashboardData(); }
   }
 
@@ -1272,12 +1599,130 @@
       }).getTrainings();
   }
 
-  function applyPendingUpdates() { var now=Date.now(); for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); } }
+  // ── Optimistic floor edits: acknowledgement, rollback, staleness ──────────
+  // Every local edit bumps _floorEditSeq. A pending entry is only forgotten once
+  // BOTH things are true: the server acknowledged it, and a floor payload
+  // requested *after* the edit has landed. Otherwise a getFloorStatus already in
+  // flight when you clicked would come back without your change and wipe it.
+  var _floorEditSeq = 0;
+
+  function markFloorEdit(names, type, val) {
+      _floorEditSeq++;
+      (names || []).forEach(function(n) {
+          state.pendingUpdates[n] = { type: type, val: val, timestamp: Date.now(), seq: _floorEditSeq, acked: false };
+      });
+      return _floorEditSeq;
+  }
+  function markGenesysEdit(names, channel, queues) {
+      _floorEditSeq++;
+      if (!state.pendingGenesys) state.pendingGenesys = {};
+      (names || []).forEach(function(n) {
+          state.pendingGenesys[n] = { channel: channel, queues: (queues || []).slice(), timestamp: Date.now(), seq: _floorEditSeq, acked: false };
+      });
+      return _floorEditSeq;
+  }
+  function ackFloorEdit(names) {
+      (names || []).forEach(function(n) {
+          if (state.pendingUpdates[n]) state.pendingUpdates[n].acked = true;
+          if (state.pendingGenesys && state.pendingGenesys[n]) state.pendingGenesys[n].acked = true;
+      });
+      fetchData();   // pull the server's truth; the guard below retires the entry
+  }
+  // The server rejected the write (quota, locked sheet, permissions). Drop the
+  // optimistic patch, say so plainly, and refetch rather than leaving a row
+  // showing a change that was never saved.
+  function failFloorEdit(names, err, what) {
+      (names || []).forEach(function(n) {
+          delete state.pendingUpdates[n];
+          if (state.pendingGenesys) delete state.pendingGenesys[n];
+      });
+      showToast((what || 'Change') + ' failed: ' + ((err && err.message) || 'unknown') + ' — reverted');
+      fetchData();
+  }
+  function retireAckedEdits(atSeq) {
+      var n;
+      for (n in state.pendingUpdates) {
+          if (state.pendingUpdates[n].acked && state.pendingUpdates[n].seq <= atSeq) delete state.pendingUpdates[n];
+      }
+      if (state.pendingGenesys) {
+          for (n in state.pendingGenesys) {
+              if (state.pendingGenesys[n].acked && state.pendingGenesys[n].seq <= atSeq) delete state.pendingGenesys[n];
+          }
+      }
+  }
+
+  function applyPendingUpdates() {
+     var now=Date.now();
+     for(var n in state.pendingUpdates) { if(now-state.pendingUpdates[n].timestamp>120000) delete state.pendingUpdates[n]; else moveAgentInMemory(n, state.pendingUpdates[n].type, state.pendingUpdates[n].val); }
+     // Genesys assignments race the async save — re-apply the optimistic value
+     // over the freshly-fetched payload for a short window.
+     if (state.pendingGenesys) { for(var gn in state.pendingGenesys) { if(now-state.pendingGenesys[gn].timestamp>120000) delete state.pendingGenesys[gn]; else setGenesysOnAgent(gn, state.pendingGenesys[gn].channel, state.pendingGenesys[gn].queues); } }
+  }
   
+  // Patch EVERY copy of the agent and actually move them between buckets.
+  // The old version grabbed the first match and `break`ed out — but the server
+  // pushes the same agent into `active` AND `safe` (separate objects after
+  // JSON.parse), so only one copy got patched and the agent rendered with two
+  // different statuses at once. It also never touched bucket membership, so
+  // assigning SAFE didn't add them to the SAFE card and Set Active didn't
+  // remove them.
+  function eachAgentCopy(name, fn) {
+      for (var k in state.agents) {
+          if (!Array.isArray(state.agents[k])) continue;
+          for (var i = 0; i < state.agents[k].length; i++) {
+              if (state.agents[k][i] && state.agents[k][i].name === name) fn(state.agents[k][i], k, i);
+          }
+      }
+  }
+  function findAgentCopy(name) {
+      var found = null;
+      eachAgentCopy(name, function(a) { if (!found) found = a; });
+      return found;
+  }
+  // Roles are additive on the server (RoleManager.setStatus appends), so the
+  // client has to be additive too or the two disagree the moment a second role
+  // is assigned.
+  function addRoleToken(current, val) {
+      var toks = String(current || '').split(/\s+/).filter(Boolean);
+      if (toks.indexOf(val) === -1) toks.push(val);
+      return toks.join(' ');
+  }
+  function removeRoleToken(current, val) {
+      return String(current || '').split(/\s+/).filter(Boolean).filter(function(t) { return t !== val; }).join(' ');
+  }
+  // Keep the role buckets (currently just SAFE) in step with an agent's roles.
+  function syncRoleBuckets(name) {
+      var a = findAgentCopy(name); if (!a) return;
+      var roles = String(a.role || '').toUpperCase();
+      [['safe', 'SAFE']].forEach(function(pair) {
+          var bucket = pair[0], token = pair[1];
+          if (!Array.isArray(state.agents[bucket])) state.agents[bucket] = [];
+          var arr = state.agents[bucket];
+          var at = -1;
+          for (var i = 0; i < arr.length; i++) { if (arr[i] && arr[i].name === name) { at = i; break; } }
+          var should = roles.indexOf(token) !== -1;
+          if (should && at === -1) arr.push(a);
+          else if (!should && at !== -1) arr.splice(at, 1);
+      });
+  }
+
   function moveAgentInMemory(name, type, val) {
-     var o = null; 
-     for (var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { o = state.agents[k][i]; break; } } if(o) break; }
-     if(o) { if (type === 'role') { o.role = (val === 'Active') ? '' : val; if(val === 'Active') { o.subStatus = ""; } } else if (type === 'absent') { o.subStatus = val; } }
+     var seen = false;
+     eachAgentCopy(name, function(o) {
+        seen = true;
+        if (type === 'role') {
+           if (val === 'Active') { o.role = ''; o.subStatus = ''; }
+           else o.role = addRoleToken(o.role, val);
+        } else if (type === 'role-remove') {
+           o.role = removeRoleToken(o.role, val);
+           if (!o.role) o.subStatus = '';
+        } else if (type === 'absent') {
+           o.subStatus = val;
+        } else if (type === 'absent-clear') {
+           o.subStatus = '';
+        }
+     });
+     if (seen) syncRoleBuckets(name);
   }
 
   function render() {
@@ -1370,27 +1815,197 @@
   function renderAgents() {
       var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
       for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
-      
+
+      // Genesys is the whole page now, so the old Avaya/Genesys sub-tab switch is
+      // gone — but keep both layouts: "Queues" is the Genesys queue board and
+      // "Roster" is the shift/roles view, which is still how you find someone.
+      var tab = state.floorTab || 'queues';
+      var seg = '<div class="floor-seg">' +
+                '<button class="' + (tab==='queues'?'active gen':'') + '" onclick="setFloorTab(\'queues\')">' + genLogoSvg(16) + ' Queues</button>' +
+                '<button class="' + (tab==='roster'?'active':'') + '" onclick="setFloorTab(\'roster\')"><i data-lucide="users" width="15"></i> Roster</button>' +
+                '</div>';
+
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
-                 '' + searchBox('agent-search', 'Search agents...', escapeHTML(state.searchTerm || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
+                 seg +
+                 '' + searchBox('agent-search', 'Search name, ID, supervisor, language…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:200px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
                  '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
                  '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
                  '<button class="btn ' + (state.regionFilter==='Onshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Onshore\')">On</button>' +
                  '<button class="btn ' + (state.regionFilter==='Offshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Offshore\')">Off</button>' +
-                 '</div></div></div>' + renderFloorLayout(upMap);
+                 '</div></div></div>' +
+                 (tab==='roster' ? renderFloorLayout(upMap) : renderGenesysPage());
       return html;
   }
+  window.setFloorTab = function(t) { state.floorTab = t; render(); };
   
+  // One agent card inside a Genesys lane. Reuses the .agent-row grid but
+  // swaps the status column for queue chips (inbound) or an OUTBOUND tag.
+  function renderGenesysRow(a) {
+      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
+      var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+      var fid = prefix + escapeHTML(a.id || '');
+      var mid;
+      if (a.genesys && a.genesys.channel === 'inbound') {
+          var qs = a.genesys.queues || [];
+          if (qs.length) {
+              var shown = qs.slice(0, 3).map(function(q){ return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
+              if (qs.length > 3) shown += '<span class="qchip more" title="' + escapeHTML(qs.slice(3).join(', ')) + '">+' + (qs.length - 3) + '</span>';
+              mid = '<div class="qrow">' + shown + '</div>';
+          } else { mid = '<span style="color:var(--status-warn); font-size:0.78rem; font-weight:700;">No queue yet — click to assign</span>'; }
+      } else { mid = ''; }
+      // Right column keeps the agent's real shift window (like the Avaya
+      // floor) — the lane header already says Inbound/Outbound.
+      var timeDisplay = 'OFF';
+      if (a.shift && a.shift.indexOf('?') === -1) { var parts = a.shift.split(' - '); if (parts.length === 2) timeDisplay = escapeHTML(parts[0]) + '-' + escapeHTML(parts[1]); }
+      var gAttrTitle = [];
+      if (a.level) gAttrTitle.push('Level ' + a.level);
+      if (a.lang) gAttrTitle.push(a.lang);
+      if (a.manager) gAttrTitle.push('Sup: ' + a.manager);
+      if (a.skills) gAttrTitle.push(prettySkills(a.skills));
+      return '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
+             '<div class="status-dot ' + stripClass + '"></div>' +
+             '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
+             '<div class="row-attrs" title="' + escapeHTML(gAttrTitle.join(' · ')) + '">' + agentLvlChip(a.level) + agentLangChip(a.lang) + '</div>' +
+             '<div class="row-id" style="padding-left:4px;">' + fid + '</div>' +
+             '<div class="row-status">' + mid + '</div>' +
+             '<div class="row-time">' + timeDisplay + '</div></div>';
+  }
+
+  // Queue coverage panel: every queue from the list with how many inbound
+  // agents hold it. Uncovered queues are dimmed — gaps read at a glance.
+  // Clicking a queue expands an inline roster (a 50-name title tooltip
+  // doesn't scan); the full queue name + copy live in the expansion.
+  function renderGenesysCoverage(inbound) {
+      var counts = {}, holders = {};
+      inbound.forEach(function(a) {
+          ((a.genesys && a.genesys.queues) || []).forEach(function(q) {
+              counts[q] = (counts[q] || 0) + 1;
+              (holders[q] = holders[q] || []).push(a);
+          });
+      });
+      var openQ = state.genesysCovOpen || null;
+      var totalQ = 0, covered = 0;
+      var groups = GENESYS_QUEUES.map(function(g) {
+          var hasOpen = false;
+          var chips = g[1].map(function(q) {
+              totalQ++;
+              var n = counts[q] || 0; if (n) covered++;
+              if (q === openQ) hasOpen = true;
+              var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
+              return '<span class="gen-cov' + (n ? ' on' : '') + (q === openQ ? ' open' : '') + '" title="' + n + ' agent' + (n === 1 ? '' : 's') + ' — click for details" onclick="toggleGenesysCov(\'' + q + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
+          }).join('');
+          var html = '<div class="gen-qgroup"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + chips + '</div></div>';
+          // Roster expansion spans the full panel width, right below the
+          // group that owns the open queue.
+          if (hasOpen) {
+              var full = GENESYS_QUEUE_PREFIX + openQ;
+              var who = (holders[openQ] || []).map(function(a) {
+                  var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
+                  var dot = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
+                  return '<span class="gen-cov-agent" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)"><span class="status-dot ' + dot + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span></span>';
+              }).join('');
+              html += '<div class="gen-cov-detail">' +
+                      '<div class="gen-cov-detail-head">' +
+                        '<span class="full-name" title="Click to copy" onclick="copyQueueName(event, \'' + openQ + '\')">' + escapeHTML(full) + '</span>' +
+                        '<button class="btn-popout" title="Copy full queue name" onclick="copyQueueName(event, \'' + openQ + '\')"><i data-lucide="copy" width="13"></i></button>' +
+                        '<span style="flex:1;"></span>' +
+                        '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted);">' + (holders[openQ] || []).length + ' agent' + ((holders[openQ] || []).length === 1 ? '' : 's') + '</span>' +
+                      '</div>' +
+                      (who ? '<div class="gen-cov-detail-list custom-scrollbar">' + who + '</div>' : '<div style="font-size:0.76rem; color:var(--text-muted); font-weight:600; padding:2px 0 4px;">No one assigned — click an agent on the floor to add them.</div>') +
+                      '</div>';
+          }
+          return html;
+      }).join('');
+      return '<details class="gen-cov-panel"' + (inbound.length ? ' open' : '') + '>' +
+             '<summary><span style="font-weight:800; font-size:0.82rem;">Queue coverage</span>' +
+             '<span style="font-size:0.72rem; font-weight:700; color:' + (covered ? 'var(--text-muted)' : 'var(--status-warn)') + ';">' + covered + ' of ' + totalQ + ' queues covered</span></summary>' +
+             '<div class="gen-cov-body">' + groups + '</div></details>';
+  }
+  window.toggleGenesysCov = function(q) {
+      state.genesysCovOpen = (state.genesysCovOpen === q) ? null : q;
+      render();
+      // Keep the panel in view after the re-render collapses/moves things.
+      var el = document.querySelector('.gen-cov.open');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  };
+
+  // The Genesys Cloud sub-page of the Floor. Splits the currently-active
+  // roster into Genesys Inbound / Outbound vs everyone still on Avaya, so the
+  // platform breakdown reads at a glance. Reached via the Floor sub-tab.
+  function renderGenesysPage() {
+      var active = state.agents.active || [];
+      var visible = active.filter(floorMatch);
+      var inbound = [], outbound = [], avaya = [];
+      visible.forEach(function(a) {
+          if (a.genesys && a.genesys.channel === 'inbound') inbound.push(a);
+          else if (a.genesys && a.genesys.channel === 'outbound') outbound.push(a);
+          else avaya.push(a);
+      });
+      var total = visible.length || 1;
+      var pIn = Math.round(inbound.length / total * 100), pOut = Math.round(outbound.length / total * 100);
+      var pAv = 100 - pIn - pOut;
+      var genTotal = inbound.length + outbound.length;
+
+      // Nobody assigned yet: onboarding hero instead of two hollow lanes.
+      if (genTotal === 0) {
+          return '<div class="aether-card" style="padding:60px 24px; align-items:center; text-align:center;">' +
+              genLogoSvg(56) +
+              '<div style="margin-top:20px;">' + genCloudLogoSvg(26) + '</div>' +
+              '<p style="color:var(--text-muted); max-width:420px; margin:16px auto 24px; font-size:0.92rem; line-height:1.6;">Nobody is tracked on Genesys Cloud yet. Assignments are manual (no IT integration) and persist until an agent is moved back to Avaya.</p>' +
+              '<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openGenesysBatch()"><i data-lucide="users" width="16"></i> Batch assign agents</button>' +
+              '<div style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 18px;">or: Avaya Floor → click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span></div>' +
+              '</div>' +
+              '<div class="aether-card" style="padding:20px 24px; margin-top:20px;">' + renderGenesysCoverage([]) + '</div>';
+      }
+
+      var kpi = function(label, val, color) {
+          return '<div class="gen-kpi"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></div>';
+      };
+      var inList = inbound.length ? inbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Inbound yet.</div>';
+      var outList = outbound.length ? outbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Outbound yet.</div>';
+
+      return '<div class="aether-card" style="padding:24px;">' +
+            '<div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:18px;">' +
+              '<div style="display:flex; flex-direction:column; gap:5px;">' + genCloudLogoSvg(24) +
+                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">Manual tracking · persists until moved back</span></div>' +
+              '<div style="flex:1;"></div>' +
+              '<div class="gen-kpis">' +
+                kpi('Avaya', avaya.length, 'var(--accent-primary)') +
+                kpi('Inbound', inbound.length, 'var(--region-on)') +
+                kpi('Outbound', outbound.length, 'var(--status-break)') +
+                kpi('On Genesys', genTotal + ' <span style="font-size:0.62em; color:var(--text-muted);">' + (pIn + pOut) + '%</span>', 'var(--genesys)') +
+              '</div>' +
+              '<div style="display:flex; gap:8px; align-items:center;">' +
+                '<button class="btn btn-glass" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="15"></i> Batch assign</button>' +
+                '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Return everyone to Avaya"><i data-lucide="undo-2" width="15"></i></button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="gen-share" title="Avaya ' + pAv + '% · Inbound ' + pIn + '% · Outbound ' + pOut + '%">' +
+              '<i style="width:' + pAv + '%; background:var(--accent-primary);"></i>' +
+              '<i style="width:' + pIn + '%; background:var(--region-on);"></i>' +
+              '<i style="width:' + pOut + '%; background:var(--status-break);"></i>' +
+            '</div>' +
+            '<div class="gen-cols">' +
+              '<div><div class="gen-lane-title"><span style="color:var(--region-on);">Inbound<span class="sub">queue-assigned</span></span><span class="cnt">' + inbound.length + '</span></div><div class="agent-list-view">' + inList + '</div></div>' +
+              '<div><div class="gen-lane-title"><span style="color:var(--status-break);">Outbound<span class="sub">callbacks</span></span><span class="cnt">' + outbound.length + '</span></div><div class="agent-list-view">' + outList + '</div></div>' +
+            '</div>' +
+            renderGenesysCoverage(inbound) +
+          '</div>';
+  }
+
   function renderFloorLayout(upMap) {
      // Upcoming shifts (later today). The startingSoon bucket holds EVERY agent
      // whose shift starts after "now", so we group them by shift-start time into
      // collapsible blocks — a preview of the next shift(s) coming in. Blocks
      // starting within 30m auto-expand; each block can be copied on its own.
      var startingHtml = '';
-     if (state.agents.startingSoon && state.agents.startingSoon.length > 0) {
+     // Filter FIRST, so a search that matches nobody upcoming collapses the card
+     // instead of rendering an empty shell.
+     var soonMatched = (state.agents.startingSoon || []).filter(floorMatch);
+     if (soonMatched.length > 0) {
          var groupsMap = {};
-         state.agents.startingSoon.forEach(function(a) {
+         soonMatched.forEach(function(a) {
              var st = (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : (a.subStatus || 'Soon');
              if (!groupsMap[st]) groupsMap[st] = { start: st, epoch: a.startEpoch || 0, agents: [] };
              if (a.startEpoch && (!groupsMap[st].epoch || a.startEpoch < groupsMap[st].epoch)) groupsMap[st].epoch = a.startEpoch;
@@ -1421,22 +2036,73 @@
          startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Upcoming Shifts (later today)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + ' · tap a block to expand</span></div>' + blocks + '</div>';
      }
      var offHtml = '';
-     if (state.searchTerm && state.searchTerm.trim() !== '') { 
+     if (state.floorSearch && state.floorSearch.trim() !== '') { 
          var offAgents = state.agents.off || []; var offRendered = renderGroup(offAgents, upMap); 
          if (offRendered) { offHtml = '<div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div><div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">' + offRendered + '</div>'; } 
      }
      
-     var html = startingHtml + 
-         '<div class="group-header"><i data-lucide="shield" width="14"></i> Special Roles</div><div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-role);">ICL</div><div class="agent-list-view">' + renderGroup(state.agents.icl||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-active);">SAFE</div><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div><div class="aether-card special-group" style="padding:20px;"><div class="section-header" style="color:var(--status-ulc);">ULC FIRE</div><div class="agent-list-view">' + renderGroup(state.agents.ulc||[], upMap) + '</div></div></div>' +
+     var html = startingHtml +
+         '<div class="group-header"><i data-lucide="shield" width="14"></i> SAFE</div><div style="margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div></div>' +
          '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
          '<div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div><div class="agent-list-view" style="margin-bottom:30px;">' + (renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>') + '</div>' + offHtml;
      return html;
   }
   
+  // One matcher for every Floor list, so the search box and the On/Off toggle
+  // narrow the whole page consistently. Previously each list rolled its own and
+  // the Upcoming Shifts chips consulted neither.
+  // Level / language chips. These lived as locals inside the SAFE renderer and had
+  // already been copy-pasted once; hoisted here so the Floor, SAFE board and the
+  // read-only copy all render an agent's attributes identically.
+  // Level can be the string 'Trainee' as well as 1-4, so don't assume a number.
+  function agentLvlChip(lv) {
+      if (lv === null || lv === undefined || lv === '') return '';
+      var isTrainee = /^trainee$/i.test(String(lv));
+      var n = parseInt(lv, 10);
+      var senior = !isTrainee && n >= 4;
+      var label = isTrainee ? 'TRAINEE' : ('L' + (isFinite(n) ? n : lv));
+      var col = isTrainee ? 'var(--status-warn)' : (senior ? 'var(--status-role)' : 'var(--text-secondary)');
+      var bg = isTrainee ? 'rgba(217,119,6,0.12)' : (senior ? 'rgba(124,58,237,0.12)' : 'rgba(0,0,0,0.05)');
+      return '<span class="attr-chip" style="color:' + col + '; background:' + bg + ';" title="' + (isTrainee ? 'Trainee' : ('ERC level ' + lv)) + '">' + label + '</span>';
+  }
+  function agentLangChip(lang) {
+      var l = String(lang || '').toUpperCase();
+      if (['EN','FR','BL'].indexOf(l) === -1) return '';
+      var col = l === 'BL' ? 'var(--status-active)' : (l === 'FR' ? 'var(--accent-primary)' : 'var(--text-secondary)');
+      var bg = l === 'BL' ? 'rgba(5,150,105,0.12)' : (l === 'FR' ? 'rgba(79,70,229,0.12)' : 'rgba(0,0,0,0.05)');
+      var full = l === 'BL' ? 'Bilingual' : (l === 'FR' ? 'French' : 'English');
+      return '<span class="attr-chip" style="color:' + col + '; background:' + bg + ';" title="' + full + '">' + l + '</span>';
+  }
+  // Each role gets its own chip with an × — roles stack on the server, and
+  // "Set Active" (which wipes them all) used to be the only way to remove one.
+  function agentRoleChips(a) {
+      var toks = String((a && a.role) || '').split(/\s+/).filter(Boolean);
+      if (!toks.length) return '';
+      // The role travels in a data attribute and the agent is read off the
+      // enclosing row, so no name is ever interpolated into the handler.
+      return toks.map(function(t) {
+          return '<span class="attr-chip role" title="' + escapeHTML(t) + '">' + escapeHTML(t) +
+                 '<button class="attr-x" data-role="' + encodeURIComponent(t) + '" title="Remove ' + escapeHTML(t) + '" onclick="removeAgentRoleFromEl(event, this)">&times;</button></span>';
+      }).join('');
+  }
+
+  function floorMatch(a) {
+      if (!a) return false;
+      var reg = a.region || '';
+      if (state.regionFilter !== 'All' && reg.indexOf(state.regionFilter) === -1) return false;
+      var term = (state.floorSearch || '').trim().toLowerCase();
+      if (!term) return true;
+      // Search across the things actually shown on the row, not just the name.
+      var hay = [a.name, a.id, a.tid, a.manager, a.lang, a.level, a.role, a.subStatus, a.shift, reg]
+          .map(function(v) { return v == null ? '' : String(v); })
+          .join(' ').toLowerCase();
+      return hay.indexOf(term) !== -1;
+  }
+
   function renderGroup(list, upMap) {
       if (!list) return '';
-      var filtered = list.filter(function(a) { var safeName = a.name || ''; var safeReg = a.region || ''; var mName = !state.searchTerm || safeName.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1; var mReg = state.regionFilter === 'All' || safeReg.indexOf(state.regionFilter) !== -1; return mName && mReg; });
+      var filtered = list.filter(floorMatch);
       if(!filtered.length) return '';
       return filtered.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('');
   }
@@ -1476,7 +2142,10 @@
      var start = "00:00", end = "00:00";
      if (a.shift && a.shift.indexOf("?") === -1) { var parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
-     if(a.subStatus && a.subStatus.match(/SICK|NCNS|AWOL|PW\/ALT|PERSONAL/i)) stripClass = 'alert';
+     // Same absence list as the server's Needs Attention rule — this was missing
+     // UNAB, COMP, ALU, LOA and BEREAVEMENT, so even a correctly-bucketed UNAB or
+     // TI LOA row rendered without the red alert strip.
+     if(a.subStatus && a.subStatus.match(/SICK|NCNS|\bUNAB\b|AWOL|\bCOMPU?\b|\bALU\b|\bLOA\b|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/i)) stripClass = 'alert';
      if(a.onBreakNow) stripClass = 'break';
      var statusText = escapeHTML(a.subStatus) || "Active";
      var statusColor = "var(--text-secondary)";
@@ -1509,21 +2178,51 @@
          timeStyle = 'color: var(--status-break); background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.18);';
      }
 
-     var hoverCardHtml = '<div class="agent-tooltip"><div style="font-weight:800; color:var(--text-main); margin-bottom:4px; font-size:0.95rem;">' + escapeHTML(a.name || '') + '</div>';
-     if (a.level) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:800; color:var(--status-active); margin-bottom:2px;">Level ' + escapeHTML(a.level) + '</div>';
-     if (a.manager) hoverCardHtml += '<div style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin-bottom:4px;">Sup: <span style="color:var(--text-main);">' + escapeHTML(a.manager) + '</span></div>';
-     if (a.skills) hoverCardHtml += '<div style="font-size:0.7rem; font-weight:600; line-height:1.4; color:var(--text-secondary); padding-top:6px; border-top:1px dashed var(--glass-border);">' + escapeHTML(prettySkills(a.skills)) + '</div>';
-     hoverCardHtml += '</div>';
+     // The old hover card was unreachable: .agent-tooltip is absolutely positioned
+     // inside .row-name, which is overflow:hidden, so it was always clipped. The
+     // attributes now render on the row itself, and the title attribute carries
+     // the detail (supervisor, skills) that doesn't fit.
+     var attrTitle = [];
+     if (a.level) attrTitle.push('Level ' + a.level);
+     if (a.lang) attrTitle.push(a.lang);
+     if (a.manager) attrTitle.push('Sup: ' + a.manager);
+     if (a.region) attrTitle.push(a.region);
+     if (a.skills) attrTitle.push(prettySkills(a.skills));
+     var attrsHtml = '<div class="row-attrs" title="' + escapeHTML(attrTitle.join(' · ')) + '">' +
+                     agentLvlChip(a.level) + agentLangChip(a.lang) + agentRoleChips(a) +
+                     ((a.manager) ? '<span class="attr-chip sup" title="Supervisor: ' + escapeHTML(a.manager) + '">' + escapeHTML(String(a.manager).split(/[ ,]/)[0]) + '</span>' : '') +
+                     '</div>';
 
-     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenu(event, \'' + escapeHTML(a.name || '').replace(/'/g, "\\'") + '\')">' +
+     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
                 '<div class="status-dot ' + stripClass + '"></div>' +
-                '<div class="row-name">' + escapeHTML(a.name || '') + hoverCardHtml + '</div>' +
+                '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
+                attrsHtml +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
-                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + breakHtml + '</div>' +
+                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + ((a.genesys && a.genesys.channel) ? '<div style="margin-top:3px;"><span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span></div>' : '') + breakHtml + '</div>' +
                 '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
      return html;
   }
   
+  // Read the agent off the element instead of interpolating the name into an
+  // inline handler — that was a SyntaxError for any name with an apostrophe.
+  window.openMenuFromRow = function(e, el) {
+      var raw = el && el.getAttribute('data-agent');
+      var name = '';
+      try { name = decodeURIComponent(raw || ''); } catch (err) { name = raw || ''; }
+      openMenu(e, name);
+  };
+
+  window.removeAgentRoleFromEl = function(e, el) {
+      e.stopPropagation();
+      var row = el;
+      while (row && !row.getAttribute('data-agent')) row = row.parentElement;
+      if (!row) return;
+      var name = '', role = '';
+      try { name = decodeURIComponent(row.getAttribute('data-agent') || ''); } catch (err) { name = ''; }
+      try { role = decodeURIComponent(el.getAttribute('data-role') || ''); } catch (err) { role = ''; }
+      if (name && role) removeAgentRole(name, role);
+  };
+
   window.copyAgentInfo = function(e, idText) { e.stopPropagation(); fallbackCopyTextToClipboard(idText, "Copied: " + idText); }
   window.openBreakModal = function() { closeMenu(); var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(!agent) { showToast("Agent data not found"); return; } var container = document.getElementById('break-editor'); container.innerHTML = ""; (agent.rawBreaks || []).forEach(function(b, i) { container.innerHTML += '<div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;"><div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">' + escapeHTML(b.type) + '</div><div style="display:flex; gap:8px;"><input id="bs-' + i + '" class="input-aether" value="' + escapeHTML(b.start || '') + '" style="font-size:0.85rem;"><input id="be-' + i + '" class="input-aether" value="' + escapeHTML(b.end || '') + '" style="font-size:0.85rem;"></div></div>'; }); document.getElementById('break-modal').classList.add('open'); };
   window.openOtModal = function() { closeMenu(); document.getElementById('ot-start').value = ""; document.getElementById('ot-end').value = ""; document.getElementById('ot-modal').classList.add('open'); };
@@ -1549,16 +2248,89 @@
       return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 14px; background:rgba(220,38,38,0.05); display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--status-alert);"><i data-lucide="alert-triangle" width="14"></i> Outage Situational Awareness<span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-left:6px;">Office-region correlation. Not a per-agent alert.</span></div>' + rows + '</div>';
   }
 
-  function renderStaffingTile() {
-      var s = state.staffingBalance;
-      if (!s || !s.available) {
-          var reason = s && s.reason ? s.reason : 'Loading…';
-          return '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; opacity:0.6;"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Net Staffing</h4><div style="font-size:1.8rem; font-weight:800; color:var(--text-muted);">—</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;" title="' + escapeHTML(reason) + '">' + escapeHTML(reason.length > 22 ? reason.substring(0, 20) + '…' : reason) + '</div></div>';
+  // Alarm.com standby status — a compact live health tile. Three states, not two:
+  // UP (banner matched), WARN (page answered but the "All systems operational"
+  // banner wasn't in the markup — a wording change looks like this, not like an
+  // outage), and DOWN (unreachable, or the page says it isn't operational).
+  // The "checked" time is the server's absolute stamp on purpose: render()
+  // string-diffs the whole view, so a ticking "2m ago" would tear down and
+  // rebuild the Dashboard every poll.
+  function renderAlarmComTile() {
+      var d = state.alarmCom;
+      var shell = function(inner, extra) {
+          return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; justify-content:center;' + (extra || '') + '">' + inner + '</div>';
+      };
+      if (!d) {
+          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-check" width="12"></i> Alarm.com</div>' +
+                       '<div style="color:var(--text-muted); font-size:0.8rem; font-weight:600;">Checking standby status…</div>', ' opacity:0.6;');
       }
-      var color = s.status === 'critical' ? 'var(--status-alert)' : (s.status === 'warn' ? 'var(--status-warn)' : (s.status === 'surplus' ? 'var(--status-active)' : 'var(--text-main)'));
-      var sign = s.net > 0 ? '+' : '';
-      return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Net = Open seats − Required for current 15-min IDP bucket"><div class="aurora-label" style="margin-bottom:10px;">Net Staffing</div><div style="font-size:2.8rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + sign + s.net + '</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + s.supply + ' open / ' + s.demand + ' req @ ' + escapeHTML(s.bucket) + '</div></div>';
+      if (d.disabled) {
+          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-off" width="12"></i> Alarm.com</div>' +
+                       '<div style="font-size:1.6rem; font-weight:800; color:var(--text-muted); line-height:1;">—</div>' +
+                       '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Probe disabled — run setAlarmComUrl()</div>');
+      }
+
+      var warn = !!d.isReachable && !d.isOperational;
+      var color = d.up ? 'var(--status-active)' : (warn ? 'var(--status-warn)' : 'var(--status-alert)');
+      var dotCls = d.up ? 'outage-dot pulse-ok' : 'outage-dot pulse';
+      var label = d.up ? 'All systems operational' : (warn ? 'Status unconfirmed' : 'Down');
+
+      var up24 = (d.uptime24h == null) ? '—' : (d.uptime24h + '%');
+      var up7 = (d.uptime7d == null) ? null : (d.uptime7d + '%');
+
+      // Footer facts, only the ones we actually have.
+      var facts = [];
+      if (d.latencyMs) facts.push(d.latencyMs + 'ms');
+      if (up7) facts.push('7d ' + up7);
+      facts.push('checked ' + escapeHTML(d.checked || '--'));
+      if (d.lastGoodChecked) facts.push('last good ' + escapeHTML(d.lastGoodChecked));
+
+      var why = '';
+      if (!d.up) {
+          var reason = d.error || d.note || ('HTTP ' + d.statusCode);
+          why = '<div style="font-size:0.65rem; font-weight:700; color:' + color + '; margin-top:6px;">' + escapeHTML(reason) + '</div>';
+      }
+
+      // Component detail from the Monitors table. Only meaningful when the page
+      // answered at all, so don't imply a healthy component on an unreachable host.
+      var chip = '';
+      if (d.isReachable) {
+          chip = '<div style="margin-top:10px;"><span class="outage-chip">Partner Portal · ' +
+                 (d.partnerPortalUp ? '<b style="color:var(--status-active);">Up</b>' : '<b style="color:var(--status-warn);">?</b>') +
+                 '</span></div>';
+      }
+
+      // 24 one-hour buckets: red if ANY probe in the hour failed (an outage
+      // should not be averaged away), grey if we never sampled that hour.
+      var strip = '';
+      var hist = state.alarmComHistory || [];
+      if (hist.length) {
+          var nowH = Date.now();
+          var cells = [];
+          for (var h = 23; h >= 0; h--) {
+              var hi = nowH - h * 3600000, lo = hi - 3600000;
+              var seen = 0, bad = 0;
+              for (var i = 0; i < hist.length; i++) {
+                  if (hist[i].t > lo && hist[i].t <= hi) { seen++; if (!hist[i].up) bad++; }
+              }
+              var cls = !seen ? '' : (bad ? 'down' : 'up');
+              cells.push('<span class="' + cls + '"></span>');
+          }
+          strip = '<div class="uptime-strip" title="Last 24 h of probes — one bar per hour">' + cells.join('') + '</div>';
+      }
+
+      return shell(
+          '<div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:7px;">' +
+              '<span class="' + dotCls + '" style="background:' + color + ';"></span> Alarm.com' +
+          '</div>' +
+          '<div style="font-size:2.4rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + up24 + '</div>' +
+          '<div style="font-size:0.7rem; font-weight:800; color:var(--text-main); margin-top:6px;">' + label + '</div>' +
+          why +
+          '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + facts.join(' · ') + '</div>' +
+          chip + strip,
+          ' cursor:default;');
   }
+
 
   function renderOutageTile() {
       var d = state.outagesData;
@@ -1621,7 +2393,6 @@
       // Real off-floor %: off-floor agents / total-scheduled. No artificial padding.
       var totalScheduled = activeCount + unplanCount + planCount;
       var offFloorPct = totalScheduled > 0 ? Math.round(((unplanCount + planCount) / totalScheduled) * 100) : 0;
-      var safeCount = (state.agents.safe||[]).length; var iclCount = (state.agents.icl||[]).length; var ulcCount = (state.agents.ulc||[]).length;
 
       var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
       if (state.calendarError) {
@@ -1637,11 +2408,43 @@
                  '<div class="aether-card tile-aurora" data-aurora-tile="sl" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px; padding:28px;"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;"><div><div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;"><span class="aurora-pulse"></span> Service Level</div><div class="aurora-num cnum" data-aurora-num="sl" style="font-size:3.8rem; font-weight:800; line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div class="aurora-label" style="margin-bottom:10px;">Response Time</div><div data-aurora-num="ack" class="cnum" style="font-size:2.2rem; font-weight:800; color:var(--text-main); line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:130px; width:100%; margin-top:24px;"><canvas id="chart-overview" style="display:block;"></canvas></div></div>' +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
                  '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" class="cnum" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
-                 renderStaffingTile() +
+                 renderAlarmComTile() +
                  '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
-                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s; display:flex; flex-direction:column; justify-content:center;"><div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span style="font-weight:700;">Special Roles</span><i data-lucide="shield" class="text-muted" width="20"></i></div><div style="display:flex; justify-content:space-between; align-items:center;"><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-active); margin-bottom:4px; letter-spacing:1px;">SAFE</div><div id="ov-safe" style="font-size:1.8rem; font-weight:800; line-height:1;">' + safeCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-role); margin-bottom:4px; letter-spacing:1px;">ICL</div><div id="ov-icl" style="font-size:1.8rem; font-weight:800; line-height:1;">' + iclCount + '</div></div><div style="width:1px; height:30px; background:var(--glass-border);"></div><div style="text-align:center;"><div style="font-size:0.65rem; font-weight:800; color:var(--status-ulc); margin-bottom:4px; letter-spacing:1px;">ULC</div><div id="ov-ulc" style="font-size:1.8rem; font-weight:800; line-height:1;">' + ulcCount + '</div></div></div></div>' +
+                 overviewIdpTile() +
                  '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +
                  mgmtLunchTile() + '</div>';
+      return html;
+  }
+
+  // Intraday IDP on the Dashboard. Deliberately does NOT read state.trackerData:
+  // that is populated at boot, but it is replaced the moment someone switches the
+  // tracker to coaching or a monthly range, and `.grid` disappears — so the tile
+  // would blank out depending on where the user had last been. Its own key, its own
+  // fetch, same shape as fetchOverviewLunch below.
+  function fetchOverviewIdp() {
+      if (typeof google === 'undefined') return;
+      state.overviewIdpLoading = true;
+      google.script.run.withSuccessHandler(function(res) {
+          try { state.overviewIdp = JSON.parse(res); } catch (e) { state.overviewIdp = { error: 'Could not read IDP data.' }; }
+          state.overviewIdpLoading = false;
+          if (state.view === 'overview') render();
+      }).withFailureHandler(function(err) {
+          state.overviewIdp = { error: (err && err.message) || 'IDP backend error.' };
+          state.overviewIdpLoading = false;
+          if (state.view === 'overview') render();
+      }).getWorkforceAnalytics('day', localDateStr(), 'furlough', 'All', 'ALL');
+  }
+
+  function overviewIdpTile() {
+      var o = state.overviewIdp;
+      var shell = function(inner) {
+          return '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header">Intraday IDP<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">net staffing per 15 min · today</span></div>' + inner + '</div>';
+      };
+      if (state.overviewIdpLoading || !o) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading IDP…</div>');
+      if (o.error) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(o.error) + '</div>');
+      // Same renderer the Furlough tracker uses, so the two always agree.
+      var html = renderIdpHeatmapTile(o.grid, (state.syncMeta && state.syncMeta.idp) || '', (state.syncMeta && state.syncMeta.muSet) || '');
+      if (!html) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">No IDP data imported for today.</div>');
       return html;
   }
 
@@ -1784,6 +2587,46 @@
       function getTrendHtml(val, isBadIfHigh, isPercentage) { if (val === 0 || val == null) return '<span style="color:var(--text-muted); font-size:0.7rem; margin-left:6px; opacity:0.5;">-</span>'; var isPositive = val > 0; var color = (isPositive && !isBadIfHigh) || (!isPositive && isBadIfHigh) ? "var(--status-active)" : "var(--status-alert)"; var arrow = isPositive ? "↑" : "↓"; var absVal = isPercentage ? Math.abs(val * 100).toFixed(1) + '%' : Math.abs(val).toFixed(1); return '<span style="color:' + color + '; font-size:0.7rem; font-weight:800; margin-left:6px;">' + arrow + ' ' + absVal + '</span>'; }
       function renderTable(title, list, type, headerColor, icon, tooltip) { var safeList = list || []; var rows = safeList.map(function(a) { if (!a) return ''; var col1 = "", col2 = ""; var statusDot = '<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;"></div>'; if (type === 'in' || type === 'scope') { var inPct = a.inPct || 0; var tasksXCalls = a.tasksXCalls || 0; col1 = '<td style="padding:12px 16px; font-weight:800;">' + (inPct * 100).toFixed(1) + '% ' + getTrendHtml(a.trendIn, true, true) + '</td>'; col2 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + Math.round(tasksXCalls * 100) + '%</td>'; } else if (type === 'out') { var outPct = a.outPct || 0; col1 = '<td style="padding:12px 16px; font-weight:800;">' + (outPct * 100).toFixed(1) + '% ' + getTrendHtml(a.trendOut, true, true) + '</td>'; col2 = '<td style="padding:12px 16px; color:var(--text-muted);">-</td>'; } else if (type === 'cph') { var cphV = a.cph || 0; var totalCalls = a.totalCalls || 0; col1 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + totalCalls + '</td>'; col2 = '<td style="padding:12px 16px; font-weight:800;">' + cphV.toFixed(2) + ' ' + getTrendHtml(a.trendCph, false, false) + '</td>'; } var safeName = escapeHTML(a.name || 'Unknown'); var wDays = escapeHTML(a.wDays || '-'); var jsSafeName = safeName.replace(/'/g, "\\'"); return '<tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><td style="padding:12px 16px; display:flex; align-items:center; gap:10px;">' + statusDot + '<span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + safeName + '</span></td>' + col1 + col2 + '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + wDays + '</td><td style="padding:12px 16px; text-align:right;"><button class="btn-icon-sm" style="color:var(--text-muted);" title="Dismiss Agent" onclick="dismissFlagAgent(\'' + jsSafeName + '\')"><i data-lucide="x" width="16"></i></button></td></tr>'; }).join(''); if(rows === "") rows = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No agents flagged.</td></tr>'; var th1 = "", th2 = ""; if (type === 'in' || type === 'scope') { th1 = "In %"; th2 = "Tasks x Calls"; } else if (type === 'out') { th1 = "Out %"; th2 = " "; } else if (type === 'cph') { th1 = "Total Tasks"; th2 = "CP/H"; } var tipAttr = encodeURIComponent(tooltip); return '<div class="aether-card rf-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;"><div style="background:' + headerColor + '; padding:14px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:1rem; color:var(--text-main);">' + icon + ' ' + title + ' <span class="rf-info-icon" data-tip="' + tipAttr + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; cursor:help; color:var(--text-muted); opacity:0.65;"><i data-lucide="help-circle" width="14"></i></span></div><span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05); flex-shrink:0;">' + safeList.length + '</span></div><div><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">' + th1 + '</th><th style="padding:12px 16px;">' + th2 + '</th><th style="padding:12px 16px; text-align:center;">W.Days</th><th style="padding:12px 16px; width:40px;"></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>'; }
       
+      // Genesys flag cards. Same shell as renderTable so the dashboard reads as one
+      // board, but its own columns — and its own header colour, because these come
+      // from Genesys, not from the Avaya GEM report the other four are built on.
+      function renderGenesysCard(title, list, type, icon, tooltip) {
+          var safeList = list || [];
+          var rows = safeList.map(function(a) {
+              if (!a) return '';
+              var safeName = escapeHTML(a.name || 'Unknown');
+              var jsSafeName = safeName.replace(/'/g, "\\'");
+              var c1, c2, c3;
+              if (type === 'drop') {
+                  c1 = '<td style="padding:12px 16px; font-weight:800;">' + String(a.noAnswer || 0) + '</td>';
+                  c2 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + ((a.dropRate || 0) * 100).toFixed(1) + '%</td>';
+                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.answered || 0) + '</td>';
+              } else {
+                  c1 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + fmtSecsShort(a.avgTalk) + '</td>';
+                  c2 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + fmtSecsShort(a.minTalk) + '</td>';
+                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.handled || 0) + '</td>';
+              }
+              return '<tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">' +
+                  '<td style="padding:12px 16px; display:flex; align-items:center; gap:10px;"><div style="width:8px; height:8px; border-radius:4px; background:#0ea5e9; flex-shrink:0;"></div><span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + safeName + '</span></td>' +
+                  c1 + c2 + c3 +
+                  '<td style="padding:12px 16px; text-align:right;"><button class="btn-icon-sm" style="color:var(--text-muted);" title="Dismiss Agent" onclick="dismissFlagAgent(\'' + jsSafeName + '\')"><i data-lucide="x" width="16"></i></button></td></tr>';
+          }).join('');
+          if (rows === "") rows = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No agents flagged.</td></tr>';
+          var th = (type === 'drop') ? ['Dropped', 'Rate', 'Answered'] : ['Avg Talk', 'Min Talk', 'Handled'];
+          var tipAttr = encodeURIComponent(tooltip);
+          return '<div class="aether-card rf-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">' +
+              '<div style="background:rgba(14,165,233,0.06); padding:14px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;">' +
+                '<div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:1rem; color:var(--text-main);">' + icon + ' ' + title +
+                  ' <span class="rf-info-icon" data-tip="' + tipAttr + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; cursor:help; color:var(--text-muted); opacity:0.65;"><i data-lucide="help-circle" width="14"></i></span>' +
+                '</div>' +
+                '<span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05); flex-shrink:0;">' + safeList.length + '</span>' +
+              '</div>' +
+              '<div style="padding:8px 20px 0; font-size:0.66rem; font-weight:700; color:#0ea5e9; text-transform:uppercase; letter-spacing:0.5px;">Genesys · ' + escapeHTML((d.genesys && d.genesys.label) || 'imported report') + '</div>' +
+              '<div><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase;"><tr>' +
+                '<th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">' + th[0] + '</th><th style="padding:12px 16px;">' + th[1] + '</th><th style="padding:12px 16px; text-align:center;">' + th[2] + '</th><th style="padding:12px 16px; width:40px;"></th>' +
+              '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+      }
+
       var masterListStatus = d.usingMasterList ? '<span style="font-size:0.75rem; font-weight:700; color:var(--status-active); background:rgba(16,185,129,0.1); padding:4px 10px; border-radius:12px;"><i data-lucide="shield-check" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Active</span>' : '<span style="font-size:0.75rem; font-weight:700; color:var(--status-warn); background:rgba(245,158,11,0.1); padding:4px 10px; border-radius:12px; cursor:pointer;" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');"><i data-lucide="alert-circle" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Missing</span>';
 
       function renderCoachingCadenceCard() {
@@ -1807,7 +2650,10 @@
                  '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
       }
 
-      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + '</div>' + renderCoachingCadenceCard();
+      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + (d.genesys && d.genesys.has
+                    ? renderGenesysCard("Dropped Calls", d.genesys.noAnswer, 'drop', '<i data-lucide="phone-missed" width="18" style="color:#0ea5e9;"></i>', "Genesys Alert - No Answer: calls that rang the agent and were never picked up, as a share of the calls they did answer. A rate rather than a raw count, so this surfaces agents who miss a disproportionate share rather than just the busiest people on the floor. Needs at least " + GENESYS_DROP_MIN_ANSWERED + " answered calls.") +
+                      renderGenesysCard("Short Calls", d.genesys.shortCalls, 'short', '<i data-lucide="timer-off" width="18" style="color:#0ea5e9;"></i>', "Agents whose AVERAGE talk time is at or under " + Math.round((d.genesys.shortTalkCutoff || 0)) + "s, which is " + Math.round(GENESYS_SHORT_TALK_FACTOR * 100) + "% of this floor's median of " + Math.round((d.genesys.medianTalk || 0)) + "s. Measured against the floor rather than a fixed number, so the rule follows the work. Min Talk (the single shortest call) is shown alongside as corroboration, but is NOT the trigger: over hundreds of calls almost every agent has one near-instant call, so on its own it flags nearly the whole floor and says nothing.")
+                    : '') + '</div>' + renderCoachingCadenceCard();
   }
 
   window.toggleInsightRow = function(id) {
@@ -1817,8 +2663,22 @@
       if (state.expandedInsights.has(id)) { row.style.display = 'table-row'; if(icon) icon.style.transform = 'rotate(180deg)'; } else { row.style.display = 'none'; if(icon) icon.style.transform = 'rotate(0deg)'; }
   };
 
+  // Genesys stores durations in seconds; show them the way a supervisor reads
+  // them. Blank means "no sample", which must not render as 0s.
+  function fmtSecsShort(v) {
+      if (v == null || v === '') return '—';
+      var n = Number(v);
+      if (!isFinite(n)) return '—';
+      if (n < 60) return (Math.round(n * 10) / 10) + 's';
+      var m = Math.floor(n / 60);
+      return m + 'm ' + Math.round(n - m * 60) + 's';
+  }
+  // A dropped-call rate worth a supervisor's attention (also the Red Flags rule).
+  var GENESYS_DROP_RATE = 0.05, GENESYS_DROP_MIN_ANSWERED = 50, GENESYS_SHORT_TALK_FACTOR = 0.6;
+
   function renderInsights() {
       var u = state.unifiedReport || {};
+      var gRpt = u.genesys || { has: false, label: '' };
 
       var schedText = "Loading...";
       if (state.syncMeta && state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
@@ -1849,7 +2709,7 @@
       else if (state.insightSort === 'safe') { c1 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' }; c2 = { key: 'tower', name: 'TOWER', color: 'var(--accent-primary)' }; c3 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' }; }
 
       var rowsHtml = displayData.map(function(a, idx) { 
-          var g = a.gem || {}; var safeId = "agt-" + idx;
+          var g = a.gem || {}; var gx = a.genesys || null; var safeId = "agt-" + idx;
           var regionTag = (a.region || '').includes('Offshore') ? '<span style="font-size:0.6rem; background:var(--region-off); color:white; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle; font-weight:800;">OFF</span>' : '';
           var isExpanded = state.expandedInsights.has(safeId);
           var displayStyle = isExpanded ? 'table-row' : 'none';
@@ -1862,16 +2722,46 @@
              '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:' + (a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)') + '; font-weight:800; font-size:1.1rem;">' + escapeHTML(a.cph || '-') + '</td>' +
              '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + escapeHTML(a.aht || '-') + '</td>' +
              '<td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">' + escapeHTML(a.inOut || '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? String(gx.noAnswer || 0) : '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '-') + '</td>' +
              '<td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-' + safeId + '" data-lucide="chevron-down" width="18" style="transform:' + iconTransform + '; transition:0.3s;"></i></td>';
 
-          var expandHtml = '<td colspan="8" style="padding:0;"><div style="padding:24px; border-bottom:2px solid var(--glass-border); display:grid; grid-template-columns: 1fr 1fr; gap:32px;">' +
+          var expandHtml = '<td colspan="10" style="padding:0;"><div style="padding:24px; border-bottom:2px solid var(--glass-border); display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:32px;">' +
              '<div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="calendar-clock" width="14"></i> Off-Phone / Roles Tracker</div><div style="display:flex; flex-wrap:wrap; gap:10px;"><div class="insight-pill"><span>Total Off-Phone</span> <b style="color:var(--text-main);">' + escapeHTML(a.total || 0) + 'h</b></div><div class="insight-pill"><span>ACSU</span> <b style="color:var(--text-main);">' + (a.acsu > 0 ? escapeHTML(a.acsu) + 'h' : '-') + '</b></div><div class="insight-pill"><span>Coach</span> <b style="color:var(--text-main);">' + (a.coach > 0 ? escapeHTML(a.coach) + 'h' : '-') + '</b></div><div class="insight-pill"><span>Tower</span> <b style="color:var(--text-main);">' + (a.tower > 0 ? escapeHTML(a.tower) + 'h' : '-') + '</b></div><div class="insight-pill"><span>SAFE</span> <b style="color:var(--text-main);">' + (a.safe > 0 ? escapeHTML(a.safe) + 'h' : '-') + '</b></div><div class="insight-pill" style="border-color:var(--accent-primary);" title="Overtime worked (separate from off-phone total)"><span style="color:var(--accent-primary);">OT</span> <b style="color:var(--accent-primary);">' + (a.ot > 0 ? escapeHTML(a.ot) + 'h' : '-') + '</b></div></div></div>' +
-             '<div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart" width="14"></i> GEM Deep Dive</div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;"><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Avg Talk Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgTalk || '-') + '</b></div><div class="insight-pill"><span>Avg Hold Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgHold || '-') + '</b></div><div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgAcw || '-') + '</b></div></div><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Transfers</span> <b style="color:var(--text-main);">' + escapeHTML(g.transfers || 0) + ' (' + (g.transfPct ? escapeHTML((g.transfPct * 100).toFixed(1)) + '%' : '0%') + ')</b></div><div class="insight-pill"><span>Outbound Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.outCalls || 0) + '</b></div><div class="insight-pill"><span>Ext. In Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.extCalls || 0) + '</b></div></div></div></div></div></td>';
+             '<div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart" width="14"></i> GEM Deep Dive</div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;"><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Avg Talk Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgTalk || '-') + '</b></div><div class="insight-pill"><span>Avg Hold Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgHold || '-') + '</b></div><div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgAcw || '-') + '</b></div></div><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Transfers</span> <b style="color:var(--text-main);">' + escapeHTML(g.transfers || 0) + ' (' + (g.transfPct ? escapeHTML((g.transfPct * 100).toFixed(1)) + '%' : '0%') + ')</b></div><div class="insight-pill"><span>Outbound Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.outCalls || 0) + '</b></div><div class="insight-pill"><span>Ext. In Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.extCalls || 0) + '</b></div></div></div></div>' +
+             // Genesys Call Performance — a SEPARATE source from GEM above. Nothing
+             // here is merged into or overrides the GEM numbers; the caption names
+             // the report the figures came from so any value can be traced.
+             (gx
+                ? '<div style="background:var(--bg-root); border:1px solid rgba(14,165,233,0.35); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);">' +
+                    '<div style="font-size:0.75rem; font-weight:800; color:#0ea5e9; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; display:flex; align-items:center; gap:8px;"><i data-lucide="phone-call" width="14"></i> Genesys Call Performance</div>' +
+                    '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-bottom:14px;">' + escapeHTML(gRpt.label || 'imported report') + (gx.media ? ' · ' + escapeHTML(gx.media) : '') + '</div>' +
+                    '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">' +
+                      '<div style="display:flex; flex-direction:column; gap:8px;">' +
+                        '<div class="insight-pill"><span>Answered</span> <b style="color:var(--text-main);">' + String(gx.answered || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Handled</span> <b style="color:var(--text-main);">' + String(gx.handled || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Avg Handle</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHandle) + '</b></div>' +
+                        '<div class="insight-pill"><span>Avg Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgTalk) + '</b></div>' +
+                        '<div class="insight-pill"><span>Avg Hold</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHold) + '</b></div>' +
+                        '<div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgAcw) + '</b></div>' +
+                      '</div>' +
+                      '<div style="display:flex; flex-direction:column; gap:8px;">' +
+                        '<div class="insight-pill" title="Alert - No Answer: rang this agent, never picked up"><span>Dropped</span> <b style="color:' + (gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + String(gx.noAnswer || 0) + (gx.answered ? ' (' + (Math.round(gx.noAnswer / gx.answered * 1000) / 10) + '%)' : '') + '</b></div>' +
+                        '<div class="insight-pill" title="Shortest talk time in the period — a very low value means very short calls"><span>Min Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.minTalk) + '</b></div>' +
+                        '<div class="insight-pill" title="Average Ring Time: mean time to answer"><span>Avg Ring</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgRing) + '</b></div>' +
+                        '<div class="insight-pill"><span>Held</span> <b style="color:var(--text-main);">' + String(gx.held || 0) + '</b></div>' +
+                        '<div class="insight-pill"><span>Transferred</span> <b style="color:var(--text-main);">' + String(gx.transferred || 0) + '</b></div>' +
+                      '</div>' +
+                    '</div></div>'
+                : (gRpt.has
+                    ? '<div style="background:var(--bg-root); border:1px dashed var(--glass-border); padding:20px; border-radius:16px; display:flex; flex-direction:column; justify-content:center;"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; display:flex; align-items:center; gap:8px;"><i data-lucide="phone-off" width="14"></i> Genesys Call Performance</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Not in the ' + escapeHTML(gRpt.label || 'imported') + ' Genesys export.</div></div>'
+                    : '')) +
+             '</div></td>';
 
           return '<tr class="hover-bg insight-row" style="border-bottom:1px solid var(--glass-border); cursor:pointer; animation-delay:' + (idx * 0.02) + 's;" onclick="toggleInsightRow(\'' + safeId + '\')">' + cellData + '</tr><tr id="details-' + safeId + '" style="display:' + displayStyle + '; background:rgba(0,0,0,0.015);">' + expandHtml + '</tr>';
-      }).join('') || '<tr><td colspan="8" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>';
+      }).join('') || '<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>';
 
-      return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); padding:16px 20px; margin-bottom:24px; border-radius:14px; border:1px solid rgba(99,102,241,0.12); display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown and deep-dive Avaya GEM metrics.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
+      return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); padding:16px 20px; margin-bottom:24px; border-radius:14px; border:1px solid rgba(99,102,241,0.12); display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown, Avaya GEM metrics and Genesys call performance.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:rgba(0,0,0,0.03); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
   }
 
   // Resolved-range chip for the ops trackers: spells out the exact days the
@@ -1929,6 +2819,52 @@
   function absTypePill(t, count) {
       var m = absTypeMeta(t);
       return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:0.66rem; font-weight:800; color:var(--text-secondary); background:rgba(0,0,0,0.04); padding:2px 8px; border-radius:99px; white-space:nowrap;"><span style="width:7px; height:7px; border-radius:50%; background:' + m.color + ';"></span>' + escapeHTML(m.label) + (count != null ? ' <b style="color:var(--text-main);">' + count + '</b>' : '') + '</span>';
+  }
+
+  // ── Intraday IDP heatmap ────────────────────────────────────────────────────
+  // 24 hour-columns x 4 fifteen-minute cells, per-hour AVG and a DAY AVERAGE IDP
+  // footer. Hoisted out of renderTracker() so the Dashboard and the Furlough
+  // tracker render the SAME widget from the same code and can never disagree.
+  // `net` is furlough-adjusted supply minus IDP demand (WorkforceTracker.gs:875),
+  // which is exactly what the tracker shows.
+  function renderIdpHeatmapTile(gridIn, idpTextIn, muTextIn) {
+      idpTextIn = idpTextIn || '';
+      muTextIn = muTextIn || '';
+      if (!gridIn || !gridIn.length) return '';
+          var hourColsHtml = '';
+          var grid = gridIn || [];
+          var dayNetSum = 0, dayNetCount = 0;
+          for (var h = 0; h < 24; h++) {
+              var cells = '';
+              var sum = 0, count = 0;
+              for (var q = 0; q < 4; q++) {
+                  var b = grid[h*4 + q];
+                  if (!b) continue;
+                  var cls = 'status-neutral';
+                  if (b.net >= 2) cls = 'status-surplus';
+                  if (b.net < 0) cls = 'status-risk';
+                  sum += b.net; count++;
+                  dayNetSum += b.net; dayNetCount++;
+                  cells += '<div class="heatmap-cell idp-static ' + cls + '" style="padding:4px 1px;"><span style="font-size:0.62rem; opacity:0.8; font-weight:700;">' + escapeHTML(b.label || '') + '</span><span style="font-size:0.8rem; font-weight:800; font-family:monospace;">' + (b.net>0?'+'+b.net:b.net) + '</span></div>';
+              }
+              var avg = count ? (sum / count) : 0;
+              var avgRounded = Math.round(avg * 10) / 10;
+              var avgCls = 'status-neutral';
+              if (avg >= 2) avgCls = 'status-surplus';
+              if (avg < 0) avgCls = 'status-risk';
+              var hourLabel = (h < 10 ? '0' : '') + h + 'h';
+              var bgAlt = h % 2 === 0 ? 'rgba(99, 102, 241, 0.04)' : 'transparent';
+              hourColsHtml += '<div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 0; padding:3px 2px; background:' + bgAlt + '; border-radius:6px;">' +
+                          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-main); text-align:center; padding:3px 0; border-bottom:1px solid var(--glass-border); letter-spacing:0.3px;">' + hourLabel + '</div>' +
+                          cells +
+                          '<div class="heatmap-cell idp-static ' + avgCls + '" style="margin-top:4px; border:2px solid var(--glass-border); border-radius:6px; padding:5px 0; box-shadow:0 1px 3px rgba(0,0,0,0.06);"><span style="font-size:0.55rem; opacity:0.9; font-weight:800; letter-spacing:1px;">AVG</span><span style="font-size:0.85rem; font-weight:800; font-family:monospace;">' + (avgRounded>0?'+'+avgRounded:avgRounded) + '</span></div>' +
+                      '</div>';
+          }
+          var dayAvg = dayNetCount ? Math.round((dayNetSum / dayNetCount) * 10) / 10 : 0;
+          var dayAvgCls = dayAvg >= 2 ? 'status-surplus' : (dayAvg < 0 ? 'status-risk' : 'status-neutral');
+          var dayAvgHtml = '<div class="heatmap-cell idp-static ' + dayAvgCls + '" style="margin-top:14px; padding:14px 24px; border-radius:12px; flex-direction:row; gap:16px; justify-content:center; border:2px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.08);"><span style="font-size:0.75rem; font-weight:800; letter-spacing:2px; opacity:0.9;">DAY AVERAGE IDP</span><span style="font-size:1.6rem; font-weight:800; font-family:monospace;">' + (dayAvg>0?'+'+dayAvg:dayAvg) + '</span></div>';
+          var gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muTextIn ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muTextIn + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpTextIn + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
+      return gridHtml;
   }
 
   function renderTracker() {
@@ -2148,39 +3084,7 @@
 
       var gridHtml = '';
       if (!isCoach && state.trackerMode === 'furlough' && d.mode === 'day') {
-          var hourColsHtml = '';
-          var grid = d.grid || [];
-          var dayNetSum = 0, dayNetCount = 0;
-          for (var h = 0; h < 24; h++) {
-              var cells = '';
-              var sum = 0, count = 0;
-              for (var q = 0; q < 4; q++) {
-                  var b = grid[h*4 + q];
-                  if (!b) continue;
-                  var cls = 'status-neutral';
-                  if (b.net >= 2) cls = 'status-surplus';
-                  if (b.net < 0) cls = 'status-risk';
-                  sum += b.net; count++;
-                  dayNetSum += b.net; dayNetCount++;
-                  cells += '<div class="heatmap-cell idp-static ' + cls + '" style="padding:4px 1px;"><span style="font-size:0.62rem; opacity:0.8; font-weight:700;">' + escapeHTML(b.label || '') + '</span><span style="font-size:0.8rem; font-weight:800; font-family:monospace;">' + (b.net>0?'+'+b.net:b.net) + '</span></div>';
-              }
-              var avg = count ? (sum / count) : 0;
-              var avgRounded = Math.round(avg * 10) / 10;
-              var avgCls = 'status-neutral';
-              if (avg >= 2) avgCls = 'status-surplus';
-              if (avg < 0) avgCls = 'status-risk';
-              var hourLabel = (h < 10 ? '0' : '') + h + 'h';
-              var bgAlt = h % 2 === 0 ? 'rgba(99, 102, 241, 0.04)' : 'transparent';
-              hourColsHtml += '<div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 0; padding:3px 2px; background:' + bgAlt + '; border-radius:6px;">' +
-                          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-main); text-align:center; padding:3px 0; border-bottom:1px solid var(--glass-border); letter-spacing:0.3px;">' + hourLabel + '</div>' +
-                          cells +
-                          '<div class="heatmap-cell idp-static ' + avgCls + '" style="margin-top:4px; border:2px solid var(--glass-border); border-radius:6px; padding:5px 0; box-shadow:0 1px 3px rgba(0,0,0,0.06);"><span style="font-size:0.55rem; opacity:0.9; font-weight:800; letter-spacing:1px;">AVG</span><span style="font-size:0.85rem; font-weight:800; font-family:monospace;">' + (avgRounded>0?'+'+avgRounded:avgRounded) + '</span></div>' +
-                      '</div>';
-          }
-          var dayAvg = dayNetCount ? Math.round((dayNetSum / dayNetCount) * 10) / 10 : 0;
-          var dayAvgCls = dayAvg >= 2 ? 'status-surplus' : (dayAvg < 0 ? 'status-risk' : 'status-neutral');
-          var dayAvgHtml = '<div class="heatmap-cell idp-static ' + dayAvgCls + '" style="margin-top:14px; padding:14px 24px; border-radius:12px; flex-direction:row; gap:16px; justify-content:center; border:2px solid var(--glass-border); box-shadow:0 2px 8px rgba(0,0,0,0.08);"><span style="font-size:0.75rem; font-weight:800; letter-spacing:2px; opacity:0.9;">DAY AVERAGE IDP</span><span style="font-size:1.6rem; font-weight:800; font-family:monospace;">' + (dayAvg>0?'+'+dayAvg:dayAvg) + '</span></div>';
-          gridHtml = '<div class="aether-card" style="grid-column: 1 / -1; margin-bottom:24px;"><div class="section-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom:1px solid var(--glass-border); padding-bottom:12px; margin-bottom:16px;"><div style="display:flex; align-items:center; gap:12px;"><span>Intraday IDP Heatmap</span>' + (muText ? '<span style="font-size:0.65rem; color:var(--accent-primary); font-weight:800; background:rgba(99, 102, 241, 0.1); padding:4px 8px; border-radius:6px; letter-spacing:0.5px;">MU SET: ' + muText + '</span>' : '') + '</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; display:flex; align-items:center; gap:6px; background:var(--bg-root); padding:4px 10px; border-radius:8px; border:1px solid var(--glass-border);"><i data-lucide="database" width="14"></i> ' + idpText + '</div></div><div style="display:flex; flex-wrap:nowrap; gap:2px; width:100%;">' + hourColsHtml + '</div>' + dayAvgHtml + '</div>';
+          gridHtml = renderIdpHeatmapTile(d.grid, idpText, muText);
       }
 
       // ───────── SAFE MODE: forensic scheduler ─────────
@@ -3259,9 +4163,11 @@
   // ───────────────── PERSONALIZED MANAGEMENT VIEW (per-browser) ────────────────
   // A manager can hide built-in KPI cards and ADD focused "tracker sections"
   // (Overtime, Coaching, SAFE, Absence, …). Every section is powered by the
-  // SAME management dashboard data, so it automatically follows the Sun–Sat
-  // management week — no Wed–Wed / Week A-B mismatch. Layout persists in
-  // localStorage so each manager keeps their own view.
+  // SAME management dashboard data, so it follows the period picked in the
+  // header (Daily / Weekly / Monthly / Quarterly / YTD) — no Wed–Wed / Week A-B
+  // mismatch. Embedded trackers follow that same period: see
+  // mgmtGrainToTrackerMode. Layout persists in localStorage so each manager
+  // keeps their own view.
   var MGMT_LAYOUT_KEY = 'mgmt_layout_v1';
   // Section registry: a label, color, the per-bucket series getter and the
   // period total getter (read off the dashboard payload).
@@ -3292,8 +4198,9 @@
   // list. Add a tracker here once and it shows up in both — no other wiring.
   // `embeddable` trackers can be dropped into the Management View as a card;
   // `fetch` picks the backend (workforce trackers just pass their id as mode).
-  // NOTE: operational trackers run a Wed→Wed week, so an embed shows that
-  // tracker's native week (its label is surfaced) — not the Sun–Sat window.
+  // NOTE: an embed is scoped to the period selected in the Management header,
+  // translated to the tracker's own mode vocabulary by mgmtGrainToTrackerMode.
+  // Each card surfaces the window the backend actually used (data.label).
   var TRACKERS = [
       { id: 'furlough', label: 'Furlough Tracker', color: '#0ea5e9', embeddable: true, fetch: 'workforce', region: 'Onshore' },
       { id: 'coaching', label: 'Coaching Tracker', color: '#f59e0b', embeddable: true, fetch: 'workforce', region: 'All' },
@@ -3304,21 +4211,29 @@
   ];
   function trackerById(id) { for (var i = 0; i < TRACKERS.length; i++) { if (TRACKERS[i].id === id) return TRACKERS[i]; } return null; }
   function embeddableTrackers() { return TRACKERS.filter(function(t) { return t.embeddable; }); }
+  // The Management grain buttons (day/week/month/quarter/ytd) and the trackers'
+  // own mode vocabulary agree everywhere except "week": a Management week is
+  // Sun–Sat, which the trackers call 'week_sun' — plain 'week' there is the
+  // Wed→Wed operational week. Everything else passes straight through.
+  function mgmtGrainToTrackerMode(g) { return g === 'week' ? 'week_sun' : (g || 'week_sun'); }
   function fetchMgmtEmbed(type) {
       var t = trackerById(type);
       if (typeof google === 'undefined' || !t || !t.embeddable) return;
       var ref = state.mgmtDate;
-      var key = type + '|' + ref;
+      var mode = mgmtGrainToTrackerMode(state.mgmtGrain);
+      // The grain HAS to be in the key: switching Weekly→Monthly leaves mgmtDate
+      // untouched, so without it the early return below would serve the stale
+      // weekly payload and the card would never move off the week.
+      var key = type + '|' + ref + '|' + mode;
       var E = state.mgmtEmbed;
       if (E.key[type] === key && E.data[type] && !E.data[type].error) return;
       E.key[type] = key; E.loading[type] = true;
       var ok = function(res) { try { E.data[type] = JSON.parse(res); } catch (e) { E.data[type] = { error: 'Could not parse tracker data.' }; } E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var fail = function(err) { E.data[type] = { error: (err && err.message) || 'Tracker backend error.' }; E.loading[type] = false; if (state.view === 'mgmt') render(); };
       var r = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
-      // 'week_sun' = Sunday→Saturday calendar week, matching the Management View.
-      if (t.fetch === 'overtime') r.getOvertimeAnalytics('week_sun', ref, t.region || 'All', 'ALL');
-      else if (t.fetch === 'safe') r.getSafeAnalytics('week_sun', ref, t.region || 'All', 'ALL');
-      else r.getWorkforceAnalytics('week_sun', ref, type, t.region || 'All', 'ALL'); // generic workforce tracker (mode = id)
+      if (t.fetch === 'overtime') r.getOvertimeAnalytics(mode, ref, t.region || 'All', 'ALL');
+      else if (t.fetch === 'safe') r.getSafeAnalytics(mode, ref, t.region || 'All', 'ALL');
+      else r.getWorkforceAnalytics(mode, ref, type, t.region || 'All', 'ALL'); // generic workforce tracker (tracker id passed separately)
   }
   window.addMgmtEmbed = function(type) { var L = getMgmtLayout(); var t = trackerById(type); if (t && t.embeddable && L.embeds.indexOf(type) === -1) { L.embeds.push(type); saveMgmtLayout(); fetchMgmtEmbed(type); render(); } };
   window.removeMgmtEmbed = function(type) { var L = getMgmtLayout(); var i = L.embeds.indexOf(type); if (i > -1) { L.embeds.splice(i, 1); saveMgmtLayout(); render(); } };
@@ -3328,7 +4243,7 @@
   window.addMgmtSection = function(type) { var L = getMgmtLayout(); if (MGMT_SECTIONS[type] && L.sections.indexOf(type) === -1) { L.sections.push(type); saveMgmtLayout(); render(); } };
   window.removeMgmtSection = function(type) { var L = getMgmtLayout(); var i = L.sections.indexOf(type); if (i > -1) { L.sections.splice(i, 1); saveMgmtLayout(); render(); } };
   window.setMgmtSectionChart = function(type, kind) { var L = getMgmtLayout(); L.chart[type] = kind; saveMgmtLayout(); render(); };
-  window.resetMgmtLayout = function() { state.mgmtLayout = { hidden: {}, sections: [], chart: {} }; saveMgmtLayout(); render(); };
+  window.resetMgmtLayout = function() { state.mgmtLayout = { hidden: {}, sections: [], chart: {}, embeds: [] }; saveMgmtLayout(); render(); };
 
   // Customize panel — chips to re-show hidden cards + add tracker sections.
   function mgmtCustomizePanel() {
@@ -3355,7 +4270,7 @@
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + embedChips + '</div>' +
           '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">KPI cards <span style="text-transform:none; font-weight:600;">(show / hide)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">' + cardChips + '</div>' +
-          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add a quick metric <span style="text-transform:none; font-weight:600;">(Sun–Sat mini-chart)</span></div>' +
+          '<div style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Add a quick metric <span style="text-transform:none; font-weight:600;">(mini-chart, follows the selected period)</span></div>' +
           '<div style="display:flex; flex-wrap:wrap; gap:6px;">' + sectionChips + '</div>' +
           '</div>';
   }
@@ -3404,19 +4319,51 @@
       }).join('') + '</div>';
   }
 
-  // Charts for embedded trackers (shift-split doughnut from each tracker's totals).
+  // Charts for embedded trackers. On a month/quarter/YTD grain a single doughnut
+  // of period totals reads as one undifferentiated ring, so when the backend
+  // hands us a month-over-month `trend` we draw that instead — with the months
+  // the selected period actually spans (`periodKeys`) highlighted. Trackers with
+  // no top-level trend (Overtime, SAFE) keep the shift-split doughnut.
   function buildMgmtEmbedCharts() {
       if (typeof Chart === 'undefined') return;
       var L = getMgmtLayout();
       var t = _mgmtChartTheme();
       var ff = "'Outfit', sans-serif";
+      var grain = state.mgmtGrain;
+      var wantsTrend = (grain === 'month' || grain === 'quarter' || grain === 'ytd');
       Object.keys(charts).forEach(function(k) { if (k.indexOf('mgmtEmbed_') === 0 && charts[k]) { charts[k].destroy(); charts[k] = null; } });
       (L.embeds || []).forEach(function(type) {
           var data = state.mgmtEmbed.data[type];
           if (!data || data.error) return;
           var el = document.getElementById('mgmt-embed-' + type); if (!el) return;
           var key = 'mgmtEmbed_' + type;
+          var e = trackerById(type) || {};
           var T = data.totals || {};
+
+          // ── Month-over-month bars (month / quarter / YTD, when trend exists) ──
+          var trend = (wantsTrend && data.trend && data.trend.length) ? data.trend : null;
+          if (trend) {
+              var inPeriod = data.periodKeys || [];
+              var tColor = e.color || '#818cf8';
+              charts[key] = new Chart(el.getContext('2d'), {
+                  type: 'bar',
+                  data: { labels: trend.map(function(m) { return m.label; }),
+                          datasets: [{ label: 'Hours',
+                                       data: trend.map(function(m) { return m.hours || 0; }),
+                                       backgroundColor: trend.map(function(m) { return inPeriod.indexOf(m.key) !== -1 ? tColor : (t.isDark ? 'rgba(255,255,255,0.13)' : 'rgba(15,23,42,0.10)'); }),
+                                       borderRadius: 5, borderSkipped: false, maxBarThickness: 26 }] },
+                  options: { responsive: true, maintainAspectRatio: false,
+                      plugins: { legend: { display: false },
+                          tooltip: { backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10,
+                              callbacks: { label: function(c2) { var m = trend[c2.dataIndex] || {}; var sel = inPeriod.indexOf(m.key) !== -1 ? ' · selected' : ''; return ' ' + (Math.round((c2.parsed.y || 0) * 10) / 10) + 'h' + sel; },
+                                           afterBody: function(items) { var m = trend[items[0].dataIndex] || {}; return (m.weekA != null && m.weekB != null) ? ['Week A ' + (Math.round(m.weekA * 10) / 10) + 'h · Week B ' + (Math.round(m.weekB * 10) / 10) + 'h'] : []; } } } },
+                      scales: { x: { grid: { display: false }, ticks: { color: t.textColor, font: { family: ff, weight: '700', size: 10 } } },
+                                y: { beginAtZero: true, grid: { color: t.gridColor }, ticks: { color: t.textColor, font: { family: ff, weight: '700', size: 10 }, callback: function(v) { return v + 'h'; } } } },
+                      animation: { duration: 500 } }
+              });
+              return;
+          }
+
           var labels, vals, colors;
           if (type === 'safe' && data.coverage && data.coverage.headline) {
               labels = ['Scheduled', 'OT']; vals = [T.sched || 0, T.ot || 0]; colors = ['#6366f1', '#f472b6'];
@@ -3429,7 +4376,8 @@
                   tooltip: { backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, usePointStyle: true, callbacks: { label: function(c2) { var v = c2.parsed || 0; var pct = sum > 0 ? Math.round(v / sum * 100) : 0; return ' ' + c2.label + ': ' + (Math.round(v * 10) / 10) + 'h (' + pct + '%)'; } } } },
               animation: { duration: 500 } };
           if (sum <= 0) {
-              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: ['No hours this week'], datasets: [{ data: [1], backgroundColor: [t.gridColor], borderWidth: 0 }] }, options: Object.assign({}, dOpts, { plugins: { legend: { display: false }, tooltip: { enabled: false } } }) });
+              var noneLbl = 'No hours in ' + (data.label || 'this period');
+              charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: [noneLbl], datasets: [{ data: [1], backgroundColor: [t.gridColor], borderWidth: 0 }] }, options: Object.assign({}, dOpts, { plugins: { legend: { display: false }, tooltip: { enabled: false } } }) });
           } else {
               charts[key] = new Chart(el.getContext('2d'), { type: 'doughnut', data: { labels: labels, datasets: [{ data: vals, backgroundColor: colors, borderColor: t.isDark ? '#0f172a' : '#fff', borderWidth: 2 }] }, options: dOpts });
           }
@@ -4564,8 +5512,8 @@
 
   function formatWindString(val) { if (!val) return ""; var w = val.toString(); if (w.toLowerCase().indexOf("light") !== -1) w = "~5"; if (w.indexOf("G") !== -1) return w.replace("G", " km/h Gust "); else if (w.match(/^\d/) || w === "~5") return w + " km/h"; return w; }
   
-  window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; if(typeof google!=='undefined') google.script.run.updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); showToast("Saved"); render(); };
-  window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; if(typeof google!=='undefined') google.script.run.submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); showToast("Logged"); render(); } };
+  window.saveBreaks = function() { var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) { var newBreaks = (agent.rawBreaks || []).map(function(b, i) { return { type: b.type, start: document.getElementById("bs-"+i).value, end: document.getElementById("be-"+i).value }; }); agent.rawBreaks = newBreaks; agent.isModified = true; _floorEditSeq++; if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(){ showToast("Breaks saved"); fetchData(); }).withFailureHandler(function(err){ showToast("Break save failed: " + ((err && err.message) || 'unknown') + " — reverted"); fetchData(); }).updateAgentBreaks(name, JSON.stringify(newBreaks)); } document.getElementById('break-modal').classList.remove('open'); render(); };
+  window.saveOvertime = function() { var name = state.selectedAgent; var s = document.getElementById('ot-start').value; var e = document.getElementById('ot-end').value; if(s && e) { var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(agent) agent.isOT = true; _floorEditSeq++; if(typeof google!=='undefined') google.script.run.withSuccessHandler(function(){ showToast("Overtime logged"); fetchData(); }).withFailureHandler(function(err){ showToast("OT log failed: " + ((err && err.message) || 'unknown') + " — reverted"); fetchData(); }).submitOvertime(name, s, e, "", ""); document.getElementById('ot-modal').classList.remove('open'); render(); } };
   
   // Threshold above which the paste won't survive a single google.script.run
   // call (it silently drops with no error). Anything bigger is sent in
@@ -4575,7 +5523,7 @@
   var DIRECT_LIMIT = 800 * 1024;
   var CHUNK_SIZE   = 50 * 1024;
 
-  function _chunkUpload(text, kind, onSuccess, onFailure) {
+  function _chunkUpload(text, kind, onSuccess, onFailure, period) {
       var token = 't' + Date.now() + Math.random().toString(36).slice(2, 8);
       var total = Math.ceil(text.length / CHUNK_SIZE);
       console.log('[sync] chunked upload: ' + total + ' chunks of ~' + CHUNK_SIZE + ' bytes');
@@ -4587,7 +5535,7 @@
               google.script.run
                   .withSuccessHandler(onSuccess)
                   .withFailureHandler(onFailure)
-                  .processChunkedImport(token, total, kind);
+                  .processChunkedImport(token, total, kind, period ? period.start : '', period ? period.end : '', period ? period.label : '');
               return;
           }
           var slice = text.slice(sent * CHUNK_SIZE, (sent + 1) * CHUNK_SIZE);
@@ -4675,15 +5623,20 @@
           || /^date\s*\t\s*start/i.test(trimmed)                                    // flattened table header
           || /^\d{1,2}\/\d{1,2}\/\d{2,4}\t\d{1,2}:\d{2}\s*[AP]M\t/i.test(trimmed); // header-less table rows
       var isIdp = !isOtOpen && (lower.includes('occupied seats') || lower.includes('sièges occupés'));
+      // Genesys Cloud "Agent Performance Summary" (per-agent voice, real comma
+      // CSV). Its header carries none of the other sniffers' markers, but claim it
+      // first anyway so a future Genesys column can never be captured by them.
+      var isGenesys = lower.indexOf('alert - no answer') !== -1
+          || (lower.indexOf('interval start') !== -1 && lower.indexOf('avg handle') !== -1);
       // IEX/BI report pastes that feed the Management View.
-      var isActivity = lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1);
+      var isActivity = !isGenesys && (lower.indexOf('exception grp') !== -1 || (lower.indexOf('activity name') !== -1 && lower.indexOf('week of ref') !== -1));
       // Forecast report ("Fcst Alarm"/"Fcst Acc", no service-type column) — must
       // be tested BEFORE alarms because it also carries "AHT Secs".
-      var isForecast = !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
-      var isAlarms = !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
+      var isForecast = !isGenesys && !isActivity && (lower.indexOf('fcst alarm') !== -1 || lower.indexOf('fcst acc') !== -1) && lower.indexOf('servtype') === -1;
+      var isAlarms = !isGenesys && !isActivity && !isForecast && (lower.indexOf('servtype') !== -1 || lower.indexOf('servicetype') !== -1) && (lower.indexOf('alarm vol') !== -1 || lower.indexOf('aht secs') !== -1);
       // SAFE / SmartWear per-agent export (ACTIVE TIME + AGENT LANGUAGES / SOS volume).
-      var isSafe = !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
-      var kind = isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched')))));
+      var isSafe = !isGenesys && !isActivity && !isForecast && lower.indexOf('active time') !== -1 && (lower.indexOf('agent languages') !== -1 || lower.indexOf('mobile sos') !== -1 || lower.indexOf('volume act') !== -1);
+      var kind = isGenesys ? 'genesys' : (isActivity ? 'activity' : (isForecast ? 'forecast' : (isSafe ? 'safe' : (isAlarms ? 'alarms' : (isOtOpen ? 'otopen' : (isIdp ? 'idp' : 'sched'))))));
 
       // 3-minute backstop. Apps Script's hard execution limit is 6 min; if
       // import takes that long and times out, the failure handler may not
@@ -4727,7 +5680,7 @@
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
           if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
-          var notifMsg = isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')))));
+          var notifMsg = isGenesys ? 'Global Update: Genesys Agent Performance Refreshed.' : isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')))));
           google.script.run.addGlobalNotification(notifMsg);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
       };
@@ -4757,6 +5710,18 @@
           var sp = safePeriodBounds();
           showToast('SAFE roster detected — tagging ' + sp.label + '…');
           google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importSafeReport(t, sp.start, sp.end, sp.label);
+          return;
+      }
+      if (kind === 'genesys') {
+          // Same period-tagging as SAFE: the export's own Interval Start has been
+          // seen arriving as 2008, so the picker is what we trust.
+          var gp = safePeriodBounds();
+          showToast('Genesys agent report detected — tagging ' + gp.label + '…');
+          // A per-interval export can be far bigger than the aggregated one, so
+          // honour the chunked transport here rather than letting a large paste
+          // fail on the direct call.
+          if (t.length > DIRECT_LIMIT) _chunkUpload(t, 'genesys', onSuccess, onFailure, gp);
+          else google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).importGenesysReport(t, gp.start, gp.end, gp.label);
           return;
       }
       if (t.length > DIRECT_LIMIT) {

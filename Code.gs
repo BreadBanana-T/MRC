@@ -78,6 +78,12 @@ function fetchLogs(filterFn) {
 
 // --- ACTIONS ---
 function updateAgentStatus(n, t, v) { _stampAction('agent_status', 'Agent status update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setStatus(n, t, v); }
+// Genesys Cloud manual assignment: channel = 'inbound' | 'outbound' | '' (back to Avaya), queuesJson = JSON array of queue ids (inbound only).
+function updateAgentGenesys(n, channel, queuesJson) { _stampAction('agent_status', 'Genesys assignment'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setGenesys(n, channel, queuesJson); }
+// Batch variant: namesJson = JSON array of agent names, one save for the whole group.
+function updateAgentGenesysBatch(namesJson, channel, queuesJson) { _stampAction('agent_status', 'Genesys batch assignment'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setGenesysBatch(namesJson, channel, queuesJson); }
+// Replace an agent's whole role string (used to remove one role off a stack).
+function setAgentRoles(n, roleStr) { _stampAction('agent_status', 'Agent role update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setRoles(n, roleStr); }
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }
@@ -153,6 +159,13 @@ function importSafeReport(t, startStr, endStr, label) {
   var r = (typeof ReportImport !== 'undefined') ? ReportImport.importSafe(t, startStr, endStr, label) : 'Error';
   _bustWfCache(); return r;
 }
+// Genesys Cloud "Agent Performance Summary". The export's own Interval Start is
+// not trustworthy, so the Import modal's grain+date picker is passed through the
+// same way the (dateless) SAFE roster does it.
+function importGenesysReport(t, startStr, endStr, label) {
+  var r = (typeof ReportImport !== 'undefined') ? ReportImport.importGenesysAgents(t, startStr, endStr, label) : 'Error';
+  _bustWfCache(); return r;
+}
 
 // --- WORKFORCE TRACKER EXPORTS ---
 function getWorkforceAnalytics(mode, date, type, region, cycleFilter) { 
@@ -204,9 +217,11 @@ function uploadChunk(token, index, total, chunk) {
   return index + 1;
 }
 
-function processChunkedImport(token, total, kind) {
+// `periodStart`/`periodEnd`/`periodLabel` are only used by report kinds that
+// have to be tagged with the period they cover (see importGenesysReport).
+function processChunkedImport(token, total, kind, periodStart, periodEnd, periodLabel) {
   Logger.log('[chunkedImport] start: token=' + token + ' total=' + total + ' kind=' + kind);
-  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : 'WFM data import')));
+  _stampAction('import', (kind === 'idp' ? 'IDP import' : (kind === 'otopen' ? 'OT slots import' : (kind === 'genesys' ? 'Genesys report import' : 'WFM data import'))));
   var cache = CacheService.getScriptCache();
   var keys = [];
   for (var i = 0; i < total; i++) keys.push('uplk_' + token + '_' + i);
@@ -228,6 +243,8 @@ function processChunkedImport(token, total, kind) {
     result = (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.importData('', fullText) : 'Error';
   } else if (kind === 'otopen') {
     result = (typeof OvertimeTracker !== 'undefined') ? OvertimeTracker.importOpenSlots(fullText) : 'Error';
+  } else if (kind === 'genesys') {
+    result = (typeof ReportImport !== 'undefined') ? ReportImport.importGenesysAgents(fullText, periodStart, periodEnd, periodLabel) : 'Error';
   } else {
     if (typeof ImportHandler !== 'undefined') {
       Logger.log('[chunkedImport] running ImportHandler...');
@@ -262,6 +279,14 @@ function getPowerOutages() {
 }
 function getOutageHistory() {
   return (typeof OutageTracker !== 'undefined') ? OutageTracker.getHistorySeries(26) : "[]";
+}
+
+// --- ALARM.COM STANDBY STATUS (operational-system uptime) ---
+function getAlarmComStatus() {
+  return (typeof AlarmComMonitor !== 'undefined') ? AlarmComMonitor.getStatus() : "{}";
+}
+function getAlarmComHistory() {
+  return (typeof AlarmComMonitor !== 'undefined') ? AlarmComMonitor.getHistorySeries(24) : "[]";
 }
 
 // --- STAFFING BALANCE (current 15-min IDP bucket) ---

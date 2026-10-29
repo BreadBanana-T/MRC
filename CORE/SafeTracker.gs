@@ -600,12 +600,13 @@ var SafeTracker = {
     if (['EN', 'FR', 'BL'].indexOf(lang) === -1) lang = 'EN';
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sh = ss.getSheetByName('WF_LANG_MAP');
-    if (!sh) { sh = ss.insertSheet('WF_LANG_MAP'); sh.appendRow(['Agent Key', 'Display Name', 'Lang']); }
+    if (!sh) { sh = ss.insertSheet('WF_LANG_MAP'); sh.appendRow(['Agent Key', 'Display Name', 'Lang', 'Source']); }
     var key = this._normKey(name);
     var last = sh.getLastRow();
     var rows = last > 1 ? sh.getRange(2, 1, last - 1, 3).getValues() : [];
-    for (var i = 0; i < rows.length; i++) { if (String(rows[i][0]) === key) { sh.getRange(i + 2, 2, 1, 2).setValues([[name, lang]]); return 'OK'; } }
-    sh.appendRow([key, name, lang]); return 'OK';
+    // Tagged 'manual' so a later roster or SAFE-report import leaves it alone.
+    for (var i = 0; i < rows.length; i++) { if (String(rows[i][0]) === key) { sh.getRange(i + 2, 2, 1, 3).setValues([[name, lang, 'manual']]); return 'OK'; } }
+    sh.appendRow([key, name, lang, 'manual']); return 'OK';
   },
   // Distinct dates that actually have a full shift envelope (for the Compare
   // "jump to latest schedule" hint). Newest first, capped.

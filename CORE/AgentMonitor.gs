@@ -3,12 +3,40 @@
  */
 
 var AgentMonitor = {
-  getPayload: function() { return compileFloorData(); },
-  setStatus: function(n, t, v) { return RoleManager.setStatus(n, t, v); },
-  updateAgentBreaks: function(n, j) { return StatusTracker.updateBreaks(n, j); },
+  // ── Payload cache ─────────────────────────────────────────────────────────
+  // compileFloorData re-reads Raw Schedule, WF_MASTERLIST, WF_LANG_MAP,
+  // WF_REGION_MAP and three override sheets IN FULL, every poll, for every open
+  // tab (60s in the app, 30s in a popout, plus a notification-triggered
+  // refetch). Nothing was cached, unlike OutageTracker and AlarmComMonitor
+  // which both do exactly this. 20s is deliberately short — this is live floor
+  // state, not a report — and ANY write busts it, so an assignment still shows
+  // up immediately instead of waiting out the TTL.
+  CACHE_KEY: 'MRC_FLOOR_V1',
+  CACHE_TTL_SECONDS: 20,
+
+  _bust: function() {
+    try { CacheService.getScriptCache().remove(this.CACHE_KEY); } catch (e) {}
+  },
+
+  getPayload: function() {
+    try {
+      const hit = CacheService.getScriptCache().get(this.CACHE_KEY);
+      if (hit) return hit;
+    } catch (e) {}
+    const payload = compileFloorData();
+    try { CacheService.getScriptCache().put(this.CACHE_KEY, payload, this.CACHE_TTL_SECONDS); } catch (e) {}
+    return payload;
+  },
+
+  setStatus: function(n, t, v) { const r = RoleManager.setStatus(n, t, v); this._bust(); return r; },
+  setRoles: function(n, roleStr) { const r = RoleManager.setRoles(n, roleStr); this._bust(); return r; },
+  setGenesys: function(n, ch, q) { const r = RoleManager.setGenesys(n, ch, q); this._bust(); return r; },
+  setGenesysBatch: function(nJson, ch, q) { const r = RoleManager.setGenesysBatch(nJson, ch, q); this._bust(); return r; },
+  updateAgentBreaks: function(n, j) { const r = StatusTracker.updateBreaks(n, j); this._bust(); return r; },
   logOvertime: function(n, s, e, bs, be) { 
       const res = StatusTracker.logOvertime(n, s, e, bs, be);
       if(typeof NotificationHandler !== 'undefined') NotificationHandler.add(n, `OVERTIME: ${s}-${e}`);
+      this._bust();
       return res;
   },
   syncFromRaw: function() { return "Synced"; }
@@ -23,7 +51,7 @@ function compileFloorData() {
   let sheet = localSS.getSheetByName("Raw Schedule");
   
   const emptyFloor = {
-    active: [], startingSoon: [], safe: [], icl: [], ulc: [], training: [],
+    active: [], startingSoon: [], safe: [], training: [],
     upcomingBreak: [], vacation: [], planned: [], unplanned: [], off: []
   };
 
@@ -41,9 +69,25 @@ function compileFloorData() {
               level: r[1],
               manager: r[2],
               skills: r[3],
+              lang: r[6] || "",   // Language, added by the roster import
               isOffshore: isOffshore
           };
       });
+  }
+
+  // WF_LANG_MAP is the authoritative language store — it holds the manual
+  // per-agent overrides as well as the bulk imports — so it wins over the
+  // masterlist column, which is only the roster's own value.
+  let langMap = {};
+  {
+      const dbLang = localSS.getSheetByName('WF_LANG_MAP');
+      if (dbLang && dbLang.getLastRow() > 1) {
+          dbLang.getDataRange().getDisplayValues().slice(1).forEach(r => {
+              const k = String(r[0] || '').trim();
+              const lv = String(r[2] || '').trim().toUpperCase();
+              if (k && lv) langMap[k] = lv;
+          });
+      }
   }
 
   const data = (sheet && sheet.getLastRow() > 1) ? sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues() : [];
@@ -61,6 +105,8 @@ function compileFloorData() {
 
     let manualRole = (fastData.role !== undefined) ? fastData.role : (persistentData.role || "");
     let absentType = (fastData.absent !== undefined) ? fastData.absent : (persistentData.absent || (row ? row[9] : ""));
+    // Genesys Cloud manual assignment (fast map wins, else sheet). null = on Avaya.
+    let genesysData = (fastData.genesys !== undefined) ? fastData.genesys : (persistentData.genesys || null);
     let shiftType = row ? row[5] : "Off";
     
     // Region resolution order: RegionRegistry > MasterList inference > Raw Schedule row.
@@ -76,7 +122,11 @@ function compileFloorData() {
     let originalBreaksJson = row ? row[7] : "[]";
     let agentID = row ? row[1] : "";
     
-    if (manualRole && manualRole !== "") absentType = "";
+    // A role used to WIPE the absence here, which made "Mark Sick" a no-op for
+    // anyone holding a role (the next payload threw the absence away) and left no
+    // way to un-mark an absence at all. Role and absence are independent now; the
+    // category decision below already gives absence precedence.
+    
 
     const otList = persistentData.ot || [];
     const customBreaks = persistentData.breaks;
@@ -213,6 +263,9 @@ function compileFloorData() {
        });
     }
 
+    // ICL and ULC FIRE are retired as roles. The Genesys icl_* QUEUES remain —
+    // they're queues, not the legacy role — but they no longer synthesize an
+    // 'ICL' role token, because there's no ICL card left to surface it in.
     let effectiveRole = manualRole || dynamicRoleNow;
     let category = "active";
     let subStatus = effectiveRole || "";
@@ -223,14 +276,22 @@ function compileFloorData() {
         effectiveRole = ""; 
     } else {
         if (absentType) {
-            const upper = absentType.toUpperCase();
-            if (upper.match(/NCNS|UNAB|AWOL|COMP/) && rawBreaks.length > 1) category = "active";
-            // NEW: Push PW/ALT and Personal into the Unplanned / Needs Attention bucket
-            else if (upper.match(/SICK|NCNS|UNAB|AWOL|COMP|PW\/ALT|PERSONAL|WELLNESS/)) { category = "unplanned"; subStatus = absentType; }
+            // A real absence ALWAYS lands in Needs Attention — an agent coded UNAB or
+            // TI LOA must be visible. There used to be an escape hatch here that sent
+            // them back to "active" whenever they had more than one break row, which
+            // hid 157 of 208 real UNAB agent-days (offshore agents keep their TI
+            // break/lunch rows on an absence day). The intent behind it was real —
+            // someone can be UNAB for a few hours and present for the rest — so that
+            // nuance now lives in the LABEL, not in the bucket: the importer marks a
+            // worked absence day "(part day)". Nobody gets hidden.
+            var _unplanned = (typeof isUnplannedAbsenceType === 'function')
+                ? isUnplannedAbsenceType(absentType)
+                : /SICK|NCNS|UNAB|AWOL|COMP|ALU|LOA|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/.test(absentType.toUpperCase());
+            if (_unplanned) { category = "unplanned"; subStatus = absentType; }
             else { category = "vacation"; subStatus = absentType; }
         } 
 
-        if (['active', 'safe', 'icl', 'ulc'].includes(category)) {
+        if (['active', 'safe'].includes(category)) {
             if (startEpoch && startEpoch > now) {
                  category = "startingSoon";
                  const diff = startEpoch - now;
@@ -263,7 +324,9 @@ function compileFloorData() {
       onBreakNow: onBreakNow, startEpoch: startEpoch, isOT: isOT, shiftEndsIn: shiftEndsIn,
       level: ml ? ml.level : null,
       manager: ml ? ml.manager : null,
-      skills: ml ? ml.skills : null
+      skills: ml ? ml.skills : null,
+      lang: langMap[cleanNameKey] || (ml ? ml.lang : "") || "",
+      genesys: genesysData
     };
 
     if (category === 'active' && nextBreakStr) {
@@ -293,10 +356,11 @@ function compileFloorData() {
       else if (targetCat !== "off") emptyFloor.active.push(item.agent); 
       
       if (targetCat === "active" || targetCat === "startingSoon") {
+          // SAFE is the only special role still tracked on the floor. ICL and
+          // ULC FIRE were retired (the SAFE Compare board and the trackers had
+          // already dropped them); Genesys queues cover that work now.
           const r = (item.agent.role || "").toUpperCase();
           if (r.includes('SAFE')) emptyFloor.safe.push(item.agent);
-          if (r.includes('ICL')) emptyFloor.icl.push(item.agent);
-          if (r.includes('ULC') || r.includes('FIRE')) emptyFloor.ulc.push(item.agent);
       }
   });
 

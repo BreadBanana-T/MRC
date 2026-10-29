@@ -9,11 +9,21 @@
 
 const StatusTracker = {
 
+  // Same key contract as RoleManager and AgentMonitor — see the note in
+  // RoleManager._key. Sheet rows keep the human-readable display name in the
+  // name column; only the in-memory lookup key is normalized, so legacy rows
+  // are matched correctly with no migration pass over the sheets.
+  _key: function(name) {
+    return (typeof _normalizeAgentKey === 'function')
+      ? _normalizeAgentKey(name)
+      : String(name).trim().toLowerCase();
+  },
+
   // --- 1. ROLES & ABSENCE (Status_Overrides) ---
   updateStatus: function(name, type, value) {
     const sheet = this._getSheet("Status_Overrides", ["Timestamp", "Agent Name", "Role", "Absent Type", "DateStr"]);
     const dateStr = this._getTodayStr();
-    const cleanName = String(name).trim().toLowerCase();
+    const cleanName = this._key(name);
 
     const data = sheet.getDataRange().getValues();
     let foundRow = -1;
@@ -51,14 +61,17 @@ const StatusTracker = {
     }
 
     if (foundRow > -1) {
-      sheet.getRange(foundRow, 1).setValue(now);
-      if (type === 'role') sheet.getRange(foundRow, 3).setValue(value);
-      if (type === 'absent') sheet.getRange(foundRow, 4).setValue(value);
+      // One setValues instead of up to three single-cell setValue round-trips.
+      const cur = data[foundRow - 1];
+      const roleVal = (type === 'role') ? value : (cur[2] || "");
+      const absentVal = (type === 'absent') ? value : (cur[3] || "");
+      sheet.getRange(foundRow, 1, 1, 5).setValues([[now, name, roleVal, absentVal, dateStr]]);
     } else {
       let roleVal = type === 'role' ? value : "";
       let absentVal = type === 'absent' ? value : "";
       sheet.appendRow([now, name, roleVal, absentVal, dateStr]);
     }
+    this._prune(sheet, 4);
     return "Status Saved";
   },
 
@@ -66,7 +79,7 @@ const StatusTracker = {
   updateBreaks: function(name, jsonBreaks) {
     const sheet = this._getSheet("Break_Overrides", ["Timestamp", "Agent Name", "DateStr", "Breaks JSON"]);
     const dateStr = this._getTodayStr();
-    const cleanName = String(name).trim().toLowerCase();
+    const cleanName = this._key(name);
 
     const data = sheet.getDataRange().getValues();
     let foundRow = -1;
@@ -83,6 +96,7 @@ const StatusTracker = {
     } else {
       sheet.appendRow([new Date(), name, dateStr, jsonBreaks]);
     }
+    this._prune(sheet, 2);
     return "Breaks Saved";
   },
 
@@ -91,19 +105,55 @@ const StatusTracker = {
     const sheet = this._getSheet("Overtime_Tracking", ["Timestamp", "Agent Name", "OT Start", "OT End", "Break Start", "Break End", "DateStr"]);
     const dateStr = this._getTodayStr();
     sheet.appendRow([new Date(), name, start, end, bStart || "-", bEnd || "-", dateStr]);
+    this._prune(sheet, 6);
     return "OT Logged";
+  },
+
+  // --- 4. GENESYS ASSIGNMENT (Genesys_Assignments) ---
+  // One row per agent (latest wins), NO date stamp — assignments persist
+  // until the agent is explicitly moved back to Avaya (channel = "").
+  setGenesys: function(name, channel, queuesJson) {
+    return this.setGenesysBatch([name], channel, queuesJson);
+  },
+
+  // Batch write: one sheet read to index existing rows, then per-name
+  // in-place updates and a single append for the new ones.
+  setGenesysBatch: function(names, channel, queuesJson) {
+    const sheet = this._getSheet("Genesys_Assignments", ["Timestamp", "Agent Name", "Channel", "Queues JSON"]);
+    const q = channel === 'inbound' ? (queuesJson || "[]") : "[]";
+    const now = new Date();
+
+    const data = sheet.getDataRange().getValues();
+    const rowByName = {};
+    for (let i = 1; i < data.length; i++) {
+      rowByName[this._key(data[i][1])] = i + 1;
+    }
+
+    const self = this;
+    const toAppend = [];
+    names.forEach(function(name) {
+      const cleanName = self._key(name);
+      if (!cleanName) return;
+      const row = rowByName[cleanName];
+      if (row) sheet.getRange(row, 1, 1, 4).setValues([[now, name, channel || "", q]]);
+      else toAppend.push([now, name, channel || "", q]);
+    });
+    if (toAppend.length) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, toAppend.length, 4).setValues(toAppend);
+    }
+    return "Genesys Saved";
   },
 
   // --- DATA RETRIEVAL (INTELLIGENT) ---
   getConsolidatedData: function() {
     const todayStr = this._getTodayStr();
     const yesterdayStr = this._getYesterdayStr();
-    
+
     const map = new Map();
 
     const getEntry = (name) => {
-      const k = String(name).trim().toLowerCase();
-      if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [] });
+      const k = this._key(name);
+      if (!map.has(k)) map.set(k, { role: "", absent: "", breaks: null, ot: [], genesys: null });
       return map.get(k);
     };
     
@@ -133,10 +183,54 @@ const StatusTracker = {
        const e = getEntry(row[1]);
        e.ot.push({ start: row[2], end: row[3], bStart: row[4], bEnd: row[5] });
     });
+
+    // Genesys assignments are date-agnostic — read every row, latest wins.
+    const gSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Genesys_Assignments");
+    if (gSheet && gSheet.getLastRow() > 1) {
+      gSheet.getDataRange().getValues().slice(1).forEach(row => {
+        const e = getEntry(row[1]);
+        const channel = row[2];
+        if (channel) {
+          let q = [];
+          try { q = JSON.parse(row[3] || "[]"); } catch (err) { q = []; }
+          e.genesys = { channel: String(channel), queues: q };
+        } else {
+          e.genesys = null;
+        }
+      });
+    }
     return map;
   },
 
   // --- HELPERS ---
+  // Status_Overrides / Break_Overrides / Overtime_Tracking are appended to and
+  // never pruned, yet getConsolidatedData reads each one IN FULL on every poll
+  // and filters to today/yesterday in JS — so the floor got slower every day it
+  // ran. Drop rows older than the read window (with slack), the same way
+  // Schedule_History already self-prunes. dateIdx is the DateStr column.
+  PRUNE_KEEP_DAYS: 7,
+  _prune: function(sheet, dateIdx) {
+    try {
+      const last = sheet.getLastRow();
+      if (last < 400) return 0;   // don't pay for this on a small sheet
+      const cutoff = Utilities.formatDate(
+        new Date(Date.now() - this.PRUNE_KEEP_DAYS * 86400000), "America/Toronto", "yyyy-MM-dd");
+      const data = sheet.getDataRange().getValues();
+      let firstKeep = 1;
+      while (firstKeep < data.length) {
+        let d = data[firstKeep][dateIdx];
+        if (d instanceof Date) d = Utilities.formatDate(d, "America/Toronto", "yyyy-MM-dd");
+        if (String(d || '') >= cutoff) break;
+        firstKeep++;
+      }
+      // Rows are appended in time order, so everything before the first row we
+      // want to keep is stale. Bail out if that isn't a clean prefix.
+      const drop = firstKeep - 1;
+      if (drop > 0) { sheet.deleteRows(2, drop); return drop; }
+      return 0;
+    } catch (e) { return 0; }
+  },
+
   _getSheet: function(name, headers) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(name);
@@ -166,8 +260,9 @@ const StatusTracker = {
     return d === targetStr;
   },
 
+  // cleanName is already normalized by the caller; normalize the row too so a
+  // re-spelled name updates the existing row instead of appending a duplicate.
   _matchRow: function(row, cleanName, dateStr, nameIdx, dateIdx) {
-    const rName = String(row[nameIdx]).trim().toLowerCase();
-    return rName === cleanName && this._matchDate(row[dateIdx], dateStr);
+    return this._key(row[nameIdx]) === cleanName && this._matchDate(row[dateIdx], dateStr);
   }
 };

@@ -73,25 +73,20 @@ function processWFMImport(rawText, forcedDate) {
        }
 
        let shiftMatch = line.match(rgxShiftLine);
-       if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.shiftEnd = shiftMatch[3]; buffer.isOff = false; }
+       if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.shiftEnd = shiftMatch[3]; buffer.isOff = false; } 
        else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
        const upper = line.toUpperCase();
        if (upper.includes("TI ") || upper.includes("OFFSHORE")) buffer.isOffshore = true;
 
-       // Order matters: PW / ALT / PDO lines are "… Congé …" in French, so they
-       // must be tested before the generic CONGÉ → VACATION catch.
-       if (upper.includes("SICK") || upper.includes("MALADIE") || upper.includes("SICU")) {
-           if (upper.includes("PLANNED") || upper.includes("STD") || upper.includes("LTD")) buffer.absentType = "Medical Leave";
-           else buffer.absentType = "SICK";
-       }
-       else if (upper.includes("AWOL") || upper.includes("NCNS")) buffer.absentType = "NCNS";
-       else if (upper.match(/\bUNAB\b/) || upper.includes("UNAUTHORIZED ABSENCE") || upper.includes("ABSENCE NON AUTORIS")) buffer.absentType = "UNAB";
-       else if (upper.match(/\bPDO\b/) || upper.includes("PERSONAL DAY OFF")) buffer.absentType = "VACATION";
-       // Personal Wellness / ALT go to the Unplanned / Needs Attention bucket.
-       else if (upper.match(/\bPW\b/) || upper.match(/\bALT\b/) || upper.includes("PERSONAL") || upper.includes("WELLNESS")) buffer.absentType = "PW/ALT";
-       else if (upper.includes("VACATION") || upper.includes("VACP") || upper.includes("CONGÉ")) buffer.absentType = "VACATION";
-       else if (upper.match(/\bLOA\b/) || upper.includes("LEAVE OF ABSENCE")) buffer.absentType = "LOA";
+       // One shared taxonomy with the reporting pipeline — see
+       // WorkforceTracker.classifyAbsenceActivity. This block used to be a weaker
+       // private copy with NO UNAB and NO LOA branch, so 208 UNAB agent-days and 40
+       // LOA/TI LOA agent-days reached the Floor with no absence type at all. It also
+       // matched CONGÉ before PW/ALT, which made the "catch Personal Wellness" branch
+       // unreachable and filed those agents as VACATION.
+       var _absType = (typeof classifyAbsenceActivity === 'function') ? classifyAbsenceActivity(line) : '';
+       if (_absType) buffer.absentType = _absType;
 
        let actMatch = line.match(rgxActivityLine);
        if (actMatch) {
@@ -116,16 +111,20 @@ function processWFMImport(rawText, forcedDate) {
            else if (upper.includes("ULC") || upper.includes("FIRE") || upper.includes("FEU")) {
                buffer.breaks.push({ type: "ULC FIRE", start: actStart, end: actEnd });
            }
-           // Absence lines (sick, AWOL, UNAB, PW/ALT, LOA, …) must not make the
-           // engine think the agent is actively working.
-           else if (!RGX_ABSENCE_ACTIVITY.test(upper) && !upper.includes("OFF")) {
+           // Anything that isn't a recognised absence, isn't worded as an absence, and
+           // isn't an "Off" line counts as real work. The old guard tested for
+           // "ABSENT", but the real strings say "ABSENCE" ("UNAB Absence non
+           // autorisée…", "LOA Absence / Leave of Absence") — and "ABSENT" is not a
+           // substring of "ABSENCE", so the importer positively concluded those agents
+           // had worked.
+           else if (!classifyAbsenceActivity(line) && !looksLikeAbsenceWording(line) && !upper.includes("OFF")) {
                buffer.hasWork = true;
            }
 
-           // Leaving early: an absence that runs to the end of the shift pulls
-           // the shift end back to when it starts. A whole-shift absence is
-           // restored in pushAgent (otherwise end == start → "Shift Ended").
-           if (buffer.end && RGX_ABSENCE_ACTIVITY.test(upper)) {
+           // An absence block running to the end of the shift means the agent left
+           // early — truncate the shift at its start. Driven off the shared classifier
+           // so UNAB/LOA are included too.
+           if (buffer.end && (classifyAbsenceActivity(line) || looksLikeAbsenceWording(line))) {
                if (compareTimeStrings(actEnd, buffer.end)) buffer.end = actStart;
            }
        }
@@ -172,24 +171,30 @@ function processWFMImport(rawText, forcedDate) {
   }
 }
 
-// Scheduled activities that mean the agent is NOT working (whole or partial
-// shift). "ABSEN" covers both "Absent" and "Absence non autorisée".
-const RGX_ABSENCE_ACTIVITY = /VACATION|VACP|SICK|SICU|MALADIE|ABSEN|AWOL|NCNS|\bUNAB\b|\bPW\b|\bALT\b|PERSONAL|WELLNESS|\bLOA\b|\bPDO\b/;
-
 function resetBuffer() { return { breaks: [], start: null, end: null, shiftEnd: null, dateStr: null, absentType: "", role: "", isOffshore: false, isOff: false, hasWork: false }; }
 
 function pushAgent(roster, name, id, buf, defY, defM, defD) {
   if (!buf) return;
   if (!buf.start && !buf.isOff && !buf.absentType) return;
   if (buf.isOff) { buf.start = ""; buf.end = ""; }
-  // Absent for the whole shift (no working activity at all): keep the full
-  // scheduled shift so the agent shows in Unplanned / Vacation while it runs.
+  // Absent for the WHOLE shift (no working activity at all): the leaving-early
+  // trim above pulled the end back to the absence start, i.e. end == start, so
+  // the agent read as "Shift Ended" and vanished from Needs Attention. Keep the
+  // full scheduled shift so they show for as long as it runs.
   if (!buf.hasWork && buf.absentType && buf.shiftEnd && !buf.isOff) buf.end = buf.shiftEnd;
 
-  if (buf.hasWork) {
+  // An agent can be absent for part of a day and work the rest. Previously a
+  // worked day WIPED a VACATION absence outright, and bereavement (which sets
+  // hasWork through its "Congé" wording) was silently cleared with it — those
+  // agents rendered as plain active. Now the absence is kept and simply marked as
+  // partial, so the Floor can say "UNAB (part day)" instead of losing the person.
+  // An agent can be absent for part of a day and work the rest. The partial state
+  // is encoded in the type string rather than a new Raw Schedule column: every
+  // downstream matcher is \b-anchored, so "UNAB (part day)" still reads as UNAB,
+  // and the label is already what the Floor should display.
+  if (buf.hasWork && buf.absentType) {
       if (buf.absentType === "VACATION") buf.absentType = "";
-      if (buf.absentType === "SICK") buf.absentType = "Leaving Early (Sick)";
-      if (buf.absentType === "PW/ALT") buf.absentType = "Leaving Early (PW/ALT)";
+      else if (buf.absentType.indexOf('(part day)') === -1) buf.absentType = buf.absentType + " (part day)";
   }
 
   let finalDateObj = safeParseDateStr(buf.dateStr, defY, defM, defD);
