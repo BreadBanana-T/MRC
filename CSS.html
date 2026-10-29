@@ -367,13 +367,6 @@
   .group-header.alert { color: var(--status-alert); background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.1); }
   .group-header i { opacity: 0.7; }
 
-  /* Floor sub-page switch: Avaya Floor <-> Genesys Cloud */
-  .floor-seg { display: flex; gap: 3px; background: rgba(120,120,140,0.10); padding: 3px; border-radius: 12px; flex-shrink: 0; }
-  .floor-seg button { appearance: none; -webkit-appearance: none; border: none; background: transparent; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 0.85rem; height: 34px; padding: 0 14px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; transition: 0.15s; white-space: nowrap; }
-  .floor-seg button:hover { color: var(--text-main); }
-  .floor-seg button.active { background: var(--bg-root); color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .floor-seg button.active.gen { color: var(--genesys); }
-
   /* ===================== GENESYS CLOUD SECTION ===================== */
   /* Official logo colorways (paths carry .gcl-mk / .gcl-tx classes). */
   .gcl-mk { fill: var(--genesys); }
@@ -383,17 +376,17 @@
   .gen-kpis { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
   .gen-kpi h4 { margin: 0; font-size: 0.62rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; letter-spacing: 0.06em; }
   .gen-kpi div { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2; }
+  /* Channel counts double as the roster's channel filter. */
+  button.gen-kpi { appearance: none; -webkit-appearance: none; font-family: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 12px; padding: 6px 12px; margin: -7px -13px; cursor: pointer; transition: 0.15s; }
+  button.gen-kpi:hover { background: rgba(120,120,140,0.08); }
+  button.gen-kpi.active { background: var(--bg-root); border-color: var(--glass-border); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .gen-filter-note { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin: -8px 0 14px; }
+  .gen-filter-note a { color: var(--accent-primary); cursor: pointer; text-decoration: underline; }
 
   /* platform share bar */
   .gen-share { height: 6px; border-radius: 99px; overflow: hidden; display: flex; background: var(--glass-border); margin: 2px 0 20px; }
   .gen-share i { display: block; height: 100%; transition: width 0.4s ease; }
 
-  /* lanes — inbound needs more room for queue chips */
-  .gen-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
-  @media (max-width: 900px) { .gen-cols { grid-template-columns: 1fr; } }
-  .gen-lane-title { display: flex; align-items: center; justify-content: space-between; font-size: 0.9rem; font-weight: 800; margin-bottom: 10px; border-bottom: 1px solid var(--glass-border); padding-bottom: 6px; }
-  .gen-lane-title .sub { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); text-transform: none; letter-spacing: 0; margin-left: 6px; }
-  .gen-lane-title .cnt { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; }
   .gen-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 0.8rem; border: 1px dashed var(--glass-border); border-radius: 10px; }
 
   /* inbound queue chips — same DNA as .row-time (mono, boxed, subtle) */

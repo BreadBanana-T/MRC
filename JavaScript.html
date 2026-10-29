@@ -194,7 +194,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', floorChannel: 'all', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -1816,61 +1816,26 @@
       var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
       for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
 
-      // Genesys is the whole page now, so the old Avaya/Genesys sub-tab switch is
-      // gone — but keep both layouts: "Queues" is the Genesys queue board and
-      // "Roster" is the shift/roles view, which is still how you find someone.
-      var tab = state.floorTab || 'queues';
-      var seg = '<div class="floor-seg">' +
-                '<button class="' + (tab==='queues'?'active gen':'') + '" onclick="setFloorTab(\'queues\')">' + genLogoSvg(16) + ' Queues</button>' +
-                '<button class="' + (tab==='roster'?'active':'') + '" onclick="setFloorTab(\'roster\')"><i data-lucide="users" width="15"></i> Roster</button>' +
-                '</div>';
-
+      // One page: the Genesys panel (channel counts, batch assign, queue
+      // coverage) on top of the full roster. Each agent appears once — their
+      // queues ride on their own row — and the channel counts double as the
+      // filter that the old Inbound / Outbound lanes used to provide.
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
-                 seg +
-                 '' + searchBox('agent-search', 'Search name, ID, supervisor, language…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:200px;', 'height:34px; font-size:0.85rem;') + '' +
+                 '' + searchBox('agent-search', 'Search name, ID, supervisor, language, queue…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
                  '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
                  '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
                  '<button class="btn ' + (state.regionFilter==='Onshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Onshore\')">On</button>' +
                  '<button class="btn ' + (state.regionFilter==='Offshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Offshore\')">Off</button>' +
                  '</div></div></div>' +
-                 (tab==='roster' ? renderFloorLayout(upMap) : renderGenesysPage());
+                 renderGenesysPanel() + renderFloorLayout(upMap);
       return html;
   }
-  window.setFloorTab = function(t) { state.floorTab = t; render(); };
-  
-  // One agent card inside a Genesys lane. Reuses the .agent-row grid but
-  // swaps the status column for queue chips (inbound) or an OUTBOUND tag.
-  function renderGenesysRow(a) {
-      var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
-      var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
-      var fid = prefix + escapeHTML(a.id || '');
-      var mid;
-      if (a.genesys && a.genesys.channel === 'inbound') {
-          var qs = a.genesys.queues || [];
-          if (qs.length) {
-              var shown = qs.slice(0, 3).map(function(q){ return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
-              if (qs.length > 3) shown += '<span class="qchip more" title="' + escapeHTML(qs.slice(3).join(', ')) + '">+' + (qs.length - 3) + '</span>';
-              mid = '<div class="qrow">' + shown + '</div>';
-          } else { mid = '<span style="color:var(--status-warn); font-size:0.78rem; font-weight:700;">No queue yet — click to assign</span>'; }
-      } else { mid = ''; }
-      // Right column keeps the agent's real shift window (like the Avaya
-      // floor) — the lane header already says Inbound/Outbound.
-      var timeDisplay = 'OFF';
-      if (a.shift && a.shift.indexOf('?') === -1) { var parts = a.shift.split(' - '); if (parts.length === 2) timeDisplay = escapeHTML(parts[0]) + '-' + escapeHTML(parts[1]); }
-      var gAttrTitle = [];
-      if (a.level) gAttrTitle.push('Level ' + a.level);
-      if (a.lang) gAttrTitle.push(a.lang);
-      if (a.manager) gAttrTitle.push('Sup: ' + a.manager);
-      if (a.skills) gAttrTitle.push(prettySkills(a.skills));
-      return '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
-             '<div class="status-dot ' + stripClass + '"></div>' +
-             '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
-             '<div class="row-attrs" title="' + escapeHTML(gAttrTitle.join(' · ')) + '">' + agentLvlChip(a.level) + agentLangChip(a.lang) + '</div>' +
-             '<div class="row-id" style="padding-left:4px;">' + fid + '</div>' +
-             '<div class="row-status">' + mid + '</div>' +
-             '<div class="row-time">' + timeDisplay + '</div></div>';
-  }
+
+  // Channel filter: 'all' | 'inbound' | 'outbound' | 'none' (not on Genesys).
+  // Clicking the active one again clears it.
+  window.setFloorChannel = function(ch) { state.floorChannel = (state.floorChannel === ch) ? 'all' : ch; render(); };
+  function agentChannel(a) { return (a && a.genesys && a.genesys.channel) || 'none'; }
 
   // Queue coverage panel: every queue from the list with how many inbound
   // agents hold it. Uncovered queues are dimmed — gaps read at a glance.
@@ -1917,11 +1882,14 @@
           }
           return html;
       }).join('');
-      return '<details class="gen-cov-panel"' + (inbound.length ? ' open' : '') + '>' +
+      // Collapsed by default now that it sits above the roster; the open state
+      // is remembered so the 60s floor poll doesn't snap it shut.
+      return '<details class="gen-cov-panel"' + (state.genCovExpanded ? ' open' : '') + ' ontoggle="setGenesysCovExpanded(this.open)">' +
              '<summary><span style="font-weight:800; font-size:0.82rem;">Queue coverage</span>' +
              '<span style="font-size:0.72rem; font-weight:700; color:' + (covered ? 'var(--text-muted)' : 'var(--status-warn)') + ';">' + covered + ' of ' + totalQ + ' queues covered</span></summary>' +
              '<div class="gen-cov-body">' + groups + '</div></details>';
   }
+  window.setGenesysCovExpanded = function(open) { state.genCovExpanded = !!open; };
   window.toggleGenesysCov = function(q) {
       state.genesysCovOpen = (state.genesysCovOpen === q) ? null : q;
       render();
@@ -1930,66 +1898,52 @@
       if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
   };
 
-  // The Genesys Cloud sub-page of the Floor. Splits the currently-active
-  // roster into Genesys Inbound / Outbound vs everyone still on Avaya, so the
-  // platform breakdown reads at a glance. Reached via the Floor sub-tab.
-  function renderGenesysPage() {
-      var active = state.agents.active || [];
-      var visible = active.filter(floorMatch);
-      var inbound = [], outbound = [], avaya = [];
+  // Genesys panel at the top of the page: on-shift channel counts (clickable
+  // filters for the roster below), share bar, batch tools and queue coverage.
+  // Counts honour search + On/Off but not the channel filter itself, so they
+  // never collapse to the one channel you clicked.
+  function renderGenesysPanel() {
+      var visible = (state.agents.active || []).filter(floorMatchAnyChannel);
+      var inbound = [], outbound = [], none = [];
       visible.forEach(function(a) {
-          if (a.genesys && a.genesys.channel === 'inbound') inbound.push(a);
-          else if (a.genesys && a.genesys.channel === 'outbound') outbound.push(a);
-          else avaya.push(a);
+          var ch = agentChannel(a);
+          if (ch === 'inbound') inbound.push(a); else if (ch === 'outbound') outbound.push(a); else none.push(a);
       });
       var total = visible.length || 1;
       var pIn = Math.round(inbound.length / total * 100), pOut = Math.round(outbound.length / total * 100);
-      var pAv = 100 - pIn - pOut;
+      var pNone = Math.max(0, 100 - pIn - pOut);
       var genTotal = inbound.length + outbound.length;
+      var cur = state.floorChannel || 'all';
 
-      // Nobody assigned yet: onboarding hero instead of two hollow lanes.
-      if (genTotal === 0) {
-          return '<div class="aether-card" style="padding:60px 24px; align-items:center; text-align:center;">' +
-              genLogoSvg(56) +
-              '<div style="margin-top:20px;">' + genCloudLogoSvg(26) + '</div>' +
-              '<p style="color:var(--text-muted); max-width:420px; margin:16px auto 24px; font-size:0.92rem; line-height:1.6;">Nobody is tracked on Genesys Cloud yet. Assignments are manual (no IT integration) and persist until an agent is moved back to Avaya.</p>' +
-              '<button class="btn btn-primary" style="margin-bottom:16px;" onclick="openGenesysBatch()"><i data-lucide="users" width="16"></i> Batch assign agents</button>' +
-              '<div style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 18px;">or: Avaya Floor → click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span></div>' +
-              '</div>' +
-              '<div class="aether-card" style="padding:20px 24px; margin-top:20px;">' + renderGenesysCoverage([]) + '</div>';
-      }
-
-      var kpi = function(label, val, color) {
-          return '<div class="gen-kpi"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></div>';
+      var kpi = function(key, label, val, color, hint) {
+          return '<button class="gen-kpi' + (cur === key ? ' active' : '') + '" onclick="setFloorChannel(\'' + key + '\')" title="' + hint + (cur === key ? ' — click again to show everyone' : '') + '"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></button>';
       };
-      var inList = inbound.length ? inbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Inbound yet.</div>';
-      var outList = outbound.length ? outbound.map(renderGenesysRow).join('') : '<div class="gen-empty">No one on Outbound yet.</div>';
+      var filterNote = cur === 'all' ? '' :
+          '<div class="gen-filter-note">Showing <b>' + ({ inbound: 'Inbound', outbound: 'Outbound', none: 'Unassigned' })[cur] + '</b> agents only · <a onclick="setFloorChannel(\'' + cur + '\')">show everyone</a></div>';
 
-      return '<div class="aether-card" style="padding:24px;">' +
-            '<div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:18px;">' +
+      return '<div class="aether-card" style="padding:20px 24px; margin-bottom:24px;">' +
+            '<div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:14px;">' +
               '<div style="display:flex; flex-direction:column; gap:5px;">' + genCloudLogoSvg(24) +
-                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">Manual tracking · persists until moved back</span></div>' +
+                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">On shift now · click a count to filter</span></div>' +
               '<div style="flex:1;"></div>' +
               '<div class="gen-kpis">' +
-                kpi('Avaya', avaya.length, 'var(--accent-primary)') +
-                kpi('Inbound', inbound.length, 'var(--region-on)') +
-                kpi('Outbound', outbound.length, 'var(--status-break)') +
-                kpi('On Genesys', genTotal + ' <span style="font-size:0.62em; color:var(--text-muted);">' + (pIn + pOut) + '%</span>', 'var(--genesys)') +
+                kpi('inbound', 'Inbound', inbound.length, 'var(--region-on)', 'Agents on Genesys inbound queues') +
+                kpi('outbound', 'Outbound', outbound.length, 'var(--status-break)', 'Agents on Genesys outbound / callbacks') +
+                kpi('none', 'Unassigned', none.length, 'var(--text-secondary)', 'On shift with no Genesys channel assigned yet') +
+                '<div class="gen-kpi static"><h4>On Genesys</h4><div style="color:var(--genesys);">' + genTotal + ' <span style="font-size:0.62em; color:var(--text-muted);">' + (pIn + pOut) + '%</span></div></div>' +
               '</div>' +
               '<div style="display:flex; gap:8px; align-items:center;">' +
                 '<button class="btn btn-glass" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="15"></i> Batch assign</button>' +
-                '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Return everyone to Avaya"><i data-lucide="undo-2" width="15"></i></button>' +
+                (genTotal ? '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Clear every Genesys assignment"><i data-lucide="undo-2" width="15"></i></button>' : '') +
               '</div>' +
             '</div>' +
-            '<div class="gen-share" title="Avaya ' + pAv + '% · Inbound ' + pIn + '% · Outbound ' + pOut + '%">' +
-              '<i style="width:' + pAv + '%; background:var(--accent-primary);"></i>' +
+            '<div class="gen-share" title="Inbound ' + pIn + '% · Outbound ' + pOut + '% · Unassigned ' + pNone + '%">' +
               '<i style="width:' + pIn + '%; background:var(--region-on);"></i>' +
               '<i style="width:' + pOut + '%; background:var(--status-break);"></i>' +
+              '<i style="width:' + pNone + '%; background:var(--glass-border);"></i>' +
             '</div>' +
-            '<div class="gen-cols">' +
-              '<div><div class="gen-lane-title"><span style="color:var(--region-on);">Inbound<span class="sub">queue-assigned</span></span><span class="cnt">' + inbound.length + '</span></div><div class="agent-list-view">' + inList + '</div></div>' +
-              '<div><div class="gen-lane-title"><span style="color:var(--status-break);">Outbound<span class="sub">callbacks</span></span><span class="cnt">' + outbound.length + '</span></div><div class="agent-list-view">' + outList + '</div></div>' +
-            '</div>' +
+            filterNote +
+            (genTotal === 0 ? '<div class="gen-filter-note">Nobody is assigned a Genesys channel yet — click an agent below → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span>, or use Batch assign.</div>' : '') +
             renderGenesysCoverage(inbound) +
           '</div>';
   }
@@ -2087,14 +2041,22 @@
       }).join('');
   }
 
+  // Used as an Array#filter callback (a, index), so it takes no extra flag —
+  // floorMatchAnyChannel is the variant the Genesys counts use.
   function floorMatch(a) {
+      if (!a) return false;
+      if (state.floorChannel && state.floorChannel !== 'all' && agentChannel(a) !== state.floorChannel) return false;
+      return floorMatchAnyChannel(a);
+  }
+
+  function floorMatchAnyChannel(a) {
       if (!a) return false;
       var reg = a.region || '';
       if (state.regionFilter !== 'All' && reg.indexOf(state.regionFilter) === -1) return false;
       var term = (state.floorSearch || '').trim().toLowerCase();
       if (!term) return true;
       // Search across the things actually shown on the row, not just the name.
-      var hay = [a.name, a.id, a.tid, a.manager, a.lang, a.level, a.role, a.subStatus, a.shift, reg]
+      var hay = [a.name, a.id, a.tid, a.manager, a.lang, a.level, a.role, a.subStatus, a.shift, reg, ((a.genesys && a.genesys.queues) || []).join(' ')]
           .map(function(v) { return v == null ? '' : String(v); })
           .join(' ').toLowerCase();
       return hay.indexOf(term) !== -1;
@@ -2137,6 +2099,25 @@
       list = list.slice().sort(function(a, b){ return (a.name || '').localeCompare(b.name || ''); });
       fallbackCopyTextToClipboard(buildRosterText(list), 'Copied ' + list.length + ' agent' + (list.length === 1 ? '' : 's') + ' (' + startStr + ')');
   };
+
+  // Genesys tag + queue chips under the status — the queue board's per-agent
+  // detail, now on the one roster row. Chips copy the full queue name.
+  function agentGenesysLine(a) {
+      if (!(a.genesys && a.genesys.channel)) return '';
+      var isIn = a.genesys.channel === 'inbound';
+      var flag = '<span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (isIn ? 'IN' : 'OUT') + '</span>';
+      var chips = '';
+      if (isIn) {
+          var qs = a.genesys.queues || [];
+          if (qs.length) {
+              chips = qs.slice(0, 3).map(function(q) { return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
+              if (qs.length > 3) chips += '<span class="qchip more" title="' + escapeHTML(qs.slice(3).join(', ')) + '">+' + (qs.length - 3) + '</span>';
+          } else {
+              chips = '<span style="color:var(--status-warn); font-size:0.72rem; font-weight:700;">No queue yet</span>';
+          }
+      }
+      return '<div class="qrow" style="margin-top:3px; align-items:center;">' + flag + chips + '</div>';
+  }
 
   function renderAgentRow(a, upInfo) {
      var start = "00:00", end = "00:00";
@@ -2198,7 +2179,7 @@
                 '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
                 attrsHtml +
                 '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
-                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + ((a.genesys && a.genesys.channel) ? '<div style="margin-top:3px;"><span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (a.genesys.channel === 'inbound' ? 'IN' : 'OUT') + '</span></div>' : '') + breakHtml + '</div>' +
+                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + agentGenesysLine(a) + breakHtml + '</div>' +
                 '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
      return html;
   }
