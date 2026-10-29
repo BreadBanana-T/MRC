@@ -12,11 +12,13 @@
  *     • /All systems operational/i          → the global status banner
  *     • /Partner Portal[\s\S]*?\bUp\b/i     → the "Monitors" component row
  *
- *   isUp = reachable AND the operational banner matched. A valid status with no
- *   banner is NOT reported as a flat outage — it is logged with the note
- *   "banner text not matched" so a wording change on the page is diagnosable
- *   instead of masquerading as a real one. partnerPortalUp is recorded and
- *   surfaced as a component detail; it does not gate isUp.
+ *   The page's banner is often painted by JavaScript, which UrlFetchApp does
+ *   not run, so _readStatus also tries status JSON embedded in the page and
+ *   the Statuspage / Instatus JSON APIs on the same host. Result is tri-state:
+ *   up | issue (the page reports a problem) | unknown (page answered but no
+ *   reader could tell). Unknown is logged blank and kept OUT of the uptime %,
+ *   so an unreadable page no longer reads as a 0% outage. partnerPortalUp is
+ *   recorded and surfaced as a component detail; it does not gate isUp.
  *
  * SETUP (run once from the Apps Script editor — this project has no trigger UI)
  *   1. debugAlarmCom()        — read-only. Prints the resolved URL, status,
@@ -56,7 +58,12 @@ var AlarmComMonitor = {
   // so present as one.
   _UA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 
-  OPERATIONAL_RE: /All systems operational/i,
+  // Raw-HTML signals. A status page often paints its banner with JavaScript
+  // (UrlFetchApp runs none), so these are only the first of several readers —
+  // see _readStatus.
+  OPERATIONAL_RE: /All systems (?:are )?operational|All services (?:are )?(?:online|operational)|Fully operational|No (?:known )?(?:issues|incidents) (?:reported|at this time)/i,
+  // Diagnostic only (debugAlarmCom) — see the note in _readStatus.
+  ISSUE_RE: /Major outage|Partial outage|Service disruption|Degraded performance|Under maintenance|Investigating/i,
   PARTNER_RE: /Partner Portal[\s\S]*?\bUp\b/i,
 
   HISTORY_SHEET: 'WF_ALARMCOM_UPTIME',
@@ -82,9 +89,52 @@ var AlarmComMonitor = {
     };
   },
 
+  // ── Reading the status ────────────────────────────────────────────────────
+  // Returns { state: 'up'|'issue'|'unknown', partnerPortalUp: true|false|null,
+  // source, detail }. Tried in order, first decisive answer wins:
+  //   1. the raw HTML (banner text, or status JSON embedded in the page)
+  //   2. the Atlassian Statuspage API   <origin>/api/v2/summary.json
+  //   3. the Instatus API               <origin>/summary.json
+  // 'unknown' means the page answered but none of these could read it — that is
+  // NOT an outage and is kept out of the uptime % (it used to count as down,
+  // which is how the tile sat at 0%).
+  _readStatus: function(url, body) {
+    var partner = this.PARTNER_RE.test(body) ? true : null;
+    if (this.OPERATIONAL_RE.test(body) || /"indicator"\s*:\s*"none"/.test(body)) return { state: 'up', partnerPortalUp: partner, source: 'page', detail: '' };
+    var ind = body.match(/"indicator"\s*:\s*"(minor|major|critical|maintenance)"/);
+    if (ind) return { state: 'issue', partnerPortalUp: partner, source: 'page', detail: ind[1] };
+
+    var origin = String(url).replace(/^(https?:\/\/[^\/]+).*$/, '$1') + '/';
+    var sp = this._fetchJson(origin + 'api/v2/summary.json');
+    if (sp && sp.status && sp.status.indicator) {
+      var pp = null;
+      (sp.components || []).forEach(function(c) { if (/partner portal/i.test(c.name || '')) pp = (c.status === 'operational'); });
+      return { state: sp.status.indicator === 'none' ? 'up' : 'issue', partnerPortalUp: pp, source: 'statuspage-api', detail: sp.status.description || sp.status.indicator };
+    }
+    var ins = this._fetchJson(origin + 'summary.json');
+    if (ins && ins.page && ins.page.status) {
+      return { state: String(ins.page.status).toUpperCase() === 'UP' ? 'up' : 'issue', partnerPortalUp: null, source: 'instatus-api', detail: String(ins.page.status) };
+    }
+
+    // Nothing decisive. Outage WORDS in the raw HTML are not used to call an
+    // issue: status pages print "Major outage / Partial outage" in their legend
+    // and past-incident list even when everything is up.
+    return { state: 'unknown', partnerPortalUp: partner, source: '', detail: '' };
+  },
+
+  _fetchJson: function(url) {
+    try {
+      var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': this._UA, 'Accept': 'application/json' } });
+      if (res.getResponseCode() !== 200) return null;
+      var t = res.getContentText();
+      if (!/^\s*[\[{]/.test(t)) return null;
+      return JSON.parse(t);
+    } catch (e) { return null; }
+  },
+
   // ── The probe ─────────────────────────────────────────────────────────────
-  // Returns { skipped } | { up, statusCode, isReachable, isOperational,
-  //                         partnerPortalUp, latencyMs, note, error }
+  // Returns { skipped } | { up, state, statusCode, isReachable, isOperational,
+  //                         partnerPortalUp, latencyMs, source, note, error }
   probe: function() {
     var url = this._getUrl();
     if (!url) return { skipped: true };
@@ -98,31 +148,34 @@ var AlarmComMonitor = {
       var body = '';
       try { body = res.getContentText(); } catch (e) { body = ''; }
 
-      var isOperational = isReachable && this.OPERATIONAL_RE.test(body);
-      var partnerPortalUp = isReachable && this.PARTNER_RE.test(body);
-
-      var note = '';
-      if (!isReachable) note = 'HTTP ' + code;
-      else if (!isOperational) note = 'banner text not matched';
-
+      if (!isReachable) {
+        return { up: false, state: 'down', statusCode: code, isReachable: false, isOperational: false, partnerPortalUp: null, latencyMs: latencyMs, source: '', note: 'HTTP ' + code, error: '' };
+      }
+      var st = this._readStatus(url, body);
+      var note = st.state === 'issue' ? ('reported: ' + st.detail)
+               : (st.state === 'unknown' ? 'status not readable' : '');
       return {
-        up: isReachable && isOperational,
+        up: st.state === 'up',
+        state: st.state,
         statusCode: code,
-        isReachable: isReachable,
-        isOperational: isOperational,
-        partnerPortalUp: partnerPortalUp,
+        isReachable: true,
+        isOperational: st.state === 'up',
+        partnerPortalUp: st.partnerPortalUp,
         latencyMs: latencyMs,
+        source: st.source,
         note: note,
         error: ''
       };
     } catch (e) {
       return {
         up: false,
+        state: 'down',
         statusCode: 0,
         isReachable: false,
         isOperational: false,
-        partnerPortalUp: false,
+        partnerPortalUp: null,
         latencyMs: Date.now() - started,
+        source: '',
         note: 'fetch failed',
         error: e.message
       };
@@ -153,10 +206,10 @@ var AlarmComMonitor = {
       }
       sheet.appendRow([
         new Date(),
-        p.up ? 1 : 0,
+        p.state === 'unknown' ? '' : (p.up ? 1 : 0),   // blank = page answered, status unreadable
         p.latencyMs || 0,
         p.statusCode || 0,
-        p.partnerPortalUp ? 1 : 0,
+        p.partnerPortalUp === null || p.partnerPortalUp === undefined ? '' : (p.partnerPortalUp ? 1 : 0),
         p.note || p.error || ''
       ]);
       var rows = sheet.getLastRow() - 1;
@@ -171,13 +224,14 @@ var AlarmComMonitor = {
     try {
       var sheet = this._historySheet(false);
       if (!sheet || sheet.getLastRow() < 2) return out;
-      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
       var now = Date.now();
       var c24 = now - 24 * 3600 * 1000, c7 = now - 7 * 24 * 3600 * 1000;
       var up24 = 0, n24 = 0, up7 = 0, n7 = 0, lastDown = 0;
       for (var i = 0; i < data.length; i++) {
         var ts = new Date(data[i][0]).getTime();
         if (isNaN(ts)) continue;
+        if (this._isUnknownRow(data[i])) continue;   // can't count what we couldn't read
         var up = Number(data[i][1]) === 1;
         if (!up && ts > lastDown) lastDown = ts;
         if (ts >= c7) { n7++; if (up) up7++; }
@@ -190,18 +244,25 @@ var AlarmComMonitor = {
     } catch (e) { return out; }
   },
 
+  // A sample whose status couldn't be read: logged blank, or a legacy row from
+  // before the multi-reader probe ("banner text not matched", logged as 0).
+  _isUnknownRow: function(row) {
+    return row[1] === '' || /banner text not matched|status not readable/i.test(String(row[5] || ''));
+  },
+
   getHistorySeries: function(hoursBack) {
     hoursBack = hoursBack || 24;
     try {
       var sheet = this._historySheet(false);
       if (!sheet || sheet.getLastRow() < 2) return '[]';
       var cutoff = Date.now() - hoursBack * 3600 * 1000;
-      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+      var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
       var out = [];
       for (var i = 0; i < data.length; i++) {
         var ts = new Date(data[i][0]).getTime();
         if (isNaN(ts) || ts < cutoff) continue;
-        out.push({ t: ts, up: Number(data[i][1]) === 1 ? 1 : 0, ms: parseInt(data[i][2], 10) || 0 });
+        // up: 1 / 0, or null when the status couldn't be read (grey on the strip).
+        out.push({ t: ts, up: this._isUnknownRow(data[i]) ? null : (Number(data[i][1]) === 1 ? 1 : 0), ms: parseInt(data[i][2], 10) || 0 });
       }
       out.sort(function(a, b) { return a.t - b.t; });
       return JSON.stringify(out);
@@ -219,10 +280,12 @@ var AlarmComMonitor = {
 
     var result = {
       up: !!p.up,
+      state: p.state || (p.up ? 'up' : 'down'),
+      source: p.source || '',
       statusCode: p.statusCode,
       isReachable: !!p.isReachable,
       isOperational: !!p.isOperational,
-      partnerPortalUp: !!p.partnerPortalUp,
+      partnerPortalUp: (p.partnerPortalUp === null || p.partnerPortalUp === undefined) ? null : !!p.partnerPortalUp,
       latencyMs: p.latencyMs || 0,
       checked: Utilities.formatDate(new Date(), this.TZ, 'HH:mm'),
       uptime24h: stats.uptime24h,
@@ -274,7 +337,7 @@ function probeAlarmCom() {
   // _publish logs the row AND refreshes the cached payload, so the dashboard
   // shows this probe's result without triggering another fetch of its own.
   AlarmComMonitor._publish(p);
-  return 'Alarm.com: ' + (p.up ? 'UP' : 'DOWN') + ' (HTTP ' + p.statusCode + ', ' + p.latencyMs + 'ms)'
+  return 'Alarm.com: ' + String(p.state || (p.up ? 'up' : 'down')).toUpperCase() + ' (HTTP ' + p.statusCode + ', ' + p.latencyMs + 'ms)'
        + (p.note ? ' — ' + p.note : '');
 }
 
@@ -286,32 +349,33 @@ function probeAlarmCom() {
  */
 function debugAlarmCom() {
   var url = AlarmComMonitor._getUrl();
-  var out = { timestamp: '', statusCode: 0, isReachable: false, isOperational: false, partnerPortalUp: false };
-  out.timestamp = Utilities.formatDate(new Date(), AlarmComMonitor.TZ, 'yyyy-MM-dd HH:mm:ss');
   Logger.log('Alarm.com probe URL: ' + (url || '(disabled)'));
-  if (!url) { Logger.log(JSON.stringify(out)); return out; }
-
+  if (!url) return { disabled: true };
+  var origin = String(url).replace(/^(https?:\/\/[^\/]+).*$/, '$1') + '/';
   var started = Date.now();
   try {
     var res = UrlFetchApp.fetch(url, AlarmComMonitor._headers());
-    var latencyMs = Date.now() - started;
     var body = '';
     try { body = res.getContentText(); } catch (e) { body = ''; }
-    out.statusCode = res.getResponseCode();
-    out.isReachable = out.statusCode >= 200 && out.statusCode <= 399;
-    out.isOperational = AlarmComMonitor.OPERATIONAL_RE.test(body);
-    out.partnerPortalUp = AlarmComMonitor.PARTNER_RE.test(body);
-
-    Logger.log('HTTP ' + out.statusCode + ' in ' + latencyMs + 'ms · body ' + body.length + ' bytes');
-    Logger.log('/All systems operational/i    → ' + out.isOperational);
-    Logger.log('/Partner Portal…\\bUp\\b/i      → ' + out.partnerPortalUp);
-    if (!out.isOperational) Logger.log('Banner not in raw HTML — the page may render it client-side (UrlFetchApp runs no JS).');
-    Logger.log('First 500 bytes:\n' + body.substring(0, 500));
+    Logger.log('Page: HTTP ' + res.getResponseCode() + ' in ' + (Date.now() - started) + 'ms · ' + body.length + ' bytes');
+    Logger.log('  operational text in HTML → ' + AlarmComMonitor.OPERATIONAL_RE.test(body));
+    Logger.log('  issue text in HTML       → ' + ((body.match(AlarmComMonitor.ISSUE_RE) || [''])[0] || 'none'));
+    Logger.log('  Partner Portal "Up"      → ' + AlarmComMonitor.PARTNER_RE.test(body));
+    Logger.log('  embedded "indicator"     → ' + ((body.match(/"indicator"\s*:\s*"\w+"/) || ['none'])[0]));
+    ['api/v2/summary.json', 'summary.json'].forEach(function(path) {
+      try {
+        var r = UrlFetchApp.fetch(origin + path, { muteHttpExceptions: true, headers: { 'User-Agent': AlarmComMonitor._UA, 'Accept': 'application/json' } });
+        Logger.log(origin + path + ' → HTTP ' + r.getResponseCode() + ' · ' + r.getContentText().substring(0, 200).replace(/\s+/g, ' '));
+      } catch (e) { Logger.log(origin + path + ' → ' + e.message); }
+    });
+    var st = AlarmComMonitor._readStatus(url, body);
+    Logger.log('RESULT: ' + JSON.stringify(st));
+    Logger.log('First 800 bytes of the page:\n' + body.substring(0, 800));
+    return st;
   } catch (e) {
     Logger.log('Fetch failed after ' + (Date.now() - started) + 'ms: ' + e.message);
+    return { error: e.message };
   }
-  Logger.log(JSON.stringify(out));
-  return out;
 }
 
 /** Installs the 5-minute background probe. Idempotent — safe to re-run. */

@@ -1316,12 +1316,20 @@
       return out;
   }
 
+  // Display pieces shared by the banner and the notification card. Plain
+  // wording, no emoji — the colour accent and status pill carry the urgency.
   function maintLines(m) {
-      var title = escapeHTML(m.ev.title || 'Scheduled Maintenance');
-      var when = escapeHTML((m.ev.startTime || '') + ' – ' + (m.ev.endTime || ''));
-      return m.live
-          ? { head: '🔧 ' + title + ' — IN PROGRESS', sub: when + ' · ends in ' + fmtMaintDur(m.minsLeft), count: fmtMaintDur(m.minsLeft) + ' left' }
-          : { head: '⚠️ ' + title + ' starting soon', sub: when + ' · starts at ' + escapeHTML(m.ev.startTime || ''), count: 'in ' + fmtMaintDur(m.minsTo) };
+      return {
+          // The kicker already says "Scheduled maintenance", so drop that prefix
+          // from the calendar title ("Scheduled Maintenance - MAS" → "MAS").
+          title: escapeHTML(String(m.ev.title || '').replace(/^\s*scheduled maintenance\s*[-–—:|·]*\s*/i, '') || 'Maintenance window'),
+          window: escapeHTML((m.ev.startTime || '') + ' – ' + (m.ev.endTime || '')),
+          pill: m.live ? 'In progress' : 'Upcoming',
+          countLabel: m.live ? 'Ends in' : 'Starts in',
+          count: fmtMaintDur(m.live ? m.minsLeft : m.minsTo),
+          // Share of the window already elapsed (live only) for the progress line.
+          progress: m.live ? Math.min(100, Math.max(0, (Date.now() - m.start) / (m.end - m.start) * 100)) : 0
+      };
   }
 
   window.hideMaintBanner = function(startMs) {
@@ -1346,7 +1354,7 @@
               if (maintToasted[k]) return;
               if (m.minsTo <= th && m.minsTo > th - 5) {
                   maintToasted[k] = true;
-                  showToast(th === 0 ? '🔧 Maintenance has started (' + (m.ev.startTime || '') + ' – ' + (m.ev.endTime || '') + ')' : '⚠️ Maintenance starts in ' + fmtMaintDur(m.minsTo) + ' (' + (m.ev.startTime || '') + ')');
+                  showToast(th === 0 ? 'Scheduled maintenance has started · ' + (m.ev.startTime || '') + ' – ' + (m.ev.endTime || '') : 'Scheduled maintenance starts in ' + fmtMaintDur(m.minsTo) + ' · ' + (m.ev.startTime || ''));
               } else if (m.minsTo <= th - 5) {
                   maintToasted[k] = true;   // passed while the page was closed — don't replay
               }
@@ -1362,12 +1370,16 @@
           else {
               var L = maintLines(show);
               el.className = 'maint-banner' + (show.live ? ' live' : '');
-              el.innerHTML = '<div class="mb-icon"><i data-lucide="' + (show.live ? 'wrench' : 'alert-triangle') + '" width="18"></i></div>' +
-                  '<div class="mb-text"><div class="mb-title">' + L.head + '</div><div class="mb-sub">' + L.sub + (list.length > 1 ? ' · +' + (list.length - 1) + ' more' : '') + '</div></div>' +
-                  '<div class="mb-count">' + L.count + '</div>' +
-                  '<button class="btn btn-glass" style="font-size:0.72rem; padding:4px 14px; height:28px;" onclick="hideMaintBanner(' + show.start + ')">Hide</button>';
+              el.innerHTML =
+                  '<div class="mb-main">' +
+                    '<div class="mb-kicker"><span class="mb-pill">' + (show.live ? '<span class="mb-dot"></span>' : '') + L.pill + '</span>Scheduled maintenance' + (list.length > 1 ? ' · ' + list.length + ' windows' : '') + '</div>' +
+                    '<div class="mb-title">' + L.title + '</div>' +
+                    '<div class="mb-sub">' + L.window + '</div>' +
+                  '</div>' +
+                  '<div class="mb-count"><span>' + L.countLabel + '</span><b>' + L.count + '</b></div>' +
+                  '<button class="mb-close" onclick="hideMaintBanner(' + show.start + ')" title="' + (show.live ? 'Hide' : 'Hide until it starts') + '" aria-label="Hide">&times;</button>' +
+                  (show.live ? '<div class="mb-progress"><i style="width:' + L.progress.toFixed(1) + '%;"></i></div>' : '');
               el.style.display = 'flex';
-              if (typeof lucide !== 'undefined') lucide.createIcons();
           }
       }
 
@@ -1381,10 +1393,10 @@
       return activeMaintenance().map(function(m) {
           var L = maintLines(m);
           return '<div class="notif-maint' + (m.live ? ' live' : '') + '">' +
-                 '<div style="display:flex; justify-content:space-between; gap:10px; font-size:0.72rem; font-weight:800; color:' + (m.live ? 'var(--status-alert)' : 'var(--status-warn)') + '; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;"><span>' + (m.live ? 'Maintenance in progress' : 'Upcoming maintenance') + '</span><span>' + L.count + '</span></div>' +
-                 '<div style="font-weight:700; font-size:0.9rem; color:var(--text-main); line-height:1.4;">' + escapeHTML(m.ev.title || 'Scheduled Maintenance') + '</div>' +
-                 '<div style="font-size:0.78rem; color:var(--text-muted); font-weight:600; margin-top:2px;">' + L.sub + '</div>' +
-                 (m.ev.description ? '<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:6px; line-height:1.4; max-height:4.2em; overflow:hidden;">' + escapeHTML(String(m.ev.description).replace(/<[^>]*>/g, ' ')) + '</div>' : '') +
+                 '<div class="mb-kicker"><span class="mb-pill">' + (m.live ? '<span class="mb-dot"></span>' : '') + L.pill + '</span><span style="flex:1;"></span><span class="nm-count">' + L.countLabel + ' ' + L.count + '</span></div>' +
+                 '<div class="nm-title">' + L.title + '</div>' +
+                 '<div class="nm-sub">Scheduled maintenance · ' + L.window + '</div>' +
+                 (m.ev.description ? '<div class="nm-desc">' + escapeHTML(String(m.ev.description).replace(/<[^>]*>/g, ' ')) + '</div>' : '') +
                  '</div>';
       }).join('');
   }
@@ -2251,10 +2263,13 @@
                        '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Probe disabled — run setAlarmComUrl()</div>');
       }
 
-      var warn = !!d.isReachable && !d.isOperational;
-      var color = d.up ? 'var(--status-active)' : (warn ? 'var(--status-warn)' : 'var(--status-alert)');
-      var dotCls = d.up ? 'outage-dot pulse-ok' : 'outage-dot pulse';
-      var label = d.up ? 'All systems operational' : (warn ? 'Status unconfirmed' : 'Down');
+      // state: up | issue (status page reports a problem) | unknown (page
+      // answered but its status couldn't be read) | down (unreachable).
+      // Older payloads have no state — derive it the way they used to.
+      var st = d.state || (d.up ? 'up' : (d.isReachable ? 'unknown' : 'down'));
+      var color = st === 'up' ? 'var(--status-active)' : (st === 'down' ? 'var(--status-alert)' : (st === 'issue' ? 'var(--status-warn)' : 'var(--text-muted)'));
+      var dotCls = (st === 'up' || st === 'unknown') ? 'outage-dot pulse-ok' : 'outage-dot pulse';
+      var label = st === 'up' ? 'All systems operational' : (st === 'issue' ? 'Issue reported' : (st === 'unknown' ? 'Site reachable · status unknown' : 'Unreachable'));
 
       var up24 = (d.uptime24h == null) ? '—' : (d.uptime24h + '%');
       var up7 = (d.uptime7d == null) ? null : (d.uptime7d + '%');
@@ -2267,7 +2282,7 @@
       if (d.lastGoodChecked) facts.push('last good ' + escapeHTML(d.lastGoodChecked));
 
       var why = '';
-      if (!d.up) {
+      if (st === 'issue' || st === 'down') {
           var reason = d.error || d.note || ('HTTP ' + d.statusCode);
           why = '<div style="font-size:0.65rem; font-weight:700; color:' + color + '; margin-top:6px;">' + escapeHTML(reason) + '</div>';
       }
@@ -2275,9 +2290,10 @@
       // Component detail from the Monitors table. Only meaningful when the page
       // answered at all, so don't imply a healthy component on an unreachable host.
       var chip = '';
-      if (d.isReachable) {
+      // null = not readable, so show nothing rather than a bare "?".
+      if (d.isReachable && d.partnerPortalUp != null) {
           chip = '<div style="margin-top:10px;"><span class="outage-chip">Partner Portal · ' +
-                 (d.partnerPortalUp ? '<b style="color:var(--status-active);">Up</b>' : '<b style="color:var(--status-warn);">?</b>') +
+                 (d.partnerPortalUp ? '<b style="color:var(--status-active);">Up</b>' : '<b style="color:var(--status-alert);">Down</b>') +
                  '</span></div>';
       }
 
@@ -2292,7 +2308,8 @@
               var hi = nowH - h * 3600000, lo = hi - 3600000;
               var seen = 0, bad = 0;
               for (var i = 0; i < hist.length; i++) {
-                  if (hist[i].t > lo && hist[i].t <= hi) { seen++; if (!hist[i].up) bad++; }
+                  // up === null: page answered but status unreadable — not an outage.
+                  if (hist[i].t > lo && hist[i].t <= hi && hist[i].up !== null) { seen++; if (!hist[i].up) bad++; }
               }
               var cls = !seen ? '' : (bad ? 'down' : 'up');
               cells.push('<span class="' + cls + '"></span>');

@@ -874,17 +874,32 @@
       70%  { box-shadow: 0 0 0 12px rgba(56, 189, 248, 0); }
       100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
   }
-  /* Scheduled-maintenance banner (above the viewport, every view). Amber when
-     upcoming, red + pulsing dot while in progress. */
-  .maint-banner { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; padding: 12px 18px; border-radius: 16px; border: 1px solid rgba(217, 119, 6, 0.45); background: rgba(245, 158, 11, 0.12); color: var(--text-main); font-weight: 600; flex-shrink: 0; flex-wrap: wrap; }
-  .maint-banner.live { border-color: rgba(220, 38, 38, 0.5); background: rgba(220, 38, 38, 0.12); }
-  .maint-banner .mb-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--status-warn); color: #fff; flex-shrink: 0; }
-  .maint-banner.live .mb-icon { background: var(--status-alert); animation: outage-pulse 2s ease-out infinite; }
-  .maint-banner .mb-text { flex: 1; min-width: 200px; line-height: 1.35; }
-  .maint-banner .mb-title { font-weight: 800; font-size: 0.95rem; }
-  .maint-banner .mb-sub { font-size: 0.78rem; color: var(--text-muted); font-weight: 700; }
-  .maint-banner .mb-count { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--status-warn); }
-  .maint-banner.live .mb-count { color: var(--status-alert); }
-  .notif-maint { padding: 14px 16px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(217, 119, 6, 0.45); background: rgba(245, 158, 11, 0.12); }
-  .notif-maint.live { border-color: rgba(220, 38, 38, 0.5); background: rgba(220, 38, 38, 0.12); }
+  /* Scheduled-maintenance banner (above the viewport, every view). Neutral
+     card; a slim left accent + status pill carry the state — amber while
+     upcoming, red while in progress (with a progress line along the bottom). */
+  .maint-banner { --mb-accent: var(--status-warn); position: relative; display: flex; align-items: center; gap: 24px; margin: 0 0 14px; padding: 14px 18px 14px 22px; border-radius: 16px; background: var(--card-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); color: var(--text-main); flex-shrink: 0; overflow: hidden; }
+  .maint-banner.live { --mb-accent: var(--status-alert); }
+  .maint-banner::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--mb-accent); }
+  .maint-banner .mb-main { flex: 1; min-width: 0; }
+  .mb-kicker { display: flex; align-items: center; gap: 10px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+  .mb-pill { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 99px; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em; color: var(--mb-accent, var(--status-warn)); border: 1px solid currentColor; }
+  .mb-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: outage-pulse 2s ease-out infinite; }
+  .maint-banner .mb-title { font-size: 0.95rem; font-weight: 700; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .maint-banner .mb-sub { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+  .maint-banner .mb-count { display: flex; flex-direction: column; align-items: flex-end; text-align: right; padding-left: 24px; border-left: 1px solid var(--glass-border); }
+  .maint-banner .mb-count span { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+  .maint-banner .mb-count b { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text-main); white-space: nowrap; }
+  .maint-banner .mb-close { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.2rem; line-height: 1; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; flex-shrink: 0; }
+  .maint-banner .mb-close:hover { background: rgba(120,120,140,0.12); color: var(--text-main); }
+  .maint-banner .mb-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
+  .maint-banner .mb-progress i { display: block; height: 100%; background: var(--mb-accent); opacity: 0.7; transition: width 0.6s ease; }
+  @media (max-width: 640px) { .maint-banner { flex-wrap: wrap; gap: 12px; } .maint-banner .mb-count { padding-left: 0; border-left: none; align-items: flex-start; text-align: left; } }
+  /* Same treatment, pinned at the top of the notifications panel. */
+  .notif-maint { --mb-accent: var(--status-warn); position: relative; padding: 14px 16px 14px 19px; border-radius: 12px; margin-bottom: 10px; background: var(--card-bg); border: 1px solid var(--glass-border); box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; }
+  .notif-maint.live { --mb-accent: var(--status-alert); }
+  .notif-maint::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--mb-accent); }
+  .notif-maint .nm-count { white-space: nowrap; color: var(--text-main); letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+  .notif-maint .nm-title { font-weight: 700; font-size: 0.9rem; color: var(--text-main); line-height: 1.4; margin-top: 6px; }
+  .notif-maint .nm-sub { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .notif-maint .nm-desc { font-size: 0.78rem; color: var(--text-secondary); margin-top: 6px; line-height: 1.4; max-height: 4.2em; overflow: hidden; }
 </style>
