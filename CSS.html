@@ -376,12 +376,7 @@
   .gen-kpis { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
   .gen-kpi h4 { margin: 0; font-size: 0.62rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; white-space: nowrap; letter-spacing: 0.06em; }
   .gen-kpi div { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2; }
-  /* Channel counts double as the roster's channel filter. */
-  button.gen-kpi { appearance: none; -webkit-appearance: none; font-family: inherit; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 12px; padding: 6px 12px; margin: -7px -13px; cursor: pointer; transition: 0.15s; }
-  button.gen-kpi:hover { background: rgba(120,120,140,0.08); }
-  button.gen-kpi.active { background: var(--bg-root); border-color: var(--glass-border); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .gen-filter-note { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin: -8px 0 14px; }
-  .gen-filter-note a { color: var(--accent-primary); cursor: pointer; text-decoration: underline; }
+  .gen-hint { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin: 0 0 14px; }
 
   /* platform share bar */
   .gen-share { height: 6px; border-radius: 99px; overflow: hidden; display: flex; background: var(--glass-border); margin: 2px 0 20px; }
@@ -874,32 +869,87 @@
       70%  { box-shadow: 0 0 0 12px rgba(56, 189, 248, 0); }
       100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
   }
-  /* Scheduled-maintenance banner (above the viewport, every view). Neutral
-     card; a slim left accent + status pill carry the state — amber while
-     upcoming, red while in progress (with a progress line along the bottom). */
-  .maint-banner { --mb-accent: var(--status-warn); position: relative; display: flex; align-items: center; gap: 24px; margin: 0 0 14px; padding: 14px 18px 14px 22px; border-radius: 16px; background: var(--card-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); color: var(--text-main); flex-shrink: 0; overflow: hidden; }
-  .maint-banner.live { --mb-accent: var(--status-alert); }
-  .maint-banner::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--mb-accent); }
+  /* Scheduled-maintenance banner (above the viewport, every view).
+     A deep "ink" ops strip in both themes so it reads as a system notice, not
+     another card: meshing gears, a timeline rail (charges up during the
+     lead-in, then tracks the window), and a rolling countdown. Amber while
+     upcoming, red while in progress. Motion is GSAP (JavaScript.html,
+     buildMaintBanner); without GSAP / with reduced motion it renders static. */
+  .maint-banner {
+      --mb-accent: #f5a524; --mb-accent-2: #ffd27a; --mb-glow: rgba(245, 165, 36, 0.38);
+      --mb-ink: #e9edf7; --mb-muted: rgba(233, 237, 247, 0.56);
+      position: relative; display: flex; align-items: center; gap: 22px; flex-shrink: 0;
+      margin: 0 0 16px; padding: 16px 18px 16px 16px; border-radius: 18px; overflow: hidden;
+      color: var(--mb-ink);
+      background:
+          radial-gradient(110% 160% at 0% 0%, color-mix(in srgb, var(--mb-accent) 22%, transparent), transparent 55%),
+          radial-gradient(80% 120% at 100% 100%, color-mix(in srgb, var(--mb-accent-2) 10%, transparent), transparent 60%),
+          linear-gradient(135deg, #0c1120 0%, #131b31 55%, #0c1120 100%);
+      border: 1px solid color-mix(in srgb, var(--mb-accent) 28%, rgba(255,255,255,0.06));
+      box-shadow: 0 22px 44px -22px var(--mb-glow), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+  .maint-banner.live { --mb-accent: #ff4d4f; --mb-accent-2: #ff9a3d; --mb-glow: rgba(255, 77, 79, 0.42); }
+  .maint-banner .mb-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 38%; pointer-events: none; transform: translateX(-100%);
+      background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.075) 50%, transparent 100%); }
+
+  .maint-banner .mb-icon { width: 58px; height: 58px; flex-shrink: 0; border-radius: 16px; display: grid; place-items: center;
+      background: color-mix(in srgb, var(--mb-accent) 13%, transparent); border: 1px solid color-mix(in srgb, var(--mb-accent) 32%, transparent); }
+  .mb-gears { width: 40px; height: 40px; overflow: visible; }
+  .mb-gear-a { fill: var(--mb-accent); }
+  .mb-gear-b { fill: var(--mb-accent-2); opacity: 0.85; }
+
   .maint-banner .mb-main { flex: 1; min-width: 0; }
-  .mb-kicker { display: flex; align-items: center; gap: 10px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-  .mb-pill { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 99px; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em; color: var(--mb-accent, var(--status-warn)); border: 1px solid currentColor; }
-  .mb-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: outage-pulse 2s ease-out infinite; }
-  .maint-banner .mb-title { font-size: 0.95rem; font-weight: 700; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .maint-banner .mb-sub { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
-  .maint-banner .mb-count { display: flex; flex-direction: column; align-items: flex-end; text-align: right; padding-left: 24px; border-left: 1px solid var(--glass-border); }
-  .maint-banner .mb-count span { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-  .maint-banner .mb-count b { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text-main); white-space: nowrap; }
-  .maint-banner .mb-close { appearance: none; border: none; background: transparent; color: var(--text-muted); font-size: 1.2rem; line-height: 1; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; flex-shrink: 0; }
-  .maint-banner .mb-close:hover { background: rgba(120,120,140,0.12); color: var(--text-main); }
-  .maint-banner .mb-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
-  .maint-banner .mb-progress i { display: block; height: 100%; background: var(--mb-accent); opacity: 0.7; transition: width 0.6s ease; }
-  @media (max-width: 640px) { .maint-banner { flex-wrap: wrap; gap: 12px; } .maint-banner .mb-count { padding-left: 0; border-left: none; align-items: flex-start; text-align: left; } }
-  /* Same treatment, pinned at the top of the notifications panel. */
-  .notif-maint { --mb-accent: var(--status-warn); position: relative; padding: 14px 16px 14px 19px; border-radius: 12px; margin-bottom: 10px; background: var(--card-bg); border: 1px solid var(--glass-border); box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; }
-  .notif-maint.live { --mb-accent: var(--status-alert); }
-  .notif-maint::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--mb-accent); }
-  .notif-maint .nm-count { white-space: nowrap; color: var(--text-main); letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
-  .notif-maint .nm-title { font-weight: 700; font-size: 0.9rem; color: var(--text-main); line-height: 1.4; margin-top: 6px; }
-  .notif-maint .nm-sub { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .notif-maint .nm-desc { font-size: 0.78rem; color: var(--text-secondary); margin-top: 6px; line-height: 1.4; max-height: 4.2em; overflow: hidden; }
+  .mb-eyebrow { display: flex; align-items: center; gap: 10px; font-size: 0.64rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mb-muted); }
+  .mb-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px; border-radius: 99px; white-space: nowrap;
+      font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; color: var(--mb-accent); background: color-mix(in srgb, var(--mb-accent) 16%, transparent); }
+  .mb-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; animation: mb-blink 1.8s ease-out infinite; }
+  @keyframes mb-blink { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); } 80%, 100% { box-shadow: 0 0 0 6px transparent; } }
+  .mb-more { color: var(--mb-ink); opacity: 0.7; letter-spacing: 0.06em; }
+  .maint-banner .mb-title { font-size: 1.08rem; font-weight: 700; color: #fff; margin-top: 6px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .mb-track { display: flex; align-items: center; gap: 10px; margin-top: 10px; max-width: 560px; }
+  .mb-time { font-size: 0.68rem; font-weight: 700; color: var(--mb-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mb-rail { position: relative; flex: 1; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.09); }
+  .mb-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; transition: width 0.9s ease;
+      background: linear-gradient(90deg, var(--mb-accent), var(--mb-accent-2)); }
+  .maint-banner.live .mb-fill, .notif-maint.live .mb-fill {
+      background: repeating-linear-gradient(115deg, rgba(255,255,255,0.16) 0 6px, transparent 6px 12px), linear-gradient(90deg, var(--mb-accent), var(--mb-accent-2));
+      background-size: 24px 100%, 100% 100%; animation: mb-stripes 0.9s linear infinite; }
+  @keyframes mb-stripes { to { background-position: 24px 0, 0 0; } }
+  .mb-head { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; transition: left 0.9s ease;
+      background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 55%, transparent), 0 0 14px var(--mb-accent); }
+
+  .maint-banner .mb-count { flex-shrink: 0; text-align: right; padding: 2px 4px 2px 22px; border-left: 1px solid rgba(255, 255, 255, 0.08); }
+  .mb-count-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mb-muted); }
+  .mb-digits { display: flex; justify-content: flex-end; font-size: 1.9rem; font-weight: 800; line-height: 1.15; color: #fff; font-variant-numeric: tabular-nums; margin: 2px 0 1px; }
+  .mb-slot { position: relative; display: inline-block; width: 0.62em; height: 1.15em; overflow: hidden; }
+  .mb-slot > span { position: absolute; inset: 0; text-align: center; }
+  .mb-colon { display: inline-block; width: 0.3em; text-align: center; opacity: 0.45; }
+  .mb-count-sub { font-size: 0.68rem; font-weight: 600; color: var(--mb-muted); font-variant-numeric: tabular-nums; }
+
+  .maint-banner .mb-close { position: relative; appearance: none; border: none; flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+      display: grid; place-items: center; color: var(--mb-muted); background: rgba(255, 255, 255, 0.06); transition: background 0.2s, color 0.2s, transform 0.2s; }
+  .maint-banner .mb-close:hover { background: rgba(255, 255, 255, 0.14); color: #fff; transform: rotate(90deg); }
+  @media (max-width: 720px) {
+      .maint-banner { flex-wrap: wrap; gap: 14px; }
+      .maint-banner .mb-count { order: 3; width: 100%; text-align: left; padding: 10px 0 0; border-left: none; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+      .mb-digits { justify-content: flex-start; }
+      .maint-banner .mb-close { position: absolute; top: 12px; right: 12px; }
+      .maint-banner .mb-main { padding-right: 34px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .mb-dot, .maint-banner.live .mb-fill, .notif-maint.live .mb-fill { animation: none; } }
+
+  /* Same ink look, pinned (static) at the top of the notifications panel. */
+  .notif-maint {
+      --mb-accent: #f5a524; --mb-accent-2: #ffd27a; --mb-ink: #e9edf7; --mb-muted: rgba(233, 237, 247, 0.56);
+      padding: 14px 16px; border-radius: 14px; margin-bottom: 10px; color: var(--mb-ink);
+      background: radial-gradient(120% 160% at 0% 0%, color-mix(in srgb, var(--mb-accent) 20%, transparent), transparent 60%), linear-gradient(135deg, #0c1120, #131b31);
+      border: 1px solid color-mix(in srgb, var(--mb-accent) 26%, rgba(255,255,255,0.06));
+  }
+  .notif-maint.live { --mb-accent: #ff4d4f; --mb-accent-2: #ff9a3d; }
+  .notif-maint .nm-count { white-space: nowrap; color: #fff; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
+  .notif-maint .nm-title { font-weight: 700; font-size: 0.92rem; color: #fff; line-height: 1.35; margin-top: 8px; }
+  .notif-maint .nm-sub { font-size: 0.76rem; color: var(--mb-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .notif-maint .nm-rail { margin-top: 10px; height: 4px; }
+  .notif-maint .nm-desc { font-size: 0.76rem; color: var(--mb-muted); margin-top: 10px; line-height: 1.45; max-height: 4.4em; overflow: hidden; }
 </style>

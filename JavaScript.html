@@ -194,7 +194,7 @@
   var APP_BUILD = 'build 2026.06.15-OT44 · OT headline = posted + pre-coded slots (reconciles with the floor count)';
 
   var state = { 
-      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', floorChannel: 'all', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
+      view: 'overview', agents: {}, pendingUpdates: {}, weather: {}, slHistory: [], calendarEvents: [], roleLogs: [], statsLogs: [], currentSL: "--", currentACK: "--", selectedAgent: null, searchTerm: "", regionFilter: 'All', notifications: [], knownNotifs: new Set(), dismissedNotifs: new Set(), notifOpen: false, scripts: [], agentTab: 'floor', currentReport: "...", selectedCategory: "All", selectedScriptId: null, editingId: null, appUrl: "", insightMode: 'month', selectedDate: localDateStr(), insightSearch: '', insightRegionFilter: 'All', insightCycleFilter: 'ALL', insightSort: 'total', unifiedReport: null, trackerData: null, trackerMode: 'furlough', trackerDate: localDateStr(), trackerRange: 'day', trackerRegion: 'Onshore', trackerCycleFilter: 'ALL', trackerSearch: '', trackerLoading: true, analyzerData: null, analyzerLoading: false, expandedInsights: new Set(), syncMeta: { sched: "Loading...", idp: "Loading...", muSet: "" }, absencesData: null, selectedAbsenceAgent: null, absenceMonthFilter: 'ALL', outagesData: null, outageHistory: [], outageDrawerProv: null, alarmCom: null, alarmComHistory: [], floorSearch: '', overviewIdp: null, overviewIdpLoading: false, regionRegistry: null, regionManagerFilter: 'ALL', outageCorrelation: null, trainingDefs: [], selectedTrainingId: null, trainingRoster: null, trainingLoading: false, editingTrainingId: null, trackerBucket: 'live', mgmtData: null, mgmtLoading: false, mgmtGrain: 'week', mgmtDate: localDateStr(), safeSelectedAgent: null, safeView: 'agents', safeOpenDay: null, safePins: new Set(), boardAgents: [], boardData: null, boardRangeData: null, boardRoster: null, boardLoading: false, boardDrillDate: null, safeCompareMode: 'day', compareHourStart: 0, compareHourEnd: 1440, scheduleDates: null,
       mgmtShrinkCats: { acsu: true, tower: true, reading: true, breakH: true, lunchH: true, safe: false, coach: false }, mgmtLunchBreaks: true,
       // Supplemental management-week data for charts relocated INTO the trackers
       // (Stacking Lunches → Furlough Tracker, Absence Mix → Absence Tracker).
@@ -243,6 +243,7 @@
     setInterval(fetchNotifications, 15000);
     setInterval(fetchCalendar, 300000); 
     setInterval(updateMaintenance, 20000);
+    setInterval(function() { maintTick(true); }, 1000);   // countdown digits + rail
     setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
     fetchPresenceBootstrap();
@@ -1316,26 +1317,149 @@
       return out;
   }
 
-  // Display pieces shared by the banner and the notification card. Plain
-  // wording, no emoji — the colour accent and status pill carry the urgency.
+  // Display pieces shared by the banner and the notification card.
   function maintLines(m) {
       return {
-          // The kicker already says "Scheduled maintenance", so drop that prefix
+          // The eyebrow already says "Scheduled maintenance", so drop that prefix
           // from the calendar title ("Scheduled Maintenance - MAS" → "MAS").
           title: escapeHTML(String(m.ev.title || '').replace(/^\s*scheduled maintenance\s*[-–—:|·]*\s*/i, '') || 'Maintenance window'),
-          window: escapeHTML((m.ev.startTime || '') + ' – ' + (m.ev.endTime || '')),
+          start: escapeHTML(m.ev.startTime || ''),
+          end: escapeHTML(m.ev.endTime || ''),
           pill: m.live ? 'In progress' : 'Upcoming',
-          countLabel: m.live ? 'Ends in' : 'Starts in',
-          count: fmtMaintDur(m.live ? m.minsLeft : m.minsTo),
-          // Share of the window already elapsed (live only) for the progress line.
-          progress: m.live ? Math.min(100, Math.max(0, (Date.now() - m.start) / (m.end - m.start) * 100)) : 0
+          countLabel: m.live ? 'Remaining' : 'Starts in',
+          count: fmtMaintDur(m.live ? m.minsLeft : m.minsTo)
       };
+  }
+
+  // Track fill, 0–100. Upcoming: how far through the lead-in we are (the bar
+  // "charges" as the start approaches). Live: how much of the window is done.
+  function maintProgress(m, now) {
+      if (now >= m.start) return Math.min(100, Math.max(0, (now - m.start) / (m.end - m.start) * 100));
+      var lead = MAINT_LEAD_MIN * 60000;
+      return Math.min(100, Math.max(0, 100 - (m.start - now) / lead * 100));
+  }
+
+  // "1:04:09" / "41:58" — the rolling countdown's text.
+  function maintClock(ms) {
+      var t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+      var p = function(n) { return (n < 10 ? '0' : '') + n; };
+      return h ? h + ':' + p(m) + ':' + p(s) : p(m) + ':' + p(s);
+  }
+
+  // Gear outline as an SVG path (teeth around a ring, hole in the middle).
+  function gearPath(cx, cy, teeth, rOut, rIn, rHole) {
+      var d = '', step = Math.PI * 2 / teeth;
+      for (var i = 0; i < teeth; i++) {
+          var a = i * step, pts = [[a - step * 0.30, rIn], [a - step * 0.17, rOut], [a + step * 0.17, rOut], [a + step * 0.30, rIn], [a + step * 0.5, rIn]];
+          pts.forEach(function(p, k) {
+              var x = (cx + Math.cos(p[0]) * p[1]).toFixed(2), y = (cy + Math.sin(p[0]) * p[1]).toFixed(2);
+              d += (i === 0 && k === 0 ? 'M' : 'L') + x + ' ' + y + ' ';
+          });
+      }
+      return d + 'Z M' + (cx + rHole) + ' ' + cy + ' A' + rHole + ' ' + rHole + ' 0 1 0 ' + (cx - rHole) + ' ' + cy + ' A' + rHole + ' ' + rHole + ' 0 1 0 ' + (cx + rHole) + ' ' + cy + ' Z';
+  }
+  var MAINT_GEARS = '<svg class="mb-gears" viewBox="0 0 64 64" aria-hidden="true">' +
+      '<path class="mb-gear-a" fill-rule="evenodd" d="' + gearPath(25, 27, 12, 19, 15, 6) + '"/>' +
+      '<path class="mb-gear-b" fill-rule="evenodd" d="' + gearPath(48.5, 46.5, 8, 12, 9, 3.6) + '"/></svg>';
+
+  function maintMotionOK() {
+      return typeof gsap !== 'undefined' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  // Rolling digits: each character sits in a slot; a changed digit slides the
+  // old one up and out while the new one rises in.
+  function maintSetDigits(box, str, animate) {
+      if (!box) return;
+      if (box.getAttribute('data-len') !== String(str.length)) {
+          box.innerHTML = str.split('').map(function(ch) { return ch === ':' ? '<span class="mb-colon">:</span>' : '<span class="mb-slot"><span>' + ch + '</span></span>'; }).join('');
+          box.setAttribute('data-len', String(str.length));
+          return;
+      }
+      var kids = box.children;
+      for (var i = 0; i < str.length; i++) {
+          var ch = str.charAt(i), slot = kids[i];
+          if (ch === ':' || !slot || slot.className !== 'mb-slot') continue;
+          var cur = slot.lastElementChild;
+          if (cur && cur.textContent === ch) continue;
+          var nu = document.createElement('span'); nu.textContent = ch; slot.appendChild(nu);
+          if (animate && cur) {
+              gsap.fromTo(nu, { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: 'power3.out' });
+              gsap.to(cur, { yPercent: -100, opacity: 0, duration: 0.45, ease: 'power3.out', onComplete: function() { if (this.targets()[0].parentNode) this.targets()[0].parentNode.removeChild(this.targets()[0]); } });
+          } else if (cur) { slot.removeChild(cur); }
+      }
+  }
+
+  var maintShown = null;      // { key, live } currently built in the banner
+  var maintLoops = [];        // running GSAP tweens to kill on rebuild
+
+  function maintKillLoops() { maintLoops.forEach(function(t) { try { t.kill(); } catch (e) {} }); maintLoops = []; }
+
+  // Build (or rebuild on phase change) the banner for one window.
+  function buildMaintBanner(el, m, total) {
+      var L = maintLines(m), motion = maintMotionOK(), phaseChange = maintShown && maintShown.key === m.key && maintShown.live !== m.live;
+      maintKillLoops();
+      el.className = 'maint-banner' + (m.live ? ' live' : '');
+      el.innerHTML =
+          '<div class="mb-sweep"></div>' +
+          '<div class="mb-icon">' + MAINT_GEARS + '</div>' +
+          '<div class="mb-main">' +
+            '<div class="mb-eyebrow"><span class="mb-chip"><span class="mb-dot"></span>' + L.pill + '</span><span>Scheduled maintenance</span>' + (total > 1 ? '<span class="mb-more">+' + (total - 1) + ' more</span>' : '') + '</div>' +
+            '<div class="mb-title">' + L.title + '</div>' +
+            '<div class="mb-track"><span class="mb-time">' + (m.live ? L.start : 'Now') + '</span>' +
+              '<div class="mb-rail"><div class="mb-fill"></div><div class="mb-head"></div></div>' +
+              '<span class="mb-time">' + (m.live ? L.end : L.start) + '</span></div>' +
+          '</div>' +
+          '<div class="mb-count"><div class="mb-count-label">' + L.countLabel + '</div><div class="mb-digits"></div><div class="mb-count-sub">' + L.start + ' – ' + L.end + '</div></div>' +
+          '<button class="mb-close" onclick="hideMaintBanner(' + m.start + ')" title="' + (m.live ? 'Hide' : 'Hide until it starts') + '" aria-label="Hide">' +
+            '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
+      el.style.display = 'flex';
+      maintShown = { key: m.key, live: m.live };
+      maintTick(false);
+
+      if (!motion) return;
+      var q = function(s) { return el.querySelector(s); };
+      // Entrance (or the phase flip from upcoming → live).
+      var tl = gsap.timeline();
+      if (phaseChange) {
+          tl.fromTo(el, { scale: 0.985 }, { scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' })
+            .fromTo(q('.mb-sweep'), { xPercent: -100, opacity: 1 }, { xPercent: 260, duration: 0.9, ease: 'power2.inOut' }, 0);
+      } else {
+          tl.fromTo(el, { clipPath: 'inset(0 100% 0 0 round 18px)', opacity: 0.4 }, { clipPath: 'inset(0 0% 0 0 round 18px)', opacity: 1, duration: 0.75, ease: 'power3.inOut' })
+            .from(q('.mb-gears'), { rotation: -120, scale: 0.4, opacity: 0, transformOrigin: '50% 50%', duration: 0.7, ease: 'back.out(1.8)' }, 0.25)
+            .from([q('.mb-eyebrow'), q('.mb-title'), q('.mb-track'), q('.mb-count')], { y: 10, opacity: 0, duration: 0.5, stagger: 0.07, ease: 'power2.out' }, 0.35)
+            .from(q('.mb-fill'), { scaleX: 0, transformOrigin: '0 50%', duration: 0.9, ease: 'power3.out' }, 0.5);
+      }
+      // Ambient loops: meshing gears (12:8 teeth → 1.5× speed), faster while
+      // live; a light sweep every few seconds; a breathing glow on the rail head.
+      var spd = m.live ? 6 : 14;
+      maintLoops.push(gsap.to(q('.mb-gear-a'), { rotation: 360, duration: spd, repeat: -1, ease: 'none', svgOrigin: '25 27' }));
+      maintLoops.push(gsap.to(q('.mb-gear-b'), { rotation: -360, duration: spd / 1.5, repeat: -1, ease: 'none', svgOrigin: '48.5 46.5' }));
+      maintLoops.push(gsap.fromTo(q('.mb-sweep'), { xPercent: -100 }, { xPercent: 260, duration: 1.6, ease: 'power2.inOut', repeat: -1, repeatDelay: m.live ? 3.5 : 6, delay: 1.2 }));
+      maintLoops.push(gsap.to(q('.mb-head'), { boxShadow: '0 0 0 7px rgba(255,255,255,0)', scale: 1.25, duration: 1.1, repeat: -1, yoyo: true, ease: 'sine.inOut' }));
+  }
+
+  // Per-second refresh of the live bits (digits, rail) without rebuilding.
+  function maintTick(animate) {
+      var el = document.getElementById('maint-banner');
+      if (!el || !maintShown || el.style.display === 'none') return;
+      var m = activeMaintenance().filter(function(x) { return x.key === maintShown.key; })[0];
+      if (!m) { updateMaintenance(); return; }
+      if (m.live !== maintShown.live) { updateMaintenance(); return; }
+      var now = Date.now();
+      maintSetDigits(el.querySelector('.mb-digits'), maintClock(m.live ? m.end - now : m.start - now), animate !== false && maintMotionOK());
+      var pct = maintProgress(m, now);
+      var fill = el.querySelector('.mb-fill'), head = el.querySelector('.mb-head');
+      if (fill) fill.style.width = pct.toFixed(2) + '%';
+      if (head) head.style.left = pct.toFixed(2) + '%';
   }
 
   window.hideMaintBanner = function(startMs) {
       var m = activeMaintenance().filter(function(x) { return x.start === startMs; })[0];
       if (m) maintHidden[m.key] = m.live ? 'live' : 'soon';
-      updateMaintenance();
+      var el = document.getElementById('maint-banner');
+      var done = function() { maintKillLoops(); maintShown = null; if (el) { el.style.display = 'none'; el.innerHTML = ''; el.style.cssText = 'display:none;'; } updateMaintenance(); };
+      if (el && maintMotionOK()) gsap.to(el, { height: 0, opacity: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0, duration: 0.45, ease: 'power3.inOut', onComplete: done });
+      else done();
   };
 
   function updateNotifDot() {
@@ -1361,25 +1485,20 @@
           });
       });
 
-      // Banner: the nearest window not hidden in its current phase. Hiding
-      // "starting soon" brings it back once it goes live.
+      // Banner: the nearest window not hidden in its current phase. Hiding an
+      // upcoming window brings it back once it goes live. Rebuilt only when the
+      // window or its phase changes, so the animations aren't restarted.
       var el = document.getElementById('maint-banner');
       if (el) {
           var show = list.filter(function(m) { return maintHidden[m.key] !== (m.live ? 'live' : 'soon'); })[0];
-          if (!show || state.view === 'popout-view') { el.style.display = 'none'; el.innerHTML = ''; }
-          else {
-              var L = maintLines(show);
-              el.className = 'maint-banner' + (show.live ? ' live' : '');
-              el.innerHTML =
-                  '<div class="mb-main">' +
-                    '<div class="mb-kicker"><span class="mb-pill">' + (show.live ? '<span class="mb-dot"></span>' : '') + L.pill + '</span>Scheduled maintenance' + (list.length > 1 ? ' · ' + list.length + ' windows' : '') + '</div>' +
-                    '<div class="mb-title">' + L.title + '</div>' +
-                    '<div class="mb-sub">' + L.window + '</div>' +
-                  '</div>' +
-                  '<div class="mb-count"><span>' + L.countLabel + '</span><b>' + L.count + '</b></div>' +
-                  '<button class="mb-close" onclick="hideMaintBanner(' + show.start + ')" title="' + (show.live ? 'Hide' : 'Hide until it starts') + '" aria-label="Hide">&times;</button>' +
-                  (show.live ? '<div class="mb-progress"><i style="width:' + L.progress.toFixed(1) + '%;"></i></div>' : '');
-              el.style.display = 'flex';
+          if (!show || state.view === 'popout-view') {
+              if (maintShown) { maintKillLoops(); maintShown = null; }
+              el.style.display = 'none'; el.innerHTML = '';
+          } else if (!maintShown || maintShown.key !== show.key || maintShown.live !== show.live) {
+              buildMaintBanner(el, show, list.length);
+          } else {
+              var more = el.querySelector('.mb-more');
+              if (list.length > 1 && !more) buildMaintBanner(el, show, list.length);
           }
       }
 
@@ -1388,14 +1507,17 @@
   }
 
   // Pinned maintenance cards for the notifications panel (not dismissable —
-  // they leave on their own when the window ends).
+  // they leave on their own when the window ends). Same ink look as the
+  // banner, static.
   function maintNotifCards() {
+      var now = Date.now();
       return activeMaintenance().map(function(m) {
           var L = maintLines(m);
           return '<div class="notif-maint' + (m.live ? ' live' : '') + '">' +
-                 '<div class="mb-kicker"><span class="mb-pill">' + (m.live ? '<span class="mb-dot"></span>' : '') + L.pill + '</span><span style="flex:1;"></span><span class="nm-count">' + L.countLabel + ' ' + L.count + '</span></div>' +
+                 '<div class="mb-eyebrow"><span class="mb-chip"><span class="mb-dot"></span>' + L.pill + '</span><span style="flex:1;"></span><span class="nm-count">' + L.countLabel + ' ' + L.count + '</span></div>' +
                  '<div class="nm-title">' + L.title + '</div>' +
-                 '<div class="nm-sub">Scheduled maintenance · ' + L.window + '</div>' +
+                 '<div class="nm-sub">Scheduled maintenance · ' + L.start + ' – ' + L.end + '</div>' +
+                 '<div class="mb-rail nm-rail"><div class="mb-fill" style="width:' + maintProgress(m, now).toFixed(1) + '%;"></div></div>' +
                  (m.ev.description ? '<div class="nm-desc">' + escapeHTML(String(m.ev.description).replace(/<[^>]*>/g, ' ')) + '</div>' : '') +
                  '</div>';
       }).join('');
@@ -1830,8 +1952,7 @@
 
       // One page: the Genesys panel (channel counts, batch assign, queue
       // coverage) on top of the full roster. Each agent appears once — their
-      // queues ride on their own row — and the channel counts double as the
-      // filter that the old Inbound / Outbound lanes used to provide.
+      // queues ride on their own row.
       var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
                  '' + searchBox('agent-search', 'Search name, ID, supervisor, language, queue…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
                  '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
@@ -1843,11 +1964,6 @@
                  renderGenesysPanel() + renderFloorLayout(upMap);
       return html;
   }
-
-  // Channel filter: 'all' | 'inbound' | 'outbound' | 'none' (not on Genesys).
-  // Clicking the active one again clears it.
-  window.setFloorChannel = function(ch) { state.floorChannel = (state.floorChannel === ch) ? 'all' : ch; render(); };
-  function agentChannel(a) { return (a && a.genesys && a.genesys.channel) || 'none'; }
 
   // Queue coverage panel: every queue from the list with how many inbound
   // agents hold it. Uncovered queues are dimmed — gaps read at a glance.
@@ -1910,52 +2026,45 @@
       if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
   };
 
-  // Genesys panel at the top of the page: on-shift channel counts (clickable
-  // filters for the roster below), share bar, batch tools and queue coverage.
-  // Counts honour search + On/Off but not the channel filter itself, so they
-  // never collapse to the one channel you clicked.
+  // Genesys panel at the top of the page: on-shift channel counts, the
+  // inbound/outbound split, batch tools and queue coverage. Everyone is on
+  // Genesys, so there is no "on Genesys %" — only which channel each agent
+  // has been given.
   function renderGenesysPanel() {
-      var visible = (state.agents.active || []).filter(floorMatchAnyChannel);
-      var inbound = [], outbound = [], none = [];
+      var visible = (state.agents.active || []).filter(floorMatch);
+      var inbound = [], outbound = [], none = 0;
       visible.forEach(function(a) {
-          var ch = agentChannel(a);
-          if (ch === 'inbound') inbound.push(a); else if (ch === 'outbound') outbound.push(a); else none.push(a);
+          var ch = (a.genesys && a.genesys.channel) || '';
+          if (ch === 'inbound') inbound.push(a); else if (ch === 'outbound') outbound.push(a); else none++;
       });
-      var total = visible.length || 1;
-      var pIn = Math.round(inbound.length / total * 100), pOut = Math.round(outbound.length / total * 100);
-      var pNone = Math.max(0, 100 - pIn - pOut);
-      var genTotal = inbound.length + outbound.length;
-      var cur = state.floorChannel || 'all';
+      var assigned = inbound.length + outbound.length;
+      var pIn = assigned ? Math.round(inbound.length / assigned * 100) : 0;
 
-      var kpi = function(key, label, val, color, hint) {
-          return '<button class="gen-kpi' + (cur === key ? ' active' : '') + '" onclick="setFloorChannel(\'' + key + '\')" title="' + hint + (cur === key ? ' — click again to show everyone' : '') + '"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></button>';
+      var kpi = function(label, val, color) {
+          return '<div class="gen-kpi"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></div>';
       };
-      var filterNote = cur === 'all' ? '' :
-          '<div class="gen-filter-note">Showing <b>' + ({ inbound: 'Inbound', outbound: 'Outbound', none: 'Unassigned' })[cur] + '</b> agents only · <a onclick="setFloorChannel(\'' + cur + '\')">show everyone</a></div>';
 
       return '<div class="aether-card" style="padding:20px 24px; margin-bottom:24px;">' +
             '<div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:14px;">' +
               '<div style="display:flex; flex-direction:column; gap:5px;">' + genCloudLogoSvg(24) +
-                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">On shift now · click a count to filter</span></div>' +
+                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">Channel assignments · on shift now</span></div>' +
               '<div style="flex:1;"></div>' +
               '<div class="gen-kpis">' +
-                kpi('inbound', 'Inbound', inbound.length, 'var(--region-on)', 'Agents on Genesys inbound queues') +
-                kpi('outbound', 'Outbound', outbound.length, 'var(--status-break)', 'Agents on Genesys outbound / callbacks') +
-                kpi('none', 'Unassigned', none.length, 'var(--text-secondary)', 'On shift with no Genesys channel assigned yet') +
-                '<div class="gen-kpi static"><h4>On Genesys</h4><div style="color:var(--genesys);">' + genTotal + ' <span style="font-size:0.62em; color:var(--text-muted);">' + (pIn + pOut) + '%</span></div></div>' +
+                kpi('On shift', visible.length, 'var(--text-main)') +
+                kpi('Inbound', inbound.length, 'var(--region-on)') +
+                kpi('Outbound', outbound.length, 'var(--status-break)') +
               '</div>' +
               '<div style="display:flex; gap:8px; align-items:center;">' +
                 '<button class="btn btn-glass" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="15"></i> Batch assign</button>' +
-                (genTotal ? '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Clear every Genesys assignment"><i data-lucide="undo-2" width="15"></i></button>' : '') +
+                (assigned ? '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Clear every channel assignment"><i data-lucide="undo-2" width="15"></i></button>' : '') +
               '</div>' +
             '</div>' +
-            '<div class="gen-share" title="Inbound ' + pIn + '% · Outbound ' + pOut + '% · Unassigned ' + pNone + '%">' +
+            // Inbound vs outbound among agents who have a channel.
+            (assigned ? '<div class="gen-share" title="Inbound ' + pIn + '% · Outbound ' + (100 - pIn) + '% of assigned agents">' +
               '<i style="width:' + pIn + '%; background:var(--region-on);"></i>' +
-              '<i style="width:' + pOut + '%; background:var(--status-break);"></i>' +
-              '<i style="width:' + pNone + '%; background:var(--glass-border);"></i>' +
-            '</div>' +
-            filterNote +
-            (genTotal === 0 ? '<div class="gen-filter-note">Nobody is assigned a Genesys channel yet — click an agent below → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span>, or use Batch assign.</div>' : '') +
+              '<i style="width:' + (100 - pIn) + '%; background:var(--status-break);"></i>' +
+            '</div>' : '') +
+            (none && !assigned ? '<div class="gen-hint">No channels set yet — click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span>, or use Batch assign.</div>' : '') +
             renderGenesysCoverage(inbound) +
           '</div>';
   }
@@ -2053,15 +2162,7 @@
       }).join('');
   }
 
-  // Used as an Array#filter callback (a, index), so it takes no extra flag —
-  // floorMatchAnyChannel is the variant the Genesys counts use.
   function floorMatch(a) {
-      if (!a) return false;
-      if (state.floorChannel && state.floorChannel !== 'all' && agentChannel(a) !== state.floorChannel) return false;
-      return floorMatchAnyChannel(a);
-  }
-
-  function floorMatchAnyChannel(a) {
       if (!a) return false;
       var reg = a.region || '';
       if (state.regionFilter !== 'All' && reg.indexOf(state.regionFilter) === -1) return false;
@@ -5072,7 +5173,19 @@
           plugins: { legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 9, boxHeight: 9, padding: 14, font: { family: ff, weight: '700', size: 12 }, color: t.textColor } },
               tooltip: { enabled: true, mode: 'index', intersect: false, backgroundColor: t.isDark ? 'rgba(15,23,42,0.96)' : 'rgba(255,255,255,0.98)', titleColor: t.isDark ? '#e2e8f0' : '#0f172a', bodyColor: t.isDark ? '#cbd5e1' : '#334155', borderColor: t.isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, boxPadding: 6, usePointStyle: true, footerColor: t.isDark ? '#93c5fd' : '#1d4ed8', footerMarginTop: 8, footerFont: { family: ff, weight: '800', size: 12 },
                   filter: function(it) { return it.dataset.yAxisID !== 'y1'; },
-                  callbacks: { footer: function(items) { var i = items[0].dataIndex; var s = L.svl[i], a = L.ack[i]; return 'SVL: ' + (s == null ? 'no sample' : s + '%') + '   ·   ACK: ' + (a == null ? 'no sample' : a + 's'); } } } },
+                  // SVL/ACK come from the calculator (about once an hour), so most
+                  // buckets have no reading of their own: show that bucket's
+                  // reading if it has one, else the latest one before it with its
+                  // time — and nothing at all before the first reading.
+                  callbacks: { footer: function(items) {
+                      var i = items[0].dataIndex, j = i;
+                      while (j >= 0 && L.svl[j] == null && L.ack[j] == null) j--;
+                      if (j < 0) return '';
+                      var parts = [];
+                      if (L.svl[j] != null) parts.push('SVL ' + L.svl[j] + '%');
+                      if (L.ack[j] != null) parts.push('ACK ' + L.ack[j] + 's');
+                      return (j === i ? '' : 'Last reading ' + L.labels[j] + ' · ') + parts.join('  ·  ');
+                  } } } },
           scales: { x: { stacked: true, grid: { display: false }, ticks: { font: { family: ff, weight: '700', size: 11 }, color: t.textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 24 } },
               y: { stacked: true, beginAtZero: true, position: 'left', title: { display: true, text: 'agents on lunch/break', font: { family: ff, weight: '700', size: 10 }, color: t.textColor }, grid: { color: t.gridColor }, ticks: { font: { family: ff, weight: '600', size: 11 }, color: t.textColor } },
               y1: { position: 'right', beginAtZero: true, suggestedMax: 100, title: { display: true, text: 'SVL % / ACK', font: { family: ff, weight: '700', size: 10 }, color: t.textColor }, grid: { display: false }, ticks: { font: { family: ff, weight: '600', size: 11 }, color: t.textColor } } },
@@ -5082,8 +5195,10 @@
           { label: 'Lunch · Onshore', data: L.onLunch, backgroundColor: '#fdba74', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
           { label: 'Break · Offshore', data: L.offBreak, backgroundColor: '#fbbf24', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
           { label: 'Break · Onshore', data: L.onBreak, backgroundColor: '#fde68a', stack: 'c', maxBarThickness: 16, yAxisID: 'y' },
-          { type: 'line', label: 'SVL %', data: L.svl, borderColor: '#38bdf8', borderWidth: 2.5, tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 0 },
-          { type: 'line', label: 'ACK', data: L.ack, borderColor: '#f472b6', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 0, pointHoverRadius: 4, yAxisID: 'y1', spanGaps: true, order: 0 }
+          // A dot marks each real calculator reading; the line between them is
+          // just the connection (spanGaps), not data.
+          { type: 'line', label: 'SVL %', data: L.svl, borderColor: '#38bdf8', backgroundColor: '#38bdf8', borderWidth: 2.5, tension: 0.35, pointRadius: 2.5, pointHoverRadius: 5, yAxisID: 'y1', spanGaps: true, order: 0 },
+          { type: 'line', label: 'ACK', data: L.ack, borderColor: '#f472b6', backgroundColor: '#f472b6', borderWidth: 2, borderDash: [5, 4], tension: 0.35, pointRadius: 2.5, pointHoverRadius: 5, yAxisID: 'y1', spanGaps: true, order: 0 }
       ] }, options: opts });
   };
 
