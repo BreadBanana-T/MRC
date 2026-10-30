@@ -15,7 +15,7 @@
 
 <script>
   function escapeHTML(str) {
-      if (!str) return "";
+      if (str == null || str === false || str === "") return "";   // 0 stays "0" (it used to vanish: 0° showed blank)
       return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
 
@@ -40,6 +40,13 @@
   function __sliceQ(sel, n) { return Array.prototype.slice.call(document.querySelectorAll(sel), 0, n); }
 
   // One consistent search field (pill + embedded icon) for every view.
+  // Loading placeholder shaped like the page it stands in for (tiles, then two
+  // panels), with one quiet line saying what is loading. Replaces the big
+  // spinner cards.
+  function skeletonPage(caption) {
+      var sk = function(h) { return '<div class="aether-card mv-skel" style="height:' + h + 'px;"></div>'; };
+      return '<div class="skel-caption">' + caption + '</div><div class="mv-hero">' + sk(120) + sk(120) + sk(120) + sk(120) + '</div><div class="grid-split">' + sk(380) + sk(380) + '</div>';
+  }
   function searchBox(id, placeholder, value, handler, wrapStyle, inputStyle) {
       return '<span class="search-wrap" style="' + (wrapStyle || '') + '"><i data-lucide="search" width="15"></i><input id="' + id + '" type="text" class="input-search" style="' + (inputStyle || '') + '" placeholder="' + placeholder + '" oninput="' + handler + '" value="' + value + '"></span>';
   }
@@ -255,6 +262,7 @@
   else initApp();
 
   function initApp() {
+    try { if (window.Chart && !Chart.__mvMorph) { Chart.register(mvMorphPlugin); Chart.defaults.font.family = "'Outfit', sans-serif"; Chart.__mvMorph = true; } } catch (e) {}
     try { console.log('[MRC] ' + APP_BUILD); var bEl = document.getElementById('import-build'); if (bEl) bEl.textContent = APP_BUILD; } catch(e) {}
     try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch(e) {}
     var config = document.getElementById('app-config');
@@ -2017,7 +2025,7 @@
   function destroyDetachedCharts() {
       for (var k in charts) {
           var ch = charts[k];
-          if (ch && ch.canvas && !document.body.contains(ch.canvas)) { snapChart(k); try { ch.destroy(); } catch (e) {} charts[k] = null; }
+          if (ch && ch.canvas && !document.body.contains(ch.canvas)) { try { ch.destroy(); } catch (e) {} charts[k] = null; }
       }
   }
 
@@ -2212,7 +2220,7 @@
      }
      
      var html = startingHtml +
-         '<div class="group-header"><i data-lucide="shield" width="14"></i> SAFE</div><div style="margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div></div>' +
+         ((state.agents.safe || []).length ? '<div class="group-header"><i data-lucide="shield" width="14"></i> SAFE</div><div style="margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div></div>' : '') +
          '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
          '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
          '<div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div><div class="agent-list-view" style="margin-bottom:30px;">' + (renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>') + '</div>' + offHtml;
@@ -2356,7 +2364,7 @@
      // Default to Onshore prefix (T) when region is unset; only mark x for explicit Offshore.
      var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
      var formattedId = prefix + escapeHTML(a.id || '');
-     var timeDisplay = escapeHTML(start) + "-" + escapeHTML(end);
+     var timeDisplay = escapeHTML(start) + "–" + escapeHTML(end);
      var timeStyle = '';
      if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') { timeDisplay = "OFF"; }
      // While on break/lunch, show the break window itself in the right-hand
@@ -2714,7 +2722,16 @@
       var provs = Object.keys(state.weather);
       if (provs.length === 0) { return '<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data loading...</div></div>'; }
 
-      var html = '<div class="grid-masonry"><div style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h2 style="margin:0;">National Overview</h2><div style="display:flex; gap:8px;"><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy Winds</button></div></div>';
+      // Header: what the page covers at a glance, then the action.
+      var allC = []; provs.forEach(function(pv) { (Array.isArray(state.weather[pv]) ? state.weather[pv] : []).forEach(function(c) { allC.push(c); }); });
+      var num = function(v) { var n = parseFloat(String(v == null ? '' : v)); return isFinite(n) ? n : null; };
+      var coldest = allC.filter(function(c) { return num(c.temp) != null; }).sort(function(a, b) { return num(a.temp) - num(b.temp); })[0];
+      var windiest = allC.filter(function(c) { return num(c.wind) != null; }).sort(function(a, b) { return num(b.wind) - num(a.wind); })[0];
+      var facts = [allC.length + ' cities · ' + provs.length + ' provinces'];
+      facts.push((state.alerts || []).length ? '<b style="color:var(--status-alert);">' + state.alerts.length + ' province' + (state.alerts.length === 1 ? '' : 's') + ' under warning</b>' : 'no active warnings');
+      if (coldest) facts.push('coldest ' + escapeHTML(coldest.name || '') + ' ' + num(coldest.temp) + '°');
+      if (windiest) facts.push('windiest ' + escapeHTML(windiest.name || '') + ' ' + num(windiest.wind) + ' km/h');
+      var html = '<div class="sticky-header" style="justify-content:space-between; align-items:center;"><div><h2 style="margin:0; font-size:1.3rem;">Weather</h2><div style="font-size:0.76rem; color:var(--text-muted); margin-top:4px; font-weight:600;">' + facts.join(' · ') + '</div></div><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy winds</button></div><div class="grid-masonry">';
       
       if (state.alerts && state.alerts.length > 0) {
          html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level) — tap a province to expand</div><div style="display:flex; flex-direction:column; gap:8px;">';
@@ -2763,8 +2780,8 @@
          cities.forEach(function(c) {
              var icon = getWeatherIcon(c.condition);
              var th = weatherTheme(c.condition);
-             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) { var dayName = f.day ? escapeHTML(String(f.day).substring(0,3)) : "---"; return '<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">' + dayName + '</span><div style="color:var(--text-main);">' + getWeatherIcon(f.cond, true) + '</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">' + escapeHTML(f.temp || '') + '</span></div>'; }).join('');
-             html += '<div class="aether-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="cursor:pointer; transition:0.2s; background:' + th.bg + ', var(--card-bg);"><i data-lucide="' + th.ico + '" class="wx-big ' + th.anim + '" width="84"></i><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;"><span style="font-weight:800; font-size:1.1rem;">' + escapeHTML(c.name || '') + '</span><span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">' + escapeHTML(prov) + '</span></div><div style="display:flex; justify-content:space-between; align-items:flex-end;"><div style="display:flex; flex-direction:column; gap:4px;"><div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">' + escapeHTML(c.temp || '') + '°</div><div style="display:flex; align-items:center; gap:6px; color:' + th.chip + '; font-weight:700; font-size:0.9rem;">' + icon + ' ' + escapeHTML(c.condition || '') + '</div></div><div style="text-align:right; display:flex; flex-direction:column; gap:4px;"><div style="font-size:1.4rem; font-weight:700;">' + escapeHTML(c.wind || '') + '</div><div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">KM/H</div></div></div><div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">' + (forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>') + '</div></div>';
+             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) { var dayName = f.day ? escapeHTML(String(f.day).substring(0,3)) : "---"; return '<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">' + dayName + '</span><div style="color:var(--text-main);">' + getWeatherIcon(f.cond, true) + '</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">' + (f.temp == null || f.temp === '' ? '—' : escapeHTML(String(f.temp)) + '°') + '</span></div>'; }).join('');
+             html += '<div class="aether-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="cursor:pointer; transition:0.2s; background:' + th.bg + ', var(--card-bg);"><i data-lucide="' + th.ico + '" class="wx-big ' + th.anim + '" width="84"></i><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;"><span style="font-weight:800; font-size:1.1rem;">' + escapeHTML(c.name || '') + '</span><span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">' + escapeHTML(prov) + '</span></div><div style="display:flex; justify-content:space-between; align-items:flex-end;"><div style="display:flex; flex-direction:column; gap:4px;"><div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">' + (c.temp == null || c.temp === '' ? '—' : escapeHTML(String(c.temp)) + '°') + '</div><div style="display:flex; align-items:center; gap:6px; color:' + th.chip + '; font-weight:700; font-size:0.9rem;">' + icon + ' ' + escapeHTML(c.condition || '') + '</div></div><div style="text-align:right; display:flex; flex-direction:column; gap:4px;"><div style="font-size:1.4rem; font-weight:700;">' + escapeHTML(String(c.wind == null ? '—' : c.wind).replace(/\s*km\/h/i, '')) + '</div><div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">wind · km/h</div></div></div><div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">' + (forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>') + '</div></div>';
          });
       }
       html += '</div>'; return html;
@@ -2943,7 +2960,7 @@
       var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">' + coverageChip(schedText) + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;">' + searchBox('insight-search', 'Search agent...', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:180px;', 'height:32px; font-size:0.8rem;') + '</div></div>';
 
       if (!u.data) {
-          return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:400px;"><div style="width: 40px; height: 40px; border: 3px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="color:var(--text-main); margin:0 0 8px 0;">Compiling Data Cycle...</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Aggregating Schedule and deep GEM metrics.</p></div>';
+          return headerHtml + skeletonPage('Compiling the month… <span>schedule and GEM metrics</span>');
       }
       
       var displayData = u.data || [];
@@ -2958,6 +2975,14 @@
       else if (state.insightSort === 'acsu') { c1 = { key: 'acsu', name: 'ACSU', color: 'var(--text-main)' }; c2 = { key: 'coach', name: 'COACH', color: 'var(--text-muted)' }; c3 = { key: 'total', name: 'Overview', color: 'var(--accent-primary)' }; }
       else if (state.insightSort === 'safe') { c1 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' }; c2 = { key: 'tower', name: 'TOWER', color: 'var(--accent-primary)' }; c3 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' }; }
 
+      // Each hour column gets a faint in-cell bar scaled to that column's
+      // largest value, so the heavy hitters stand out without reading numbers.
+      var colMax = {}; [c1, c2, c3].forEach(function(c) { colMax[c.key] = displayData.reduce(function(m, a) { return Math.max(m, parseFloat(a[c.key]) || 0); }, 0) || 1; });
+      var hCell = function(a, c) {
+          var v = parseFloat(a[c.key]) || 0;
+          if (!(v > 0)) return '<td class="ins-h zero">–</td>';
+          return '<td class="ins-h"><span class="ins-v">' + escapeHTML(String(a[c.key])) + 'h</span><span class="ins-bar"><i style="transform:scaleX(' + Math.min(1, v / colMax[c.key]).toFixed(3) + ');"></i></span></td>';
+      };
       var rowsHtml = displayData.map(function(a, idx) { 
           var g = a.gem || {}; var gx = a.genesys || null; var safeId = "agt-" + idx;
           var regionTag = (a.region || '').includes('Offshore') ? '<span style="font-size:0.6rem; background:var(--region-off); color:white; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle; font-weight:800;">OFF</span>' : '';
@@ -2966,14 +2991,12 @@
           var iconTransform = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
 
           var cellData = '<td style="padding:16px; font-weight:700; color:var(--text-main);">' + escapeHTML(a.name || '') + ' ' + regionTag + '</td>' +
-             '<td style="padding:16px; text-align:right; font-family:monospace; color:' + c1.color + '; font-weight:800;">' + (a[c1.key] > 0 ? escapeHTML(a[c1.key]) + 'h' : '-') + '</td>' +
-             '<td style="padding:16px; text-align:right; font-family:monospace; color:' + c2.color + '; font-weight:800;">' + (a[c2.key] > 0 ? escapeHTML(a[c2.key]) + 'h' : '-') + '</td>' +
-             '<td style="padding:16px; text-align:right; font-family:monospace; color:' + c3.color + '; font-weight:800;">' + (a[c3.key] > 0 ? escapeHTML(a[c3.key]) + 'h' : '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; color:' + (a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)') + '; font-weight:800; font-size:1.1rem;">' + escapeHTML(a.cph || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + escapeHTML(a.aht || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-family:monospace; font-weight:700; opacity:0.8;">' + escapeHTML(a.inOut || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-family:monospace; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? String(gx.noAnswer || 0) : '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-family:monospace; font-size:0.9rem;">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '-') + '</td>' +
+             hCell(a, c1) + hCell(a, c2) + hCell(a, c3) +
+             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-variant-numeric:tabular-nums; color:' + (a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)') + '; font-weight:800; font-size:1.1rem;">' + escapeHTML(a.cph || '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-size:0.9rem;">' + escapeHTML(a.aht || '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-weight:700; opacity:0.8;">' + escapeHTML(a.inOut || '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-variant-numeric:tabular-nums; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? String(gx.noAnswer || 0) : '-') + '</td>' +
+             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-size:0.9rem;">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '-') + '</td>' +
              '<td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-' + safeId + '" data-lucide="chevron-down" width="18" style="transform:' + iconTransform + '; transition:0.3s;"></i></td>';
 
           var expandHtml = '<td colspan="10" style="padding:0;"><div style="padding:24px; border-bottom:2px solid var(--glass-border); display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:32px;">' +
@@ -3011,7 +3034,19 @@
           return '<tr class="hover-bg insight-row" style="border-bottom:1px solid var(--glass-border); cursor:pointer; animation-delay:' + (idx * 0.02) + 's;" onclick="toggleInsightRow(\'' + safeId + '\')">' + cellData + '</tr><tr id="details-' + safeId + '" style="display:' + displayStyle + '; background:rgba(0,0,0,0.015);">' + expandHtml + '</tr>';
       }).join('') || '<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>';
 
-      return headerHtml + '<div style="background:rgba(99, 102, 241, 0.05); padding:16px 20px; margin-bottom:24px; border-radius:14px; border:1px solid rgba(99,102,241,0.12); display:flex; justify-content:space-between; align-items:center;"><div><h3 style="margin:0 0 4px 0; color:var(--accent-primary); font-size:1rem; display:flex; align-items:center; gap:8px;"><i data-lucide="database" width="18"></i> UNIFIED OPERATIONS DASHBOARD</h3><p style="margin:0; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Click on any agent to expand their full WFM role breakdown, Avaya GEM metrics and Genesys call performance.</p></div><div style="text-align:right; font-size:0.8rem; color:var(--text-muted); font-weight:700;">Total Visible: <span style="font-size:1.2rem; color:var(--text-main);">' + displayData.length + '</span></div></div><div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
+      // Team summary for what is on screen (filters apply).
+      var sumK = function(k) { return Math.round(displayData.reduce(function(t, x) { return t + (parseFloat(x[k]) || 0); }, 0) * 10) / 10; };
+      var cphs = displayData.map(function(x) { return parseFloat(x.cph); }).filter(function(v) { return isFinite(v); }).sort(function(x, y) { return x - y; });
+      var medCph = cphs.length ? cphs[Math.floor(cphs.length / 2)] : null;
+      var lowCph = cphs.filter(function(v) { return v < 7.3; }).length;
+      var insTile = function(label, val, cap) { return '<div class="aether-card mv-tile"><div class="mv-k">' + label + '</div><div class="mv-v sm">' + val + '</div><div class="mv-cap">' + cap + '</div></div>'; };
+      var summaryHtml = '<div class="mv-tiles">' +
+          insTile('Agents shown', '<span class="cnum">' + displayData.length + '</span>', 'click a row for WFM roles, GEM and Genesys detail') +
+          insTile('Tower · SAFE', sumK('tower') + 'h <small>·</small> ' + sumK('safe') + 'h', 'scheduled role hours, this cycle') +
+          insTile('Coaching · ACSU', sumK('coach') + 'h <small>·</small> ' + sumK('acsu') + 'h', 'coaching and released time') +
+          insTile('CP/H', medCph != null ? medCph + ' <small>median</small>' : '<span class="mv-na">no GEM data</span>', lowCph ? '<b style="color:var(--status-alert);">' + lowCph + ' under 7.3</b>' : 'nobody under 7.3') +
+          '</div>';
+      return headerHtml + summaryHtml + '<div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
   }
 
   // Resolved-range chip for the ops trackers: spells out the exact days the
@@ -3133,7 +3168,7 @@
       }
 
       var headerHtml = '<div class="sticky-header" style="justify-content:space-between; align-items:center;">' +
-                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; background:linear-gradient(90deg, var(--accent-primary), var(--text-main)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Workforce Engine</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">' + coverageChip(schedText) + '<span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
+                       '<div style="display:flex; align-items:center; gap:16px;"><div><h2 style="margin:0; font-size:1.3rem;">Workforce trackers</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; display:flex; gap:12px; font-weight:600;">' + coverageChip(schedText) + '<span id="tracker-last-import" style="display:flex; align-items:center; gap:5px;">' + lastActionInline('import') + '</span></div></div>';
 
       if (!isAbsences && !isTraining) {
           headerHtml += '<div style="display:flex; gap:8px; margin-right:12px; margin-left:16px;">';
@@ -3173,7 +3208,7 @@
       if (state.trackerLoading) {
           var loadingTitle = isAbsences ? "Compiling Agent Profiles..." : "Analyzing WFM Calendar...";
           var loadingSub = isAbsences ? "Aggregating yearly absenteeism records." : "Computing cycles and aligning boundaries.";
-          return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:450px; animation: slideUp 0.3s ease forwards; opacity:0; transform:translateY(10px);"><div style="width: 50px; height: 50px; border: 4px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite; margin-bottom: 24px; box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);"></div><h3 style="color:var(--text-main); margin:0 0 8px 0; font-size:1.4rem;">' + loadingTitle + '</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">' + loadingSub + '</p></div>';
+          return headerHtml + skeletonPage(loadingTitle.replace(/\.\.\.$/, '…') + ' <span>' + loadingSub + '</span>');
       }
 
       if (isAbsences) {
@@ -5178,27 +5213,37 @@
       var content = document.getElementById('content'); if (content) content.__lastHtml = null;   // DOM changed under the render cache
   };
 
-  // Snapshot of the chart that last lived under a key, so its replacement can
-  // morph from the old values (period switch) instead of growing from zero.
-  var chartSnap = {};
-  function snapChart(k) {
-      var ch = charts[k]; if (!ch) return;
-      try { chartSnap[k] = { type: ch.config.type, n: ch.data.labels.length, sets: ch.data.datasets.map(function(ds) { return (ds.data || []).slice(); }) }; } catch (e) {}
-  }
-  function mvChart(key, el, cfg) {
-      if (charts[key]) { snapChart(key); charts[key].destroy(); charts[key] = null; }
-      var snap = chartSnap[key]; delete chartSnap[key];
-      var ch = new Chart(el.getContext('2d'), cfg);
-      var same = snap && snap.type === cfg.type && snap.n === cfg.data.labels.length && snap.sets.length === cfg.data.datasets.length;
-      if (same && maintMotionOK()) {
-          var target = cfg.data.datasets.map(function(ds) { return ds.data.slice(); });
-          ch.data.datasets.forEach(function(ds, i) { ds.data = snap.sets[i]; });
-          ch.update('none');
-          ch.data.datasets.forEach(function(ds, i) { ds.data = target[i]; });
-          ch.update();
+  // Any chart rebuilt onto the same canvas id moves from the values it showed
+  // to the new ones (period switch, data refresh) instead of growing from
+  // zero again. Registered once for every chart in the app: beforeDestroy
+  // keeps the old values, afterInit replays them as the starting point when
+  // the new chart has the same shape.
+  var chartSnapById = {};
+  var mvMorphPlugin = {
+      id: 'mvMorph',
+      beforeDestroy: function(ch) {
+          var id = ch.canvas && ch.canvas.id; if (!id) return;
+          try { chartSnapById[id] = { at: Date.now(), type: ch.config.type, n: (ch.data.labels || []).length, sets: ch.data.datasets.map(function(ds) { return (ds.data || []).slice(); }) }; } catch (e) {}
+      },
+      afterInit: function(ch) {
+          var id = ch.canvas && ch.canvas.id, s = id && chartSnapById[id];
+          if (!s) return; delete chartSnapById[id];
+          if (Date.now() - s.at > 3000 || s.type !== ch.config.type || s.n !== (ch.data.labels || []).length || s.sets.length !== ch.data.datasets.length) return;
+          try { if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch (e) {}
+          var target = ch.data.datasets.map(function(ds) { return ds.data; });
+          Promise.resolve().then(function() {
+              if (!ch.canvas || !ch.ctx) return;
+              ch.data.datasets.forEach(function(ds, i) { ds.data = s.sets[i]; });
+              ch.update('none');
+              ch.data.datasets.forEach(function(ds, i) { ds.data = target[i]; });
+              ch.update();
+          });
       }
-      charts[key] = ch;
-      return ch;
+  };
+  function mvChart(key, el, cfg) {
+      if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+      charts[key] = new Chart(el.getContext('2d'), cfg);
+      return charts[key];
   }
 
   function initMgmtCharts() {
@@ -5595,7 +5640,7 @@
         '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…"></textarea>' +
         '<label class="paste-label" style="margin-top:16px;"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
         '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…"></textarea>' +
-        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div><div style="font-size:6rem; font-weight:800; color:var(--text-accent); margin-bottom:40px;">' + escapeHTML(state.currentSL) + '</div><div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + escapeHTML(state.currentReport || "...") + '</div><div style="display:flex; gap:10px; margin-top:20px;"><button class="btn btn-glass" style="flex:1;" onclick="copyReport()" title="For Google Chat: exact spacing, section headers in bold (Chat can\'t show colours)"><i data-lucide="message-square" width="15"></i> Copy for Chat</button><button class="btn btn-glass" style="flex:1;" onclick="copyReportRich()" title="For Gmail / Docs: section headers in red"><i data-lucide="mail" width="15"></i> Copy Rich (email)</button></div></div></div></div>' + renderCalcTemplateEditor();
+        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>' + (/^-+$|^$/.test(String(state.currentSL || '').trim()) ? '<div style="margin-bottom:40px; display:flex; flex-direction:column; align-items:center; gap:8px;"><div style="font-size:4.5rem; font-weight:800; line-height:1; color:var(--text-muted); opacity:0.35;">—</div><div style="font-size:0.8rem; font-weight:600; color:var(--text-muted);">Paste the stats and run the analysis</div></div>' : '<div style="font-size:6rem; font-weight:800; line-height:1.05; color:var(--text-main); margin-bottom:40px; font-variant-numeric:tabular-nums; letter-spacing:-0.03em;">' + escapeHTML(state.currentSL) + '</div>') + '<div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + (state.currentReport && state.currentReport !== '...' ? escapeHTML(state.currentReport) : '<span style="color:var(--text-muted); font-family:var(--font-ui);">The report appears here after a run.</span>') + '</div><div style="display:flex; gap:10px; margin-top:20px;"><button class="btn btn-glass" style="flex:1;" onclick="copyReport()" title="For Google Chat: exact spacing, section headers in bold (Chat can\'t show colours)"><i data-lucide="message-square" width="15"></i> Copy for Chat</button><button class="btn btn-glass" style="flex:1;" onclick="copyReportRich()" title="For Gmail / Docs: section headers in red"><i data-lucide="mail" width="15"></i> Copy Rich (email)</button></div></div></div></div>' + renderCalcTemplateEditor();
   }
 
   // Client-side token fill — mirrors buildCalcReport() in CORE/Calculator.gs so
