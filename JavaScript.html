@@ -479,10 +479,10 @@
   };
   function fetchRegionRegistry() {
       if (typeof google === 'undefined') return;
-      document.getElementById('region-list').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-size:0.85rem;">Loading registry…</div>';
+      document.getElementById('region-list').innerHTML = '<div class="rm-empty">Loading registry…</div>';
       google.script.run.withSuccessHandler(function(res) {
           try { state.regionRegistry = JSON.parse(res); renderRegionManager(); }
-          catch(e) { document.getElementById('region-list').innerHTML = '<div style="padding:40px; text-align:center; color:var(--status-alert); font-weight:600;">Failed to load registry.</div>'; }
+          catch(e) { document.getElementById('region-list').innerHTML = '<div class="rm-empty" style="color:var(--status-alert);">Failed to load registry.</div>'; }
       }).getRegionRegistry();
   }
   window.renderRegionManager = function() {
@@ -495,38 +495,27 @@
           if (q && r.display.toLowerCase().indexOf(q) === -1) return false;
           return true;
       });
-      var sourceBadge = function(src) {
-          var color = src === 'manual' ? 'var(--status-alert)' : (src === 'masterlist' ? 'var(--accent-primary)' : 'var(--text-muted)');
-          var bg = src === 'manual' ? 'rgba(220,38,38,0.1)' : (src === 'masterlist' ? 'rgba(99,102,241,0.1)' : 'rgba(0,0,0,0.05)');
-          return '<span style="background:' + bg + '; color:' + color + '; padding:2px 8px; border-radius:6px; font-size:0.65rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">' + src + '</span>';
-      };
+      var srcLabel = { manual: 'Manual', masterlist: 'Master list', auto: 'Auto' };
       var rows = filtered.map(function(r) {
-          var regionColor = r.region === 'Offshore' ? 'var(--region-off, #b45309)' : 'var(--status-active)';
           var flipTo = r.region === 'Offshore' ? 'Onshore' : 'Offshore';
           var nameEsc = escapeHTML(r.display).replace(/'/g, "\\'");
-          return '<div style="padding:12px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;">' +
-                   '<div style="flex:1; min-width:0;">' +
-                     '<div style="font-weight:700; color:var(--text-main); font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(r.display) + '</div>' +
-                     '<div style="display:flex; gap:6px; margin-top:4px; align-items:center;">' +
-                       '<span style="font-size:0.7rem; font-weight:800; color:' + regionColor + ';">' + escapeHTML(r.region) + '</span>' +
-                       sourceBadge(r.source) +
-                     '</div>' +
-                   '</div>' +
-                   '<div style="display:flex; gap:6px; flex-shrink:0;">' +
-                     '<button class="btn btn-glass" onclick="flipAgentRegion(\'' + nameEsc + '\', \'' + flipTo + '\')" style="height:30px; padding:0 12px; font-size:0.75rem;">Flip to ' + flipTo + '</button>' +
-                     (r.source === 'manual' ? '<button class="btn btn-glass" onclick="resetAgentRegion(\'' + nameEsc + '\')" style="height:30px; padding:0 10px; font-size:0.75rem; color:var(--text-muted);" title="Remove manual override, revert to auto-detection">Reset</button>' : '') +
-                   '</div>' +
-                 '</div>';
-      }).join('') || '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:600;">No agents match the filter.</div>';
+          return '<div class="rm-row"><div style="flex:1; min-width:0;">' +
+                     '<div class="rm-name">' + escapeHTML(r.display) + '</div>' +
+                     '<div class="rm-meta"><i class="dot" style="background:var(' + (r.region === 'Offshore' ? '--region-off' : '--region-on') + ');"></i>' + escapeHTML(r.region) +
+                       '<span class="rm-src' + (r.source === 'manual' ? ' manual' : '') + '" title="Where the region comes from">' + escapeHTML(srcLabel[r.source] || r.source || '') + '</span></div>' +
+                 '</div><div class="rm-acts">' +
+                     '<button class="btn btn-glass" onclick="flipAgentRegion(\'' + nameEsc + '\', \'' + flipTo + '\')">Flip to ' + flipTo + '</button>' +
+                     (r.source === 'manual' ? '<button class="btn btn-glass" onclick="resetAgentRegion(\'' + nameEsc + '\')" title="Remove manual override, revert to auto-detection">Reset</button>' : '') +
+                 '</div></div>';
+      }).join('') || '<div class="rm-empty">No agents match the filter.</div>';
       document.getElementById('region-list').innerHTML = rows;
-      ['all','on','off'].forEach(function(k) {
-          var el = document.getElementById('region-filter-' + k);
-          if (!el) return;
-          var wantActive = (filter === 'ALL' && k === 'all') || (filter === 'Onshore' && k === 'on') || (filter === 'Offshore' && k === 'off');
-          el.classList.toggle('btn-primary', wantActive);
-      });
+      var fEl = document.getElementById('region-filter');
+      if (fEl) fEl.innerHTML = segControl([['ALL', 'All'], ['Onshore', 'Onshore'], ['Offshore', 'Offshore']], filter, 'setRegionMgrFilter');
+      var sub = document.getElementById('region-sub');
+      if (sub && list.length) { var man = list.filter(function(r) { return r.source === 'manual'; }).length; sub.textContent = list.length + ' agents · ' + man + ' manual override' + (man === 1 ? '' : 's') + '. Manual flips always beat auto-detection.'; }
       refreshIcons();
   };
+  window.setRegionMgrFilter = function(v) { state.regionManagerFilter = v; renderRegionManager(); };
   window.flipAgentRegion = function(name, newRegion) {
       if (typeof google === 'undefined') return;
       google.script.run.withSuccessHandler(function() { fetchRegionRegistry(); showToast('Flipped ' + name + ' → ' + newRegion); }).setAgentRegionManual(name, newRegion);
@@ -811,7 +800,7 @@
   function feedbackWhoamiText() {
       var u = state.currentUser;
       if (!u) return 'Identifying you…';
-      if (u.email) return '<span style="display:inline-flex; align-items:center; gap:7px; vertical-align:-5px;">' + avatarHtml({ email: u.email, name: u.name, photo: u.photo }, 18) + '<span>Submitting as <b style="color:var(--text-secondary);">' + escapeHTML(u.name || nameFromEmail(u.email)) + '</b> · ' + escapeHTML(u.email) + '</span></span>';
+      if (u.email) return '<span style="display:inline-flex; align-items:center; gap:7px; vertical-align:-5px;">' + avatarHtml({ email: u.email, name: u.name, photo: u.photo }, 18) + '<span>Submitting as <b style="color:var(--mv-ink2);">' + escapeHTML(u.name || nameFromEmail(u.email)) + '</b> · ' + escapeHTML(u.email) + '</span></span>';
       return 'Couldn\'t detect your account — your submission will still be logged.';
   }
 
@@ -899,32 +888,21 @@
       var right;
       if (data.isAdmin) {
           var opts = (data.statuses||[]).map(function(s){ return '<option value="' + escapeHTML(s) + '"' + (String(f.status).toLowerCase() === s.toLowerCase() ? ' selected' : '') + '>' + escapeHTML(s) + '</option>'; }).join('');
-          right = '<select title="Set status" onchange="setFeedbackStatus(' + f.row + ', this.value)" onclick="event.stopPropagation()" style="margin-left:auto; font-size:0.64rem; font-weight:800; color:' + sc + '; background:var(--card-bg); border:1px solid var(--glass-border); border-radius:8px; padding:3px 6px; cursor:pointer;">' + opts + '</select>';
+          right = '<select class="fb-st-sel" title="Set status" onchange="setFeedbackStatus(' + f.row + ', this.value)" onclick="event.stopPropagation()" style="color:' + sc + ';">' + opts + '</select>';
       } else {
-          right = '<span style="margin-left:auto; font-size:0.66rem; font-weight:800; color:' + sc + '; text-transform:uppercase;">' + escapeHTML(f.status||'New') + '</span>';
+          right = '<span class="fb-st" style="color:' + sc + ';">' + escapeHTML(f.status||'New') + '</span>';
       }
       var footer = escapeHTML(f.ts||'');
       if (f.updatedBy) footer += ' · ' + escapeHTML(f.status) + ' by ' + escapeHTML(nameFromEmail(f.updatedBy) || f.updatedBy);
-      return '<div style="padding:12px 14px; border-bottom:1px solid var(--glass-border);">' +
-          '<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">' +
-              '<span style="font-size:0.6rem; font-weight:800; color:#fff; background:' + m.color + '; padding:2px 8px; border-radius:99px; text-transform:uppercase; letter-spacing:0.4px;">' + escapeHTML(f.type||'') + '</span>' +
-              '<span style="font-size:0.78rem; font-weight:700; color:var(--text-main);">' + escapeHTML(nm) + '</span>' +
-              '<span style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">' + escapeHTML(f.page||'') + '</span>' +
-              right +
-          '</div>' +
-          '<div style="font-size:0.82rem; color:var(--text-secondary); line-height:1.4; white-space:pre-wrap; word-break:break-word;">' + escapeHTML(f.message||'') + '</div>' +
-          '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + footer + '</div>' +
-      '</div>';
+      return '<div class="fb-item"><div class="fb-item-h">' +
+              '<span class="fb-type"><i data-lucide="' + m.icon + '" width="11"></i>' + escapeHTML(m.label) + '</span>' +
+              '<b>' + escapeHTML(nm) + '</b><span style="color:var(--text-muted); font-weight:600;">' + escapeHTML(f.page||'') + '</span>' + right +
+          '</div><div class="fb-msg">' + escapeHTML(f.message||'') + '</div><div class="fb-foot">' + footer + '</div></div>';
   }
 
   function renderFeedbackBody(focus) {
       var body = document.getElementById('feedback-body'); if (!body) return;
-      var typeBtns = FEEDBACK_TYPES.map(function(t) {
-          var on = state.feedbackType === t.key;
-          return '<button onclick="setFeedbackType(\'' + t.key + '\')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:10px 8px; border-radius:12px; cursor:pointer; font-weight:800; font-size:0.85rem; transition:0.15s; ' +
-              (on ? 'background:' + t.color + '; color:#fff; border:1px solid ' + t.color + '; box-shadow:0 4px 12px ' + t.color + '40;' : 'background:var(--card-bg); color:var(--text-muted); border:1px solid var(--glass-border);') + '">' +
-              '<i data-lucide="' + t.icon + '" width="16"></i> ' + t.label + '</button>';
-      }).join('');
+      var typeBtns = segControl(FEEDBACK_TYPES.map(function(t) { return [t.key, '<i data-lucide="' + t.icon + '" width="14"></i>' + t.label]; }), state.feedbackType, 'setFeedbackType');
       var meta = feedbackTypeMeta(state.feedbackType);
       var placeholder = state.feedbackType === 'bug'
           ? 'What went wrong? What were you doing, what did you expect, and what happened instead?'
@@ -937,33 +915,28 @@
       var activeCount = data ? (data.activeCount || 0) : 0;
       var archCount = data ? (data.archivedCount || 0) : 0;
       if (data === null) {
-          listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">Loading recent submissions…</div>';
+          listHtml = '<div class="fb-empty">Loading recent submissions…</div>';
       } else {
           var arr = showArch ? (data.archived || []) : (data.items || []);
           if (!arr.length) {
-              listHtml = '<div style="padding:18px; text-align:center; color:var(--text-muted); font-weight:600; font-size:0.82rem;">' + (showArch ? 'Nothing archived yet.' : 'No submissions yet — be the first.') + '</div>';
+              listHtml = '<div class="fb-empty">' + (showArch ? 'Nothing archived yet.' : 'No submissions yet — be the first.') + '</div>';
           } else {
               listHtml = arr.map(function(f) { return fbItemHtml(f, data); }).join('');
           }
       }
-      var listHeader = '<div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">' +
-          '<div style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.6px;">' + (showArch ? 'Archived' : 'Recent submissions') + '</div>' +
-          (data ? '<button onclick="toggleFeedbackArchive()" style="margin-left:auto; font-size:0.66rem; font-weight:800; color:var(--text-muted); background:var(--card-bg); border:1px solid var(--glass-border); border-radius:8px; padding:3px 9px; cursor:pointer;">' + (showArch ? ('&larr; Active (' + activeCount + ')') : ('Archive (' + archCount + ')')) + '</button>' : '') +
+      var listHeader = '<div class="fb-list-h">' + (showArch ? 'Archived' : 'Recent submissions') +
+          (data ? '<button class="mv-link" onclick="toggleFeedbackArchive()">' + (showArch ? ('&larr; Active (' + activeCount + ')') : ('Archive (' + archCount + ')')) + '</button>' : '') +
           '</div>' +
-          (data && data.isAdmin && !showArch ? '<div style="font-size:0.64rem; color:var(--text-muted); font-weight:600; margin-bottom:6px;">Set a status to let managers know it\'s handled. Completed items auto-archive after a few days.</div>' : '');
+          (data && data.isAdmin && !showArch ? '<div class="fb-page">Set a status to let managers know it\'s handled. Completed items auto-archive after a few days.</div>' : '');
 
       body.innerHTML =
-          '<div style="display:flex; gap:8px; margin-bottom:14px;">' + typeBtns + '</div>' +
-          '<div style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">On page: <span style="color:var(--text-secondary);">' + escapeHTML(state._feedbackPage || currentPageLabel()) + '</span></div>' +
+          '<div class="fb-seg">' + typeBtns + '</div>' +
+          '<div class="fb-page">On page: <b>' + escapeHTML(state._feedbackPage || currentPageLabel()) + '</b></div>' +
           '<textarea id="feedback-msg" class="input-aether custom-scrollbar" oninput="state._feedbackDraft=this.value" placeholder="' + escapeHTML(placeholder) + '" style="width:100%; height:130px; resize:vertical; padding:12px 14px; font-size:0.9rem; line-height:1.5;">' + escapeHTML(state._feedbackDraft || '') + '</textarea>' +
-          '<div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">' +
-              '<button class="btn btn-glass" onclick="closeFeedback()" style="height:40px;">Cancel</button>' +
-              '<button class="btn btn-primary" onclick="sendFeedback()" ' + (sending ? 'disabled' : '') + ' style="height:40px; background:' + meta.color + '; border-color:' + meta.color + '; opacity:' + (sending ? '0.6' : '1') + ';"><i data-lucide="' + (sending ? 'loader' : 'send') + '" width="16"></i> ' + (sending ? 'Sending…' : 'Send ' + meta.label) + '</button>' +
-          '</div>' +
-          '<div style="margin-top:22px; border-top:1px solid var(--glass-border); padding-top:14px;">' +
-              listHeader +
-              '<div style="border:1px solid var(--glass-border); border-radius:12px; overflow:hidden; max-height:230px; overflow-y:auto;" class="custom-scrollbar">' + listHtml + '</div>' +
-          '</div>';
+          listHeader + '<div class="fb-list custom-scrollbar">' + listHtml + '</div>';
+      var foot = document.getElementById('feedback-foot');
+      if (foot) foot.innerHTML = '<button class="btn btn-glass" onclick="closeFeedback()">Cancel</button>' +
+          '<button class="btn btn-primary" onclick="sendFeedback()"' + (sending ? ' disabled style="opacity:0.6;"' : '') + '><i data-lucide="' + (sending ? 'loader' : 'send') + '" width="15"></i> ' + (sending ? 'Sending…' : 'Send ' + meta.label.toLowerCase()) + '</button>';
 
       if (window.lucide) lucide.createIcons();
       if (focus) { var ta = document.getElementById('feedback-msg'); if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(e) {} } }
@@ -1273,9 +1246,12 @@
   }
   window.openPopout = function(mode) { var baseUrl = state.appUrl || window.location.href.split('?')[0]; var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?'; window.open(baseUrl + sep + "popout=true&mode=" + mode.toLowerCase(), '_blank', 'width=450,height=800,menubar=no,toolbar=no,location=no,status=no'); };
 
-  function showToast(m) {
+  // kind: 'ok' | 'err' | 'info'; guessed from the wording when not given.
+  function showToast(m, kind) {
       var t = document.getElementById('toast'); if(!t) return;
       t.querySelector('#toast-msg').innerText = m;
+      kind = kind || (/\b(fail|failed|error|could not|couldn't|not saved|not submitted|missing|required|invalid)\b/i.test(String(m)) ? 'err' : 'ok');
+      t.className = 't-' + kind;
       if (typeof gsap !== 'undefined') {
           gsap.killTweensOf(t);
           gsap.fromTo(t, { y: 24, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: 'back.out(1.6)' });
@@ -1352,7 +1328,7 @@
               activeNotifs.forEach(function(n) {
                   if(!state.knownNotifs.has(n.id)) {
                       state.knownNotifs.add(n.id);
-                      showToast("🔔 " + escapeHTML(n.text)); 
+                      showToast(n.text, 'info');
                       if (n.text.indexOf("Global Update") !== -1) fetchCoverage();
                       if (n.text.indexOf("Dashboards refreshed") !== -1) { fetchData(); fetchMetadata(); if (state.view === 'tracker') fetchTrackerData(); if (state.view === 'insights') fetchInsightData(); }
                   }
@@ -1370,21 +1346,19 @@
       var visibleNotifs = state.notifications.filter(function(n) { return !state.dismissedNotifs.has(String(n.id)); });
       var html = '';
       if (visibleNotifs.length > 0) {
-          // Clean neutral cards — no accent "lip", no per-item backdrop-filter blur.
-          var clearAll = visibleNotifs.length > 1
-              ? '<div style="display:flex; justify-content:flex-end; margin-bottom:10px;"><button class="btn btn-glass" style="font-size:0.7rem; padding:3px 12px; height:26px;" onclick="dismissAllNotifs(event)">Dismiss all (' + visibleNotifs.length + ')</button></div>'
-              : '';
-          html = clearAll + visibleNotifs.map(function(n) {
-              return '<div style="padding:14px 16px; background:var(--card-bg); border:1px solid var(--glass-border); border-radius:12px; margin-bottom:10px; box-shadow:0 2px 8px rgba(0,0,0,0.04);">' +
-                     '<div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:4px; font-weight:700;">' + escapeHTML(n.time) + '</div>' +
-                     '<div style="font-weight:600; font-size:0.88rem; margin-bottom:10px; color:var(--text-main); line-height:1.4;">' + escapeHTML(n.text) + '</div>' +
-                     '<div style="display:flex; justify-content:flex-end;"><button class="btn btn-glass" style="font-size:0.72rem; padding:4px 14px; height:26px;" onclick="dismissNotif(event, \'' + escapeHTML(n.id) + '\')">Dismiss</button></div>' +
-                     '</div>';
-          }).join('');
+          html = (visibleNotifs.length > 1 ? '<div class="np-bar"><span>' + visibleNotifs.length + ' new</span><button class="mv-link" onclick="dismissAllNotifs(event)">Dismiss all</button></div>' : '') +
+              visibleNotifs.map(function(n) {
+                  var icon = /global update|synced/i.test(n.text) ? 'refresh-cw' : (/refreshed|imported/i.test(n.text) ? 'database' : 'bell');
+                  return '<div class="np-item"><span class="np-ic"><i data-lucide="' + icon + '" width="14"></i></span>' +
+                      '<div class="np-body"><div class="np-text">' + escapeHTML(n.text) + '</div><div class="np-time">' + escapeHTML(n.time) + '</div></div>' +
+                      '<button class="np-x" title="Dismiss" aria-label="Dismiss" onclick="dismissNotif(event, \'' + escapeHTML(n.id) + '\')"><i data-lucide="x" width="14"></i></button></div>';
+              }).join('');
       } else if (!activeMaintenance().length) {
-          html = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-weight:600;">No new notifications.</div>';
+          html = '<div class="np-empty">You are all caught up.</div>';
       }
       list.innerHTML = maintNotifCards() + html;
+      var cnt = document.getElementById('notif-count'); if (cnt) cnt.textContent = visibleNotifs.length ? String(visibleNotifs.length) : '';
+      refreshIcons();
   };
 
   // stopPropagation: without it, re-rendering the list detaches the clicked
@@ -2542,7 +2516,7 @@
   var DASH_PROV_SRC = { BC: 'BC Hydro', ON: 'Hydro One', QC: 'Hydro-Québec' };
 
   function dashNum(v) { return Number(v || 0).toLocaleString('en-US'); }
-  function dashHM(t) { var d = new Date(t); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function dashHM(t) { var d = new Date(t); if (t == null || isNaN(d.getTime())) return ''; return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
   function dashPlural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   // A "source down" sign plays when its problem first shows up, then rests on
   // the minute-by-minute re-renders (hovering the cell plays it again).
@@ -3143,100 +3117,271 @@
   window.getAnalyzerHistory = function(month) { state.analyzerLoading = true; render(); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function(res) { try { state.analyzerData = JSON.parse(res); state.analyzerLoading = false; render(); } catch(e) { state.analyzerLoading = false; render(); } }).withFailureHandler(function(){ state.analyzerLoading = false; render(); }).fetchAnalyzerData(month); google.script.run.withSuccessHandler(function(res) { try { state.coachingCadence = JSON.parse(res); if (state.view === 'analyzer') render(); } catch(e) {} }).fetchCoachingCadence(30); } };
   window.dismissFlagAgent = function(agentName) { if (confirm("Are you sure you want to dismiss " + agentName + "? They will be permanently hidden from all future Red Flag reports.")) { showToast("Dismissing Agent..."); if (typeof google !== 'undefined') { google.script.run.withSuccessHandler(function() { getAnalyzerHistory(state.analyzerData ? state.analyzerData.selectedMonth : null); }).ignoreAnalyzerAgent(agentName); } } };
 
+  // Modal shell shared by the app chrome (Index.html uses the same classes):
+  // header (icon, title, one line), scrolling body, footer with the actions.
+  function mdlShell(id, icon, title, sub, bodyHtml, footHtml) {
+      var close = "document.getElementById('" + id + "').classList.remove('open')";
+      return '<div id="' + id + '" class="modal-blur" onclick="' + close + '"><div class="modal-window mdl" role="dialog" aria-modal="true" aria-labelledby="' + id + '-t" onclick="event.stopPropagation()">' +
+          '<div class="mdl-h"><span class="mdl-ic"><i data-lucide="' + icon + '" width="18"></i></span><div class="mdl-tt"><h3 id="' + id + '-t">' + title + '</h3>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>' +
+          '<button class="mdl-x" title="Close" aria-label="Close" onclick="' + close + '"><i data-lucide="x" width="18"></i></button></div>' +
+          '<div class="mdl-b">' + bodyHtml + '</div><div class="mdl-f">' + footHtml + '</div></div></div>';
+  }
+  // Esc closes the top modal through its own backdrop handler (so each modal's
+  // close function and its side effects still run); Enter/Space opens a focused
+  // Master Operations row.
+  document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { var open = document.querySelectorAll('.modal-blur.open'); if (open.length) { open[open.length - 1].click(); return; } if (state.notifOpen) toggleNotifPanel(); return; }
+      var t = e.target;
+      if ((e.key === 'Enter' || e.key === ' ') && t && t.classList && t.classList.contains('ins-r')) { e.preventDefault(); t.click(); }
+  });
+
+  // ───────────────────────────── Red Flags ─────────────────────────────
+  // One table per rule (the rules live in AssignmentAnalyzer.gs and
+  // getCoachingCadenceFlags). Every row is already a flag, so numbers stay
+  // ink; the meter shows how far past the line each agent is, and only that
+  // part is in the status colour.
+  var RF_SECTIONS = [
+      { k: 'in', list: 'inbound', src: 'gem', title: 'Inbound red flags', short: 'Inbound', icon: 'phone-incoming',
+        rule: 'In-time 75%+ and calls are half or more of their tasks', act: 'balance with outbound work',
+        tip: 'Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.' },
+      { k: 'out', list: 'outbound', src: 'gem', title: 'Outbound red flags', short: 'Outbound', icon: 'phone-outgoing',
+        rule: 'Out-time 75%+ at Level 2 or above', act: 'give them more inbound calls',
+        tip: 'Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.' },
+      { k: 'scope', list: 'outOfScope', src: 'gem', title: 'Inbound, out of scope', short: 'Out of scope', icon: 'scale',
+        rule: 'In-time 75%+ but most of their tasks are outbound', act: 'no balancing needed, adjust if convenient',
+        tip: "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted." },
+      { k: 'cph', list: 'cph', src: 'gem', title: 'Low CP/H', short: 'CP/H', icon: 'trending-down',
+        rule: 'CP/H at or under 7.3', act: 'pause specialised tasks (SAFE, BMRC, ULC LS) for a while',
+        tip: "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment." },
+      { k: 'drop', list: 'noAnswer', src: 'genesys', title: 'Dropped calls', short: 'Dropped', icon: 'phone-missed',
+        rule: function() { return 'Rang out on ' + Math.round(GENESYS_DROP_RATE * 100) + '%+ of answered calls (' + GENESYS_DROP_MIN_ANSWERED + '+ answered)'; }, act: 'check their phone status and ready time' },
+      { k: 'short', list: 'shortCalls', src: 'genesys', title: 'Short calls', short: 'Short calls', icon: 'timer-off',
+        rule: function() { return 'Average talk at or under ' + Math.round(GENESYS_SHORT_TALK_FACTOR * 100) + '% of the floor median'; }, act: 'listen to a few calls' },
+      { k: 'coach', src: 'coach', title: 'Coaching overdue', short: 'Coaching', icon: 'clock',
+        rule: function() { return 'No coaching session in ' + ((state.coachingCadence || {}).threshold || 30) + '+ days'; }, act: 'book a session' }
+  ];
+  function rfSectionList(sec, d) {
+      if (sec.src === 'coach') return ((state.coachingCadence || {}).flags) || [];
+      if (sec.src === 'genesys') return (d.genesys && d.genesys.has && d.genesys[sec.list]) || [];
+      return d[sec.list] || [];
+  }
+  function rfMonthLabel(m) {
+      if (!m) return '';
+      var p = String(m).split('-'); if (p.length < 2) return m;
+      return new Date(+p[0], +p[1] - 1, 1, 12).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+  window.rfStepMonth = function(dir) {
+      var d = state.analyzerData || {}, ms = (d.availableMonths || []).slice().sort();
+      var i = ms.indexOf(d.selectedMonth) + dir;
+      if (i >= 0 && i < ms.length) getAnalyzerHistory(ms[i]);
+  };
+  window.setRfFocus = function(v) { state.rfFocus = v; render(); };
+  window.handleRfSearch = function(val) { _debouncedSearch('rfSearch', val); };
+  window.openRfModal = function(id) { var m = document.getElementById(id); if (m) m.classList.add('open'); };
+
+  // Meter on a 0..max scale with the rule's line at t. dir 'over': past the
+  // line is bad (status colour from t to v); 'under': the shortfall from v up
+  // to t is shown instead.
+  function rfMeter(v, t, max, dir, i) {
+      var p = function(x) { return Math.max(0, Math.min(100, x / max * 100)).toFixed(1); };
+      var base = dir === 'over' ? Math.min(v, t) : v;
+      var flag = dir === 'over' ? (v > t ? '<em style="left:' + p(t) + '%; width:' + (p(v) - p(t)).toFixed(1) + '%;"></em>' : '')
+                                : (v < t ? '<em class="gap" style="left:' + p(v) + '%; width:' + (p(t) - p(v)).toFixed(1) + '%;"></em>' : '');
+      return '<span class="rf-meter"><span class="rf-fill" style="--i:' + (i || 0) + ';"><i style="width:' + p(base) + '%;"></i>' + flag + '</span><b style="left:' + p(t) + '%;"></b></span>';
+  }
+  // Change vs last month: arrow + value; colour only says better / worse.
+  function rfTrend(v, prev, badUp, fmt) {
+      if (prev == null) return '<span class="rf-d flat" title="Not in last month\'s report">new</span>';
+      if (!isFinite(v) || Math.abs(v) < 0.0005) return '<span class="rf-d flat">no change</span>';
+      var worse = badUp ? v > 0 : v < 0;
+      return '<span class="rf-d ' + (worse ? 'bad' : 'good') + '" title="' + (worse ? 'Worse' : 'Better') + ' than last month">' + (v > 0 ? '▲ ' : '▼ ') + fmt(Math.abs(v)) + '</span>';
+  }
+
+  function rfTable(sec, list, d, also) {
+      var g = d.genesys || {}, cad = state.coachingCadence || {};
+      var pct = function(x) { return (x * 100).toFixed(1) + '%'; }, pts = function(x) { return (x * 100).toFixed(1) + ' pts'; };
+      var head, cells;
+      if (sec.k === 'in' || sec.k === 'scope' || sec.k === 'out') {
+          var isOut = sec.k === 'out';
+          head = ['Agent', isOut ? 'Out-time' : 'In-time', 'vs last month'].concat(isOut ? [] : ['Calls share']).concat(['Days']);
+          cells = function(a, i) {
+              var v = isOut ? (a.outPct || 0) : (a.inPct || 0);
+              return '<td class="rf-v"><span class="rf-num">' + pct(v) + '</span>' + rfMeter(v * 100, 75, 100, 'over', i) + '</td>' +
+                  '<td>' + rfTrend(isOut ? a.trendOut : a.trendIn, isOut ? a.prevOut : a.prevIn, true, pts) + '</td>' +
+                  (isOut ? '' : '<td class="n">' + Math.round((a.tasksXCalls || 0) * 100) + '%</td>') + '<td class="n">' + escapeHTML(a.wDays || '–') + '</td>';
+          };
+      } else if (sec.k === 'cph') {
+          var top = Math.max(9, list.reduce(function(m, a) { return Math.max(m, a.cph || 0); }, 0));
+          head = ['Agent', 'CP/H', 'vs last month', 'Tasks', 'Days'];
+          cells = function(a, i) {
+              return '<td class="rf-v"><span class="rf-num">' + (a.cph || 0).toFixed(2) + '</span>' + rfMeter(a.cph || 0, 7.3, top, 'under', i) + '</td>' +
+                  '<td>' + rfTrend(a.trendCph, a.prevCph, false, function(x) { return x.toFixed(2); }) + '</td>' +
+                  '<td class="n">' + (a.totalCalls || 0) + '</td><td class="n">' + escapeHTML(a.wDays || '–') + '</td>';
+          };
+      } else if (sec.k === 'drop') {
+          var topR = Math.max(GENESYS_DROP_RATE * 300, list.reduce(function(m, a) { return Math.max(m, (a.dropRate || 0) * 100); }, 0) * 1.1);
+          head = ['Agent', 'Rang out', 'Calls missed', 'Answered'];
+          cells = function(a, i) {
+              return '<td class="rf-v"><span class="rf-num">' + pct(a.dropRate || 0) + '</span>' + rfMeter((a.dropRate || 0) * 100, GENESYS_DROP_RATE * 100, topR, 'over', i) + '</td>' +
+                  '<td class="n">' + (a.noAnswer || 0) + '</td><td class="n">' + (a.answered || 0) + '</td>';
+          };
+      } else if (sec.k === 'short') {
+          var med = g.medianTalk || 0, cut = g.shortTalkCutoff || 0;
+          head = ['Agent', 'Avg talk', 'of median', 'Shortest call', 'Handled'];
+          cells = function(a, i) {
+              return '<td class="rf-v"><span class="rf-num">' + fmtSecsShort(a.avgTalk) + '</span>' + rfMeter(a.avgTalk || 0, cut, med || 1, 'under', i) + '</td>' +
+                  '<td class="n">' + (med ? Math.round((a.avgTalk || 0) / med * 100) + '%' : '–') + '</td><td class="n">' + fmtSecsShort(a.minTalk) + '</td><td class="n">' + (a.handled || 0) + '</td>';
+          };
+      } else {
+          var th = cad.threshold || 30;
+          var topD = Math.max(90, list.reduce(function(m, f) { return Math.max(m, f.daysSince || 0); }, 0));
+          head = ['Agent', 'Since last session', 'Last session', 'Sessions (90 days)'];
+          cells = function(f, i) {
+              var never = f.daysSince == null;
+              return '<td class="rf-v"><span class="rf-num">' + (never ? 'never' : f.daysSince + 'd') + '</span>' + rfMeter(never ? topD : f.daysSince, th, topD, 'over', i) + '</td>' +
+                  '<td class="n">' + (f.lastCoachingDate ? escapeHTML(f.lastCoachingDate) : '–') + '</td><td class="n">' + (f.coachingCount90d || 0) + '</td>';
+          };
+      }
+      var canDismiss = sec.src !== 'coach';
+      var rows = list.map(function(a, i) {
+          if (!a) return '';
+          var nm = escapeHTML(a.name || 'Unknown'), js = nm.replace(/'/g, "\\'");
+          var others = (also[a.name] || []).filter(function(s) { return s !== sec.short; });
+          var tags = others.slice(0, 2).map(function(s) { return '<span class="rf-tag">' + s + '</span>'; }).join('') + (others.length > 2 ? '<span class="rf-tag">+' + (others.length - 2) + '</span>' : '');
+          return '<tr' + (i < 24 ? ' class="rf-rise" style="--i:' + i + ';"' : '') + '><td class="rf-name"><span class="rf-nm">' + nm + '</span>' +
+              (a.region === 'Offshore' ? '<span class="rf-tag off">Offshore</span>' : '') +
+              (others.length ? '<span class="rf-also" title="Also flagged: ' + others.join(', ') + '">' + tags + '</span>' : '') + '</td>' +
+              cells(a, i) +
+              (canDismiss ? '<td class="rf-act"><button class="rf-x" title="Dismiss — hide from all future Red Flag reports" aria-label="Dismiss ' + nm + '" onclick="dismissFlagAgent(\'' + js + '\')"><i data-lucide="eye-off" width="14"></i></button></td>' : '') + '</tr>';
+      }).join('');
+      return '<div class="mv-table-wrap"><table class="mv-table rf-table"><thead><tr>' + head.map(function(h, i) { return '<th' + (i > 1 ? ' class="n"' : '') + '>' + h + '</th>'; }).join('') + (canDismiss ? '<th class="rf-act"></th>' : '') + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  // Plain-language findings across the lists (same idea as mgmtInsights).
+  function rfInsights(d, also) {
+      var out = [], g = d.genesys || {}, cad = state.coachingCadence || {};
+      var multi = Object.keys(also).filter(function(n) { return also[n].length > 1; }).sort(function(a, b) { return also[b].length - also[a].length; });
+      if (!d.usingMasterList) out.push({ tone: 'bad', icon: 'users', html: '<b>Master roster missing</b> — managers and team leads can appear in these lists until it is synced.' });
+      if (multi.length) out.push({ tone: 'bad', icon: 'layers', html: '<b>' + escapeHTML(multi[0]) + '</b> is on ' + also[multi[0]].length + ' lists (' + also[multi[0]].join(', ') + ')' + (multi.length > 1 ? '; ' + (multi.length - 1) + ' more agent' + (multi.length > 2 ? 's are' : ' is') + ' on two or more.' : '.') });
+      var inb = d.inbound || [], worse = inb.filter(function(a) { return a.prevIn != null && a.trendIn > 0.0005; });
+      if (inb.length) {
+          var big = worse.slice().sort(function(a, b) { return b.trendIn - a.trendIn; })[0];
+          out.push({ tone: worse.length ? 'bad' : 'good', icon: worse.length ? 'arrow-up-right' : 'arrow-down-right', html: '<b>' + worse.length + ' of ' + inb.length + '</b> inbound flags got more inbound-heavy than last month' + (big ? ' (most: ' + escapeHTML(big.name) + ', +' + (big.trendIn * 100).toFixed(1) + ' pts).' : '.') });
+      }
+      var low = (d.cph || [])[0];
+      if (low) out.push({ tone: 'bad', icon: 'trending-down', html: 'Lowest CP/H: <b>' + escapeHTML(low.name) + ' ' + (low.cph || 0).toFixed(2) + '</b>' + (low.prevCph != null && low.trendCph ? ', ' + (low.trendCph < 0 ? 'down ' : 'up ') + Math.abs(low.trendCph).toFixed(2) + ' on last month.' : '.') });
+      var dr = g.has && (g.noAnswer || [])[0];
+      if (dr) out.push({ tone: 'bad', icon: 'phone-missed', html: 'Highest ring-out rate: <b>' + escapeHTML(dr.name) + ' ' + ((dr.dropRate || 0) * 100).toFixed(1) + '%</b> — ' + (dr.noAnswer || 0) + ' calls rang out against ' + (dr.answered || 0) + ' answered.' });
+      var fl = cad.flags || [];
+      if (fl.length) {
+          var never = fl.filter(function(f) { return f.daysSince == null; }).length, longest = fl.filter(function(f) { return f.daysSince != null; })[0];
+          out.push({ tone: 'info', icon: 'calendar-x', html: (never ? '<b>' + never + '</b> agent' + (never === 1 ? ' has' : 's have') + ' no coaching on record' : 'Everyone has a coaching session on record') + (longest ? '; longest gap <b>' + longest.daysSince + ' days</b> (' + escapeHTML(longest.name) + ').' : '.') });
+      }
+      return out.slice(0, 6);
+  }
+
   function renderAnalyzer() {
-      var modalsHtml = '<div id="gem-modal" class="modal-blur" onclick="document.getElementById(\'gem-modal\').classList.remove(\'open\')"><div class="modal-window" onclick="event.stopPropagation()"><div style="margin-bottom:20px; font-weight:800; font-size:1.1rem; display:flex; justify-content:space-between; align-items:center;"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart-2" width="18" style="color:var(--accent-primary);"></i> Import GEM Data</span><i data-lucide="x" style="cursor:pointer; color:var(--text-muted);" onclick="document.getElementById(\'gem-modal\').classList.remove(\'open\')"></i></div><p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5; margin-bottom:20px;">Paste the raw text from your "PA Call Performance by Agent" Excel file below. The engine will instantly auto-detect the month and permanently log it to the historical database.</p><textarea id="gem-import-text" class="input-aether custom-scrollbar" style="width:100%; height:200px; resize:none; font-family:monospace; white-space:pre; font-size:0.8rem; margin-bottom:20px;"></textarea><div style="display:flex; justify-content:flex-end; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'gem-modal\').classList.remove(\'open\')">Cancel</button><button class="btn btn-primary" onclick="runAnalyzerImport()">Analyze Data</button></div></div></div><div id="master-modal" class="modal-blur" onclick="document.getElementById(\'master-modal\').classList.remove(\'open\')"><div class="modal-window" onclick="event.stopPropagation()"><div style="margin-bottom:20px; font-weight:800; font-size:1.1rem; display:flex; justify-content:space-between; align-items:center;"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="users" width="18" style="color:var(--status-warn);"></i> Sync Master Roster</span><i data-lucide="x" style="cursor:pointer; color:var(--text-muted);" onclick="document.getElementById(\'master-modal\').classList.remove(\'open\')"></i></div><p style="margin-top:0; color:var(--text-muted); font-size:0.9rem; line-height:1.5; margin-bottom:20px;">Paste your RAW DATA (MasterList) here. This permanently teaches the engine who is an active Monitoring Specialist, automatically hiding all managers and team leads from the flags.</p><textarea id="masterlist-import-text" class="input-aether custom-scrollbar" style="width:100%; height:200px; resize:none; font-family:monospace; white-space:pre; font-size:0.8rem; margin-bottom:20px;"></textarea><div style="display:flex; justify-content:flex-end; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.remove(\'open\')">Cancel</button><button class="btn btn-primary" onclick="runMasterListImport()">Sync Roster</button></div></div></div>';
-      
-      if (state.analyzerLoading) { return modalsHtml + '<div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:60vh; text-align:center;"><div style="width: 50px; height: 50px; border: 4px solid var(--glass-border); border-top-color: var(--status-alert); border-radius: 50%; animation: spin 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite; margin-bottom: 24px; box-shadow: 0 0 20px rgba(220, 38, 38, 0.4);"></div><h2 style="margin:0 0 8px 0; font-weight:800; font-size:1.8rem; color:var(--text-main);">Analyzing Data...</h2><p style="color:var(--text-muted); font-size:1rem;">Cross-referencing metrics against the Master Roster.</p></div>'; }
-      
-      if (!state.analyzerData || state.analyzerData.error) { var errMsg = state.analyzerData ? escapeHTML(state.analyzerData.error) : "Upload your first Avaya GEM report to begin."; return modalsHtml + '<div style="display:flex; justify-content:center; align-items:center; height:70vh;"><div style="text-align:center; max-width:450px;"><div style="width:80px; height:80px; border-radius:40px; background:rgba(99,102,241,0.1); color:var(--accent-primary); display:flex; align-items:center; justify-content:center; margin:0 auto 24px;"><i data-lucide="flag" width="40" height="40"></i></div><h2 style="margin:0 0 16px 0; font-weight:800; font-size:2rem;">Red Flags Dashboard</h2><p style="color:var(--text-muted); margin:0 auto 32px; font-size:1rem; line-height:1.6;">' + errMsg + '</p><div style="display:flex; gap:16px; justify-content:center;"><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:44px; padding:0 24px; border-radius:12px; box-shadow:0 8px 20px rgba(99,102,241,0.2);"><i data-lucide="bar-chart-2" width="18"></i> Import GEM Data</button><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:44px; padding:0 24px; border-radius:12px;"><i data-lucide="users" width="18"></i> Sync MasterList</button></div></div></div>'; }
-      
-      var d = state.analyzerData || {};
-      var monthsHtml = (d.availableMonths || []).map(function(m) { var formattedMonth = m; try { var dObj = new Date(m + 'T12:00:00Z'); formattedMonth = dObj.toLocaleString('default', { month: 'long', year: 'numeric' }); if (formattedMonth === "Invalid Date") formattedMonth = m; } catch(e) {} return '<option value="' + escapeHTML(m) + '" ' + (d.selectedMonth === m ? 'selected' : '') + '>📅 ' + escapeHTML(formattedMonth) + '</option>'; }).join('');
-      
-      function getTrendHtml(val, isBadIfHigh, isPercentage) { if (val === 0 || val == null) return '<span style="color:var(--text-muted); font-size:0.7rem; margin-left:6px; opacity:0.5;">-</span>'; var isPositive = val > 0; var color = (isPositive && !isBadIfHigh) || (!isPositive && isBadIfHigh) ? "var(--status-active)" : "var(--status-alert)"; var arrow = isPositive ? "↑" : "↓"; var absVal = isPercentage ? Math.abs(val * 100).toFixed(1) + '%' : Math.abs(val).toFixed(1); return '<span style="color:' + color + '; font-size:0.7rem; font-weight:800; margin-left:6px;">' + arrow + ' ' + absVal + '</span>'; }
-      function renderTable(title, list, type, headerColor, icon, tooltip) { var safeList = list || []; var rows = safeList.map(function(a) { if (!a) return ''; var col1 = "", col2 = ""; var statusDot = '<div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert); flex-shrink:0;"></div>'; if (type === 'in' || type === 'scope') { var inPct = a.inPct || 0; var tasksXCalls = a.tasksXCalls || 0; col1 = '<td style="padding:12px 16px; font-weight:800;">' + (inPct * 100).toFixed(1) + '% ' + getTrendHtml(a.trendIn, true, true) + '</td>'; col2 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + Math.round(tasksXCalls * 100) + '%</td>'; } else if (type === 'out') { var outPct = a.outPct || 0; col1 = '<td style="padding:12px 16px; font-weight:800;">' + (outPct * 100).toFixed(1) + '% ' + getTrendHtml(a.trendOut, true, true) + '</td>'; col2 = '<td style="padding:12px 16px; color:var(--text-muted);">-</td>'; } else if (type === 'cph') { var cphV = a.cph || 0; var totalCalls = a.totalCalls || 0; col1 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + totalCalls + '</td>'; col2 = '<td style="padding:12px 16px; font-weight:800;">' + cphV.toFixed(2) + ' ' + getTrendHtml(a.trendCph, false, false) + '</td>'; } var safeName = escapeHTML(a.name || 'Unknown'); var wDays = escapeHTML(a.wDays || '-'); var jsSafeName = safeName.replace(/'/g, "\\'"); return '<tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg"><td style="padding:12px 16px; display:flex; align-items:center; gap:10px;">' + statusDot + '<span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + safeName + '</span></td>' + col1 + col2 + '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + wDays + '</td><td style="padding:12px 16px; text-align:right;"><button class="btn-icon-sm" style="color:var(--text-muted);" title="Dismiss Agent" onclick="dismissFlagAgent(\'' + jsSafeName + '\')"><i data-lucide="x" width="16"></i></button></td></tr>'; }).join(''); if(rows === "") rows = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No agents flagged.</td></tr>'; var th1 = "", th2 = ""; if (type === 'in' || type === 'scope') { th1 = "In %"; th2 = "Tasks x Calls"; } else if (type === 'out') { th1 = "Out %"; th2 = " "; } else if (type === 'cph') { th1 = "Total Tasks"; th2 = "CP/H"; } var tipAttr = encodeURIComponent(tooltip); return '<div class="aether-card rf-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;"><div style="background:' + headerColor + '; padding:14px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:1rem; color:var(--text-main);">' + icon + ' ' + title + ' <span class="rf-info-icon" data-tip="' + tipAttr + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; cursor:help; color:var(--text-muted); opacity:0.65;"><i data-lucide="help-circle" width="14"></i></span></div><span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05); flex-shrink:0;">' + safeList.length + '</span></div><div><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">' + th1 + '</th><th style="padding:12px 16px;">' + th2 + '</th><th style="padding:12px 16px; text-align:center;">W.Days</th><th style="padding:12px 16px; width:40px;"></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>'; }
-      
-      // Genesys flag cards. Same shell as renderTable so the dashboard reads as one
-      // board, but its own columns — and its own header colour, because these come
-      // from Genesys, not from the Avaya GEM report the other four are built on.
-      function renderGenesysCard(title, list, type, icon, tooltip) {
-          var safeList = list || [];
-          var rows = safeList.map(function(a) {
-              if (!a) return '';
-              var safeName = escapeHTML(a.name || 'Unknown');
-              var jsSafeName = safeName.replace(/'/g, "\\'");
-              var c1, c2, c3;
-              if (type === 'drop') {
-                  c1 = '<td style="padding:12px 16px; font-weight:800;">' + String(a.noAnswer || 0) + '</td>';
-                  c2 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + ((a.dropRate || 0) * 100).toFixed(1) + '%</td>';
-                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.answered || 0) + '</td>';
-              } else {
-                  c1 = '<td style="padding:12px 16px; font-weight:800; color:var(--status-alert);">' + fmtSecsShort(a.avgTalk) + '</td>';
-                  c2 = '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600;">' + fmtSecsShort(a.minTalk) + '</td>';
-                  c3 = '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + String(a.handled || 0) + '</td>';
-              }
-              return '<tr style="border-bottom:1px solid var(--glass-border); transition:0.2s;" class="hover-bg">' +
-                  '<td style="padding:12px 16px; display:flex; align-items:center; gap:10px;"><div style="width:8px; height:8px; border-radius:4px; background:#0ea5e9; flex-shrink:0;"></div><span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + safeName + '</span></td>' +
-                  c1 + c2 + c3 +
-                  '<td style="padding:12px 16px; text-align:right;"><button class="btn-icon-sm" style="color:var(--text-muted);" title="Dismiss Agent" onclick="dismissFlagAgent(\'' + jsSafeName + '\')"><i data-lucide="x" width="16"></i></button></td></tr>';
-          }).join('');
-          if (rows === "") rows = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No agents flagged.</td></tr>';
-          var th = (type === 'drop') ? ['Dropped', 'Rate', 'Answered'] : ['Avg Talk', 'Min Talk', 'Handled'];
-          var tipAttr = encodeURIComponent(tooltip);
-          return '<div class="aether-card rf-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">' +
-              '<div style="background:rgba(14,165,233,0.06); padding:14px 20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;">' +
-                '<div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:1rem; color:var(--text-main);">' + icon + ' ' + title +
-                  ' <span class="rf-info-icon" data-tip="' + tipAttr + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; cursor:help; color:var(--text-muted); opacity:0.65;"><i data-lucide="help-circle" width="14"></i></span>' +
-                '</div>' +
-                '<span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05); flex-shrink:0;">' + safeList.length + '</span>' +
-              '</div>' +
-              '<div style="padding:8px 20px 0; font-size:0.66rem; font-weight:700; color:#0ea5e9; text-transform:uppercase; letter-spacing:0.5px;">Genesys · ' + escapeHTML((d.genesys && d.genesys.label) || 'imported report') + '</div>' +
-              '<div><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:rgba(0,0,0,0.02); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase;"><tr>' +
-                '<th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">' + th[0] + '</th><th style="padding:12px 16px;">' + th[1] + '</th><th style="padding:12px 16px; text-align:center;">' + th[2] + '</th><th style="padding:12px 16px; width:40px;"></th>' +
-              '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+      var gemModal = mdlShell('gem-modal', 'bar-chart-2', 'Import GEM data', 'Paste the raw text of the “PA Call Performance by Agent” Excel file. The month is detected automatically and logged to the history.',
+          '<textarea id="gem-import-text" class="input-aether mdl-paste custom-scrollbar" placeholder="Paste here (Ctrl+V)…"></textarea>',
+          '<button class="btn btn-glass" onclick="document.getElementById(\'gem-modal\').classList.remove(\'open\')">Cancel</button><button class="btn btn-primary" onclick="runAnalyzerImport()"><i data-lucide="sparkles" width="15"></i> Analyze</button>');
+      var masterModal = mdlShell('master-modal', 'users', 'Sync master roster', 'Paste the MasterList raw data. It tells the engine who is an active Monitoring Specialist, so managers and team leads drop out of the flags.',
+          '<textarea id="masterlist-import-text" class="input-aether mdl-paste custom-scrollbar" placeholder="Paste here (Ctrl+V)…"></textarea>',
+          '<button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.remove(\'open\')">Cancel</button><button class="btn btn-primary" onclick="runMasterListImport()"><i data-lucide="refresh-cw" width="15"></i> Sync roster</button>');
+      var modalsHtml = gemModal + masterModal;
+
+      var d0 = state.analyzerData;
+      var hasData = d0 && !d0.error;
+      var actions = '<button class="mv-text-btn" onclick="openRfModal(\'master-modal\')"><i data-lucide="users" width="14"></i> Sync roster</button>' +
+          '<button class="mv-text-btn rf-primary" onclick="openRfModal(\'gem-modal\')"><i data-lucide="upload" width="14"></i> Import GEM</button>';
+      if (!hasData && !state.analyzerLoading) {
+          var errMsg = d0 ? escapeHTML(d0.error) : 'Upload your first Avaya GEM report to begin.';
+          return modalsHtml + pageHeader('Red Flags', 'Agents outside the assignment, productivity and coaching rules', actions) +
+              '<div class="aether-card rf-empty">' + mvEmpty('flag', 'No red flags data yet', errMsg) +
+              '<div class="rf-empty-act"><button class="btn btn-primary" onclick="openRfModal(\'gem-modal\')"><i data-lucide="upload" width="16"></i> Import GEM data</button><button class="btn btn-glass" onclick="openRfModal(\'master-modal\')"><i data-lucide="users" width="16"></i> Sync master roster</button></div></div>';
       }
+      var d = d0 || {};
+      var months = (d.availableMonths || []).slice().sort();
+      var mi = months.indexOf(d.selectedMonth);
+      var monthNav = '<div class="mv-datenav">' +
+          '<button class="mv-icon-btn" title="Previous month" onclick="rfStepMonth(-1)"' + (mi <= 0 ? ' disabled' : '') + '><i data-lucide="chevron-left" width="16"></i></button>' +
+          '<select class="mv-date rf-month" onchange="getAnalyzerHistory(this.value)" aria-label="Month">' + months.slice().reverse().map(function(m) { return '<option value="' + escapeHTML(m) + '"' + (d.selectedMonth === m ? ' selected' : '') + '>' + escapeHTML(rfMonthLabel(m)) + '</option>'; }).join('') + '</select>' +
+          '<button class="mv-icon-btn" title="Next month" onclick="rfStepMonth(1)"' + (mi < 0 || mi >= months.length - 1 ? ' disabled' : '') + '><i data-lucide="chevron-right" width="16"></i></button></div>';
+      var g = d.genesys || {};
+      var focus = state.rfFocus || 'all';
+      var segItems = [['all', 'All'], ['gem', 'GEM']].concat(g.has ? [['genesys', 'Genesys']] : []).concat([['coach', 'Coaching']]);
+      if (!segItems.some(function(s) { return s[0] === focus; })) focus = 'all';
+      var controls = segControl(segItems, focus, 'setRfFocus') + monthNav +
+          searchBox('rf-search', 'Search agent…', escapeHTML(state.rfSearch || ''), 'handleRfSearch(this.value)', 'width:190px;', 'height:36px; border-radius:11px;') + actions;
+      var roster = d.usingMasterList
+          ? '<span class="rf-roster ok"><i data-lucide="shield-check" width="13"></i>Master roster applied</span>'
+          : '<button class="rf-roster bad" onclick="openRfModal(\'master-modal\')"><i data-lucide="alert-circle" width="13"></i>Master roster missing — sync it</button>';
+      var sub = '<b>' + escapeHTML(rfMonthLabel(d.selectedMonth) || 'Latest') + '</b> · Avaya GEM' + (g.has ? ' and Genesys' : '') + ' · ' + roster;
+      var headerHtml = pageHeader('Red Flags', sub, controls);
+      if (state.analyzerLoading) return modalsHtml + headerHtml + skeletonPage('Analyzing… <span>cross-referencing GEM with the master roster</span>');
 
-      var masterListStatus = d.usingMasterList ? '<span style="font-size:0.75rem; font-weight:700; color:var(--status-active); background:rgba(16,185,129,0.1); padding:4px 10px; border-radius:12px;"><i data-lucide="shield-check" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Active</span>' : '<span style="font-size:0.75rem; font-weight:700; color:var(--status-warn); background:rgba(245,158,11,0.1); padding:4px 10px; border-radius:12px; cursor:pointer;" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');"><i data-lucide="alert-circle" width="12" style="vertical-align:middle; margin-right:4px;"></i> Master Roster Missing</span>';
+      // Which lists each agent is on — used for the "also on" tags and findings.
+      var also = {}, total = 0;
+      RF_SECTIONS.forEach(function(sec) {
+          rfSectionList(sec, d).forEach(function(a) { if (!a || !a.name) return; if (!also[a.name]) { also[a.name] = []; total++; } if (also[a.name].indexOf(sec.short) === -1) also[a.name].push(sec.short); });
+      });
+      var cnt = function(k) { for (var i = 0; i < RF_SECTIONS.length; i++) if (RF_SECTIONS[i].k === k) return rfSectionList(RF_SECTIONS[i], d).length; return 0; };
+      var multiN = Object.keys(also).filter(function(n) { return also[n].length > 1; }).length;
+      var cad = state.coachingCadence || {}, cadFlags = cad.flags || [];
+      var low = (d.cph || [])[0];
+      var num = function(n) { return '<span class="cnum">' + n + '</span>'; };
+      var tilesHtml = '<div class="mv-tiles rf-tiles">' +
+          kpiTile('Agents flagged', num(total), null, multiN ? multiN + ' on two or more lists' : 'nobody is on more than one list') +
+          kpiTile('Assignment balance', num(cnt('in') + cnt('out')) + ' <small>' + cnt('in') + ' in · ' + cnt('out') + ' out</small>', null, cnt('scope') + ' more inbound-heavy but out of scope') +
+          kpiTile('Low CP/H', num(cnt('cph')), null, low ? 'lowest ' + (low.cph || 0).toFixed(2) + ' · ' + escapeHTML(low.name) : 'nobody at or under 7.3') +
+          (g.has ? kpiTile('Genesys', num(cnt('drop') + cnt('short')) + ' <small>' + cnt('drop') + ' ring-out · ' + cnt('short') + ' short</small>', null, g.medianTalk ? 'floor median talk ' + fmtSecsShort(g.medianTalk) : escapeHTML(g.label || '')) : '') +
+          kpiTile('Coaching overdue', num(cadFlags.length), null, (cad.threshold || 30) + '+ days without a session' + (cad.totalActive ? ' · of ' + cad.totalActive + ' active' : '')) +
+          '</div>';
+      var ins = rfInsights(d, also);
+      var insightsHtml = ins.length ? '<div class="aether-card mv-insights"><div class="mv-sec-h">What stands out<span>' + escapeHTML(rfMonthLabel(d.selectedMonth)) + '</span></div><ul>' +
+          ins.map(function(x, i) { return '<li class="' + x.tone + '" style="--i:' + i + ';"><span class="ic"><i data-lucide="' + x.icon + '" width="14"></i></span><span>' + x.html + '</span></li>'; }).join('') + '</ul></div>' : '';
 
-      function renderCoachingCadenceCard() {
-          var c = state.coachingCadence || { flags: [] };
-          var rows = (c.flags || []).map(function(f) {
-              var sev = f.daysSince === null ? 'var(--status-alert)' : (f.daysSince >= 60 ? 'var(--status-alert)' : 'var(--status-warn)');
-              var regionTag = f.region === 'Offshore' ? '<span style="font-size:0.6rem; background:rgba(180,83,9,0.12); color:#b45309; padding:1px 6px; border-radius:4px; font-weight:800; margin-left:6px;">OFF</span>' : '';
-              return '<tr style="border-bottom:1px solid var(--glass-border);" class="hover-bg">' +
-                     '<td style="padding:12px 16px; display:flex; align-items:center; gap:10px;"><div style="width:8px; height:8px; border-radius:4px; background:' + sev + '; flex-shrink:0;"></div><span style="font-weight:700; color:var(--text-main); font-size:0.9rem;">' + escapeHTML(f.name) + '</span>' + regionTag + '</td>' +
-                     '<td style="padding:12px 16px; font-weight:800; color:' + sev + ';">' + (f.daysSince === null ? 'Never' : f.daysSince + ' days') + '</td>' +
-                     '<td style="padding:12px 16px; color:var(--text-secondary); font-weight:600; font-size:0.8rem;">' + (f.lastCoachingDate ? escapeHTML(f.lastCoachingDate) : '—') + '</td>' +
-                     '<td style="padding:12px 16px; text-align:center; color:var(--text-secondary); font-weight:600;">' + f.coachingCount90d + '</td>' +
-                     '</tr>';
-          }).join('') || '<tr><td colspan="4" style="text-align:center; padding:40px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">No coaching cadence flags.</td></tr>';
-          var threshold = c.threshold || 30;
-          return '<div class="aether-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column; height:380px; grid-column: 1 / -1;">' +
-                 '<div style="background:rgba(245,158,11,0.06); padding:16px 20px; font-weight:800; font-size:1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--glass-border);">' +
-                 '<span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clock" width="18" style="color:var(--status-warn);"></i> Coaching Cadence<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); margin-left:6px;">no session in ' + threshold + '+ days</span></span>' +
-                 '<span style="background:var(--bg-root); padding:2px 12px; border-radius:12px; font-size:0.8rem; box-shadow:0 2px 5px rgba(0,0,0,0.05);">' + (c.flags || []).length + '</span>' +
-                 '</div>' +
-                 '<div style="overflow-y:auto; flex:1;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:12px 16px;">Agent Name</th><th style="padding:12px 16px;">Days Since</th><th style="padding:12px 16px;">Last Session</th><th style="padding:12px 16px; text-align:center;">Sessions 90d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
-      }
-
-      return modalsHtml + '<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px;"><div><h2 style="margin:0 0 12px 0; font-size:2.2rem; letter-spacing:-0.5px;">Red Flags Dashboard</h2><div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;"><select class="input-aether" style="width:auto; height:34px; font-weight:800; border-color:var(--accent-primary); color:var(--accent-primary);" onchange="getAnalyzerHistory(this.value)">' + monthsHtml + '</select>' + masterListStatus + '<div style="display:flex; gap:12px; font-size:0.75rem; font-weight:700; color:var(--text-muted); background:var(--bg-root); padding:6px 12px; border-radius:12px; border:1px solid var(--glass-border);"><span style="display:flex; align-items:center; gap:6px;"><div style="width:8px; height:8px; border-radius:4px; background:var(--status-alert);"></div> Critical Flag</span></div></div></div><div style="display:flex; gap:12px;"><button class="btn btn-glass" onclick="document.getElementById(\'master-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="users" width="16"></i> Sync Roster</button><button class="btn btn-primary" onclick="document.getElementById(\'gem-modal\').classList.add(\'open\');" style="height:40px; border-radius:12px;"><i data-lucide="upload" width="16"></i> Import GEM Data</button></div></div><div class="rf-grid">' + renderTable("Inbound Red Flags", d.inbound, 'in', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-incoming" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced In% results and also have the majority of their tasks being Calls. This confirms without a doubt that these agents need balancing through more Outbound assignments.") + renderTable("Inbound Out of Scope", d.outOfScope, 'scope', 'rgba(245,158,11,0.05)', '<i data-lucide="alert-triangle" width="18" style="color:var(--status-warn);"></i>', "Display agents that have unbalanced In% results but that have most of their tasks being Outbound tasks meaning they aren't technically in need of balancing, but could be adjusted.") + renderTable("Outbound Red Flags", d.outbound, 'out', 'rgba(220,38,38,0.05)', '<i data-lucide="phone-outgoing" width="18" style="color:var(--status-alert);"></i>', "Display agents that have unbalanced Out% results while being Level 2+. These agents will require more Inbound tasks (Calls) in order to be correctly balanced.") + renderTable("CP/H Red Flags", d.cph, 'cph', 'rgba(99,102,241,0.05)', '<i data-lucide="trending-down" width="18" style="color:var(--accent-primary);"></i>', "Display agents that have critically low CP/H which are being harmful to that agent's targets and quarterly goals. They should avoid specialized tasks (SAFE, BMRC, ULC LS..) and focus on Inbound or Outbound in normal quantity for a moment.") + (d.genesys && d.genesys.has
-                    ? renderGenesysCard("Dropped Calls", d.genesys.noAnswer, 'drop', '<i data-lucide="phone-missed" width="18" style="color:#0ea5e9;"></i>', "Genesys Alert - No Answer: calls that rang the agent and were never picked up, as a share of the calls they did answer. A rate rather than a raw count, so this surfaces agents who miss a disproportionate share rather than just the busiest people on the floor. Needs at least " + GENESYS_DROP_MIN_ANSWERED + " answered calls.") +
-                      renderGenesysCard("Short Calls", d.genesys.shortCalls, 'short', '<i data-lucide="timer-off" width="18" style="color:#0ea5e9;"></i>', "Agents whose AVERAGE talk time is at or under " + Math.round((d.genesys.shortTalkCutoff || 0)) + "s, which is " + Math.round(GENESYS_SHORT_TALK_FACTOR * 100) + "% of this floor's median of " + Math.round((d.genesys.medianTalk || 0)) + "s. Measured against the floor rather than a fixed number, so the rule follows the work. Min Talk (the single shortest call) is shown alongside as corroboration, but is NOT the trigger: over hundreds of calls almost every agent has one near-instant call, so on its own it flags nearly the whole floor and says nothing.")
-                    : '') + '</div>' + renderCoachingCadenceCard();
+      var term = (state.rfSearch || '').toLowerCase().trim();
+      var srcLabel = { gem: 'Avaya GEM · ' + rfMonthLabel(d.selectedMonth), genesys: 'Genesys · ' + (g.label || 'imported report'), coach: 'Coaching log · active in the last 60 days' };
+      var card = function(sec) {
+          if (focus !== 'all' && focus !== sec.src) return '';
+          if (sec.src === 'genesys' && !g.has) return '';
+          var all = rfSectionList(sec, d);
+          var list = term ? all.filter(function(a) { return a && String(a.name || '').toLowerCase().indexOf(term) !== -1; }) : all;
+          var tip = sec.tip || (sec.k === 'drop'
+              ? 'Genesys Alert - No Answer: calls that rang the agent and were never picked up, as a share of the calls they did answer. A rate rather than a raw count, so this surfaces agents who miss a disproportionate share rather than just the busiest people on the floor. Needs at least ' + GENESYS_DROP_MIN_ANSWERED + ' answered calls.'
+              : sec.k === 'short' ? 'Agents whose AVERAGE talk time is at or under ' + Math.round(g.shortTalkCutoff || 0) + 's, which is ' + Math.round(GENESYS_SHORT_TALK_FACTOR * 100) + "% of this floor's median of " + Math.round(g.medianTalk || 0) + 's. Measured against the floor rather than a fixed number, so the rule follows the work. Shortest call is shown alongside as corroboration, but is NOT the trigger: over hundreds of calls almost every agent has one near-instant call.'
+              : 'Active agents (any WFM activity in the last 60 days) whose latest coaching session is ' + (cad.threshold || 30) + '+ days ago, or who have none on record.');
+          var title = '<span class="rf-t"><i data-lucide="' + sec.icon + '" width="16"></i>' + sec.title +
+              '<span class="rf-info" tabindex="0" data-tip="' + encodeURIComponent(tip) + '" onmouseenter="showRfTip(this, event)" onmouseleave="hideRfTip()" onfocus="showRfTip(this, event)" onblur="hideRfTip()" aria-label="How this is calculated"><i data-lucide="help-circle" width="14"></i></span></span>';
+          var side = term && list.length !== all.length ? list.length + ' <small>of ' + all.length + '</small>' : String(all.length);
+          var subLine = '<span class="rf-rule">' + (typeof sec.rule === 'function' ? sec.rule() : sec.rule) + '</span><span class="rf-act-l"><i data-lucide="corner-down-right" width="12"></i>' + sec.act + '</span><span class="rf-src">' + escapeHTML(srcLabel[sec.src]) + '</span>';
+          var body = list.length ? rfTable(sec, list, d, also)
+              : mvEmpty(term ? 'search-x' : 'check-circle', term ? 'No match' : 'Nobody flagged', term ? 'No agent on this list matches “' + escapeHTML(state.rfSearch) + '”.' : 'Everyone is inside this rule.');
+          return sectionCard(title, side, subLine, body, { cls: 'rf-sec' + (list.length > 14 ? ' long-list' : '') });
+      };
+      var C = {}; RF_SECTIONS.forEach(function(s) { C[s.k] = card(s); });
+      var pair = function(a, b) { var x = [a, b].filter(Boolean); return x.length ? '<div class="' + (x.length === 2 ? 'grid-split' : 'mv-single') + ' mv-row rf-row">' + x.join('') + '</div>' : ''; };
+      // Genesys lists stack in one column beside coaching, so no row is half empty.
+      var gen = C['drop'] + C['short'];
+      return modalsHtml + headerHtml + tilesHtml + insightsHtml +
+          pair(C['in'], C['out']) + pair(C['scope'], C['cph']) + pair(gen ? '<div class="rf-stack">' + gen + '</div>' : '', C['coach']);
   }
 
   var insightDetail = {};
   window.toggleInsightRow = function(id) {
       if (state.expandedInsights.has(id)) { state.expandedInsights.delete(id); } else { state.expandedInsights.add(id); }
-      var row = document.getElementById('details-' + id); var icon = document.getElementById('icon-' + id);
+      var row = document.getElementById('details-' + id);
       if(!row) return;
-      if (state.expandedInsights.has(id) && !row.firstElementChild && insightDetail[id]) {
+      var open = state.expandedInsights.has(id);
+      if (open && !row.firstElementChild && insightDetail[id]) {
           row.innerHTML = insightDetail[id]();
           refreshIcons();
           var c = document.getElementById('content'); if (c) c.__lastHtml = null;   // DOM changed under the render cache
-          if (typeof gsap !== 'undefined' && row.firstElementChild && row.firstElementChild.firstElementChild) gsap.from(row.firstElementChild.firstElementChild, { y: -6, autoAlpha: 0, duration: 0.3, ease: 'power2.out', clearProps: 'all' });
+          var inner = row.querySelector('.ins-det');
+          if (typeof gsap !== 'undefined' && inner) gsap.from(inner.children, { y: -6, autoAlpha: 0, duration: 0.3, stagger: 0.05, ease: 'power2.out', clearProps: 'all' });
       }
-      if (state.expandedInsights.has(id)) { row.style.display = 'table-row'; if(icon) icon.style.transform = 'rotate(180deg)'; } else { row.style.display = 'none'; if(icon) icon.style.transform = 'rotate(0deg)'; }
+      row.style.display = open ? 'table-row' : 'none';
+      if (row.previousElementSibling) { row.previousElementSibling.classList.toggle('open', open); row.previousElementSibling.setAttribute('aria-expanded', open); }
   };
 
   // Genesys stores durations in seconds; show them the way a supervisor reads
@@ -3252,117 +3397,130 @@
   // A dropped-call rate worth a supervisor's attention (also the Red Flags rule).
   var GENESYS_DROP_RATE = 0.05, GENESYS_DROP_MIN_ANSWERED = 50, GENESYS_SHORT_TALK_FACTOR = 0.6;
 
+  // ───────────────────────── Master Operations ─────────────────────────
+  window.setInsightRegion = function(v) { state.insightRegionFilter = v; render(); };
+  window.setInsightSort = function(v) { state.insightSort = v; render(); };
+  window.setInsightCycle = function(v) { if ((state.insightCycleFilter || 'ALL') === v) return; state.insightCycleFilter = v; fetchInsightData(); render(); };
+  window.insightStepMonth = function(dir) {
+      var p = state.selectedDate.split('-'), d = new Date(+p[0], +p[1] - 1 + dir, 1, 12);
+      state.selectedDate = localDateStr(d); fetchInsightData(); render();
+  };
+  // Hour columns: fixed order, the sorted one is marked and its bars are the
+  // accent; the others stay neutral so the eye lands on the ranking.
+  var INS_HOURS = [['total', 'Off-phone'], ['tower', 'Tower'], ['safe', 'SAFE'], ['coach', 'Coaching'], ['acsu', 'ACSU']];
+
+  // Per-agent panel, built only when the row opens (building it for every
+  // agent up front was ~30k hidden elements — the lag this page used to have).
+  function insightDetailHtml(a, gRpt) {
+      var g = a.gem || {}, gx = a.genesys || null;
+      var hrs = function(v) { return v > 0 ? escapeHTML(v) + 'h' : '–'; };
+      var kv = function(k, v, cls, title) { return '<dt' + (title ? ' title="' + title + '"' : '') + '>' + k + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</dd>'; };
+      var roles = [['ACSU', a.acsu], ['Coaching', a.coach], ['Tower', a.tower], ['SAFE', a.safe]];
+      var rMax = roles.reduce(function(m, r) { return Math.max(m, parseFloat(r[1]) || 0); }, 0) || 1;
+      var wfm = '<section><h4><i data-lucide="calendar-clock" width="14"></i>Off-phone and roles<span>WFM schedule</span></h4>' +
+          '<div class="ins-roles">' + roles.map(function(r, i) {
+              var v = parseFloat(r[1]) || 0;
+              return '<div class="ins-role' + (v > 0 ? '' : ' zero') + '"><span>' + r[0] + '</span><span class="ins-role-t"><i style="width:' + (v / rMax * 100).toFixed(1) + '%; --i:' + i + ';"></i></span><b>' + hrs(v) + '</b></div>';
+          }).join('') + '</div>' +
+          '<dl class="ins-kv">' + kv('Total off-phone', hrs(parseFloat(a.total) || 0)) + kv('Overtime worked', hrs(parseFloat(a.ot) || 0), '', 'Separate from the off-phone total') +
+          (a.isBackupMRC ? kv('Master list', 'Backup MRC') : '') + '</dl></section>';
+      var gem = '<section><h4><i data-lucide="bar-chart" width="14"></i>Call performance<span>Avaya GEM</span></h4>' + (a.gem
+          ? '<dl class="ins-kv">' + kv('CP/H', escapeHTML(a.cph || '–'), parseFloat(a.cph) < 7.3 ? 'low' : '') + kv('AHT', escapeHTML(a.aht || '–')) + kv('In / out', escapeHTML(a.inOut || '–')) +
+              kv('Avg talk', escapeHTML(g.avgTalk || '–')) + kv('Avg hold', escapeHTML(g.avgHold || '–')) + kv('Avg ACW', escapeHTML(g.avgAcw || '–')) +
+              kv('Transfers', escapeHTML(g.transfers || 0) + ' <small>' + (g.transfPct ? escapeHTML((g.transfPct * 100).toFixed(1)) : '0') + '%</small>') + kv('Outbound calls', escapeHTML(g.outCalls || 0)) + kv('Ext. inbound calls', escapeHTML(g.extCalls || 0)) + '</dl>'
+          : '<p class="ins-none">No GEM row for this agent this month.</p>') + '</section>';
+      // Genesys is a separate source from GEM: nothing here is merged into the
+      // GEM numbers, and the caption names the report so values can be traced.
+      var dropFlag = gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE;
+      var gen = gx
+          ? '<section><h4><i data-lucide="phone-call" width="14"></i>Genesys<span>' + escapeHTML(gRpt.label || 'imported report') + (gx.media ? ' · ' + escapeHTML(gx.media) : '') + '</span></h4><dl class="ins-kv">' +
+              kv('Answered', String(gx.answered || 0)) + kv('Handled', String(gx.handled || 0)) +
+              kv('Rang out', String(gx.noAnswer || 0) + (gx.answered ? ' <small>' + (Math.round(gx.noAnswer / gx.answered * 1000) / 10) + '%</small>' : ''), dropFlag ? 'low' : '', 'Alert - No Answer: rang this agent, never picked up') +
+              kv('Avg handle', fmtSecsShort(gx.avgHandle)) + kv('Avg talk', fmtSecsShort(gx.avgTalk)) + kv('Avg hold', fmtSecsShort(gx.avgHold)) + kv('Avg ACW', fmtSecsShort(gx.avgAcw)) +
+              kv('Avg ring', fmtSecsShort(gx.avgRing), '', 'Mean time to answer') + kv('Shortest call', fmtSecsShort(gx.minTalk)) + kv('Held', String(gx.held || 0)) + kv('Transferred', String(gx.transferred || 0)) + '</dl></section>'
+          : (gRpt.has ? '<section><h4><i data-lucide="phone-off" width="14"></i>Genesys<span>' + escapeHTML(gRpt.label || 'imported') + '</span></h4><p class="ins-none">Not in this Genesys export.</p></section>' : '');
+      return '<td colspan="12" class="ins-det-c"><div class="ins-det">' + wfm + gem + gen + '</div></td>';
+  }
+
   function renderInsights() {
       var u = state.unifiedReport || {};
       var gRpt = u.genesys || { has: false, label: '' };
+      var schedText = (state.syncMeta && state.syncMeta.sched) ? escapeHTML(state.syncMeta.sched) : 'Loading…';
+      var cyc = state.insightCycleFilter || 'ALL';
+      var ym = state.selectedDate.substring(0, 7), isCur = ym >= localDateStr().substring(0, 7);
+      var monthNav = '<div class="mv-datenav">' +
+          '<button class="mv-icon-btn" title="Previous month" onclick="insightStepMonth(-1)"><i data-lucide="chevron-left" width="16"></i></button>' +
+          '<input type="month" class="mv-date" value="' + ym + '" max="' + localDateStr().substring(0, 7) + '" onchange="if(this.value){state.selectedDate = this.value + \'-01\'; fetchInsightData(); render();}" onclick="try{this.showPicker();}catch(e){}" aria-label="Month">' +
+          '<button class="mv-icon-btn" title="Next month" onclick="insightStepMonth(1)"' + (isCur ? ' disabled' : '') + '><i data-lucide="chevron-right" width="16"></i></button></div>';
+      var controls = segControl([['ALL', 'Month'], ['WEEK A', 'Week A'], ['WEEK B', 'Week B']], cyc, 'setInsightCycle') +
+          segControl([['All', 'All'], ['Onshore', 'Onshore'], ['Offshore', 'Offshore']], state.insightRegionFilter, 'setInsightRegion') + monthNav +
+          searchBox('insight-search', 'Search agent…', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:190px;', 'height:36px; border-radius:11px;');
+      var headerHtml = pageHeader('Master Operations', coverageChip(schedText) + (cyc !== 'ALL' ? '<span class="mv-cmp">' + cyc.charAt(0) + cyc.slice(1).toLowerCase() + ' days only</span>' : ''), controls);
 
-      var schedText = "Loading...";
-      if (state.syncMeta && state.syncMeta.sched) schedText = escapeHTML(state.syncMeta.sched);
+      if (!u.data) return headerHtml + skeletonPage('Compiling the month… <span>schedule and GEM metrics</span>');
 
-      var curCycle = state.insightCycleFilter || 'ALL';
-      var cycleBtn = function(label, val) {
-          var active = curCycle === val;
-          return '<button onclick="toggleInsightCycle(\'' + val + '\');" style="background:' + (active ? 'var(--accent-primary)' : 'var(--card-bg)') + '; color:' + (active ? 'white' : 'var(--text-muted)') + '; border:' + (active ? 'none' : '1px solid var(--glass-border)') + '; padding:4px 14px; border-radius:12px; font-weight:800; font-size:0.75rem; letter-spacing:1px; cursor:pointer; transition:0.2s;">' + label + '</button>';
-      };
-      var cycleToggleHtml = '<div style="display:flex; gap:8px; flex-shrink:0;">' + cycleBtn('WEEK A', 'WEEK A') + cycleBtn('WEEK B', 'WEEK B') + (curCycle !== 'ALL' ? '<button onclick="toggleInsightCycle(\'' + curCycle + '\');" style="background:transparent; color:var(--text-muted); border:none; padding:4px 8px; font-size:0.7rem; cursor:pointer; text-decoration:underline;">Clear</button>' : '') + '</div>';
-
-      var headerHtml = '<div class="sticky-header" style="display:flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; align-items: center; padding: 12px 24px;"><div style="flex-shrink: 0;"><h2 style="margin:0; font-size:1.2rem;">Master Operations Tracker</h2><div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px; font-weight:600;">' + coverageChip(schedText) + '</div></div><div style="width:1px; height:30px; background:var(--glass-border); flex-shrink: 0;"></div><div style="display:flex; align-items:center; gap:12px; flex-shrink: 0;"><input type="month" class="input-aether" style="width:auto; height:32px; font-weight:700; font-size:0.85rem; cursor:pointer;" value="' + state.selectedDate.substring(0,7) + '" onchange="state.selectedDate = this.value + \'-01\'; fetchInsightData();" onclick="try{this.showPicker();}catch(e){}"><div class="nav-island" style="background:var(--card-bg); border:1px solid var(--glass-border);"><button class="nav-btn ' + (state.insightRegionFilter==='All'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'All\'; render();">All</button><button class="nav-btn ' + (state.insightRegionFilter==='Onshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Onshore\'; render();">Onshore</button><button class="nav-btn ' + (state.insightRegionFilter==='Offshore'?'active':'') + '" style="height:30px; font-size:0.75rem; padding:0 12px;" onclick="state.insightRegionFilter=\'Offshore\'; render();">Offshore</button></div>' + cycleToggleHtml + '</div><div style="flex: 1; min-width: 16px;"></div><div style="display:flex; gap:12px; flex-shrink: 0;">' + searchBox('insight-search', 'Search agent...', escapeHTML(state.insightSearch), 'handleInsightSearch(this.value)', 'width:180px;', 'height:32px; font-size:0.8rem;') + '</div></div>';
-
-      if (!u.data) {
-          return headerHtml + skeletonPage('Compiling the month… <span>schedule and GEM metrics</span>');
-      }
-      
+      var sortK = state.insightSort || 'total';
       var displayData = u.data || [];
       if (state.insightRegionFilter !== 'All') { displayData = displayData.filter(function(a) { return (a.region || 'Onshore').includes(state.insightRegionFilter); }); }
       if (state.insightSearch) { var term = state.insightSearch.toLowerCase(); displayData = displayData.filter(function(a) { return (a.name||'').toLowerCase().indexOf(term) !== -1; }); }
       // Tower view: everyone who worked Tower this cycle, plus Backup MRC agents
       // from the master list (it used to keep ONLY the Backup MRC tag, so agents
       // with 100h of Tower vanished when nobody carried the tag).
-      if (state.insightSort === 'tower') { displayData = displayData.filter(function(a) { return (parseFloat(a.tower) || 0) > 0 || a.isBackupMRC === true; }); }
+      if (sortK === 'tower') { displayData = displayData.filter(function(a) { return (parseFloat(a.tower) || 0) > 0 || a.isBackupMRC === true; }); }
+      displayData.sort(function(a, b) { return (parseFloat(b[sortK]) || 0) - (parseFloat(a[sortK]) || 0); });
 
-      displayData.sort(function(a, b) { return (b[state.insightSort] || 0) - (a[state.insightSort] || 0); });
+      // Each hour cell draws its bar as a background (no extra elements: 250
+      // rows × 5 columns), scaled to that column's largest value.
+      var colMax = {}; INS_HOURS.forEach(function(c) { colMax[c[0]] = displayData.reduce(function(m, a) { return Math.max(m, parseFloat(a[c[0]]) || 0); }, 0) || 1; });
+      var dropFlag = function(gx) { return gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE; };
+      var rowsHtml = displayData.map(function(a, idx) {
+          var gx = a.genesys || null, safeId = 'agt-' + idx;
+          var open = state.expandedInsights.has(safeId);
+          var cells = INS_HOURS.map(function(c) {
+              var v = parseFloat(a[c[0]]) || 0;
+              if (!(v > 0)) return '<td class="ins-h zero">–</td>';
+              return '<td class="ins-h' + (c[0] === sortK ? ' on' : '') + '" style="--w:' + Math.min(1, v / colMax[c[0]]).toFixed(3) + ';">' + escapeHTML(String(a[c[0]])) + 'h</td>';
+          }).join('');
+          var cph = parseFloat(a.cph), io = /^(\d+)%/.exec(a.inOut || '');
+          var nm = '<td class="ins-name">' + escapeHTML(a.name || '') + ((a.region || '').includes('Offshore') ? '<span class="ins-tag">Offshore</span>' : '') + (a.isBackupMRC ? '<span class="ins-tag">Backup MRC</span>' : '') + '</td>';
+          insightDetail[safeId] = function() { return insightDetailHtml(a, gRpt); };
+          return '<tr class="ins-r' + (open ? ' open' : '') + (idx < 24 ? ' insight-row" style="animation-delay:' + (idx * 0.02).toFixed(2) + 's;' : '') + '" tabindex="0" aria-expanded="' + open + '" onclick="toggleInsightRow(\'' + safeId + '\')">' + nm + cells +
+              '<td class="n' + (cph < 7.3 ? ' ins-low" title="Under 7.3 CP/H' : '') + '">' + escapeHTML(a.cph || '–') + '</td>' +
+              '<td class="n">' + escapeHTML(a.aht || '–') + '</td>' +
+              (io ? '<td class="n ins-io" style="--in:' + io[1] + '%;">' + io[1] + ' / ' + (100 - +io[1]) + '</td>' : '<td class="n zero">–</td>') +
+              '<td class="n ins-gen' + (dropFlag(gx) ? ' ins-low" title="Rang out on ' + Math.round(GENESYS_DROP_RATE * 100) + '%+ of answered calls' : '') + '">' + (gx ? String(gx.noAnswer || 0) : '–') + '</td>' +
+              '<td class="n">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '–') + '</td>' +
+              '<td class="ins-chev"></td></tr>' +
+              '<tr id="details-' + safeId + '" class="ins-det-r" style="display:' + (open ? 'table-row' : 'none') + ';">' + (open ? insightDetail[safeId]() : '') + '</tr>';
+      }).join('') || '<tr><td colspan="12">' + mvEmpty('search-x', 'No agents match', 'Nothing for this month, region and search.') + '</td></tr>';
 
-      var c1 = { key: 'tower', name: 'TOWER', color: 'var(--accent-primary)' }; var c2 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' }; var c3 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' };
-      if (state.insightSort === 'coach') { c1 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' }; c2 = { key: 'acsu', name: 'ACSU', color: 'var(--text-muted)' }; c3 = { key: 'total', name: 'Overview', color: 'var(--accent-primary)' }; }
-      else if (state.insightSort === 'acsu') { c1 = { key: 'acsu', name: 'ACSU', color: 'var(--text-main)' }; c2 = { key: 'coach', name: 'COACH', color: 'var(--text-muted)' }; c3 = { key: 'total', name: 'Overview', color: 'var(--accent-primary)' }; }
-      else if (state.insightSort === 'safe') { c1 = { key: 'safe', name: 'SAFE', color: 'var(--status-active)' }; c2 = { key: 'tower', name: 'TOWER', color: 'var(--accent-primary)' }; c3 = { key: 'coach', name: 'COACH', color: 'var(--text-main)' }; }
-
-      // Each hour column gets a faint in-cell bar scaled to that column's
-      // largest value, so the heavy hitters stand out without reading numbers.
-      var colMax = {}; [c1, c2, c3].forEach(function(c) { colMax[c.key] = displayData.reduce(function(m, a) { return Math.max(m, parseFloat(a[c.key]) || 0); }, 0) || 1; });
-      var hCell = function(a, c) {
-          var v = parseFloat(a[c.key]) || 0;
-          if (!(v > 0)) return '<td class="ins-h zero">–</td>';
-          return '<td class="ins-h"><span class="ins-v">' + escapeHTML(String(a[c.key])) + 'h</span><span class="ins-bar"><i style="transform:scaleX(' + Math.min(1, v / colMax[c.key]).toFixed(3) + ');"></i></span></td>';
-      };
-      var rowsHtml = displayData.map(function(a, idx) { 
-          var g = a.gem || {}; var gx = a.genesys || null; var safeId = "agt-" + idx;
-          var regionTag = (a.region || '').includes('Offshore') ? '<span style="font-size:0.6rem; background:var(--region-off); color:white; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle; font-weight:800;">OFF</span>' : '';
-          var isExpanded = state.expandedInsights.has(safeId);
-          var displayStyle = isExpanded ? 'table-row' : 'none';
-          var iconTransform = isExpanded ? 'rotate(180deg)' : 'rotate(0deg)';
-
-          var cellData = '<td style="padding:16px; font-weight:700; color:var(--text-main);">' + escapeHTML(a.name || '') + ' ' + regionTag + '</td>' +
-             hCell(a, c1) + hCell(a, c2) + hCell(a, c3) +
-             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-variant-numeric:tabular-nums; color:' + (a.cph !== '-' && parseFloat(a.cph) < 7.3 ? 'var(--status-alert)' : 'var(--accent-primary)') + '; font-weight:800; font-size:1.1rem;">' + escapeHTML(a.cph || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-size:0.9rem;">' + escapeHTML(a.aht || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-weight:700; opacity:0.8;">' + escapeHTML(a.inOut || '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); font-variant-numeric:tabular-nums; font-weight:800; color:' + (gx && gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + (gx ? String(gx.noAnswer || 0) : '-') + '</td>' +
-             '<td style="padding:16px; text-align:center; font-variant-numeric:tabular-nums; font-size:0.9rem;">' + (gx && gx.avgRing != null ? escapeHTML(String(Math.round(gx.avgRing * 10) / 10)) + 's' : '-') + '</td>' +
-             '<td style="padding:16px; text-align:right; color:var(--text-muted);"><i id="icon-' + safeId + '" data-lucide="chevron-down" width="18" style="transform:' + iconTransform + '; transition:0.3s;"></i></td>';
-
-          // The detail panel is built only when the row is opened: building it
-          // for every agent up front meant ~30k hidden elements and ~1000
-          // icons on this page — the cause of the lag.
-          insightDetail[safeId] = function() { return '<td colspan="10" style="padding:0;"><div style="padding:24px; border-bottom:2px solid var(--glass-border); display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:32px;">' +
-             '<div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="calendar-clock" width="14"></i> Off-Phone / Roles Tracker</div><div style="display:flex; flex-wrap:wrap; gap:10px;"><div class="insight-pill"><span>Total Off-Phone</span> <b style="color:var(--text-main);">' + escapeHTML(a.total || 0) + 'h</b></div><div class="insight-pill"><span>ACSU</span> <b style="color:var(--text-main);">' + (a.acsu > 0 ? escapeHTML(a.acsu) + 'h' : '-') + '</b></div><div class="insight-pill"><span>Coach</span> <b style="color:var(--text-main);">' + (a.coach > 0 ? escapeHTML(a.coach) + 'h' : '-') + '</b></div><div class="insight-pill"><span>Tower</span> <b style="color:var(--text-main);">' + (a.tower > 0 ? escapeHTML(a.tower) + 'h' : '-') + '</b></div><div class="insight-pill"><span>SAFE</span> <b style="color:var(--text-main);">' + (a.safe > 0 ? escapeHTML(a.safe) + 'h' : '-') + '</b></div><div class="insight-pill" style="border-color:var(--accent-primary);" title="Overtime worked (separate from off-phone total)"><span style="color:var(--accent-primary);">OT</span> <b style="color:var(--accent-primary);">' + (a.ot > 0 ? escapeHTML(a.ot) + 'h' : '-') + '</b></div></div></div>' +
-             '<div style="background:var(--bg-root); border:1px solid var(--glass-border); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; display:flex; align-items:center; gap:8px;"><i data-lucide="bar-chart" width="14"></i> GEM Deep Dive</div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;"><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Avg Talk Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgTalk || '-') + '</b></div><div class="insight-pill"><span>Avg Hold Time</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgHold || '-') + '</b></div><div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + escapeHTML(g.avgAcw || '-') + '</b></div></div><div style="display:flex; flex-direction:column; gap:8px;"><div class="insight-pill"><span>Transfers</span> <b style="color:var(--text-main);">' + escapeHTML(g.transfers || 0) + ' (' + (g.transfPct ? escapeHTML((g.transfPct * 100).toFixed(1)) + '%' : '0%') + ')</b></div><div class="insight-pill"><span>Outbound Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.outCalls || 0) + '</b></div><div class="insight-pill"><span>Ext. In Calls</span> <b style="color:var(--text-main);">' + escapeHTML(g.extCalls || 0) + '</b></div></div></div></div>' +
-             // Genesys Call Performance — a SEPARATE source from GEM above. Nothing
-             // here is merged into or overrides the GEM numbers; the caption names
-             // the report the figures came from so any value can be traced.
-             (gx
-                ? '<div style="background:var(--bg-root); border:1px solid rgba(14,165,233,0.35); padding:20px; border-radius:16px; box-shadow:inset 0 2px 10px rgba(0,0,0,0.02);">' +
-                    '<div style="font-size:0.75rem; font-weight:800; color:#0ea5e9; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; display:flex; align-items:center; gap:8px;"><i data-lucide="phone-call" width="14"></i> Genesys Call Performance</div>' +
-                    '<div style="font-size:0.66rem; color:var(--text-muted); font-weight:600; margin-bottom:14px;">' + escapeHTML(gRpt.label || 'imported report') + (gx.media ? ' · ' + escapeHTML(gx.media) : '') + '</div>' +
-                    '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">' +
-                      '<div style="display:flex; flex-direction:column; gap:8px;">' +
-                        '<div class="insight-pill"><span>Answered</span> <b style="color:var(--text-main);">' + String(gx.answered || 0) + '</b></div>' +
-                        '<div class="insight-pill"><span>Handled</span> <b style="color:var(--text-main);">' + String(gx.handled || 0) + '</b></div>' +
-                        '<div class="insight-pill"><span>Avg Handle</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHandle) + '</b></div>' +
-                        '<div class="insight-pill"><span>Avg Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgTalk) + '</b></div>' +
-                        '<div class="insight-pill"><span>Avg Hold</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgHold) + '</b></div>' +
-                        '<div class="insight-pill"><span>Avg ACW</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgAcw) + '</b></div>' +
-                      '</div>' +
-                      '<div style="display:flex; flex-direction:column; gap:8px;">' +
-                        '<div class="insight-pill" title="Alert - No Answer: rang this agent, never picked up"><span>Dropped</span> <b style="color:' + (gx.answered >= GENESYS_DROP_MIN_ANSWERED && (gx.noAnswer / gx.answered) >= GENESYS_DROP_RATE ? 'var(--status-alert)' : 'var(--text-main)') + ';">' + String(gx.noAnswer || 0) + (gx.answered ? ' (' + (Math.round(gx.noAnswer / gx.answered * 1000) / 10) + '%)' : '') + '</b></div>' +
-                        '<div class="insight-pill" title="Shortest talk time in the period — a very low value means very short calls"><span>Min Talk</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.minTalk) + '</b></div>' +
-                        '<div class="insight-pill" title="Average Ring Time: mean time to answer"><span>Avg Ring</span> <b style="color:var(--text-main);">' + fmtSecsShort(gx.avgRing) + '</b></div>' +
-                        '<div class="insight-pill"><span>Held</span> <b style="color:var(--text-main);">' + String(gx.held || 0) + '</b></div>' +
-                        '<div class="insight-pill"><span>Transferred</span> <b style="color:var(--text-main);">' + String(gx.transferred || 0) + '</b></div>' +
-                      '</div>' +
-                    '</div></div>'
-                : (gRpt.has
-                    ? '<div style="background:var(--bg-root); border:1px dashed var(--glass-border); padding:20px; border-radius:16px; display:flex; flex-direction:column; justify-content:center;"><div style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; display:flex; align-items:center; gap:8px;"><i data-lucide="phone-off" width="14"></i> Genesys Call Performance</div><div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Not in the ' + escapeHTML(gRpt.label || 'imported') + ' Genesys export.</div></div>'
-                    : '')) +
-             '</div></td>'; };
-          var expandHtml = isExpanded ? insightDetail[safeId]() : '';
-
-          return '<tr class="hover-bg' + (idx < 24 ? ' insight-row' : '') + '" style="border-bottom:1px solid var(--glass-border); cursor:pointer;' + (idx < 24 ? ' animation-delay:' + (idx * 0.02) + 's;' : '') + '" onclick="toggleInsightRow(\'' + safeId + '\')">' + cellData + '</tr><tr id="details-' + safeId + '" style="display:' + displayStyle + '; background:rgba(0,0,0,0.015);">' + expandHtml + '</tr>';
-      }).join('') || '<tr><td colspan="10" style="padding:40px; text-align:center; color:var(--text-muted);">No data found for this cycle.</td></tr>';
-
-      // Team summary for what is on screen (filters apply).
+      // Headline numbers for what is on screen (filters apply).
       var sumK = function(k) { return Math.round(displayData.reduce(function(t, x) { return t + (parseFloat(x[k]) || 0); }, 0) * 10) / 10; };
+      var withK = function(k) { return displayData.filter(function(x) { return (parseFloat(x[k]) || 0) > 0; }).length; };
       var cphs = displayData.map(function(x) { return parseFloat(x.cph); }).filter(function(v) { return isFinite(v); }).sort(function(x, y) { return x - y; });
       var medCph = cphs.length ? cphs[Math.floor(cphs.length / 2)] : null;
       var lowCph = cphs.filter(function(v) { return v < 7.3; }).length;
-      var insTile = function(label, val, cap) { return '<div class="aether-card mv-tile"><div class="mv-k">' + label + '</div><div class="mv-v sm">' + val + '</div><div class="mv-cap">' + cap + '</div></div>'; };
-      var summaryHtml = '<div class="mv-tiles">' +
-          insTile('Agents shown', '<span class="cnum">' + displayData.length + '</span>', 'click a row for WFM roles, GEM and Genesys detail') +
-          insTile('Tower · SAFE', sumK('tower') + 'h <small>·</small> ' + sumK('safe') + 'h', 'scheduled role hours, this cycle') +
-          insTile('Coaching · ACSU', sumK('coach') + 'h <small>·</small> ' + sumK('acsu') + 'h', 'coaching and released time') +
-          insTile('CP/H', medCph != null ? medCph + ' <small>median</small>' : '<span class="mv-na">no GEM data</span>', lowCph ? '<b style="color:var(--status-alert);">' + lowCph + ' under 7.3</b>' : 'nobody under 7.3') +
+      var offN = displayData.filter(function(a) { return (a.region || '').includes('Offshore'); }).length;
+      var drops = displayData.filter(function(a) { return dropFlag(a.genesys); }).length;
+      var num = function(v) { return '<span class="cnum">' + v + '</span>'; };
+      var summaryHtml = '<div class="mv-tiles ins-tiles">' +
+          kpiTile('Agents', num(displayData.length), null, (displayData.length - offN) + ' onshore · ' + offN + ' offshore') +
+          kpiTile('Tower', num(sumK('tower') + 'h'), null, withK('tower') + ' agents' + (displayData.some(function(a) { return a.isBackupMRC; }) ? ' · ' + displayData.filter(function(a) { return a.isBackupMRC; }).length + ' Backup MRC' : '')) +
+          kpiTile('SAFE', num(sumK('safe') + 'h'), null, withK('safe') + ' agents') +
+          kpiTile('Coaching · ACSU', sumK('coach') + 'h <small>·</small> ' + sumK('acsu') + 'h', null, withK('coach') + ' coached · ' + withK('acsu') + ' released') +
+          kpiTile('CP/H median', medCph != null ? num(medCph.toFixed(2)) : '<span class="mv-na">no GEM data</span>', null, cphs.length + ' agents with GEM data',
+              { badge: medCph == null ? '' : (lowCph ? mvBadge('bad', 'arrow-down-right', lowCph + ' under 7.3') : mvBadge('good', 'check', 'none under 7.3')) }) +
+          (gRpt.has ? kpiTile('Ring-outs', num(drops), null, 'agents at ' + Math.round(GENESYS_DROP_RATE * 100) + '%+ of answered · Genesys') : '') +
           '</div>';
-      return headerHtml + summaryHtml + '<div class="aether-card long-list" style="padding:0; overflow:hidden; display:flex; flex-direction:column; min-height:500px;"><div style="background:rgba(0,0,0,0.01); padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; overflow-x:auto; scrollbar-width: none;"><span style="font-size:0.75rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">Sort By:</span><button onclick="state.insightSort=\'total\'; render();" class="sort-btn ' + (state.insightSort==='total'?'active':'') + '"><i data-lucide="bar-chart-2" width="14" style="margin-right:4px; vertical-align:text-bottom;"></i> Overview</button><button onclick="state.insightSort=\'safe\'; render();" class="sort-btn ' + (state.insightSort==='safe'?'active-safe':'') + '">SAFE</button><button onclick="state.insightSort=\'tower\'; render();" class="sort-btn ' + (state.insightSort==='tower'?'active-tower':'') + '">TOWER</button><button onclick="state.insightSort=\'coach\'; render();" class="sort-btn ' + (state.insightSort==='coach'?'active':'') + '">COACHING</button><button onclick="state.insightSort=\'acsu\'; render();" class="sort-btn ' + (state.insightSort==='acsu'?'active':'') + '">ACSU</button></div><div style="overflow-y:auto; flex:1; padding-right:12px;" class="custom-scrollbar"><table style="width:100%; border-collapse:collapse; font-size:0.9rem;"><thead style="background:var(--bg-root); color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; position:sticky; top:0; z-index:10;"><tr><th style="padding:16px; text-align:left;">Agent Name</th><th style="padding:16px; text-align:right; color:' + c1.color + ';">' + c1.name + '</th><th style="padding:16px; text-align:right; color:' + c2.color + ';">' + c2.name + '</th><th style="padding:16px; text-align:right; color:' + c3.color + ';">' + c3.name + '</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:var(--accent-primary);">CP/H</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">AHT</th><th style="padding:16px; text-align:center; color:var(--accent-primary);">IN / OUT %</th><th style="padding:16px; text-align:center; border-left:1px dashed var(--glass-border); color:#0ea5e9;" title="Genesys — Alert / No Answer: calls that rang this agent and were never picked up">DROPPED</th><th style="padding:16px; text-align:center; color:#0ea5e9;" title="Genesys — Average Ring Time: mean time to answer">RING</th><th style="padding:16px; width:40px;"></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div>';
+
+      var sortLabel = {}; INS_HOURS.forEach(function(c) { sortLabel[c[0]] = c[1]; });
+      var th = function(c) { var on = c[0] === sortK; return '<th class="n ins-th' + (on ? ' on' : '') + '" onclick="setInsightSort(\'' + c[0] + '\')" title="Sort by ' + c[1] + '"' + (on ? ' aria-sort="descending"' : '') + '>' + c[1] + '</th>'; };
+      var tableHead = '<thead><tr class="ins-grp"><th></th><th colspan="5">Hours this ' + (cyc === 'ALL' ? 'month' : 'cycle') + ' <small>WFM</small></th><th colspan="3">Call performance <small>Avaya GEM</small></th><th colspan="2">Genesys</th><th></th></tr>' +
+          '<tr><th>Agent</th>' + INS_HOURS.map(th).join('') + '<th class="n">CP/H</th><th class="n">AHT</th><th class="n" title="Inbound / outbound share of time">In / out %</th><th class="n" title="Alert - No Answer: calls that rang this agent and were never picked up">Rang out</th><th class="n" title="Average time to answer">Ring</th><th></th></tr></thead>';
+      var cardHead = '<div class="ins-card-h"><div><div class="mv-sec-h">Agents</div>' +
+          '<div class="mv-sec-sub">sorted by ' + (sortLabel[sortK] || sortK) + (sortK === 'tower' ? ' · everyone with Tower hours, plus Backup MRC' : '') + ' · bars compare each agent with the highest in the column · click a row for the detail</div></div>' +
+          segControl([['total', 'Overview'], ['tower', 'Tower'], ['safe', 'SAFE'], ['coach', 'Coaching'], ['acsu', 'ACSU']], sortK, 'setInsightSort') + '</div>';
+      return headerHtml + summaryHtml + '<div class="aether-card long-list ins-card">' + cardHead + '<div class="mv-table-wrap"><table class="mv-table ins-table">' + tableHead + '<tbody>' + rowsHtml + '</tbody></table></div></div>';
   }
 
   // Resolved-range chip for the ops trackers: spells out the exact days the
@@ -7135,7 +7293,7 @@
           (need.length && okN > 0 ? '<div class="imp-h-ok">' + okN + ' other dataset' + (okN === 1 ? ' is' : 's are') + ' up to date</div>' : '');
       if (dsKey && dsKey !== prevMatch && typeof gsap !== 'undefined') {
           var row = box.querySelector('.imp-h-row.match');
-          if (row) gsap.fromTo(row, { backgroundColor: 'rgba(79,70,229,0.22)' }, { backgroundColor: 'rgba(79,70,229,0.07)', duration: 0.8, ease: 'power2.out', clearProps: 'backgroundColor' });
+          if (row) gsap.fromTo(row, { opacity: 0.35, x: -6 }, { opacity: 1, x: 0, duration: 0.45, ease: 'power2.out', clearProps: 'opacity,transform' });
       }
   }
 
