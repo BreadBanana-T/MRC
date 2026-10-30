@@ -1290,4 +1290,9 @@
   .ins-bar { display: block; height: 3px; margin-top: 5px; border-radius: 99px; background: rgba(15, 23, 42, 0.06); overflow: hidden; }
   body.dark .ins-bar { background: rgba(255, 255, 255, 0.07); }
   .ins-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent-primary); opacity: 0.55; transform-origin: right; }
+  /* Very tall cards (long tables): a large soft shadow on a 10 000px-tall box
+     is repainted on every scroll frame (measured: 2.3s of work per second of
+     scrolling on the Master Operations Tracker). A tight shadow costs ~nothing. */
+  .aether-card.long-list, .aether-card.long-list:hover { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 0 0 1px var(--glass-border); }
+  .aether-card.long-list::before { display: none; }
 </style>
