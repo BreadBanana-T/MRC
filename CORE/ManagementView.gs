@@ -183,15 +183,23 @@ var ManagementView = {
     // fast cache, invalidated by WF_CACHE_VER (bumped on every import).
     var _isPast = pb.selEnd < nowMs - 86400000;
     var _ver = ''; try { _ver = PropertiesService.getScriptProperties().getProperty('WF_CACHE_VER') || ''; } catch (e) {}
-    var _ck = 'mgmtDash|' + grain + '|' + refDateStr + '|' + _ver;
+    // Keyed on the PERIOD, not the clicked date, so every day inside the same
+    // past week/month hits one entry. The live period now gets a 90 s cache
+    // (imports still bust it through WF_CACHE_VER) — enough to absorb rapid
+    // grain/date clicking and multiple open tabs.
+    var _ck = 'mgmtDash|' + grain + '|' + pb.selStart + '|' + _ver;
+    var _ttl = _isPast ? 21600 : 90;
     var _cache = null;
-    if (_isPast) {
-      try { _cache = CacheService.getScriptCache(); } catch (e) {}
-      if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
-    }
+    try { _cache = CacheService.getScriptCache(); } catch (e) {}
+    if (_cache) { try { var _hit = _cache.get(_ck); if (_hit) return Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(_hit), 'application/x-gzip', 'c.gz')).getDataAsString(); } catch (e) {} }
     var wins = this._subWindows(grain, pb.selStart, pb.selEnd);
     var selCap = Math.min(pb.selEnd, nowMs);   // to-date cap
-    var prevCap = Math.min(pb.prevEnd, nowMs);
+    // Like-for-like: while the selected period is still running, compare it
+    // with the SAME elapsed span of the previous one (this Mon–Wed vs last
+    // Mon–Wed; YTD vs the same date last year). Capping only at "now" compared
+    // a part-period with a whole one, so every in-progress delta read low.
+    var prevCap = Math.min(pb.prevEnd, nowMs, pb.prevStart + (selCap - pb.selStart));
+    var inProgress = selCap < pb.selEnd;
 
     var newTotals = function() {
       return { ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
@@ -452,7 +460,7 @@ var ManagementView = {
           if (dayMs < 0 || dayMs > nowMs) return;
           var dayMid = dayMs + 43200000;
           var inSel = dayMid >= pb.selStart && dayMid < pb.selEnd;
-          var inPrev = dayMid >= pb.prevStart && dayMid < pb.prevEnd;
+          var inPrev = dayMid >= pb.prevStart && dayMid < pb.prevEnd && dayMs < prevCap;   // same elapsed days (sel stops at today)
           if (!inSel && !inPrev) return;
           var agent = String(row[0]).trim();
           var type = String(row[2]).trim() || 'OTHER';
@@ -704,6 +712,8 @@ var ManagementView = {
       forecast: forecastImported,
       safeAgents: safeAgentsImported,
       totals: { sel: selT, prev: prevT },
+      // Deltas compare equal elapsed spans while the period is in progress.
+      compare: { toDate: inProgress, prevStartStr: this._fmt(pb.prevStart, 'yyyy-MM-dd'), prevCapStr: this._fmt(prevCap - 1, 'yyyy-MM-dd') },
       sel: {
         label: periodLabel,
         startStr: this._fmt(pb.selStart, 'yyyy-MM-dd'),
@@ -715,9 +725,8 @@ var ManagementView = {
         otAgents: topList(topOt).length ? Object.keys(topOt).filter(function(n) { return topOt[n] > 0; }).length : 0
       }
     });
-    // _cache is non-null only for fully-past periods (set above), so this writes
-    // a long-lived cache for history and never for the live period.
-    if (_cache) { try { var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, 21600); } catch (e) {} }
+    // 6 h for fully-past periods, 90 s for the live one (see _ttl above).
+    if (_cache) { try { var _z = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(__payload)).getBytes()); if (_z.length < 99000) _cache.put(_ck, _z, _ttl); } catch (e) {} }
     return __payload;
   }
 };

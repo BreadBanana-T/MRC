@@ -4365,16 +4365,28 @@
   window.toggleSafeDay = function(date) { state.safeOpenDay = (state.safeOpenDay === date ? null : date); render(); };
   window.setMgmtDate = function(v) { if (!v) return; state.mgmtDate = v; fetchMgmtData(); render(); };
 
-  function fetchMgmtData() {
-      state.mgmtLoading = true;
-      if (typeof google === 'undefined') { state.mgmtLoading = false; return; }
+  // Periods already fetched (grain|date → { at, data }) so flipping back to one
+  // is instant; 2-minute TTL matches the live data's pace. A request token
+  // drops a late answer from an earlier click (rapid grain/date changes used
+  // to let an older response overwrite a newer one).
+  var mgmtMemo = {}, mgmtReqToken = 0;
+  function fetchMgmtData(force) {
       // Load any embedded real trackers the manager saved (anchored on mgmtDate).
       try { getMgmtLayout().embeds.forEach(fetchMgmtEmbed); } catch (e) {}
+      var key = state.mgmtGrain + '|' + state.mgmtDate, hit = mgmtMemo[key];
+      if (!force && hit && Date.now() - hit.at < 120000) { mgmtReqToken++; state.mgmtData = hit.data; state.mgmtLoading = false; return; }   // ++token: an in-flight older request must not land on top
+      state.mgmtLoading = true;
+      if (typeof google === 'undefined') { state.mgmtLoading = false; return; }
+      var token = ++mgmtReqToken;
       google.script.run.withSuccessHandler(function(res) {
-          try { state.mgmtData = JSON.parse(res); } catch(e) { state.mgmtData = { error: 'Could not parse management data.' }; }
+          var parsed = null; try { parsed = JSON.parse(res); } catch (e) {}
+          if (parsed && !parsed.error) mgmtMemo[key] = { at: Date.now(), data: parsed };   // kept even if superseded
+          if (token !== mgmtReqToken) return;
+          state.mgmtData = parsed || { error: 'Could not parse management data.' };
           state.mgmtLoading = false;
           if (state.view === 'mgmt') render();
       }).withFailureHandler(function(err) {
+          if (token !== mgmtReqToken) return;
           state.mgmtData = { error: (err && err.message) || 'Backend error.' };
           state.mgmtLoading = false;
           if (state.view === 'mgmt') render();
@@ -4394,7 +4406,7 @@
   // period total getter (read off the dashboard payload).
   var MGMT_SECTIONS = {
       overtime: { label: 'Overtime', color: '#818cf8', unit: 'h', total: function(c) { return c.ot || 0; }, series: function(b) { return b.ot || 0; } },
-      coaching: { label: 'Coaching', color: '#f59e0b', unit: 'h', total: function(c) { return c.coach || 0; }, series: function(b) { return b.coach || 0; } },
+      coaching: { label: 'Coaching', color: '#14b8a6', unit: 'h', total: function(c) { return c.coach || 0; }, series: function(b) { return b.coach || 0; } },
       // SAFE hours now come from the SAFE report ("SAFE Hours by Agent" card), not
       // schedule codes — so it is not a schedule-derived quick-metric here.
       tower:    { label: 'Tower', color: '#0ea5e9', unit: 'h', total: function(c) { return c.tower || 0; }, series: function(b) { return b.tower || 0; } },
@@ -4873,13 +4885,16 @@
           '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">' +
           grainBtn('Daily','day') + grainBtn('Weekly','week') + grainBtn('Monthly','month') + grainBtn('Quarterly','quarter') + grainBtn('YTD','ytd') +
           '<input type="date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700; cursor:pointer;" value="' + escapeHTML(state.mgmtDate) + '" onchange="setMgmtDate(this.value)" onclick="try{this.showPicker();}catch(e){}">' +
-          '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
+          '<button class="btn btn-glass" style="height:32px; font-size:0.78rem;" onclick="fetchMgmtData(true); render();"><i data-lucide="refresh-cw" width="14"></i> Refresh</button>' +
           '<button class="btn ' + (state.mgmtCustomize ? 'btn-primary' : 'btn-glass') + '" style="height:32px; font-size:0.78rem;" onclick="toggleMgmtCustomize()"><i data-lucide="sliders-horizontal" width="14"></i> ' + (state.mgmtCustomize ? 'Done' : 'Customize') + '</button>' +
           '</div>' +
           (stripHtml ? '<div style="width:100%;">' + stripHtml + '</div>' : '') +
           '</div>';
 
-      if (state.mgmtLoading || !state.mgmtData) {
+      // First load only: a spinner. Switching periods keeps the current page
+      // (dimmed, slim progress bar) until the new numbers land.
+      var mgmtBusy = state.mgmtLoading && state.mgmtData && !state.mgmtData.error;
+      if (!state.mgmtData || (state.mgmtLoading && !mgmtBusy)) {
           return headerHtml + '<div class="aether-card" style="padding:60px; text-align:center; min-height:400px; display:flex; flex-direction:column; align-items:center; justify-content:center;"><div style="width: 44px; height: 44px; border: 4px solid var(--glass-border); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 24px;"></div><h3 style="margin:0 0 8px 0;">Compiling aggregates…</h3><p style="color:var(--text-muted); font-size:0.9rem; margin:0;">Scanning OT, roles, coaching, absences and SL history.</p></div>';
       }
       var d = state.mgmtData;
@@ -4892,14 +4907,17 @@
       var sel = d.sel || {};
       var word = ({ day: 'day', week: 'week', month: 'month', quarter: 'quarter', ytd: 'year' })[d.grain] || 'period';
 
+      // While the period is still running the server compares equal elapsed
+      // spans (d.compare.toDate), so say so: "vs last week to date".
+      var vsTxt = 'vs last ' + word + (d.compare && d.compare.toDate ? ' to date' : '');
       var delta = function(curV, prevV, goodWhenUp, suffix) {
           if (curV == null || prevV == null) return '';
           var diff = Math.round((curV - prevV) * 10) / 10;
-          if (diff === 0) return '<span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); margin-left:8px;">= prev ' + word + '</span>';
+          if (diff === 0) return '<span class="mgmt-delta flat">= ' + vsTxt + '</span>';
           var up = diff > 0;
           var good = (up && goodWhenUp) || (!up && !goodWhenUp);
-          var color = good ? 'var(--status-active)' : 'var(--status-alert)';
-          return '<span style="font-size:0.7rem; font-weight:800; color:' + color + '; margin-left:8px;">' + (up ? '▲' : '▼') + ' ' + Math.abs(diff) + (suffix || '') + ' vs prev ' + word + '</span>';
+          var pct = (prevV && suffix !== '%' && suffix !== ' pts') ? Math.round(Math.abs(diff) / Math.abs(prevV) * 100) : null;
+          return '<span class="mgmt-delta ' + (good ? 'good' : 'bad') + '">' + (up ? '▲' : '▼') + ' ' + Math.abs(diff) + (suffix || '') + (pct != null && isFinite(pct) ? ' (' + (up ? '+' : '−') + pct + '%)' : '') + ' ' + vsTxt + '</span>';
       };
       var kpi = function(label, value, deltaHtml, sub, color) {
           return '<div class="aether-card" style="padding:20px 22px;">' +
@@ -4955,7 +4973,7 @@
           { k: 'coded', html: kpi('Offline Coded Time', codedTotal + 'h', delta(codedTotal, prevCodedTotal, false, 'h'), codedBreak) },
           { k: 'otcov', html: otCoverageCard },
           { k: 'idp', html: kpi('Staffing (IDP)', cur.idpNet != null ? (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' <span style="font-size:1rem;">seats</span>' : '—', delta(cur.idpNet, prev.idpNet, true), cur.idpReq != null ? 'avg net seats vs requirement · Req ' + cur.idpReq + ' / Open ' + cur.idpOpen + ' (incl. forecast)' : 'no IDP grid imported', (cur.idpNet != null && cur.idpNet < 0) ? 'var(--status-alert)' : 'var(--status-active)') },
-          { k: 'coaching', html: kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', 'var(--status-role)') },
+          { k: 'coaching', html: kpi('Coaching', (cur.coachSessions || 0) + ' <span style="font-size:1rem;">sessions</span>', delta(cur.coachSessions, prev.coachSessions, true), (cur.coach || 0) + 'h of coaching time', '#14b8a6') },
           { k: 'absence', html: kpi('Absence Hours', absHrs + 'h' + (weekPct != null ? ' <span style="font-size:1rem; font-weight:800; color:var(--text-muted);">(' + weekPct + '% of week)</span>' : ''), delta(cur.absHours, prev.absHours, false, 'h'), absShiftSub + '<br>' + (cur.absences || 0) + ' agent-days · Onshore ' + (cur.absOn || 0) + ' / Offshore ' + (cur.absOff || 0) + (absTypesSub ? '<br>' + absTypesSub : '') + '<br>Lates (ALU): <b style="color:var(--status-warn);">' + (cur.lates || 0) + '</b>' + (cur.approvedLeave ? ' · approved leave (excl.): ' + cur.approvedLeave : ''), absHrs > 0 ? 'var(--status-alert)' : 'var(--text-main)') },
           { k: 'sl', html: kpi('Avg Service Level', cur.slAvg != null ? cur.slAvg + '%' : '—', delta(cur.slAvg, prev.slAvg, true, '%'), cur.ackAvg != null ? 'avg ACK ' + cur.ackAvg + 's' : 'no readings in this ' + word) }
       ];
@@ -4991,7 +5009,7 @@
 
       // Stacking Lunches is shown here (dashboard) AND in the Furlough tracker.
       // Absence Mix (onshore/offshore) lives in the Absence tracker.
-      return headerHtml + mgmtCustomizePanel() + mgmtEmbedsHtml() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
+      return headerHtml + (mgmtBusy ? '<div class="mgmt-progress"><i></i></div>' : '') + '<div class="mgmt-body' + (mgmtBusy ? ' busy' : '') + '">' + mgmtCustomizePanel() + mgmtEmbedsHtml() + kpisHtml + mgmtCodingCard() + mgmtSectionsHtml() +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           chartCard('Staffing — Requirement vs Open', 'mgmt-chart-idp', 'avg seats ' + (d.grain === 'day' ? 'per hour' : 'per day') + ' — Requirement (bars) vs Open/staffed (line)', (cur.idpNet != null ? (cur.idpNet > 0 ? '+' : '') + cur.idpNet + ' seats' : '—')) +
           chartCard('Service Level' + (d.grain === 'day' ? ' by Hour' : ' vs Absence by Shift'), 'mgmt-chart-sl', slSub, cur.slAvg != null ? '<span style="font-size:0.72rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">avg SL</span> ' + cur.slAvg + '%' : null) +
@@ -5011,7 +5029,8 @@
           '</div>' +
           '<div class="grid-split" style="margin-bottom:24px;">' +
           mgmtSafeAgentsCard() +
-          '</div>';
+          '</div>' +
+          '</div>';   // .mgmt-body
   }
 
   // Vertical crosshair at the hovered column — makes it obvious what you're reading.
@@ -5030,11 +5049,11 @@
   // ICL / ULC FIRE are on-phone and never appear here.
   var MGMT_SHRINK_CATS = [
       { k: 'acsu', label: 'ACSU', color: '#94a3b8' },
-      { k: 'tower', label: 'Tower', color: '#38bdf8' },
+      { k: 'tower', label: 'Tower', color: '#0ea5e9' },
       { k: 'reading', label: 'Reading', color: '#a78bfa' },
       { k: 'breakH', label: 'Breaks', color: '#fbbf24' },
       { k: 'lunchH', label: 'Lunch', color: '#fb923c' },
-      { k: 'coach', label: 'Coaching', color: '#f472b6' }
+      { k: 'coach', label: 'Coaching', color: '#14b8a6' }   // teal everywhere in MGMT (pink is ×1.5 OT, amber is Breaks)
   ];
   function renderShrinkChips() {
       return MGMT_SHRINK_CATS.map(function(c) {
@@ -5226,7 +5245,7 @@
               label: function(c2) { var v = c2.parsed.y; if (v == null) return ' ' + c2.dataset.label + ': —'; if (c2.dataset.yAxisID === 'y') return ' ' + c2.dataset.label + ': ' + (Math.round(v * 10) / 10) + '%'; if (c2.dataset.label === 'Lates (ALU)') return ' Lates: ' + v + (v === 1 ? ' agent' : ' agents'); return ' ' + c2.dataset.label + ' absent: ' + v + (v === 1 ? ' agent' : ' agents'); }
           };
           var slSets = [
-              { type: 'line', label: 'Avg SL %', data: buckets.map(function(b) { return b.slAvg; }), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#38bdf8', yAxisID: 'y', spanGaps: true, order: 0 }
+              { type: 'line', label: 'Avg SL %', data: buckets.map(function(b) { return b.slAvg; }), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.10)', borderWidth: 3, tension: 0.35, fill: true, pointRadius: 3, pointBackgroundColor: '#10b981', yAxisID: 'y', spanGaps: true, order: 0 }
           ];
           // Per-shift agent COUNTS (not hours). A single-day view has no per-day bars — KPI carries it.
           if (hasAbsShift) {
@@ -5923,7 +5942,7 @@
           fetchData(); fetchMetadata();
           if (state.view === 'tracker') fetchTrackerData();
           if (state.view === 'insights') fetchInsightData();
-          if (state.view === 'mgmt') { state.mgmtData = null; fetchMgmtData(); }
+          if (state.view === 'mgmt') { state.mgmtData = null; mgmtMemo = {}; fetchMgmtData(true); }
           var notifMsg = isGenesys ? 'Global Update: Genesys Agent Performance Refreshed.' : isActivity ? 'Global Update: Activity Loading Refreshed.' : (isForecast ? 'Global Update: Forecast Data Refreshed.' : (isSafe ? 'Global Update: SAFE Roster Refreshed.' : (isAlarms ? 'Global Update: Alarms Data Refreshed.' : (isOtOpen ? 'Global Update: OT Open Slots Refreshed.' : (isIdp ? 'Global Update: IDP Heatmap Refreshed.' : 'Global Update: WFM Schedule Refreshed.')))));
           google.script.run.addGlobalNotification(notifMsg);
           if (kind === 'sched') flushArchivesOnce();   // archive the imported month(s) in the background (single, delayed)
