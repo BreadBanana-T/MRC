@@ -368,6 +368,20 @@ function debugAlarmCom() {
         Logger.log(origin + path + ' → HTTP ' + r.getResponseCode() + ' · ' + r.getContentText().substring(0, 200).replace(/\s+/g, ' '));
       } catch (e) { Logger.log(origin + path + ' → ' + e.message); }
     });
+    // Where does the page get its status from? The banner is drawn in the
+    // browser, so look for the data source: which status-page product it is,
+    // the scripts it loads and any data/API addresses written in the HTML.
+    var vendors = ['__NEXT_DATA__', 'statuspage', 'atlassian', 'instatus', 'betteruptime', 'betterstack', 'statuspal', 'status.io', 'sorryapp', 'freshstatus', 'uptimerobot', 'cachet', 'hund.io', 'statuscast']
+      .filter(function(v) { return body.toLowerCase().indexOf(v.toLowerCase()) !== -1; });
+    Logger.log('Status-page markers found: ' + (vendors.join(', ') || 'none'));
+    var words = [], re = /(operational|degraded|outage|incident|maintenance|partner portal)/ig, m, n = 0;
+    while ((m = re.exec(body)) && n < 8) { words.push('…' + body.substring(Math.max(0, m.index - 70), m.index + 70).replace(/\s+/g, ' ') + '…'); n++; }
+    Logger.log('Status words in the HTML (' + n + ' shown):\n  ' + (words.join('\n  ') || 'none'));
+    var scripts = (body.match(/<script[^>]+src=["'][^"']+["']/ig) || []).map(function(x) { return x.replace(/.*src=["']([^"']+)["'].*/i, '$1'); }).slice(0, 15);
+    Logger.log('Scripts loaded (' + scripts.length + '):\n  ' + (scripts.join('\n  ') || 'none'));
+    var urls = {}; (body.match(/https?:\/\/[^"'\s<>)]+/ig) || []).forEach(function(u) { if (/api|status|summary|json|component|incident|graphql/i.test(u) && !/googletagmanager|google-analytics|fonts\.g/i.test(u)) urls[u] = 1; });
+    (body.match(/["'](\/[^"'\s<>]*(?:api|json|summary|status)[^"'\s<>]*)["']/ig) || []).forEach(function(u) { urls[origin.replace(/\/$/, '') + u.replace(/["']/g, '')] = 1; });
+    Logger.log('Data/API addresses in the HTML:\n  ' + (Object.keys(urls).slice(0, 20).join('\n  ') || 'none'));
     var st = AlarmComMonitor._readStatus(url, body);
     Logger.log('RESULT: ' + JSON.stringify(st));
     Logger.log('First 800 bytes of the page:\n' + body.substring(0, 800));
