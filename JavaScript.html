@@ -2485,117 +2485,6 @@
   window.openBreakModal = function() { closeMenu(); var name = state.selectedAgent; var agent = null; for(var k in state.agents) { if(!Array.isArray(state.agents[k])) continue; for(var i=0; i<state.agents[k].length; i++) { if(state.agents[k][i].name === name) { agent = state.agents[k][i]; break; } } if(agent) break; } if(!agent) { showToast("Agent data not found"); return; } var container = document.getElementById('break-editor'); container.innerHTML = ""; (agent.rawBreaks || []).forEach(function(b, i) { container.innerHTML += '<div style="margin-bottom:12px; border-bottom:1px solid var(--glass-border); padding-bottom:8px;"><div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">' + escapeHTML(b.type) + '</div><div style="display:flex; gap:8px;"><input id="bs-' + i + '" class="input-aether" value="' + escapeHTML(b.start || '') + '" style="font-size:0.85rem;"><input id="be-' + i + '" class="input-aether" value="' + escapeHTML(b.end || '') + '" style="font-size:0.85rem;"></div></div>'; }); document.getElementById('break-modal').classList.add('open'); };
   window.openOtModal = function() { closeMenu(); document.getElementById('ot-start').value = ""; document.getElementById('ot-end').value = ""; document.getElementById('ot-modal').classList.add('open'); };
 
-  function renderOutageCorrelationBanner() {
-      var c = state.outageCorrelation;
-      if (!c || !c.banners || !c.banners.length) return '';
-      var rows = c.banners.map(function(b) {
-          var sourceTag = b.source ? ' • ' + escapeHTML(b.source) : '';
-          var topTag = b.topRegion ? ' — epicenter ' + escapeHTML(b.topRegion) : '';
-          var starting = b.agentsStarting > 0
-              ? '<span style="background:rgba(245,158,11,0.12); color:var(--status-warn); padding:2px 8px; border-radius:6px; font-size:0.7rem; font-weight:800; margin-left:6px;">' + b.agentsStarting + ' starting in next ' + b.lookaheadHours + 'h</span>'
-              : '';
-          return '<div style="display:flex; align-items:center; gap:12px; padding:10px 14px; border-top:1px solid var(--glass-border);">' +
-                 '<span style="font-size:0.7rem; font-weight:800; color:var(--status-alert); background:rgba(220,38,38,0.12); padding:2px 8px; border-radius:6px; letter-spacing:1px;">' + escapeHTML(b.province) + '</span>' +
-                 '<div style="flex:1; min-width:0;">' +
-                   '<div style="font-weight:800; color:var(--text-main); font-size:0.85rem;">' + b.customers.toLocaleString() + ' customers affected' + topTag + '</div>' +
-                   '<div style="font-size:0.7rem; color:var(--text-muted); font-weight:600; margin-top:2px;">' + b.agentsInProvince + ' agents office-based here' + sourceTag + '</div>' +
-                 '</div>' +
-                 starting +
-                 '</div>';
-      }).join('');
-      return '<div class="aether-card" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:10px 14px; background:rgba(220,38,38,0.05); display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--status-alert);"><i data-lucide="alert-triangle" width="14"></i> Outage Situational Awareness<span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-left:6px;">Office-region correlation. Not a per-agent alert.</span></div>' + rows + '</div>';
-  }
-
-  // Alarm.com standby status — a compact live health tile. Three states, not two:
-  // UP (banner matched), WARN (page answered but the "All systems operational"
-  // banner wasn't in the markup — a wording change looks like this, not like an
-  // outage), and DOWN (unreachable, or the page says it isn't operational).
-  // The "checked" time is the server's absolute stamp on purpose: render()
-  // string-diffs the whole view, so a ticking "2m ago" would tear down and
-  // rebuild the Dashboard every poll.
-  function renderAlarmComTile() {
-      var d = state.alarmCom;
-      var shell = function(inner, extra) {
-          return '<div class="aether-card tile-aurora" style="display:flex; flex-direction:column; justify-content:center;' + (extra || '') + '">' + inner + '</div>';
-      };
-      if (!d) {
-          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-check" width="12"></i> Alarm.com</div>' +
-                       '<div style="color:var(--text-muted); font-size:0.8rem; font-weight:600;">Checking standby status…</div>', ' opacity:0.6;');
-      }
-      if (d.disabled) {
-          return shell('<div class="aurora-label" style="margin-bottom:10px;"><i data-lucide="shield-off" width="12"></i> Alarm.com</div>' +
-                       '<div style="font-size:1.6rem; font-weight:800; color:var(--text-muted); line-height:1;">—</div>' +
-                       '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">Probe disabled — run setAlarmComUrl()</div>');
-      }
-
-      // state: up | issue (status page reports a problem) | unknown (page
-      // answered but its status couldn't be read) | down (unreachable).
-      // Older payloads have no state — derive it the way they used to.
-      var st = d.state || (d.up ? 'up' : (d.isReachable ? 'unknown' : 'down'));
-      var color = st === 'up' ? 'var(--status-active)' : (st === 'down' ? 'var(--status-alert)' : (st === 'issue' ? 'var(--status-warn)' : 'var(--text-muted)'));
-      var dotCls = (st === 'up' || st === 'unknown') ? 'outage-dot pulse-ok' : 'outage-dot pulse';
-      var label = st === 'up' ? 'All systems operational' : (st === 'issue' ? 'Issue reported' : (st === 'unknown' ? 'Site reachable · status unknown' : 'Unreachable'));
-
-      var up24 = (d.uptime24h == null) ? '—' : (d.uptime24h + '%');
-      var up7 = (d.uptime7d == null) ? null : (d.uptime7d + '%');
-
-      // Footer facts, only the ones we actually have.
-      var facts = [];
-      if (d.latencyMs) facts.push(d.latencyMs + 'ms');
-      if (up7) facts.push('7d ' + up7);
-      facts.push('checked ' + escapeHTML(d.checked || '--'));
-      if (d.lastGoodChecked) facts.push('last good ' + escapeHTML(d.lastGoodChecked));
-
-      var why = '';
-      if (st === 'issue' || st === 'down') {
-          var reason = d.error || d.note || ('HTTP ' + d.statusCode);
-          why = '<div style="font-size:0.65rem; font-weight:700; color:' + color + '; margin-top:6px;">' + escapeHTML(reason) + '</div>';
-      }
-
-      // Component detail from the Monitors table. Only meaningful when the page
-      // answered at all, so don't imply a healthy component on an unreachable host.
-      var chip = '';
-      // null = not readable, so show nothing rather than a bare "?".
-      if (d.isReachable && d.partnerPortalUp != null) {
-          chip = '<div style="margin-top:10px;"><span class="outage-chip">Partner Portal · ' +
-                 (d.partnerPortalUp ? '<b style="color:var(--status-active);">Up</b>' : '<b style="color:var(--status-alert);">Down</b>') +
-                 '</span></div>';
-      }
-
-      // 24 one-hour buckets: red if ANY probe in the hour failed (an outage
-      // should not be averaged away), grey if we never sampled that hour.
-      var strip = '';
-      var hist = state.alarmComHistory || [];
-      if (hist.length) {
-          var nowH = Date.now();
-          var cells = [];
-          for (var h = 23; h >= 0; h--) {
-              var hi = nowH - h * 3600000, lo = hi - 3600000;
-              var seen = 0, bad = 0;
-              for (var i = 0; i < hist.length; i++) {
-                  // up === null: page answered but status unreadable — not an outage.
-                  if (hist[i].t > lo && hist[i].t <= hi && hist[i].up !== null) { seen++; if (!hist[i].up) bad++; }
-              }
-              var cls = !seen ? '' : (bad ? 'down' : 'up');
-              cells.push('<span class="' + cls + '"></span>');
-          }
-          strip = '<div class="uptime-strip" title="Last 24 h of probes — one bar per hour">' + cells.join('') + '</div>';
-      }
-
-      return shell(
-          '<div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:7px;">' +
-              '<span class="' + dotCls + '" style="background:' + color + ';"></span> Alarm.com' +
-          '</div>' +
-          '<div style="font-size:2.4rem; font-weight:800; color:' + color + '; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; line-height:1;">' + up24 + '</div>' +
-          (st === 'up' ? '<div style="font-size:0.7rem; font-weight:800; color:var(--text-main); margin-top:6px;">' + label + '</div>'
-              : '<div style="display:flex; align-items:center; gap:8px; margin-top:8px;">' + sourceSign(st === 'unknown' ? 'unreadable' : (st === 'issue' ? 'issue' : (d.statusCode ? 'http' : 'unreachable')), 24) + '<span style="font-size:0.72rem; font-weight:800; color:var(--text-main); line-height:1.25;">' + label + '</span></div>') +
-          why +
-          '<div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:6px;">' + facts.join(' · ') + '</div>' +
-          chip + strip,
-          ' cursor:default;');
-  }
-
-
   // ── "Source down" signs ────────────────────────────────────────────────────
   // One small animated mark per failure cause, so a dead feed says WHY at a
   // glance instead of a generic "offline". CSS-animated (.sign-*), static with
@@ -2640,60 +2529,289 @@
       showToast((SOURCE_ISSUES[iss.code] || {}).label + ': ' + iss.detail + extra);
   };
 
-  function renderOutageTile() {
-      var d = state.outagesData;
-      if (!d || !d.byProvince) {
-          return '<div class="aether-card" style="padding:14px 20px; margin-bottom:20px; display:flex; align-items:center; gap:12px; color:var(--text-muted); font-size:0.8rem; font-weight:600;"><i data-lucide="zap" width="14"></i> Loading power-outage feeds…</div>';
+  // ───────────────────────────── DASHBOARD (overview) ─────────────────────────────
+  // Reading order: five live numbers → "right now" lines + agenda → power and
+  // Alarm.com → service level / ACK → stacking breaks → IDP. The view
+  // re-renders on every poll, so its CSS entrance motion (sparks, bars, rows)
+  // only runs while .dash-enter is set: the first moments after arriving.
+  var __dashEnterAt = 0;
+  var __dashSignSeen = {};
+  var __dashChartFp = {};
+  var DASH_PROVS = ['BC', 'ON', 'QC'];
+  var DASH_PROV_NAMES = { BC: 'British Columbia', ON: 'Ontario', QC: 'Québec' };
+  var DASH_PROV_SRC = { BC: 'BC Hydro', ON: 'Hydro One', QC: 'Hydro-Québec' };
+
+  function dashNum(v) { return Number(v || 0).toLocaleString('en-US'); }
+  function dashHM(t) { var d = new Date(t); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function dashPlural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+  // A "source down" sign plays when its problem first shows up, then rests on
+  // the minute-by-minute re-renders (hovering the cell plays it again).
+  function dashSign(key, code, size) {
+      var k = key + ':' + code, now = Date.now();
+      if (!__dashSignSeen[k]) __dashSignSeen[k] = now;
+      var svg = sourceSign(code, size);
+      return now - __dashSignSeen[k] > 8000 ? svg.replace('class="src-sign ', 'class="src-sign rest ') : svg;
+  }
+  // The reading closest to an hour before the newest one (at least 40 min back).
+  function dashHourAgo(list) {
+      if (!list || list.length < 2) return null;
+      var last = list[list.length - 1];
+      if (last.t == null) return list[list.length - 2];
+      var want = last.t - 3600000, best = null;
+      for (var i = list.length - 2; i >= 0; i--) {
+          var dt = last.t - list[i].t;
+          if (dt < 2400000) continue;
+          if (!best || Math.abs(list[i].t - want) < Math.abs(best.t - want)) best = list[i];
+          if (dt > 5400000) break;
       }
-      var provs = ['BC','ON','QC'];
-      var provLabels = { BC: 'British Columbia', ON: 'Ontario (Hydro One)', QC: 'Québec' };
-      // Meter widths are relative to the worst province so the three bars
-      // read as a comparison, not three unrelated absolutes.
-      var maxCust = provs.reduce(function(m, p) { var s = d.byProvince[p]; return Math.max(m, (s && s.customers) || 0); }, 0);
-      var cols = provs.map(function(p) {
-          var stats = d.byProvince[p];
-          var iss = stats && !stats.stale ? null : outageIssue(d, p);
+      return best;
+  }
+  function dashDelta(cur, prev, goodWhenUp, suffix, vs) {
+      if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev)) return '';
+      var diff = Math.round((cur - prev) * 10) / 10;
+      if (diff === 0) return '<span class="mgmt-delta flat">= <span class="vs">' + vs + '</span></span>';
+      var up = diff > 0;
+      if (suffix === ' pts' && Math.abs(diff) === 1) suffix = ' pt';
+      return '<span class="mgmt-delta ' + (up === !!goodWhenUp ? 'good' : 'bad') + '">' + (up ? '▲' : '▼') + ' ' + Math.abs(diff) + suffix + ' <span class="vs">' + vs + '</span></span>';
+  }
+  function dashSlHist() { return (state.slHistory || []).filter(function(p) { return p && p.val != null && p.val !== ''; }); }
+
+  // Floor counts the tiles and the "right now" lines share.
+  function dashFloor() {
+      var ag = state.agents || {}, act = ag.active || [];
+      var onBrk = act.filter(function(a) { return a.onBreakNow; });
+      var lunch = onBrk.filter(function(a) { return /lunch|repas|meal/i.test(a.subStatus || ''); }).length;
+      var mins = function(s) { var m = String(s || '').match(/^(\d+)m$/); return m ? +m[1] : null; };
+      var due = (ag.upcomingBreak || []).filter(function(a) { var m = mins(a.startsIn); return m != null && m <= 10; });
+      var soon = (ag.startingSoon || []).filter(function(a) { var m = String(a.subStatus || '').match(/In (\d+)m/); return m && +m[1] <= 60; }).length;
+      var unpl = ag.unplanned || [], plan = (ag.vacation || []).length + (ag.planned || []).length;
+      var sched = act.length + unpl.length + plan;
+      var types = {}; unpl.forEach(function(a) { var t = String(a.subStatus || 'Absent').replace(/\s*\(.*\)\s*$/, '') || 'Absent'; types[t] = (types[t] || 0) + 1; });
+      var typesTxt = Object.keys(types).sort(function(a, b) { return types[b] - types[a]; }).map(function(t) { return escapeHTML(t) + (types[t] > 1 ? ' ×' + types[t] : ''); }).join(' · ');
+      return { loaded: Array.isArray(ag.active), active: act.length, onBreak: onBrk.length, lunch: lunch, brk: onBrk.length - lunch, due: due, soon: soon,
+               later: (ag.startingSoon || []).length, safe: (ag.safe || []).length, training: (ag.training || []).length,
+               unplanned: unpl, plan: plan, sched: sched, offPct: sched > 0 ? Math.round((unpl.length + plan) / sched * 100) : 0, typesTxt: typesTxt };
+  }
+
+  function dashOutages() {
+      var d = state.outagesData;
+      if (!d || !d.byProvince) return null;
+      var tot = 0, down = [], stale = [];
+      DASH_PROVS.forEach(function(p) { var s = d.byProvince[p]; if (!s) { down.push(p); return; } if (s.stale) stale.push(p); tot += s.customers || 0; });
+      var H = state.outageHistory || [];
+      return { d: d, total: tot, down: down, stale: stale, hist: H, last: H.length ? H[H.length - 1] : null, prev: dashHourAgo(H) };
+  }
+  function dashOutSev(n) {
+      return n > 10000 ? { tone: 'bad', icon: 'alert-triangle', word: 'Major' } : n > 1000 ? { tone: 'warn', icon: 'alert-circle', word: 'Elevated' }
+           : n > 0 ? { tone: 'flat', icon: 'minus', word: 'Minor' } : { tone: 'good', icon: 'check', word: 'All clear' };
+  }
+  function dashAlarmState(d) { return d.state || (d.up ? 'up' : (d.isReachable ? 'unknown' : 'down')); }
+
+  window.dashScrollTo = function(id) { var el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+
+  // ── Headline row ──
+  function dashHero(f, o) {
+      var H = dashSlHist(), last = H.length ? H[H.length - 1] : null, prev = dashHourAgo(H);
+      var target = mgmtSlTarget(), ackT = ponrTarget(), P = mvPal();
+      var since = prev ? 'since ' + escapeHTML(prev.name || dashHM(prev.t)) : '';
+      var slV = last ? Number(last.val) : null, ackV = last ? Number(last.ack) : null;
+      var click = function(fn, tip) { return ' onclick="' + fn + '" role="button" tabindex="0" title="' + tip + '"'; };
+
+      var sl = kpiTile('Service level',
+          slV != null ? '<span class="cnum">' + slV + '%</span>' : '<span class="mv-na">no reading yet</span>',
+          prev ? dashDelta(slV, Number(prev.val), true, ' pts', since) : '',
+          '<button class="mv-link" onclick="setMgmtSlTarget()" title="Change the target (shared with Management)">target ' + target + '%</button>' + (last && last.name ? ' · read at ' + escapeHTML(last.name) : ''),
+          { big: true, spark: mvSpark(H.map(function(p) { return Number(p.val); }), target),
+            badge: slV == null ? '' : (slV >= target ? mvBadge('good', 'check', 'On target') : mvBadge('bad', 'arrow-down-right', 'Below target')) });
+
+      var acks = H.map(function(p) { return Number(p.ack); }).filter(function(v) { return isFinite(v); });
+      var ackAvg = acks.length ? Math.round(acks.reduce(function(s, v) { return s + v; }, 0) / acks.length) : null;
+      var ack = kpiTile('Response time (ACK)',
+          ackV != null && isFinite(ackV) ? '<span class="cnum">' + ackV + 's</span>' : '<span class="mv-na">no reading yet</span>',
+          prev ? dashDelta(ackV, Number(prev.ack), false, 's', since) : '',
+          'target ' + ackT + 's' + (ackAvg != null ? ' · avg ' + ackAvg + 's over ' + dashPlural(acks.length, 'reading') : ''),
+          { big: true, spark: mvSpark(H.map(function(p) { return Number(p.ack); }), ackT),
+            badge: ackV == null || !isFinite(ackV) ? '' : (ackV <= ackT ? mvBadge('good', 'check', 'Within target') : mvBadge('bad', 'arrow-up-right', 'Over target')) });
+
+      var working = Math.max(0, f.active - f.onBreak);
+      var parts = [[working, P.s1, 'working'], [f.lunch, P.s2, 'on lunch'], [f.brk, P.s4, 'on break']];
+      var split = f.active ? '<div class="mv-split dash-split">' + parts.map(function(x) { return x[0] ? '<span style="flex:' + x[0] + ' 1 0; background:' + x[1] + ';" title="' + x[0] + ' ' + x[2] + '"></span>' : ''; }).join('') + '</div>' : '';
+      var floor = kpiTile('On the floor',
+          f.loaded ? '<span class="cnum">' + f.active + '</span> <small>agents</small>' : '<span class="mv-na">loading…</span>',
+          f.loaded ? '<span class="dash-dnote"><b>' + f.onBreak + '</b> on break' + (f.due.length ? ' · <b>' + f.due.length + '</b> due in 10 min' : '') + '</span>' : '',
+          f.active ? '<span class="dash-lg">' + parts.map(function(x) { return '<span><i style="background:' + x[1] + ';"></i>' + x[0] + ' ' + x[2].replace('on ', '') + '</span>'; }).join('') + '</span>' + (f.later ? '<span class="dash-cap2">' + f.later + ' starting later' + (f.safe ? ' · ' + f.safe + ' SAFE' : '') + (f.training ? ' · ' + f.training + ' training' : '') + '</span>' : '') : '',
+          { big: true, spark: split, cls: 'dash-click', attrs: click("setView('agents')", 'Open the floor') });
+
+      var absn = kpiTile('Unplanned absences',
+          f.loaded ? '<span class="cnum">' + f.unplanned.length + '</span> <small>agents</small>' : '<span class="mv-na">loading…</span>',
+          f.unplanned.length ? '<span class="dash-dnote">' + f.typesTxt + '</span>' : (f.loaded ? '<span class="dash-dnote">none today so far</span>' : ''),
+          '<span title="Off-floor % = (unplanned + planned) / (active + unplanned + planned)">off the floor <b>' + f.offPct + '%</b> · ' + (f.unplanned.length + f.plan) + ' of ' + f.sched + ' scheduled</span><span class="dash-cap2">' + f.plan + ' planned / vacation</span>',
+          { big: true, cls: 'dash-click', attrs: click("setView('agents')", 'Open the floor') });
+
+      var pd = '';
+      if (o && o.prev && o.last) {
+          var df = o.last.customers - o.prev.customers;
+          pd = df === 0 ? '<span class="mgmt-delta flat">= <span class="vs">vs an hour ago</span></span>'
+             : '<span class="mgmt-delta ' + (df > 0 ? 'bad' : 'good') + '">' + (df > 0 ? '▲' : '▼') + ' ' + dashNum(Math.abs(df)) + (o.prev.customers > 0 ? ' (' + (df > 0 ? '+' : '−') + Math.round(Math.abs(df) / o.prev.customers * 100) + '%)' : '') + ' <span class="vs">in the last hour</span></span>';
+      }
+      var feedsDown = o ? o.down.concat(o.stale) : [];
+      var power = kpiTile('Without power',
+          o ? '<span class="cnum">' + dashNum(o.total) + '</span> <small>customers</small>' : '<span class="mv-na">loading feeds…</span>',
+          pd,
+          o ? DASH_PROVS.map(function(p) { var s = o.d.byProvince[p]; return p + ' ' + (s ? dashNum(s.customers) + (s.stale ? '*' : '') : '—'); }).join(' · ') + (o.stale.length ? '<span class="dash-cap2">* last good reading</span>' : '') : '',
+          { big: true, cls: 'dash-click', attrs: click("dashScrollTo('dash-outages')", 'Outages by province'),
+            spark: o && o.hist.length > 1 ? mvSpark(o.hist.map(function(h) { return h.customers; })) : '',
+            badge: feedsDown.length ? mvBadge('warn', 'unplug', feedsDown.join(' · ') + ' feed down') : '' });
+
+      return '<div class="mv-hero dash-hero">' + sl + ack + floor + absn + power + '</div>';
+  }
+
+  // ── "Right now": plain-language lines, each naming its evidence. Fixed order
+  // so lines don't jump around between polls. ──
+  function dashInsights(f, o) {
+      var out = [], H = dashSlHist(), target = mgmtSlTarget();
+      var last = H.length ? H[H.length - 1] : null, prev = dashHourAgo(H);
+      if (last) {
+          var sl = Number(last.val), gap = Math.round((target - sl) * 10) / 10, mv = prev ? Math.round((sl - Number(prev.val)) * 10) / 10 : 0;
+          var trend = mv ? ', ' + (mv > 0 ? 'up' : 'down') + ' <b>' + Math.abs(mv) + (Math.abs(mv) === 1 ? ' pt' : ' pts') + '</b> since ' + escapeHTML(prev.name || '') : '';
+          out.push(gap > 0 ? { tone: 'bad', icon: 'trending-down', html: 'Service level <b>' + sl + '%</b> is <b>' + gap + (gap === 1 ? ' pt' : ' pts') + ' under</b> the ' + target + '% target' + trend + ' · ACK ' + escapeHTML(last.ack) + 's.' }
+                           : { tone: 'good', icon: 'check', html: 'Service level <b>' + sl + '%</b>, at or above the ' + target + '% target' + trend + ' · ACK ' + escapeHTML(last.ack) + 's.' });
+      }
+      if (f.active) {
+          var dueTypes = {}; f.due.forEach(function(a) { var t = a.nextBreakType || 'Break'; dueTypes[t] = (dueTypes[t] || 0) + 1; });
+          var dueTxt = Object.keys(dueTypes).map(function(t) { return escapeHTML(t) + (dueTypes[t] > 1 ? ' ×' + dueTypes[t] : ''); }).join(', ');
+          out.push({ tone: f.onBreak / f.active >= 0.3 ? 'bad' : 'info', icon: 'coffee',
+              html: (f.onBreak ? '<b>' + f.onBreak + ' of ' + f.active + '</b> agents on break now (' + f.lunch + ' lunch, ' + f.brk + ' break)' : 'Nobody on break right now') +
+                    (f.due.length ? '; <b>' + f.due.length + ' more</b> due in the next 10 min (' + dueTxt + ').' : '; nobody else due in the next 10 min.') });
+      }
+      if (f.unplanned.length) out.push({ tone: 'bad', icon: 'user-x', html: '<b>' + dashPlural(f.unplanned.length, 'unplanned absence') + '</b>: ' + f.typesTxt + '.' });
+      var g = state.overviewIdp && state.overviewIdp.grid;
+      if (g && g.length) {
+          var nd = new Date(), qi = nd.getHours() * 4 + Math.floor(nd.getMinutes() / 15), b = g[qi];
+          if (b && b.net != null && isFinite(b.net)) {
+              var at = ('0' + nd.getHours()).slice(-2) + ':' + ('0' + (qi % 4) * 15).slice(-2);
+              out.push(b.net < 0 ? { tone: 'bad', icon: 'users', html: 'Staffing for the ' + at + ' quarter-hour: <b>' + dashPlural(Math.abs(b.net), 'seat') + ' short</b> of requirement (IDP).' }
+                                 : { tone: 'good', icon: 'users', html: 'Staffing for the ' + at + ' quarter-hour: ' + (b.net > 0 ? '<b>+' + dashPlural(b.net, 'seat') + '</b> over' : 'exactly at') + ' requirement (IDP).' });
+          }
+      }
+      if (f.soon) out.push({ tone: 'info', icon: 'log-in', html: '<b>' + dashPlural(f.soon, 'agent') + '</b> start' + (f.soon === 1 ? 's' : '') + ' in the next hour.' });
+      if (o) {
+          if (o.prev && o.last && o.prev.customers > 0) {
+              var diff = o.last.customers - o.prev.customers, rel = diff / o.prev.customers;
+              if (Math.abs(rel) >= 0.15 && Math.abs(diff) >= 500) out.push({ tone: rel > 0 ? 'bad' : 'good', icon: rel > 0 ? 'arrow-up-right' : 'arrow-down-right', html: 'Customers without power <b>' + (rel > 0 ? 'up' : 'down') + ' ' + Math.round(Math.abs(rel) * 100) + '%</b> in the last hour (' + dashNum(o.prev.customers) + ' → ' + dashNum(o.last.customers) + ', all provinces).' });
+          }
+          ((state.outageCorrelation || {}).banners || []).forEach(function(b) {
+              out.push({ tone: 'bad', icon: 'zap', title: 'Office-region correlation, not a per-agent alert' + (b.source ? ' · ' + b.source : ''),
+                  html: '<b>' + escapeHTML(DASH_PROV_NAMES[b.province] || b.province) + '</b>: ' + dashNum(b.customers) + ' customers without power' + (b.topRegion ? ', mostly ' + escapeHTML(b.topRegion) : '') + ' — ' + dashPlural(b.agentsInProvince || 0, 'agent') + ' office-based there' + (b.agentsStarting > 0 ? ', <b>' + b.agentsStarting + ' starting in the next ' + b.lookaheadHours + 'h</b>' : '') + '.' });
+          });
+          o.down.concat(o.stale).forEach(function(p) {
+              var iss = outageIssue(o.d, p), meta = SOURCE_ISSUES[iss.code] || SOURCE_ISSUES.unreachable, s = o.d.byProvince[p];
+              out.push({ tone: 'info', icon: 'unplug', html: '<b>' + DASH_PROV_NAMES[p] + '</b> outage feed down (' + meta.label.toLowerCase() + ')' + (s ? '; showing numbers from ' + escapeHTML(s.staleAt || 'earlier') : '') + '.' });
+          });
+      }
+      var a = state.alarmCom;
+      if (a && !a.disabled) {
+          var st = dashAlarmState(a);
+          if (st === 'down' || st === 'issue') out.push({ tone: 'bad', icon: 'shield-alert', html: '<b>Alarm.com ' + (st === 'down' ? 'unreachable' : 'reports an issue') + '</b>' + (a.lastGoodChecked ? ' — last good check ' + escapeHTML(a.lastGoodChecked) : '') + '.' });
+      }
+      var now = Date.now();
+      (state.calendarEvents || []).forEach(function(e) {
+          if (e.type === 'maintenance' && e.startMs && e.endMs && now >= e.startMs && now < e.endMs) out.push({ tone: 'info', icon: 'wrench', html: '<b>' + escapeHTML(e.title || 'Maintenance') + '</b> in progress until ' + escapeHTML(e.endTime || '') + '.' });
+      });
+      return out;
+  }
+
+  function dashAgendaCard() {
+      var ev = state.calendarEvents || [], now = Date.now(), body;
+      if (state.calendarError) body = mvEmpty('calendar-x', 'Calendar unavailable', escapeHTML(state.calendarError) + '<br>Re-authorize the script (Apps Script editor → Run doGet once) or redeploy as "Execute as: Me".');
+      else if (!ev.length) body = mvEmpty('calendar-check', 'Nothing scheduled', 'No meetings or maintenance on the calendar.');
+      else body = '<div class="dash-agenda">' + ev.map(function(e, i) {
+          var maint = e.type === 'maintenance', live = e.startMs && e.endMs && now >= e.startMs && now < e.endMs;
+          return '<button class="dash-ev" style="--i:' + Math.min(i, 24) + ';" onclick="openEventModal(' + i + ')">' +
+              '<span class="dash-ev-t"><b>' + escapeHTML(e.startTime || '') + '</b><small>' + escapeHTML(e.date || '') + '</small></span>' +
+              '<span class="dash-ev-m"><span class="dash-ev-n">' + escapeHTML(e.title || 'Untitled event') + '</span>' +
+              '<span class="dash-ev-s"><i data-lucide="' + (maint ? 'wrench' : 'users') + '" width="12"></i>' + (maint ? 'Maintenance' : 'Meeting') + ' · ' + escapeHTML(e.startTime || '') + '–' + escapeHTML(e.endTime || '') + '</span></span>' +
+              (live ? mvBadge(maint ? 'warn' : 'info', 'radio', 'Now') : '') + '</button>';
+      }).join('') + '</div>';
+      return sectionCard('Agenda', ev.length ? '<span class="cnum">' + ev.length + '</span>' : '', 'meetings and maintenance · click one for details', body, { cls: 'dash-agenda-card' + (ev.length > 8 ? ' long-list' : '') });
+  }
+
+  // Power outages by province. Click a province for its regions (drawer); a
+  // dead feed says why with its sign, click for the full reason.
+  function dashOutageCard(o) {
+      var tableau = '<a class="mv-text-btn" href="https://prod-ca-a.online.tableau.com/#/site/telus-comm/views/PowerOutagePlaybook_17616695939000/DivisionPowerOutage?:iid=1" target="_blank" rel="noopener noreferrer" title="Opens the full TELUS Power Outage Playbook in Tableau (external site, new tab)"><i data-lucide="external-link" width="14"></i> Tableau Playbook</a>';
+      var head = function(side, sub, errBadge) {
+          return '<div class="mv-sec-h"><div class="dash-h">Power outages' + (errBadge || '') + '</div>' + (side ? '<span class="mv-side">' + side + '</span>' : '') + '</div>' +
+                 '<div class="dash-sub-row"><div class="mv-sec-sub">' + sub + '</div>' + tableau + '</div>';
+      };
+      if (!o) return '<div class="aether-card mv-chart-card dash-out" id="dash-outages">' + head('', 'BC Hydro · Hydro One · Hydro-Québec') + mvEmpty('zap', 'Loading power-outage feeds…') + '</div>';
+      var d = o.d;
+      var maxCust = DASH_PROVS.reduce(function(m, p) { var s = d.byProvince[p]; return Math.max(m, (s && s.customers) || 0); }, 0);
+      var cells = DASH_PROVS.map(function(p) {
+          var s = d.byProvince[p], iss = s && !s.stale ? null : outageIssue(d, p);
           var meta = iss ? (SOURCE_ISSUES[iss.code] || SOURCE_ISSUES.unreachable) : null;
-          // Québec only: say what the browser fallback did.
           var hqNote = '';
-          if (p === 'QC' && iss && state.hqBrowser) {
-              hqNote = state.hqBrowser.status === 'trying' ? 'Trying from your browser…'
-                     : state.hqBrowser.status === 'failed' ? 'Browser fallback ' + escapeHTML(state.hqBrowser.reason) : '';
+          if (p === 'QC' && iss && state.hqBrowser) hqNote = state.hqBrowser.status === 'trying' ? 'Trying from your browser…' : state.hqBrowser.status === 'failed' ? 'Browser fallback ' + escapeHTML(state.hqBrowser.reason) : '';
+          if (!s) {
+              return '<div class="outage-cell dash-oc down tone-' + meta.tone + '" onclick="showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' +
+                  '<div class="dash-oc-h"><span class="nm">' + DASH_PROV_NAMES[p] + ' <small>' + DASH_PROV_SRC[p] + '</small></span>' + mvBadge(meta.tone === 'alert' ? 'bad' : (meta.tone === 'warn' ? 'warn' : 'flat'), 'unplug', 'Feed down') + '</div>' +
+                  '<div class="src-down">' + dashSign(p, iss.code, 38) + '<div style="min-width:0;"><div class="src-down-title">' + meta.label + '</div><div class="src-down-detail">' + escapeHTML(iss.detail) + '</div>' +
+                  (hqNote ? '<div class="src-down-detail" style="margin-top:3px;">' + hqNote + '</div>' : '') + '</div></div></div>';
           }
-          if (!stats) {
-              return '<div class="outage-cell down tone-' + meta.tone + '" onclick="showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' +
-                     '<div style="display:flex; align-items:center; gap:8px; min-width:0;"><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(provLabels[p]) + '</div><span class="src-badge">feed down</span></div>' +
-                     '<div class="src-down">' + sourceSign(iss.code, 38) +
-                       '<div style="min-width:0;"><div class="src-down-title">' + meta.label + '</div>' +
-                       '<div class="src-down-detail">' + escapeHTML(iss.detail) + '</div>' +
-                       (hqNote ? '<div class="src-down-detail" style="margin-top:3px;">' + hqNote + '</div>' : '') + '</div></div>' +
-                     '</div>';
-          }
-          // Stale: last good numbers, clearly labelled, with the live feed's issue.
-          var staleTag = stats.stale ? '<div class="src-stale" onclick="event.stopPropagation(); showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' + sourceSign(iss.code, 16) + '<span>as of ' + escapeHTML(stats.staleAt || '?') + ' · live feed ' + meta.label.toLowerCase() + '</span></div>' : '';
-          var n = stats.customers || 0;
-          var nOut = stats.outages || 0;
-          var sev = n > 10000 ? 'var(--status-alert)' : (n > 1000 ? 'var(--status-warn)' : 'var(--status-active)');
-          var numColor = n > 10000 ? 'var(--status-alert)' : (n > 1000 ? 'var(--status-warn)' : 'var(--text-main)');
-          var pct = (maxCust > 0 && n > 0) ? Math.max(4, Math.round(n / maxCust * 100)) : 0;
-          var chips = (stats.top || []).slice(0, 2).map(function(t) { return '<span class="outage-chip">' + escapeHTML(t.region) + ' · ' + (t.customers || 0).toLocaleString() + '</span>'; }).join('');
-          var footer;
-          if (n === 0) footer = '<span style="font-size:0.7rem; color:var(--status-active); font-weight:700; display:inline-flex; align-items:center; gap:5px;"><i data-lucide="check-circle" width="12"></i> All clear</span>';
-          else footer = chips || '<span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">No region breakdown from this feed</span>';
-          return '<div class="outage-cell' + (stats.stale ? ' stale' : '') + '" onclick="openOutageDrawer(\'' + p + '\');" title="' + escapeHTML(stats.source || '') + '">' +
-                 '<div style="display:flex; align-items:center; gap:8px; min-width:0;"><div class="outage-dot' + (n > 10000 ? ' pulse' : '') + '" style="background:' + sev + ';"></div><div style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHTML(provLabels[p]) + '</div><span style="margin-left:auto; flex-shrink:0; font-size:0.65rem; color:var(--text-muted); font-weight:700; font-variant-numeric:tabular-nums;">' + nOut.toLocaleString() + ' outage' + (nOut === 1 ? '' : 's') + '</span></div>' +
-                 '<div style="display:flex; align-items:baseline; gap:6px; margin-top:10px;"><span style="font-size:1.9rem; font-weight:800; color:' + numColor + '; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + n.toLocaleString() + '</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">customers</span></div>' +
-                 '<div class="outage-meter"><div style="width:' + pct + '%; background:' + sev + ';"></div></div>' +
-                 '<div style="display:flex; gap:6px; margin-top:10px; min-width:0; overflow:hidden;">' + footer + '</div>' +
-                 staleTag +
-                 '</div>';
+          var n = s.customers || 0, nOut = s.outages || 0, sev = dashOutSev(n);
+          var pct = maxCust > 0 && n > 0 ? Math.max(3, Math.round(n / maxCust * 100)) : 0;
+          var top = (s.top || []).slice(0, 3).map(function(t) { return '<span class="outage-chip">' + escapeHTML(t.region) + ' · ' + dashNum(t.customers) + '</span>'; }).join('');
+          var staleTag = s.stale ? '<div class="src-stale" onclick="event.stopPropagation(); showOutageIssue(\'' + p + '\')" title="' + escapeHTML(iss.detail) + '">' + dashSign(p, iss.code, 16) + '<span>as of ' + escapeHTML(s.staleAt || '?') + ' · live feed ' + meta.label.toLowerCase() + '</span></div>' : '';
+          return '<div class="outage-cell dash-oc' + (s.stale ? ' stale' : '') + '" onclick="openOutageDrawer(\'' + p + '\')" title="' + escapeHTML(s.source || DASH_PROV_SRC[p]) + ' · click for regions">' +
+              '<div class="dash-oc-h"><span class="nm">' + DASH_PROV_NAMES[p] + ' <small>' + escapeHTML(s.source || DASH_PROV_SRC[p]) + '</small></span>' + mvBadge(sev.tone, sev.icon, sev.word) + '</div>' +
+              '<div class="dash-oc-v"><span class="cnum">' + dashNum(n) + '</span><small>customers · ' + dashPlural(nOut, 'outage') + '</small></div>' +
+              '<div class="dash-oc-meter"><i class="' + sev.tone + '" style="width:' + pct + '%;"></i></div>' +
+              (n > 0 ? '<div class="dash-oc-f">' + (top || '<span>No region breakdown from this feed</span>') + '</div>' : '') + staleTag + '</div>';
       }).join('');
-      var updated = d.updated ? 'updated ' + escapeHTML(d.updated) : '';
-      var downProvs = provs.filter(function(p) { return !d.byProvince[p] || d.byProvince[p].stale; });
-      var errBadge = downProvs.length ? '<span style="margin-left:8px; font-size:0.65rem; background:rgba(220,38,38,0.1); color:var(--status-alert); padding:2px 8px; border-radius:99px; font-weight:700;" title="' + escapeHTML((d.errors || []).join(' | ')) + '">' + downProvs.join(' · ') + ' feed' + (downProvs.length > 1 ? 's' : '') + ' down</span>' : '';
-      // External redirect to the full TELUS Tableau Power Outage Playbook.
-      var tableauBtn = '<a href="https://prod-ca-a.online.tableau.com/#/site/telus-comm/views/PowerOutagePlaybook_17616695939000/DivisionPowerOutage?:iid=1" target="_blank" rel="noopener noreferrer" class="btn btn-glass" style="height:28px; font-size:0.7rem; font-weight:700; text-decoration:none; padding:0 10px; display:inline-flex; align-items:center; gap:6px;" title="Opens the full TELUS Power Outage Playbook in Tableau (external site, new tab)"><i data-lucide="external-link" width="13"></i> Tableau Playbook <i data-lucide="arrow-up-right" width="12" style="opacity:0.7;"></i></a>';
-      return '<div class="aether-card tile-aurora" style="padding:0; margin-bottom:20px; overflow:hidden;"><div style="padding:12px 20px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:12px;"><div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:0.85rem; color:var(--text-main);"><i data-lucide="zap" width="16" style="color:var(--accent-primary);"></i> Power Outages <span class="aurora-label" style="font-size:0.6rem; letter-spacing:0.14em;">Real-time</span>' + errBadge + '</div><div style="display:flex; align-items:center; gap:12px;"><span style="font-size:0.7rem; color:var(--text-muted); font-weight:600;">' + updated + '</span>' + tableauBtn + '</div></div><div class="outage-grid">' + cols + '</div></div>';
+      var downProvs = o.down.concat(o.stale);
+      var errBadge = downProvs.length ? '<span title="' + escapeHTML((d.errors || []).join(' | ')) + '">' + mvBadge('warn', 'unplug', downProvs.join(' · ') + ' feed' + (downProvs.length > 1 ? 's' : '') + ' down') + '</span>' : '';
+      return '<div class="aether-card mv-chart-card dash-out" id="dash-outages">' +
+          head(dashNum(o.total) + ' <small>customers</small>', 'customers without power by province · click a province for its regions' + (d.updated ? ' · updated ' + escapeHTML(d.updated) : ''), errBadge) +
+          '<div class="outage-grid dash-oc-grid">' + cells + '</div></div>';
+  }
+
+  // Alarm.com standby status. Four states: up, issue (the status page reports
+  // a problem), unknown (answered, status unreadable) and down (unreachable).
+  // The "checked" time is the server's absolute stamp on purpose: a ticking
+  // "2m ago" would rebuild the Dashboard on every poll.
+  function dashAlarmCard() {
+      var d = state.alarmCom, sub = 'standby status page · checked every 5 min';
+      if (!d) return sectionCard('Alarm.com', '', sub, mvEmpty('shield', 'Checking standby status…'), { cls: 'dash-alarm' });
+      if (d.disabled) return sectionCard('Alarm.com', '—', sub, mvEmpty('shield-off', 'Probe disabled', 'Run setAlarmComUrl() in the Apps Script editor to turn it on.'), { cls: 'dash-alarm' });
+      var st = dashAlarmState(d);
+      var label = st === 'up' ? 'All systems operational' : (st === 'issue' ? 'Issue reported' : (st === 'unknown' ? 'Site reachable · status unknown' : 'Unreachable'));
+      var badge = st === 'up' ? mvBadge('good', 'check', 'Operational') : st === 'issue' ? mvBadge('warn', 'alert-triangle', 'Issue') : st === 'unknown' ? mvBadge('flat', 'help-circle', 'Unknown') : mvBadge('bad', 'x', 'Down');
+      var reason = (st === 'issue' || st === 'down') ? (d.error || d.note || ('HTTP ' + d.statusCode)) : '';
+      var status = '<div class="dash-al-st">' + (st === 'up' ? '<span class="dash-al-ok"><i data-lucide="shield-check" width="20"></i></span>'
+              : dashSign('alarm', st === 'unknown' ? 'unreadable' : (st === 'issue' ? 'issue' : (d.statusCode ? 'http' : 'unreachable')), 32)) +
+          '<div><b>' + label + '</b>' + (reason ? '<span class="why">' + escapeHTML(reason) + '</span>' : '') + '</div>' + badge + '</div>';
+      var facts = [];
+      if (d.latencyMs) facts.push(d.latencyMs + ' ms');
+      if (d.uptime7d != null) facts.push('7 days ' + d.uptime7d + '%');
+      facts.push('checked ' + escapeHTML(d.checked || '--'));
+      if (d.lastGoodChecked) facts.push('last good ' + escapeHTML(d.lastGoodChecked));
+      // null = not readable, so show nothing rather than a bare "?"; and only
+      // when the page answered, so an unreachable host implies no healthy part.
+      var chip = (d.isReachable && d.partnerPortalUp != null) ? '<div class="dash-al-chip"><span class="outage-chip">Partner Portal · <b>' + (d.partnerPortalUp ? 'Up' : 'Down') + '</b></span></div>' : '';
+      // 24 one-hour bars: red if ANY probe in the hour failed (an outage should
+      // not be averaged away), grey if that hour was never sampled.
+      var strip = '', hist = state.alarmComHistory || [];
+      if (hist.length) {
+          var nowH = Date.now(), cells = [];
+          for (var h = 23; h >= 0; h--) {
+              var hi = nowH - h * 3600000, lo = hi - 3600000, seen = 0, bad = 0;
+              for (var i = 0; i < hist.length; i++) if (hist[i].t > lo && hist[i].t <= hi && hist[i].up !== null) { seen++; if (!hist[i].up) bad++; }
+              cells.push('<span class="' + (!seen ? '' : (bad ? 'down' : 'up')) + '"></span>');
+          }
+          strip = '<div class="uptime-strip" title="Last 24 h of probes, one bar per hour (red = at least one failed probe)">' + cells.join('') + '</div><div class="dash-strip-l"><span>24 h ago</span><span>now</span></div>';
+      }
+      return sectionCard('Alarm.com', d.uptime24h == null ? '—' : '<span class="cnum">' + d.uptime24h + '%</span> <small>up, 24 h</small>', sub,
+          status + '<div class="dash-al-facts">' + facts.join(' · ') + '</div>' + chip + strip, { cls: 'dash-alarm' });
   }
 
   // Today's stacking-lunch concurrency (daily) for the Overview dashboard.
@@ -2704,42 +2822,160 @@
           .withFailureHandler(function(err) { state.overviewLunch = { error: (err && err.message) || 'Backend error.' }; state.overviewLunchLoading = false; if (state.view === 'overview') render(); })
           .getManagementDashboard('day', localDateStr(new Date()));
   }
+
+  function dashSlCards() {
+      var H = dashSlHist(), target = mgmtSlTarget(), ackT = ponrTarget();
+      var since = H.length ? 'last ' + dashPlural(H.length, 'reading') + ' since ' + escapeHTML(H[0].name || '') + ' · ' : '';
+      var empty = mvEmpty('line-chart', 'No readings yet', 'Service level and ACK come from the calculator, about once an hour.');
+      var last = H.length ? H[H.length - 1] : null;
+      var slCard = sectionCard('Service level', last ? last.val + '%' : '', since + 'shaded band = at or above the ' + target + '% target · points under it are marked · ACK and outages on hover',
+          H.length > 1 ? '<div class="mv-canvas dash-canvas"><canvas id="dash-sl-chart"></canvas></div>' : empty);
+      var ackCard = sectionCard('Response time (ACK)', last ? escapeHTML(last.ack) + 's' : '', since + 'seconds to acknowledge · shaded band = within the ' + ackT + 's target · lower is better',
+          H.length > 1 ? '<div class="mv-canvas dash-canvas"><canvas id="dash-ack-chart"></canvas></div>' : empty);
+      return '<div class="grid-split mv-row">' + slCard + ackCard + '</div>';
+  }
+
   function renderOverview() {
       if (typeof google !== 'undefined' && !state.overviewLunch && !state.overviewLunchLoading) fetchOverviewLunch();
-      var unplanCount = (state.agents.unplanned||[]).length;
-      var planCount = (state.agents.vacation||[]).length + (state.agents.planned||[]).length;
-      var activeCount = (state.agents.active||[]).length;
-      // Real off-floor %: off-floor agents / total-scheduled. No artificial padding.
-      var totalScheduled = activeCount + unplanCount + planCount;
-      var offFloorPct = totalScheduled > 0 ? Math.round(((unplanCount + planCount) / totalScheduled) * 100) : 0;
+      if (!document.querySelector('#content .dash-page')) __dashEnterAt = Date.now();
+      var entering = Date.now() - __dashEnterAt < 1500;
+      var f = dashFloor(), o = dashOutages();
+      var ins = dashInsights(f, o);
+      var insHtml = '<div class="aether-card mv-insights dash-now"><div class="mv-sec-h">Right now<span>from the live floor, the calculator and the status feeds</span></div>' +
+          (ins.length ? '<ul>' + ins.map(function(x, i) { return '<li class="' + x.tone + '" style="--i:' + i + ';"' + (x.title ? ' title="' + escapeHTML(x.title) + '"' : '') + '><span class="ic"><i data-lucide="' + x.icon + '" width="14"></i></span><span>' + x.html + '</span></li>'; }).join('') + '</ul>'
+                      : mvEmpty('loader', 'Waiting for the first readings…')) + '</div>';
+      var sub = '<b>' + new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '</b><span class="mv-cmp">live floor, service level and outages</span>';
+      return pageHeader('Dashboard', sub, '') +
+          '<div class="dash-page' + (entering ? ' dash-enter' : '') + '">' +
+          dashHero(f, o) +
+          '<div class="dash-row dash-row-a">' + insHtml + dashAgendaCard() + '</div>' +
+          '<div class="dash-row dash-row-b">' + dashOutageCard(o) + dashAlarmCard() + '</div>' +
+          dashSlCards() + mgmtLunchTile() + overviewIdpTile() + '</div>';
+  }
 
-      var eventsHtml = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-size:0.8rem;">No meetings or maintenance scheduled.</div>';
-      if (state.calendarError) {
-          eventsHtml = '<div style="padding:16px; color:var(--status-alert); font-size:0.8rem; font-weight:700; line-height:1.5;"><i data-lucide="alert-triangle" width="14" style="vertical-align:middle; margin-right:4px;"></i> Calendar unavailable<div style="font-size:0.7rem; font-weight:600; color:var(--text-muted); margin-top:6px;">' + escapeHTML(state.calendarError) + '</div><div style="font-size:0.7rem; color:var(--text-muted); margin-top:8px;">Re-authorize the script (Apps Script editor → Run doGet once) or redeploy as "Execute as: Me".</div></div>';
+  // Draws a target line and shades the good side of it (above for SL, below
+  // for ACK). Passed per chart, not registered globally.
+  var dashRefBand = {
+      id: 'dashRefBand',
+      beforeDatasetsDraw: function(chart, args, o) {
+          if (!o || o.value == null) return;
+          var y = chart.scales.y, a = chart.chartArea, ctx = chart.ctx, at = y.getPixelForValue(o.value);
+          if (at < a.top || at > a.bottom) return;
+          var top = o.above ? a.top : at, bot = o.above ? at : a.bottom;
+          ctx.save();
+          ctx.fillStyle = o.fill; ctx.fillRect(a.left, top, a.right - a.left, bot - top);
+          ctx.beginPath(); ctx.moveTo(a.left, at); ctx.lineTo(a.right, at);
+          ctx.lineWidth = 1; ctx.setLineDash([5, 4]); ctx.strokeStyle = o.line; ctx.stroke();
+          // Label on the left: the newest reading (right edge) stays clear.
+          ctx.setLineDash([]); ctx.font = "700 10px 'Outfit', sans-serif"; ctx.textAlign = 'left';
+          var ty = o.above ? at - 5 : at + 12, tw = ctx.measureText(o.label).width;
+          ctx.fillStyle = o.bg; ctx.fillRect(a.left + 2, ty - 9, tw + 6, 12);
+          ctx.fillStyle = o.text; ctx.fillText(o.label, a.left + 5, ty);
+          ctx.restore();
       }
-      if(state.calendarEvents && state.calendarEvents.length > 0) {
-          eventsHtml = state.calendarEvents.map(function(e, i) { return '<div onclick="openEventModal(' + i + ')" style="padding:10px; border-bottom:1px solid var(--glass-border); display:flex; gap:10px; align-items:center; cursor:pointer; transition:0.2s;" class="hover-bg"><span style="width:9px; height:9px; border-radius:50%; background:' + (e.type==='maintenance'?'var(--status-alert)':'var(--accent-primary)') + '; flex-shrink:0;"></span><div style="flex:1;"><div style="font-weight:700; font-size:0.9rem;">' + escapeHTML(e.title || 'Untitled Event') + '</div><div style="font-size:0.75rem; color:var(--text-muted);"><span style="color:var(--text-main); font-weight:700;">' + escapeHTML(e.date || '') + '</span> • ' + escapeHTML(e.startTime || '') + ' - ' + escapeHTML(e.endTime || '') + '</div></div></div>'; }).join('');
+  };
+  // Dashed "now" marker on the stacking-breaks chart.
+  var dashNowLine = {
+      id: 'dashNowLine',
+      afterDatasetsDraw: function(chart, args, o) {
+          if (!o || o.index == null) return;
+          var x = chart.scales.x.getPixelForValue(o.index), a = chart.chartArea, ctx = chart.ctx;
+          if (!(x >= a.left && x <= a.right)) return;
+          ctx.save(); ctx.beginPath(); ctx.moveTo(x, a.top); ctx.lineTo(x, a.bottom);
+          ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.strokeStyle = o.color; ctx.stroke();
+          ctx.setLineDash([]); ctx.fillStyle = o.color; ctx.font = "700 10px 'Outfit', sans-serif"; ctx.textAlign = 'left';
+          ctx.fillText('now', x + 4, a.top + 10);
+          ctx.restore();
+      }
+  };
+  // Rebuild a chart on its canvas; animate only when its data (or the theme)
+  // changed, or on arrival — the per-minute re-renders redraw in place.
+  function dashChart(key, id, fp, cfg) {
+      var el = document.getElementById(id); if (!el) return;
+      var same = __dashChartFp[key] === fp; __dashChartFp[key] = fp;
+      if (same && Date.now() - __dashEnterAt > 1500) cfg.options.animation = false;
+      mvChart(key, el, cfg);
+  }
+
+  // Called from render() for the overview: SL, ACK and stacking breaks.
+  function initOverviewChart() {
+      if (typeof Chart === 'undefined') return;
+      var P = mvPal(), dk = document.body.classList.contains('dark'), surface = dk ? '#12141e' : '#ffffff';
+      var ink = dk ? '#94a3b8' : '#64748b', refLine = dk ? 'rgba(255,255,255,0.35)' : 'rgba(15,23,42,0.35)', goodFill = dk ? 'rgba(12,163,12,0.10)' : 'rgba(12,163,12,0.07)';
+      var H = dashSlHist(), labels = H.map(function(p) { return p.name || ''; });
+      var sl = H.map(function(p) { return Number(p.val); }), ack = H.map(function(p) { var v = Number(p.ack); return isFinite(v) ? v : null; });
+      var target = mgmtSlTarget(), ackT = ponrTarget();
+      // Customers without power at each reading (nearest snapshot ≤45 min away)
+      // so an SL dip explains itself in the tooltip.
+      var outH = state.outageHistory || [];
+      var outAt = H.map(function(pt) {
+          if (!pt.t || !outH.length) return null;
+          var best = null, bestD = 45 * 60000;
+          for (var i = 0; i < outH.length; i++) { var dd = Math.abs(outH[i].t - pt.t); if (dd < bestD) { bestD = dd; best = outH[i]; } }
+          return best ? best.customers : null;
+      });
+      var line = function(label, data, bad) {
+          return { label: label, data: data, borderColor: P.s1, backgroundColor: P.s1, borderWidth: 2, tension: 0.3, spanGaps: true,
+              pointRadius: function(c) { return bad(c.raw) ? 4 : 2.5; }, pointHoverRadius: 6, pointBorderColor: surface, pointBorderWidth: 1.5,
+              pointBackgroundColor: function(c) { return bad(c.raw) ? P.bad : P.s1; } };
+      };
+      if (H.length > 1) {
+          var os = mvChartOpts({ yFmt: function(v) { return v + '%'; } });
+          var lo = Math.min.apply(null, sl.concat([target]));
+          os.plugins.legend.display = false;
+          os.scales.y.beginAtZero = false; os.scales.y.min = Math.max(0, Math.floor((lo - 6) / 5) * 5); os.scales.y.max = 100;
+          os.scales.x.ticks.maxTicksLimit = 8;
+          os.plugins.dashRefBand = { value: target, above: true, label: 'target ' + target + '%', fill: goodFill, line: refLine, text: ink, bg: surface };
+          os.plugins.tooltip.callbacks = {
+              label: function(c) { return ' Service level ' + c.parsed.y + '%'; },
+              footer: function(items) { var i = items[0].dataIndex, p = []; if (ack[i] != null) p.push('ACK ' + ack[i] + 's'); var gp = Math.round((target - sl[i]) * 10) / 10; p.push(sl[i] >= target ? 'on target' : gp + (gp === 1 ? ' pt' : ' pts') + ' under target'); if (outAt[i] != null) p.push(dashNum(outAt[i]) + ' customers without power'); return p.join(' · '); } };
+          dashChart('dashSl', 'dash-sl-chart', JSON.stringify([labels, sl, target, dk]), { type: 'line', data: { labels: labels, datasets: [line('Service level', sl, function(v) { return v != null && v < target; })] }, options: os, plugins: [dashRefBand] });
+
+          var oa = mvChartOpts({ yFmt: function(v) { return v + 's'; } });
+          var hi = Math.max.apply(null, ack.filter(function(v) { return v != null; }).concat([ackT]));
+          oa.plugins.legend.display = false;
+          oa.scales.y.suggestedMax = Math.ceil(hi * 1.15 / 5) * 5;
+          oa.scales.x.ticks.maxTicksLimit = 8;
+          oa.plugins.dashRefBand = { value: ackT, above: false, label: 'target ' + ackT + 's', fill: goodFill, line: refLine, text: ink, bg: surface };
+          oa.plugins.tooltip.callbacks = {
+              label: function(c) { return c.parsed.y == null ? ' No ACK reading' : ' ACK ' + c.parsed.y + 's'; },
+              footer: function(items) { var i = items[0].dataIndex; return 'SL ' + sl[i] + '%' + (ack[i] != null ? ' · ' + (ack[i] <= ackT ? 'within' : (Math.round((ack[i] - ackT) * 10) / 10) + 's over') + ' the ' + ackT + 's target' : ''); } };
+          dashChart('dashAck', 'dash-ack-chart', JSON.stringify([labels, ack, ackT, dk]), { type: 'line', data: { labels: labels, datasets: [line('ACK', ack, function(v) { return v != null && v > ackT; })] }, options: oa, plugins: [dashRefBand] });
       }
 
-      var outageTileHtml = renderOutageTile();
-      var correlationHtml = renderOutageCorrelationBanner();
-      var html = '<style>.hover-bg:hover { background: rgba(0,0,0,0.03); }</style>' + correlationHtml + outageTileHtml + '<div class="grid-bento">' +
-                 '<div class="aether-card tile-aurora" data-aurora-tile="sl" style="grid-column: span 4; display:flex; flex-direction:column; min-height:220px; padding:28px;"><div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;"><div><div class="aurora-label" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;"><span class="aurora-pulse"></span> Service Level</div><div class="aurora-num cnum" data-aurora-num="sl" style="font-size:3.8rem; font-weight:800; line-height:1;">' + escapeHTML(state.currentSL) + '</div></div><div style="text-align:right;"><div class="aurora-label" style="margin-bottom:10px;">Response Time</div><div data-aurora-num="ack" class="cnum" style="font-size:2.2rem; font-weight:800; color:var(--text-main); line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-0.02em;">' + escapeHTML(state.currentACK) + '</div></div></div><div style="position:relative; height:130px; width:100%; margin-top:24px;"><canvas id="chart-overview" style="display:block;"></canvas></div></div>' +
-                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700; color:var(--status-alert);">Unplanned</span><i data-lucide="alert-circle" color="var(--status-alert)" width="20"></i></div><div id="ov-unplanned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--status-alert);">' + unplanCount + '</div></div>' +
-                 '<div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;" title="Off-Floor % = (Unplanned + Planned) / (Active + Unplanned + Planned)"><h4 style="margin:0; font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Off-Floor %</h4><div id="ov-shrink" class="cnum" style="font-size:2.5rem; font-weight:800; color:var(--text-main);">' + offFloorPct + '%</div><div style="font-size:0.65rem; color:var(--text-muted); font-weight:600; margin-top:4px;">' + (unplanCount + planCount) + ' of ' + totalScheduled + ' scheduled</div></div>' +
-                 renderAlarmComTile() +
-                 '<div class="aether-card" onclick="setView(\'agents\')" style="cursor:pointer; transition:0.2s;"><div style="display:flex; justify-content:space-between; margin-bottom:12px;"><span style="font-weight:700;">Planned</span><i data-lucide="calendar" class="text-muted" width="20"></i></div><div id="ov-planned" class="cnum" style="font-size:2rem; font-weight:800; color:var(--text-main);">' + planCount + '</div></div>' +
-                 overviewIdpTile() +
-                 '<div class="aether-card" style="grid-column: span 4; display:flex; flex-direction:column;"><div class="section-header">Agenda<i data-lucide="calendar" class="text-muted" width="16"></i></div><div id="ov-agenda" style="overflow-y:auto; max-height:200px;">' + eventsHtml + '</div></div>' +
-                 mgmtLunchTile() + '</div>';
-      return html;
+      var L = state.overviewLunch && !state.overviewLunch.error && state.overviewLunch.lunch;
+      if (L) {
+          var sets = [['Lunch · Onshore', L.onLunch, P.s1], ['Lunch · Offshore', L.offLunch, P.s2], ['Break · Onshore', L.onBreak, P.s3], ['Break · Offshore', L.offBreak, P.s4]].map(function(x) {
+              return { label: x[0], data: x[1] || [], backgroundColor: x[2], stack: 'c', borderColor: surface, borderWidth: { top: 1, left: 0, right: 0, bottom: 0 }, borderRadius: 2, maxBarThickness: 14, categoryPercentage: 0.92, barPercentage: 0.92 };
+          });
+          var ol = mvChartOpts({ stacked: true });
+          ol.scales.y.ticks.precision = 0;
+          ol.scales.x.ticks.maxTicksLimit = 13;
+          var nd = new Date();
+          ol.plugins.dashNowLine = { index: nd.getHours() * 4 + nd.getMinutes() / 15, color: dk ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.5)' };
+          ol.plugins.tooltip.callbacks = {
+              label: function(c) { return ' ' + c.dataset.label + ': ' + c.parsed.y; },
+              // SVL/ACK come from the calculator (about once an hour), so most
+              // buckets have no reading of their own: show that bucket's, else
+              // the latest one before it with its time, else nothing.
+              footer: function(items) {
+                  var i = items[0].dataIndex, tot = 0, j = i, svl = L.svl || [], ak = L.ack || [];
+                  sets.forEach(function(s) { tot += Number(s.data[i]) || 0; });
+                  var out = 'Total ' + (Math.round(tot * 10) / 10) + ' on lunch or break';
+                  while (j >= 0 && svl[j] == null && ak[j] == null) j--;
+                  if (j < 0) return out;
+                  var p = []; if (svl[j] != null) p.push('SL ' + svl[j] + '%'); if (ak[j] != null) p.push('ACK ' + ak[j] + 's');
+                  return out + '\n' + (j === i ? '' : 'Last reading ' + L.labels[j] + ' · ') + p.join(' · ');
+              } };
+          dashChart('dashLunch', 'dash-lunch-chart', JSON.stringify([L.labels, L.onLunch, L.offLunch, L.onBreak, L.offBreak, dk]), { type: 'bar', data: { labels: L.labels, datasets: sets }, options: ol, plugins: [dashNowLine] });
+      }
   }
 
   // Intraday IDP on the Dashboard. Deliberately does NOT read state.trackerData:
   // that is populated at boot, but it is replaced the moment someone switches the
   // tracker to coaching or a monthly range, and `.grid` disappears — so the tile
   // would blank out depending on where the user had last been. Its own key, its own
-  // fetch, same shape as fetchOverviewLunch below.
+  // fetch, same shape as fetchOverviewLunch.
   function fetchOverviewIdp() {
       if (typeof google === 'undefined') return;
       state.overviewIdpLoading = true;
@@ -2754,28 +2990,33 @@
       }).getWorkforceAnalytics('day', localDateStr(), 'furlough', 'All', 'ALL');
   }
 
+  // The minute-by-minute refetch keeps showing the previous grid (no
+  // "Loading…" flash); only the very first load shows the placeholder.
   function overviewIdpTile() {
       var o = state.overviewIdp;
-      var shell = function(inner) {
-          return '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header">Intraday IDP<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">net staffing per 15 min · today</span></div>' + inner + '</div>';
-      };
-      if (state.overviewIdpLoading || !o) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading IDP…</div>');
-      if (o.error) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(o.error) + '</div>');
+      var shell = function(inner) { return sectionCard('Intraday IDP', '', 'net staffing per 15 min · today', inner, { cls: 'dash-idp' }); };
+      if (!o) return shell(mvEmpty('grid-3x3', 'Loading IDP…'));
+      if (o.error) return shell(mvEmpty('alert-triangle', 'IDP unavailable', escapeHTML(o.error)));
       // Same renderer the Furlough tracker uses, so the two always agree.
       var html = renderIdpHeatmapTile(o.grid, (state.syncMeta && state.syncMeta.idp) || '', (state.syncMeta && state.syncMeta.muSet) || '');
-      if (!html) return shell('<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">No IDP data imported for today.</div>');
+      if (!html) return shell(mvEmpty('grid-3x3', 'No IDP data imported for today', 'Import today’s IDP report to see net staffing per quarter-hour.'));
       return html;
   }
 
-  // Stacking Lunches & Breaks — Overview dashboard, today only.
+  // Stacking lunches & breaks — today only. One axis (agents); SL / ACK
+  // readings ride the tooltip.
   function mgmtLunchTile() {
-      var lo = state.overviewLunch;
-      var body;
-      if (state.overviewLunchLoading || !lo) body = '<div style="height:300px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">Loading today’s breaks…</div>';
-      else if (lo.error) body = '<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--status-alert); font-weight:600;">' + escapeHTML(lo.error) + '</div>';
-      else if (!lo.lunch) body = '<div style="height:120px; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-weight:600;">No break data for today.</div>';
-      else body = '<div style="position:relative; height:300px; width:100%;"><canvas id="overview-lunch-chart" style="display:block;"></canvas></div>';
-      return '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header">Stacking Lunches &amp; Breaks — Today<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">agents on lunch/break at once (15-min) · Onshore vs Offshore · SVL %/ACK on right axis</span></div>' + body + '</div>';
+      var lo = state.overviewLunch, body, side = '';
+      if (!lo) body = mvEmpty('coffee', 'Loading today’s breaks…');
+      else if (lo.error) body = mvEmpty('alert-triangle', 'Breaks unavailable', escapeHTML(lo.error));
+      else if (!lo.lunch) body = mvEmpty('coffee', 'No break data for today');
+      else {
+          var L = lo.lunch, peak = -1, pi = 0;
+          (L.labels || []).forEach(function(l, i) { var t = (+L.onLunch[i] || 0) + (+L.offLunch[i] || 0) + (+L.onBreak[i] || 0) + (+L.offBreak[i] || 0); if (t > peak) { peak = t; pi = i; } });
+          if (peak > 0) side = (Math.round(peak * 10) / 10) + ' <small>peak at ' + escapeHTML(L.labels[pi]) + '</small>';
+          body = '<div class="mv-canvas dash-lunch-c"><canvas id="dash-lunch-chart"></canvas></div>';
+      }
+      return sectionCard('Lunches and breaks stacking today', side, 'agents on lunch or break at the same time, per 15 min · Onshore and Offshore · SL and ACK readings on hover · dashed line = now', body, { cls: 'dash-lunch mv-row' });
   }
   
   function renderWeather() {
@@ -6492,124 +6733,6 @@
   }
 
   function initCharts() {}
-
-  function initOverviewChart() {
-      if (typeof Chart === 'undefined') return;
-      var canvas = document.getElementById('chart-overview'); if (!canvas) return; var ctx = canvas.getContext('2d');
-      var labels = state.slHistory.map(function(d){return d.name || '';}); var slData = state.slHistory.map(function(d){return d.val || 0;}); var rawAck = state.slHistory.map(function(d){return d.ack || 0;});
-      // Only rebuild when the underlying data (or theme) actually changed —
-      // stats only move on load / calculator runs, so the chart shouldn't
-      // re-animate on every periodic render() of the overview.
-      var fp = state.slHistory.length + '|' + (state.slHistory.length ? state.slHistory[state.slHistory.length-1].t + '|' + state.slHistory[state.slHistory.length-1].val + '|' + state.slHistory[state.slHistory.length-1].ack : '') + '|' + (state.outageHistory || []).length + '|' + document.body.classList.contains('dark');
-      var fpChanged = charts.__ovFp !== fp;
-      charts.__ovFp = fp;
-      if (charts.overview && !fpChanged && document.getElementById('chart-overview') === canvas && charts.overview.canvas === canvas) return;
-      if (charts.overview) { charts.overview.destroy(); charts.overview = null; }
-      // Aurora palette. SL is the hero (cyan, filled, full glow). ACK is the
-      // supporting line (warm amber, no fill, dashed) so the two read at a
-      // glance instead of competing for attention.
-      var SL_HEX  = '#38bdf8';
-      var ACK_HEX = '#fbbf24';
-      var gradientSL  = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
-      gradientSL.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
-      gradientSL.addColorStop(1, 'rgba(56, 189, 248, 0)');
-
-      var isDark = document.body.classList.contains('dark');
-      var gridColor = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(15, 23, 42, 0.04)';
-      var textColor = isDark ? 'rgba(255,255,255,0.45)' : '#64748b';
-
-      // Per-dataset glow: SL gets a strong cyan bloom (hero), ACK gets a
-      // gentler amber halo so it's visible without competing. The outage
-      // band (index 2) stays flat — it's background context, not a hero.
-      var neonGlow = {
-          id: 'auroraNeon',
-          beforeDatasetDraw: function(chart, args) {
-              var c = chart.ctx;
-              c.save();
-              if (args.index === 0) {
-                  c.shadowColor = 'rgba(56, 189, 248, 0.75)';
-                  c.shadowBlur = 22;
-              } else if (args.index === 1) {
-                  c.shadowColor = 'rgba(251, 191, 36, 0.55)';
-                  c.shadowBlur = 10;
-              }
-              c.shadowOffsetX = 0;
-              c.shadowOffsetY = 0;
-          },
-          afterDatasetDraw: function(chart) { chart.ctx.restore(); }
-      };
-
-      // Outage band: align each SL point with the nearest outage-history
-      // snapshot (≤45 min apart). Skipped entirely when there's no history
-      // or every snapshot is zero, so quiet days stay clean.
-      var outSeries = null;
-      var outHist = state.outageHistory || [];
-      if (outHist.length && state.slHistory.length && state.slHistory[0].t) {
-          outSeries = state.slHistory.map(function(pt) {
-              var best = null, bestD = 45 * 60000;
-              for (var i = 0; i < outHist.length; i++) {
-                  var dd = Math.abs(outHist[i].t - pt.t);
-                  if (dd < bestD) { bestD = dd; best = outHist[i]; }
-              }
-              return best ? best.customers : null;
-          });
-          var hasSignal = outSeries.some(function(v) { return v !== null && v > 0; });
-          if (!hasSignal) outSeries = null;
-      }
-      var outMax = 0;
-      if (outSeries) outSeries.forEach(function(v) { if (v) outMax = Math.max(outMax, v); });
-      var gradientOut = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
-      gradientOut.addColorStop(0, 'rgba(248, 113, 113, 0.20)');
-      gradientOut.addColorStop(1, 'rgba(248, 113, 113, 0)');
-
-      charts.overview = new Chart(ctx, {
-          type: 'line',
-          plugins: [neonGlow],
-          data: {
-              labels: labels,
-              datasets: [
-                  { label: 'Service Level', data: slData, borderColor: SL_HEX, backgroundColor: gradientSL, borderWidth: 3, fill: true, tension: 0.45, pointRadius: 0, pointHoverRadius: 7, pointBackgroundColor: SL_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, pointHoverBorderWidth: 2, yAxisID: 'y' },
-                  { label: 'Response Time', data: rawAck.map(function(v){return v > 120 ? 120 : v;}), borderColor: ACK_HEX, backgroundColor: 'transparent', borderWidth: 1.5, borderDash: [3, 6], fill: false, tension: 0.45, pointRadius: 0, pointHoverRadius: 6, pointBackgroundColor: ACK_HEX, pointBorderColor: '#fff', pointBorderWidth: 2, yAxisID: 'y1' }
-              ].concat(outSeries ? [
-                  // Drawn last = rendered underneath; a faint red context band
-                  // so SL dips explain themselves when the grid is dark.
-                  { label: 'Power Outages', data: outSeries, borderColor: 'rgba(248, 113, 113, 0.45)', backgroundColor: gradientOut, borderWidth: 1, fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 0, spanGaps: true, yAxisID: 'y2' }
-              ] : [])
-          },
-          options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              resizeDelay: 200,
-              interaction: { mode: 'index', intersect: false, axis: 'x' },
-          hover: { mode: 'index', intersect: false, axis: 'x' },
-              plugins: {
-                  legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 8, boxHeight: 8, font: { family: "'Outfit', sans-serif", weight: '700', size: 11 }, color: textColor } },
-                  tooltip: {
-                      backgroundColor: isDark ? 'rgba(15, 18, 30, 0.92)' : 'rgba(255, 255, 255, 0.96)',
-                      titleColor: isDark ? '#fff' : '#0f172a',
-                      bodyColor: isDark ? '#cbd5e1' : '#475569',
-                      borderColor: isDark ? 'rgba(129, 140, 248, 0.25)' : 'rgba(99, 102, 241, 0.18)',
-                      borderWidth: 1,
-                      titleFont: { family: "'Outfit', sans-serif", size: 13, weight: '800' },
-                      bodyFont: { family: "'Outfit', sans-serif", size: 12, weight: '600' },
-                      padding: 12, cornerRadius: 14, boxPadding: 6, usePointStyle: true,
-                      callbacks: { label: function(ctx2) { var l = ctx2.dataset.label || ''; if (l) l += ': '; if (ctx2.datasetIndex === 0) l += ctx2.raw + '%'; else if (ctx2.datasetIndex === 1) l += rawAck[ctx2.dataIndex] + 's'; else l += (ctx2.raw == null ? '—' : Number(ctx2.raw).toLocaleString() + ' customers out'); return l; } }
-                  }
-              },
-              scales: {
-                  x: { grid: { display: false, drawBorder: false }, ticks: { font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
-                  y:  { type: 'linear', display: true, position: 'left',  min: 0, max: 100, grid: { color: gridColor, drawBorder: false, borderDash: [4, 6] }, ticks: { callback: function(v){return v + '%';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } },
-                  y1: { type: 'linear', display: true, position: 'right', min: 0, suggestedMax: Math.max.apply(null, rawAck.map(function(v){return v > 120 ? 120 : v;}).concat([40])) * 1.2, grid: { display: false, drawBorder: false }, ticks: { callback: function(v){return v + 's';}, font: { family: "'Outfit', sans-serif", weight: '600', size: 10 }, color: textColor, padding: 8 } },
-                  // Hidden axis for the outage band; 2.4× headroom keeps the
-                  // band in the lower third so it never crowds the SL line.
-                  y2: { type: 'linear', display: false, min: 0, suggestedMax: Math.max(outMax, 1) * 2.4 }
-              },
-              // Animate only when the data genuinely changed (load / calculator
-              // run / theme flip) — periodic re-renders redraw instantly.
-              animation: { duration: fpChanged ? 1100 : 0, easing: 'easeOutQuart', delay: fpChanged ? 150 : 0 }
-          }
-      });
-  }
 
 
   // ───────────────────────────── Data coverage ─────────────────────────────
