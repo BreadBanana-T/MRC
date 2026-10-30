@@ -161,11 +161,12 @@
   }
   
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
-  /* Logo-only brand mark: the wordmark was dropped, so the diamond gets a
-     slow, alive breathing/glow to carry the header on its own. */
-  .brand-logo-diamond { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 7px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 6px; cursor: pointer; animation: brandBreath 4.5s ease-in-out infinite; will-change: transform; }
-  .brand-logo-diamond:hover { animation-duration: 1.6s; }
-  .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.92); border-radius: 3px; transform: rotate(-45deg); animation: brandInner 4.5s ease-in-out infinite; }
+  /* Logo-only brand mark. It breathes once on load and on hover only: any
+     animation that never ends makes Chrome redraw the whole page 60×/s, which
+     on PCs without graphics acceleration (VDI) costs a full CPU core. */
+  .brand-logo-diamond { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 7px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 6px; cursor: pointer; animation: brandBreath 4.5s ease-in-out 1; }
+  .brand-logo-diamond:hover, .brand-logo-diamond:hover .brand-logo-inner { animation-duration: 1.6s; animation-iteration-count: infinite; }
+  .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.92); border-radius: 3px; transform: rotate(-45deg); animation: brandInner 4.5s ease-in-out 1; }
   @keyframes brandBreath {
       0%, 100% { transform: rotate(45deg) scale(1); }
       50%      { transform: rotate(45deg) scale(1.06); }
@@ -826,10 +827,11 @@
   @keyframes wx-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
   @keyframes wx-rot { to { transform: rotate(360deg); } }
   @keyframes wx-flash { 0%, 88%, 100% { opacity: 0.16; } 91% { opacity: 0.45; } 94% { opacity: 0.2; } 97% { opacity: 0.5; } }
-  .wx-bob { animation: wx-bob 4.5s ease-in-out infinite; }
-  .wx-spin-slow { animation: wx-rot 26s linear infinite; }
-  .wx-spin { animation: wx-rot 34s linear infinite; }
-  .wx-flash { animation: wx-flash 5.5s ease-in-out infinite; }
+  .wx-bob { animation: wx-bob 4.5s ease-in-out 2; }
+  .wx-spin-slow { animation: wx-rot 26s linear 1; }
+  .wx-spin { animation: wx-rot 34s linear 1; }
+  .wx-flash { animation: wx-flash 5.5s ease-in-out 2; }
+  .aether-card:hover .wx-bob, .aether-card:hover .wx-spin-slow, .aether-card:hover .wx-spin, .aether-card:hover .wx-flash { animation-iteration-count: infinite; }
   @media (prefers-reduced-motion: reduce) { .wx-bob, .wx-spin-slow, .wx-spin, .wx-flash { animation: none; } }
 
   /* ─────────────── CALCULATOR: paste zones ───────────────
@@ -929,12 +931,16 @@
   .mb-gear { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; will-change: transform; }
   /* Ambient loops are CSS (compositor) — a GSAP loop would tick JavaScript
      every frame for as long as the window lasts (hours). Live = faster. */
-  .maint-banner { --mb-spin: 14s; --mb-sweep: 7.6s; }
-  .maint-banner.live { --mb-spin: 6s; --mb-sweep: 5.1s; }
-  .mb-gear-a { transform-origin: 39.06% 42.19%; animation: mb-rot var(--mb-spin) linear infinite; }
-  .mb-gear-b { transform-origin: 75.78% 72.66%; animation: mb-rot calc(var(--mb-spin) / 1.5) linear infinite reverse; }
+  .maint-banner { --mb-spin: 3.2s; --mb-sweep: 7.6s; }
+  .maint-banner.live { --mb-spin: 2.4s; --mb-sweep: 5.1s; }
+  .mb-gear-a { transform-origin: 39.06% 42.19%; animation: mb-rot var(--mb-spin) cubic-bezier(0.3, 0, 0.2, 1) 1; }
+  .mb-gear-b { transform-origin: 75.78% 72.66%; animation: mb-rot calc(var(--mb-spin) / 1.5) cubic-bezier(0.3, 0, 0.2, 1) 1 reverse; }
+  /* Loops run only while hovered: an endless loop redraws the page 60×/s for
+     the whole window (hours), which is what made Chrome flag the tab. */
+  .maint-banner:hover .mb-gear-a, .maint-banner:hover .mb-gear-b, .maint-banner:hover .mb-sweep,
+  .maint-banner:hover .mb-fill::after, .maint-banner:hover .mb-head::after, .maint-banner:hover .mb-dot::after { animation-iteration-count: infinite; animation-timing-function: linear; }
   @keyframes mb-rot { to { transform: rotate(360deg); } }
-  .maint-banner .mb-sweep { animation: mb-sweep var(--mb-sweep) cubic-bezier(0.45, 0, 0.55, 1) 1.2s infinite; will-change: transform; }
+  .maint-banner .mb-sweep { animation: mb-sweep var(--mb-sweep) cubic-bezier(0.45, 0, 0.55, 1) 1.2s 1; }
   @keyframes mb-sweep { 0% { transform: translateX(-100%); } 22% { transform: translateX(260%); } 100% { transform: translateX(260%); } }
   @media (prefers-reduced-motion: reduce) { .mb-gear-a, .mb-gear-b, .maint-banner .mb-sweep { animation: none; } }
   .mb-gear-a { fill: var(--mb-accent); }
@@ -945,7 +951,7 @@
   .mb-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px; border-radius: 99px; white-space: nowrap;
       font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; color: var(--mb-accent); background: color-mix(in srgb, var(--mb-accent) 16%, transparent); }
   .mb-dot { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .mb-dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: ring-pulse 1.8s ease-out infinite; will-change: transform, opacity; }
+  .mb-dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: ring-pulse 1.8s ease-out 3; }
   .mb-more { color: var(--mb-ink); opacity: 0.7; letter-spacing: 0.06em; }
   .maint-banner .mb-title { font-size: 1.08rem; font-weight: 700; color: #fff; margin-top: 6px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -955,12 +961,12 @@
   .mb-fill { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; clip-path: inset(0 100% 0 0 round 99px);
       background: linear-gradient(90deg, var(--mb-accent), var(--mb-accent-2)); }
   .maint-banner.live .mb-fill::after, .notif-maint.live .mb-fill::after { content: ''; position: absolute; top: 0; bottom: 0; left: -26px; right: 0;
-      background: repeating-linear-gradient(115deg, rgba(255,255,255,0.18) 0 6px, transparent 6px 12px); animation: mb-stripes 0.9s linear infinite; will-change: transform; }
+      background: repeating-linear-gradient(115deg, rgba(255,255,255,0.18) 0 6px, transparent 6px 12px); animation: mb-stripes 0.9s linear 3; }
   @keyframes mb-stripes { from { transform: translateX(0); } to { transform: translateX(26px); } }
   .mb-headtrack { position: absolute; inset: 0; pointer-events: none; will-change: transform; }
   .mb-head { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
       background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 55%, transparent), 0 0 14px var(--mb-accent); }
-  .mb-head::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--mb-accent); animation: ring-pulse 1.6s ease-out infinite; will-change: transform, opacity; }
+  .mb-head::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--mb-accent); animation: ring-pulse 1.6s ease-out 3; }
 
   .maint-banner .mb-count { flex-shrink: 0; text-align: right; padding: 2px 4px 2px 22px; border-left: 1px solid rgba(255, 255, 255, 0.08); }
   .mb-count-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mb-muted); }
@@ -1116,7 +1122,11 @@
   .status-dot.alert, .outage-dot.pulse, .outage-dot.pulse-ok, .aurora-pulse { position: relative; }
   .status-dot.alert::after, .outage-dot.pulse::after, .outage-dot.pulse-ok::after, .aurora-pulse::after {
       content: ''; position: absolute; inset: 0; border-radius: 50%; background: inherit; pointer-events: none;
-      animation: ring-pulse var(--ring-dur, 2s) ease-out infinite; will-change: transform, opacity; }
+      animation: ring-pulse var(--ring-dur, 2s) ease-out 3; }
+  /* Three pulses when a dot appears, then a still halo (an endless pulse keeps
+     the page redrawing 60×/s). Hover a row to see it pulse again. */
+  .status-dot.alert, .outage-dot.pulse { box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-alert) 22%, transparent); }
+  .agent-row:hover .status-dot.alert::after, .outage-cell:hover .outage-dot::after { animation-iteration-count: infinite; }
   @keyframes ring-pulse { 0% { transform: scale(1); opacity: 0.5; } 70%, 100% { transform: scale(2.6); opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .status-dot.alert::after, .outage-dot.pulse::after, .outage-dot.pulse-ok::after, .aurora-pulse::after { animation: none; opacity: 0; } }
   /* Management view: period switch keeps the current page (dimmed) under a

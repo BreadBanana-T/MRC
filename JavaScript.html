@@ -1196,7 +1196,7 @@
           setTimeout(function(){t.style.opacity='0'; t.style.transform='translateY(20px)';},3000);
       }
   }
-  function updateClock() { var el=document.getElementById('clock'); if(el) el.innerText=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); }
+  function updateClock() { var el=document.getElementById('clock'); if(!el) return; var t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); if(el.textContent!==t) el.textContent=t; }   // write only on change: no repaint 59 seconds out of 60
   
   // One timer PER FIELD. A single shared `searchTimeout` meant any two search
   // boxes cancelled each other's pending render.
@@ -1434,7 +1434,10 @@
           if (cur) cur.className = '';
           if (cur && cur.textContent === ch) continue;
           var nu = document.createElement('span'); nu.textContent = ch;
-          if (animate && cur && !document.hidden) {
+          // The ones-of-seconds digit swaps without a roll: a roll every second
+          // keeps Chrome redrawing half of every second for hours. The other
+          // digits (every 10 s and slower) still roll.
+          if (animate && cur && !document.hidden && i < str.length - 1) {
               nu.className = 'd-in'; slot.appendChild(nu);
               cur.className = 'd-out';
               requestAnimationFrame(function(n) { return function() { requestAnimationFrame(function() { n.className = ''; }); }; }(nu));
@@ -1471,6 +1474,7 @@
             '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>';
       el.style.display = 'flex';
       maintShown = { key: m.key, live: m.live };
+      el.__mbPct = null;   // new DOM: the rail must be drawn
       maintTick(false);
 
       if (!motion) return;
@@ -1500,7 +1504,11 @@
       maintSetDigits(el.querySelector('.mb-digits'), maintClock(m.live ? m.end - now : m.start - now), animate !== false && maintMotionOK());
       // Clip + transform only (no width/left) so the per-second update never
       // triggers layout.
-      var pct = maintProgress(m, now);
+      // A window lasts hours, so the rail moves a fraction of a pixel per
+      // second: repaint it only when it moves a visible 0.1%.
+      var pct = Math.round(maintProgress(m, now) * 10) / 10;
+      if (el.__mbPct === pct) return;
+      el.__mbPct = pct;
       var fill = el.querySelector('.mb-fill'), track = el.querySelector('.mb-headtrack');
       if (fill) fill.style.clipPath = 'inset(0 ' + (100 - pct).toFixed(2) + '% 0 0 round 99px)';
       if (track) track.style.transform = 'translateX(' + pct.toFixed(2) + '%)';
