@@ -40,6 +40,68 @@
   function __sliceQ(sel, n) { return Array.prototype.slice.call(document.querySelectorAll(sel), 0, n); }
 
   // One consistent search field (pill + embedded icon) for every view.
+  // ───────────── SHARED PAGE COMPONENTS (the Management view's design system) ─────────────
+  // Every page builds from these so the app reads as one product. Styles: the
+  // .mv-* rules in CSS.html. Rules of the system: ink text (never series
+  // colour), status colour only with an icon/arrow, one y-axis per chart,
+  // motion one-shot (entrance / change / hover) — nothing loops at rest.
+  //
+  // Sticky page header: title, one line of context, controls on the right.
+  function pageHeader(title, subHtml, controlsHtml) {
+      return '<div class="sticky-header mv-header"><div class="mv-title"><h2>' + title + '</h2>' + (subHtml ? '<div class="mv-sub">' + subHtml + '</div>' : '') + '</div>' +
+          (controlsHtml ? '<div class="mv-controls">' + controlsHtml + '</div>' : '') + '</div>';
+  }
+  // Segmented switch with a sliding pill. items: [[value, label], …];
+  // onPick: a global function name called with the value.
+  function segControl(items, current, onPick) {
+      var idx = 0; items.forEach(function(it, i) { if (it[0] === current) idx = i; });
+      return '<div class="mv-seg" style="--i:' + idx + '; --n:' + items.length + ';" role="tablist"><span class="mv-seg-pill"></span>' +
+          items.map(function(it) { var on = it[0] === current; return '<button role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + '" onclick="' + onPick + '(\'' + String(it[0]).replace(/'/g, "\\'") + '\')">' + it[1] + '</button>'; }).join('') + '</div>';
+  }
+  // Number tile: label, value (wrap numbers in <span class="cnum">), an
+  // optional change line, a caption. opts.big for the headline size,
+  // opts.badge for an on/off-target badge, opts.spark for a trend (mvSpark).
+  function kpiTile(label, valueHtml, deltaHtml, capHtml, opts) {
+      opts = opts || {};
+      return '<div class="aether-card ' + (opts.big ? 'mv-hero-tile' : 'mv-tile') + (opts.cls ? ' ' + opts.cls : '') + '"' + (opts.attrs || '') + '>' +
+          '<div class="mv-k">' + label + (opts.badge || '') + '</div><div class="mv-v' + (opts.big ? '' : ' sm') + '">' + valueHtml + '</div>' +
+          (deltaHtml != null ? '<div class="mv-d">' + (deltaHtml || '&nbsp;') + '</div>' : '') +
+          (opts.spark ? '<div class="mv-spark-wrap">' + opts.spark + '</div>' : '') +
+          (capHtml ? '<div class="mv-cap">' + capHtml + '</div>' : '') + '</div>';
+  }
+  // Section card: title (+ big side figure), one muted line, then the body.
+  function sectionCard(title, sideHtml, subHtml, bodyHtml, opts) {
+      opts = opts || {};
+      return '<div class="aether-card mv-chart-card' + (opts.cls ? ' ' + opts.cls : '') + '"' + (opts.id ? ' id="' + opts.id + '"' : '') + '>' +
+          '<div class="mv-sec-h">' + title + (sideHtml ? '<span class="mv-side">' + sideHtml + '</span>' : '') + '</div>' +
+          (subHtml ? '<div class="mv-sec-sub">' + subHtml + '</div>' : '') + (bodyHtml || '') + '</div>';
+  }
+  function mvBadge(tone, icon, txt) { return '<span class="mv-badge ' + tone + '"><i data-lucide="' + icon + '" width="12"></i>' + txt + '</span>'; }
+  function mvEmpty(icon, title, sub) { return '<div class="mv-empty"><i data-lucide="' + icon + '" width="22"></i><b>' + title + '</b>' + (sub ? '<span>' + sub + '</span>' : '') + '</div>'; }
+  // Chart.js options in the house style (theme-aware): legend top-left with
+  // rounded swatches, index tooltip, recessive grid, one y-axis.
+  function mvChartOpts(o) {
+      o = o || {};
+      var dk = document.body.classList.contains('dark'), ff = "'Outfit', sans-serif";
+      var tc = dk ? '#94a3b8' : '#64748b', gc = dk ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)';
+      return {
+          responsive: true, maintainAspectRatio: false, resizeDelay: 150,
+          layout: { padding: { top: 8, right: 8, bottom: 0, left: 0 } },
+          interaction: { mode: 'index', intersect: false, axis: 'x' },
+          plugins: {
+              legend: { display: o.legend !== false, position: 'top', align: 'start', labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, boxHeight: 10, padding: 14, font: { family: ff, weight: '700', size: 11.5 }, color: tc } },
+              tooltip: { mode: 'index', intersect: false, backgroundColor: dk ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)', titleColor: dk ? '#e2e8f0' : '#0f172a', bodyColor: dk ? '#cbd5e1' : '#334155', footerColor: dk ? '#cbd5e1' : '#334155',
+                  borderColor: dk ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)', borderWidth: 1, padding: 12, cornerRadius: 10, boxPadding: 6, usePointStyle: true,
+                  titleFont: { family: ff, weight: '800', size: 13 }, bodyFont: { family: ff, weight: '600', size: 12.5 }, footerFont: { family: ff, weight: '700', size: 12 }, footerMarginTop: 8, callbacks: {} }
+          },
+          scales: {
+              x: { stacked: !!o.stacked, grid: { display: false }, border: { color: gc }, ticks: { font: { family: ff, weight: '700', size: 11 }, color: tc, maxRotation: 0, autoSkip: true } },
+              y: { stacked: !!o.stacked, beginAtZero: true, border: { display: false }, grid: { color: gc }, ticks: { font: { family: ff, weight: '600', size: 11 }, color: tc, maxTicksLimit: 6, callback: o.yFmt || undefined } }
+          },
+          animation: { duration: 650, easing: 'easeOutQuart' }
+      };
+  }
+
   // Loading placeholder shaped like the page it stands in for (tiles, then two
   // panels), with one quiet line saying what is loading. Replaces the big
   // spinner cards.
