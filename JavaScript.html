@@ -2065,203 +2065,201 @@
   }
 
   function renderPopout(mode) {
-     var c = document.getElementById('content'); if(!c) return; 
-     var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
-     for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
-     
+     var c = document.getElementById('content'); if(!c) return;
+     var upMap = {}; (state.agents.upcomingBreak || []).forEach(function(u) { upMap[u.id] = u; });
      var title = "All Units";
      if (mode === 'Onshore') title = "Onshore Unit"; else if (mode === 'Offshore') title = "Offshore Unit"; else if (mode === 'Breaks') title = "Break Room";
-     var filterFn = function(list) { return (list||[]).filter(function(a) { if (mode === 'All') return true; if (mode === 'Breaks') return true; return (a.region||"").indexOf(mode) !== -1; }); };
-     
-     var h = '<div style="padding:20px;"><h2 style="margin-top:0; border-bottom:1px solid var(--glass-border); padding-bottom:10px;">' + title + '</h2>';
-     if (mode !== 'Breaks') { 
-         h += '<div style="font-weight:700; color:var(--text-muted); margin-bottom:10px;">Starting Soon</div><div class="agent-list-view">' + filterFn(state.agents.startingSoon).map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('') + '</div><div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Active Floor</div><div class="agent-list-view">' + filterFn(state.agents.active).map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('') + '</div>'; 
-     }
-     if (mode === 'Breaks' || mode === 'All' || mode === 'Onshore' || mode === 'Offshore') { 
-         var breakList = filterFn(state.agents.active).filter(function(a){return a.onBreakNow;}); 
-         h += '<div style="font-weight:700; color:var(--text-muted); margin:20px 0 10px;">Break Room</div><div class="agent-list-view">' + (breakList.length ? breakList.map(function(a){return renderAgentRow(a, upMap[a.id]);}).join('') : '<div style="opacity:0.5; font-size:0.8rem;">Empty</div>') + '</div>'; 
-     }
+     var filterFn = function(list) { return (list||[]).filter(function(a) { if (mode === 'All' || mode === 'Breaks') return true; return (a.region||"").indexOf(mode) !== -1; }); };
+     var rows = function(list) { return list.map(function(a) { return renderAgentRow(a, upMap[a.id]); }).join(''); };
+     var sec = function(label, list, empty) {
+         return '<div class="gx-pop-h">' + label + '<span>' + list.length + '</span></div>' +
+                (list.length ? '<div class="agent-list-view gx-list">' + rows(list) + '</div>' : '<div class="gx-pop-empty">' + empty + '</div>');
+     };
+     var h = '<div class="gx-pop"><h2>' + title + '</h2>';
+     if (mode !== 'Breaks') h += sec('Starting soon', filterFn(state.agents.startingSoon), 'No one starting soon') + sec('On shift', filterFn(state.agents.active), 'No one on shift');
+     h += sec('Break room', filterFn(state.agents.active).filter(function(a) { return a.onBreakNow; }), 'Empty');
      h += '</div>'; c.innerHTML = h; refreshIcons();
   }
-  
+
+  // ───────────── GENESYS (roster + queues on one page) ─────────────
+  function gxChan(a) { return (a && a.genesys && a.genesys.channel) || ''; }
+  function gxMinsTo(epoch) { return epoch ? Math.round((epoch - Date.now()) / 60000) : null; }
+  function gxWhen(mins) { return mins <= 0 ? 'now' : (mins >= 60 ? 'in ' + Math.floor(mins / 60) + 'h' + (mins % 60 ? ' ' + (mins % 60) + 'm' : '') : 'in ' + mins + 'm'); }
+  function gxQueueLabel(q) { var m = q.match(/_(en|fr)$/); return escapeHTML(q.replace(/_(en|fr)$/, '')) + (m ? ' <span class="lang">' + m[1].toUpperCase() + '</span>' : ''); }
+  function gxStart(a) { return (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : (a.subStatus || 'Soon'); }
+
   function renderAgents() {
-      var upMap = {}; var upBreakList = state.agents.upcomingBreak || [];
-      for(var i=0; i<upBreakList.length; i++) { upMap[upBreakList[i].id] = upBreakList[i]; }
-
-      // One page: the Genesys panel (channel counts, batch assign, queue
-      // coverage) on top of the full roster. Each agent appears once — their
-      // queues ride on their own row.
-      var html = '<div class="sticky-header"><div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; width:100%;">' +
-                 '' + searchBox('agent-search', 'Search name, ID, supervisor, language, queue…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:240px;', 'height:34px; font-size:0.85rem;') + '' +
-                 '<button class="btn btn-glass" style="height:34px;" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="16"></i> Tower Control</button>' +
-                 '<div style="flex:1"></div><div style="display:flex; gap:8px;">' +
-                 '<button class="btn ' + (state.regionFilter==='All'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'All\')">All</button>' +
-                 '<button class="btn ' + (state.regionFilter==='Onshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Onshore\')">On</button>' +
-                 '<button class="btn ' + (state.regionFilter==='Offshore'?'btn-primary':'btn-glass') + '" onclick="setRegionFilter(\'Offshore\')">Off</button>' +
-                 '</div></div></div>' +
-                 renderGenesysPanel() + renderFloorLayout(upMap);
-      return html;
+      var upMap = {}; (state.agents.upcomingBreak || []).forEach(function(u) { upMap[u.id] = u; });
+      var visible = (state.agents.active || []).filter(floorMatch);
+      var anyAssigned = (state.agents.active || []).some(function(a) { return gxChan(a); });
+      var term = (state.floorSearch || '').trim();
+      var sub = '<b>' + visible.length + ' on shift</b>' + (state.regionFilter !== 'All' ? ' · ' + state.regionFilter + ' only' : '') +
+                (term ? ' · matching “' + escapeHTML(term) + '”' : '') + '<span class="mv-cmp">click an agent to set their channel and queues</span>';
+      var controls = searchBox('agent-search', 'Search name, ID, supervisor, queue…', escapeHTML(state.floorSearch || ''), 'handleSearch(this.value)', 'width:240px;', 'height:36px; font-size:0.84rem;') +
+          segControl([['All', 'All'], ['Onshore', 'On'], ['Offshore', 'Off']], state.regionFilter, 'setRegionFilter') +
+          '<button class="mv-text-btn" onclick="window.open(\'https://telus.sharepoint.com/sites/SAM/Lists/Queue_Manager/AllItems.aspx#InplviewHash590fd117-67d3-4b41-ac7c-4cbe29d7eb34=\', \'_blank\')"><i data-lucide="radio" width="14"></i> Tower Control</button>' +
+          '<button class="mv-text-btn gx-primary" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="14"></i> Batch assign</button>' +
+          (anyAssigned ? '<button class="mv-icon-btn" onclick="returnAllGenesys()" title="Clear every channel assignment"><i data-lucide="undo-2" width="15"></i></button>' : '');
+      return pageHeader('Genesys', sub, controls) + renderGenesysPanel(visible) + renderFloorLayout(upMap);
   }
 
-  // Queue coverage panel: every queue from the list with how many inbound
-  // agents hold it. Uncovered queues are dimmed — gaps read at a glance.
-  // Clicking a queue expands an inline roster (a 50-name title tooltip
-  // doesn't scan); the full queue name + copy live in the expansion.
+  // Queue coverage: the gaps (queues nobody holds) first, then the covered
+  // queues thinnest-first. Clicking a queue opens who holds it, the full ACD
+  // name and a copy button, right under that queue.
   function renderGenesysCoverage(inbound) {
-      var counts = {}, holders = {};
-      inbound.forEach(function(a) {
-          ((a.genesys && a.genesys.queues) || []).forEach(function(q) {
-              counts[q] = (counts[q] || 0) + 1;
-              (holders[q] = holders[q] || []).push(a);
-          });
-      });
+      var holders = {}, order = [];
+      inbound.forEach(function(a) { ((a.genesys && a.genesys.queues) || []).forEach(function(q) { (holders[q] = holders[q] || []).push(a); }); });
+      GENESYS_QUEUES.forEach(function(g) { g[1].forEach(function(q) { order.push(q); }); });
       var openQ = state.genesysCovOpen || null;
-      var totalQ = 0, covered = 0;
-      var groups = GENESYS_QUEUES.map(function(g) {
-          var hasOpen = false;
-          var chips = g[1].map(function(q) {
-              totalQ++;
-              var n = counts[q] || 0; if (n) covered++;
-              if (q === openQ) hasOpen = true;
-              var base = q.replace(/_(en|fr)$/, ''); var m = q.match(/_(en|fr)$/); var lang = m ? m[1].toUpperCase() : '';
-              return '<span class="gen-cov' + (n ? ' on' : '') + (q === openQ ? ' open' : '') + '" title="' + n + ' agent' + (n === 1 ? '' : 's') + ' — click for details" onclick="toggleGenesysCov(\'' + q + '\')">' + escapeHTML(base) + ' <span class="lang">' + lang + '</span>' + (n ? '<b>' + n + '</b>' : '') + '</span>';
+      var gaps = order.filter(function(q) { return !holders[q]; });
+      var covered = order.filter(function(q) { return holders[q]; }).sort(function(x, y) { return holders[x].length - holders[y].length || order.indexOf(x) - order.indexOf(y); });
+      var max = covered.reduce(function(m, q) { return Math.max(m, holders[q].length); }, 1);
+      var detail = function(q) {
+          var who = (holders[q] || []).map(function(a) {
+              return '<span class="gen-cov-agent" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)"><span class="status-dot ' + ((a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on') + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + escapeHTML(fmtAgentId(a)) + '</span></span>';
           }).join('');
-          var html = '<div class="gen-qgroup"><h5>' + escapeHTML(g[0]) + '</h5><div class="gen-qlist">' + chips + '</div></div>';
-          // Roster expansion spans the full panel width, right below the
-          // group that owns the open queue.
-          if (hasOpen) {
-              var full = GENESYS_QUEUE_PREFIX + openQ;
-              var who = (holders[openQ] || []).map(function(a) {
-                  var pfx = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
-                  var dot = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
-                  return '<span class="gen-cov-agent" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)"><span class="status-dot ' + dot + '"></span>' + escapeHTML(a.name || '') + '<span class="id">' + pfx + escapeHTML(a.id || '') + '</span></span>';
-              }).join('');
-              html += '<div class="gen-cov-detail">' +
-                      '<div class="gen-cov-detail-head">' +
-                        '<span class="full-name" title="Click to copy" onclick="copyQueueName(event, \'' + openQ + '\')">' + escapeHTML(full) + '</span>' +
-                        '<button class="btn-popout" title="Copy full queue name" onclick="copyQueueName(event, \'' + openQ + '\')"><i data-lucide="copy" width="13"></i></button>' +
-                        '<span style="flex:1;"></span>' +
-                        '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted);">' + (holders[openQ] || []).length + ' agent' + ((holders[openQ] || []).length === 1 ? '' : 's') + '</span>' +
-                      '</div>' +
-                      (who ? '<div class="gen-cov-detail-list custom-scrollbar">' + who + '</div>' : '<div style="font-size:0.76rem; color:var(--text-muted); font-weight:600; padding:2px 0 4px;">No one assigned — click an agent on the floor to add them.</div>') +
-                      '</div>';
-          }
-          return html;
+          return '<div class="gen-cov-detail">' +
+                 '<div class="gen-cov-detail-head"><span class="full-name" title="Click to copy" onclick="copyQueueName(event, \'' + q + '\')">' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '</span>' +
+                 '<button class="btn-popout" title="Copy full queue name" onclick="copyQueueName(event, \'' + q + '\')"><i data-lucide="copy" width="13"></i></button><span style="flex:1;"></span>' +
+                 '<span class="gx-muted">' + (holders[q] || []).length + ' agent' + ((holders[q] || []).length === 1 ? '' : 's') + '</span></div>' +
+                 (who ? '<div class="gen-cov-detail-list custom-scrollbar">' + who + '</div>' : '<div class="gx-muted">No one assigned — click an agent on the floor to add them.</div>') + '</div>';
+      };
+      var gapHtml = gaps.length
+          ? '<div class="gx-lbl"><i data-lucide="alert-triangle" width="13" class="gx-warn"></i> Nobody on ' + gaps.length + ' queue' + (gaps.length === 1 ? '' : 's') + '</div>' +
+            '<div class="gx-gaps">' + gaps.map(function(q) { return '<button class="gx-gap' + (q === openQ ? ' open' : '') + '" onclick="toggleGenesysCov(\'' + q + '\')">' + gxQueueLabel(q) + '</button>'; }).join('') + '</div>' +
+            (openQ && gaps.indexOf(openQ) !== -1 ? detail(openQ) : '')
+          : '<div class="gx-lbl"><i data-lucide="check" width="13" class="gx-ok"></i> Every queue has someone on it</div>';
+      var barHtml = covered.map(function(q, i) {
+          var n = holders[q].length;
+          return '<button class="gx-q' + (q === openQ ? ' open' : '') + '" style="--i:' + Math.min(i, 24) + ';" onclick="toggleGenesysCov(\'' + q + '\')" title="' + escapeHTML(holders[q].map(function(a) { return a.name; }).join(', ')) + '">' +
+                 '<span class="nm">' + gxQueueLabel(q) + '</span><span class="track"><i style="width:' + Math.max(4, Math.round(n / max * 100)) + '%;"></i></span><b>' + n + '</b></button>' +
+                 (q === openQ ? detail(q) : '');
       }).join('');
-      // Collapsed by default now that it sits above the roster; the open state
-      // is remembered so the 60s floor poll doesn't snap it shut.
-      return '<details class="gen-cov-panel"' + (state.genCovExpanded ? ' open' : '') + ' ontoggle="setGenesysCovExpanded(this.open)">' +
-             '<summary><span style="font-weight:800; font-size:0.82rem;">Queue coverage</span>' +
-             '<span style="font-size:0.72rem; font-weight:700; color:' + (covered ? 'var(--text-muted)' : 'var(--status-warn)') + ';">' + covered + ' of ' + totalQ + ' queues covered</span></summary>' +
-             '<div class="gen-cov-body">' + groups + '</div></details>';
+      return gapHtml + (covered.length ? '<div class="gx-lbl" style="margin-top:16px;">Covered · thinnest first</div><div class="gx-qbars">' + barHtml + '</div>' : '');
   }
-  window.setGenesysCovExpanded = function(open) { state.genCovExpanded = !!open; };
   window.toggleGenesysCov = function(q) {
       state.genesysCovOpen = (state.genesysCovOpen === q) ? null : q;
       render();
-      // Keep the panel in view after the re-render collapses/moves things.
-      var el = document.querySelector('.gen-cov.open');
+      var el = document.querySelector('.gen-cov-detail');
       if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
   };
+  window.toggleGenSoon = function(start, open) {
+      state.genSoonOpen = state.genSoonOpen || {};
+      state.genSoonOpen[start] = !open;
+      render();
+  };
 
-  // Genesys panel at the top of the page: on-shift channel counts, the
-  // inbound/outbound split, batch tools and queue coverage. Everyone is on
-  // Genesys, so there is no "on Genesys %" — only which channel each agent
-  // has been given.
-  function renderGenesysPanel() {
-      var visible = (state.agents.active || []).filter(floorMatch);
-      var inbound = [], outbound = [], none = 0;
+  // Headline row, then queue coverage beside the shifts starting later.
+  // Everyone is on Genesys, so there is no "on Genesys %" — only which
+  // channel each agent has been given.
+  function renderGenesysPanel(visible) {
+      var inbound = [], out = 0, none = 0, lunch = 0, brk = 0, onN = 0;
       visible.forEach(function(a) {
-          var ch = (a.genesys && a.genesys.channel) || '';
-          if (ch === 'inbound') inbound.push(a); else if (ch === 'outbound') outbound.push(a); else none++;
+          var ch = gxChan(a);
+          if (ch === 'inbound') inbound.push(a); else if (ch === 'outbound') out++; else none++;
+          if (a.onBreakNow) { if (/lunch/i.test(a.subStatus || '')) lunch++; else brk++; }
+          if ((a.region || '').indexOf('Offshore') === -1) onN++;
       });
-      var assigned = inbound.length + outbound.length;
-      var pIn = assigned ? Math.round(inbound.length / assigned * 100) : 0;
-
-      var kpi = function(label, val, color) {
-          return '<div class="gen-kpi"><h4>' + label + '</h4><div style="color:' + color + ';">' + val + '</div></div>';
+      var heldQ = {}; inbound.forEach(function(a) { ((a.genesys && a.genesys.queues) || []).forEach(function(q) { heldQ[q] = 1; }); });
+      var totalQ = 0; GENESYS_QUEUES.forEach(function(g) { totalQ += g[1].length; });
+      var nHeld = 0; GENESYS_QUEUES.forEach(function(g) { g[1].forEach(function(q) { if (heldQ[q]) nHeld++; }); });
+      var soon = (state.agents.startingSoon || []).filter(floorMatch);
+      var next = null; soon.forEach(function(a) { if (a.startEpoch && (!next || a.startEpoch < next.startEpoch)) next = a; });
+      var inHour = soon.filter(function(a) { var m = gxMinsTo(a.startEpoch); return m === null || m <= 60; }).length;
+      var P = mvPal();
+      var cell = function(label, val, cap, sw) {
+          return '<div class="gx-kpi"><div class="gx-k">' + (sw ? '<i class="gx-sw" style="background:' + sw + ';"></i>' : '') + label + '</div><div class="gx-v"><span class="cnum">' + val + '</span></div><div class="gx-cap">' + cap + '</div></div>';
       };
-
-      return '<div class="aether-card" style="padding:20px 24px; margin-bottom:24px;">' +
-            '<div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap; margin-bottom:14px;">' +
-              '<div style="display:flex; flex-direction:column; gap:5px;">' + genCloudLogoSvg(24) +
-                '<span style="font-size:0.64rem; font-weight:700; letter-spacing:0.06em; color:var(--text-muted); text-transform:uppercase;">Channel assignments · on shift now</span></div>' +
-              '<div style="flex:1;"></div>' +
-              '<div class="gen-kpis">' +
-                kpi('On shift', visible.length, 'var(--text-main)') +
-                kpi('Inbound', inbound.length, 'var(--region-on)') +
-                kpi('Outbound', outbound.length, 'var(--status-break)') +
-              '</div>' +
-              '<div style="display:flex; gap:8px; align-items:center;">' +
-                '<button class="btn btn-glass" onclick="openGenesysBatch()" title="Assign several agents at once"><i data-lucide="users" width="15"></i> Batch assign</button>' +
-                (assigned ? '<button class="btn-popout" style="height:36px; width:36px;" onclick="returnAllGenesys()" title="Clear every channel assignment"><i data-lucide="undo-2" width="15"></i></button>' : '') +
-              '</div>' +
-            '</div>' +
-            // Inbound vs outbound among agents who have a channel.
-            (assigned ? '<div class="gen-share" title="Inbound ' + pIn + '% · Outbound ' + (100 - pIn) + '% of assigned agents">' +
-              '<i style="width:' + pIn + '%; background:var(--region-on);"></i>' +
-              '<i style="width:' + (100 - pIn) + '%; background:var(--status-break);"></i>' +
-            '</div>' : '') +
-            (none && !assigned ? '<div class="gen-hint">No channels set yet — click an agent → <span style="color:var(--region-on);">Genesys Inbound</span> / <span style="color:var(--status-break);">Genesys Outbound</span>, or use Batch assign.</div>' : '') +
-            renderGenesysCoverage(inbound) +
+      var strip = '<div class="aether-card gx-head">' +
+          '<div class="gx-kpis">' +
+            cell('On shift', visible.length, onN + ' onshore · ' + (visible.length - onN) + ' offshore') +
+            cell('Inbound', inbound.length, nHeld + ' of ' + totalQ + ' queues held', P.s1) +
+            cell('Outbound', out, 'callbacks &amp; verification', P.s2) +
+            cell('Unassigned', none, none ? 'no channel yet' : 'everyone has a channel', P.neutral) +
+            cell('On break', lunch + brk, (lunch || brk) ? lunch + ' lunch · ' + brk + ' break' : 'everyone is working') +
+            cell('Starting soon', inHour, next ? 'next at ' + escapeHTML(gxStart(next)) + ' (' + gxWhen(Math.max(0, gxMinsTo(next.startEpoch))) + ')' + (soon.length > inHour ? ' · ' + soon.length + ' later today' : '') : 'no one later today') +
+          '</div>' +
+          (visible.length ? '<div class="mv-split gx-split" title="Inbound ' + inbound.length + ' · Outbound ' + out + ' · Unassigned ' + none + '">' +
+              (inbound.length ? '<span style="flex:' + inbound.length + ' 1 0; background:' + P.s1 + ';"></span>' : '') +
+              (out ? '<span style="flex:' + out + ' 1 0; background:' + P.s2 + ';"></span>' : '') +
+              (none ? '<span style="flex:' + none + ' 1 0; background:' + P.neutral + ';"></span>' : '') + '</div>' : '') +
           '</div>';
+
+      var covBody = inbound.length ? renderGenesysCoverage(inbound)
+          : mvEmpty('phone-incoming', 'No one on inbound yet', 'Every queue is open. Click an agent and choose Genesys Inbound, or use Batch assign.');
+      var cov = sectionCard('Queue coverage', '<span class="cnum">' + nHeld + '</span><small class="gx-of"> / ' + totalQ + '</small>',
+          'inbound queues held right now · click a queue to see who has it and copy its full name', covBody, { cls: 'gx-cov' });
+      return strip + '<div class="grid-split mv-row gx-top">' + cov + renderUpcomingShifts(soon) + '</div>';
+  }
+
+  // Shifts starting later today, one block per start time. Blocks within
+  // 30 min open by themselves; names are only built for open blocks.
+  function renderUpcomingShifts(soon) {
+      if (!soon.length) return sectionCard('Starting later today', '<span class="cnum">0</span>', '', mvEmpty('sunset', 'No one else starts today', (state.floorSearch || '').trim() ? 'Nothing matches the search.' : ''), { cls: 'gx-soon' });
+      var map = {};
+      soon.forEach(function(a) {
+          var st = gxStart(a);
+          if (!map[st]) map[st] = { start: st, epoch: a.startEpoch || 0, agents: [] };
+          if (a.startEpoch && (!map[st].epoch || a.startEpoch < map[st].epoch)) map[st].epoch = a.startEpoch;
+          map[st].agents.push(a);
+      });
+      var list = Object.keys(map).map(function(k) { return map[k]; }).sort(function(x, y) { return (x.epoch || 0) - (y.epoch || 0); });
+      var openMap = state.genSoonOpen || {};
+      var blocks = list.map(function(g, gi) {
+          var mins = g.epoch ? Math.max(0, gxMinsTo(g.epoch)) : null;
+          var imminent = mins !== null && mins <= 30;
+          var open = openMap.hasOwnProperty(g.start) ? openMap[g.start] : imminent;
+          var startJs = escapeHTML(g.start).replace(/'/g, "\\'");
+          var names = open ? '<div class="gx-soon-names">' + g.agents.map(function(a) {
+              return '<span class="gx-soon-chip" title="' + escapeHTML((a.name || '') + ' — ' + (a.shift || '')) + '"><span class="status-dot ' + ((a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on') + '"></span><span class="nm">' + escapeHTML(a.name || '') + '</span><span class="id">' + escapeHTML(fmtAgentId(a)) + '</span></span>';
+          }).join('') + '</div>' : '';
+          return '<div class="gx-blk' + (open ? ' open' : '') + '">' +
+                 '<div class="gx-blk-h" onclick="toggleGenSoon(\'' + startJs + '\', ' + open + ')">' +
+                   '<i data-lucide="chevron-right" width="14" class="gx-chev"></i>' +
+                   '<span class="t">' + escapeHTML(g.start) + '</span>' +
+                   (mins !== null ? '<span class="w' + (imminent ? ' soon' : '') + '">' + gxWhen(mins) + '</span>' : '') +
+                   '<span style="flex:1;"></span><span class="n">' + g.agents.length + ' agent' + (g.agents.length === 1 ? '' : 's') + '</span>' +
+                   '<button class="btn-popout" title="Copy this shift block (name + ID)" onclick="event.stopPropagation(); copyShiftBlock(\'' + startJs + '\')"><i data-lucide="copy" width="13"></i></button>' +
+                 '</div>' + names + '</div>';
+      }).join('');
+      return sectionCard('Starting later today', '<span class="cnum">' + soon.length + '</span>', 'grouped by start time · copy a block for the handover', '<div class="gx-blks">' + blocks + '</div>', { cls: 'gx-soon' });
   }
 
   function renderFloorLayout(upMap) {
-     // Upcoming shifts (later today). The startingSoon bucket holds EVERY agent
-     // whose shift starts after "now", so we group them by shift-start time into
-     // collapsible blocks — a preview of the next shift(s) coming in. Blocks
-     // starting within 30m auto-expand; each block can be copied on its own.
-     var startingHtml = '';
-     // Filter FIRST, so a search that matches nobody upcoming collapses the card
-     // instead of rendering an empty shell.
-     var soonMatched = (state.agents.startingSoon || []).filter(floorMatch);
-     if (soonMatched.length > 0) {
-         var groupsMap = {};
-         soonMatched.forEach(function(a) {
-             var st = (a.shift && a.shift.indexOf(' - ') !== -1) ? a.shift.split(' - ')[0] : (a.subStatus || 'Soon');
-             if (!groupsMap[st]) groupsMap[st] = { start: st, epoch: a.startEpoch || 0, agents: [] };
-             if (a.startEpoch && (!groupsMap[st].epoch || a.startEpoch < groupsMap[st].epoch)) groupsMap[st].epoch = a.startEpoch;
-             groupsMap[st].agents.push(a);
-         });
-         var groupList = Object.keys(groupsMap).map(function(k){ return groupsMap[k]; });
-         groupList.sort(function(x, y){ return (x.epoch || 0) - (y.epoch || 0); });
-         var blocks = groupList.map(function(g) {
-             var mins = g.epoch ? Math.max(0, Math.round((g.epoch - Date.now()) / 60000)) : null;
-             var imminent = (mins !== null && mins <= 30);
-             var whenLabel = (mins === null) ? '' : (mins <= 0 ? 'now' : (mins >= 60 ? ('in ' + Math.floor(mins/60) + 'h' + (mins%60 ? ' ' + (mins%60) + 'm' : '')) : ('in ' + mins + 'm')));
-             var accent = imminent ? 'var(--accent-primary)' : 'var(--text-main)';
-             var chips = g.agents.map(function(a) {
-                 var dotCls = (a.region || '').indexOf('Offshore') !== -1 ? 'off' : 'on';
-                 return '<div class="soon-chip" title="' + escapeHTML(a.name || '') + ' — ' + escapeHTML(a.shift || '') + '"><span class="status-dot ' + dotCls + '"></span><span class="soon-name">' + escapeHTML(a.name || '') + '</span><span class="soon-when" style="font-family:monospace;">' + escapeHTML(fmtAgentId(a)) + '</span></div>';
-             }).join('');
-             return '<details class="upcoming-block"' + (imminent ? ' open' : '') + ' style="border:1px solid var(--glass-border); border-radius:10px; margin-bottom:10px; background:var(--card-bg);">' +
-                    '<summary style="list-style:none; cursor:pointer; padding:10px 14px; display:flex; align-items:center; gap:12px;">' +
-                      '<span style="font-weight:800; font-family:monospace; font-size:0.95rem; color:' + accent + ';">' + escapeHTML(g.start) + '</span>' +
-                      (whenLabel ? '<span style="font-size:0.68rem; font-weight:700; color:' + (imminent ? 'var(--accent-primary)' : 'var(--text-muted)') + '; text-transform:uppercase; letter-spacing:1px;">' + whenLabel + '</span>' : '') +
-                      '<span style="flex:1;"></span>' +
-                      '<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted);">' + g.agents.length + ' agent' + (g.agents.length === 1 ? '' : 's') + '</span>' +
-                      '<button class="btn-popout" title="Copy this shift block (ID + name)" onclick="event.stopPropagation(); event.preventDefault(); copyShiftBlock(\'' + escapeHTML(g.start).replace(/'/g, "\\'") + '\')"><i data-lucide="copy" width="13"></i></button>' +
-                    '</summary>' +
-                    '<div class="soon-grid custom-scrollbar" style="padding:0 14px 14px 14px;">' + chips + '</div>' +
-                    '</details>';
-         }).join('');
-         startingHtml = '<div class="aether-card" style="padding:20px; margin-bottom:24px;"><div class="section-header" style="color:var(--accent-primary);">Upcoming Shifts (later today)<span style="font-size:0.7rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + state.agents.startingSoon.length + ' agent' + (state.agents.startingSoon.length === 1 ? '' : 's') + ' · tap a block to expand</span></div>' + blocks + '</div>';
+     var act = state.agents.active || [];
+     var rows = function(list) { return list.map(function(a) { return renderAgentRow(a, upMap[a.id]); }).join(''); };
+     var term = (state.floorSearch || '').trim();
+     var unit = function(region, label) {
+         var list = act.filter(function(a) { return (a.region || '').indexOf(region) !== -1; }).filter(floorMatch);
+         var nIn = 0, nOut = 0, nBrk = 0;
+         list.forEach(function(a) { var ch = gxChan(a); if (ch === 'inbound') nIn++; else if (ch === 'outbound') nOut++; if (a.onBreakNow) nBrk++; });
+         var hidden = state.regionFilter !== 'All' && state.regionFilter !== region;
+         if (hidden) return '';
+         return '<div class="aether-card mv-chart-card long-list gx-unit">' +
+             '<div class="mv-sec-h">' + label + '<span class="gx-acts"><b>' + list.length + '</b> on shift' +
+               '<button class="btn-popout" title="Copy ' + region + ' roster (name, ID, shift, break)" onclick="copyUnitRoster(\'' + region + '\')"><i data-lucide="copy" width="13"></i></button>' +
+               '<button class="btn-popout" title="Pop out ' + region + '" onclick="openPopout(\'' + region + '\')"><i data-lucide="external-link" width="13"></i></button></span></div>' +
+             '<div class="mv-sec-sub">' + nIn + ' inbound · ' + nOut + ' outbound · ' + nBrk + ' on break</div>' +
+             (list.length ? '<div class="agent-list-view gx-list">' + rows(list) + '</div>' : mvEmpty('users', term ? 'No one matches' : 'No one on shift', term ? 'Try a name, ID, supervisor or queue.' : '')) + '</div>';
+     };
+     var units = unit('Onshore', 'Onshore unit') + unit('Offshore', 'Offshore unit');
+     var html = '';
+     var safe = (state.agents.safe || []).filter(floorMatch);
+     if (safe.length) html += sectionCard('SAFE', '<span class="cnum">' + safe.length + '</span>', 'agents on the SAFE role', '<div class="agent-list-view gx-list">' + rows(safe) + '</div>', { cls: 'gx-unit mv-row' });
+     html += '<div class="' + (state.regionFilter === 'All' ? 'grid-split ' : '') + 'mv-row gx-floor">' + units + '</div>';
+     var need = (state.agents.unplanned || []).filter(floorMatch);
+     var planned = [].concat(state.agents.vacation || [], state.agents.training || [], state.agents.planned || []).filter(floorMatch);
+     html += '<div class="grid-split mv-row gx-floor">' +
+         sectionCard('Needs attention', '<span class="cnum">' + need.length + '</span>', 'unplanned absences today', need.length ? '<div class="agent-list-view gx-list">' + rows(need) + '</div>' : mvEmpty('check-circle', 'No unplanned absences', ''), { cls: 'gx-unit' + (need.length > 12 ? ' long-list' : '') }) +
+         sectionCard('Planned / support', '<span class="cnum">' + planned.length + '</span>', 'vacation, training and planned time off', planned.length ? '<div class="agent-list-view gx-list">' + rows(planned) + '</div>' : mvEmpty('calendar', 'Nothing planned today', ''), { cls: 'gx-unit gx-dim' + (planned.length > 12 ? ' long-list' : '') }) +
+         '</div>';
+     if (term) {
+         var off = (state.agents.off || []).filter(floorMatch);
+         if (off.length) html += sectionCard('Offline / not active', '<span class="cnum">' + off.length + '</span>', 'matches among agents who are not on shift', '<div class="agent-list-view gx-list">' + rows(off) + '</div>', { cls: 'gx-unit gx-dim mv-row' + (off.length > 12 ? ' long-list' : '') });
      }
-     var offHtml = '';
-     if (state.floorSearch && state.floorSearch.trim() !== '') { 
-         var offAgents = state.agents.off || []; var offRendered = renderGroup(offAgents, upMap); 
-         if (offRendered) { offHtml = '<div class="group-header" style="opacity:0.6;"><i data-lucide="power-off" width="14"></i> Offline / Not Active</div><div class="agent-list-view" style="opacity:0.6; margin-bottom:30px;">' + offRendered + '</div>'; } 
-     }
-     
-     var html = startingHtml +
-         ((state.agents.safe || []).length ? '<div class="group-header"><i data-lucide="shield" width="14"></i> SAFE</div><div style="margin-bottom:24px;"><div class="aether-card special-group" style="padding:20px;"><div class="agent-list-view">' + renderGroup(state.agents.safe||[], upMap) + '</div></div></div>' : '') +
-         '<div class="grid-split" style="align-items:start;"><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Onshore Unit<button class="btn-popout" title="Copy Onshore roster (TID + status)" onclick="copyUnitRoster(\'Onshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Onshore" onclick="openPopout(\'Onshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Onshore')!==-1;}), upMap) + '</div></div></div><div style="display:flex; flex-direction:column; gap:20px;"><div class="aether-card" style="padding:24px;"><div class="section-header">Offshore Unit<button class="btn-popout" title="Copy Offshore roster (XID + status)" onclick="copyUnitRoster(\'Offshore\')"><i data-lucide="copy" width="14"></i></button><button class="btn-popout" title="Popout Offshore" onclick="openPopout(\'Offshore\')"><i data-lucide="external-link" width="14"></i></button></div><div class="agent-list-view">' + renderGroup((state.agents.active||[]).filter(function(a){return (a.region||'').indexOf('Offshore')!==-1;}), upMap) + '</div></div></div></div>' +
-         '<div class="group-header"><i data-lucide="calendar" width="14"></i> Planned / Support</div><div class="agent-list-view" style="opacity:0.8;">' + renderGroup([].concat(state.agents.vacation||[], state.agents.training||[], state.agents.planned||[]), upMap) + '</div>' +
-         '<div class="group-header alert"><i data-lucide="alert-triangle" width="14"></i> Needs Attention</div><div class="agent-list-view" style="margin-bottom:30px;">' + (renderGroup(state.agents.unplanned || [], upMap) || '<div style="padding:10px; color:var(--text-muted); font-size:0.9rem;">No unplanned absences.</div>') + '</div>' + offHtml;
      return html;
   }
-  
+
   // One matcher for every Floor list, so the search box and the On/Off toggle
   // narrow the whole page consistently. Previously each list rolled its own and
   // the Upcoming Shifts chips consulted neither.
@@ -2351,90 +2349,72 @@
       fallbackCopyTextToClipboard(buildRosterText(list), 'Copied ' + list.length + ' agent' + (list.length === 1 ? '' : 's') + ' (' + startStr + ')');
   };
 
-  // Genesys tag + queue chips under the status — the queue board's per-agent
-  // detail, now on the one roster row. Chips copy the full queue name.
+  // Channel cell: In / Out tag (swatch matches the headline split) and the
+  // first queues. Chips copy the full queue name.
   function agentGenesysLine(a) {
-      if (!(a.genesys && a.genesys.channel)) return '';
-      var isIn = a.genesys.channel === 'inbound';
-      var flag = '<span class="gen-flag"><svg width="7" height="11" viewBox="0 0 30 50" fill="currentColor">' + GENESYS_LOGOMARK_PATHS + '</svg>GENESYS · ' + (isIn ? 'IN' : 'OUT') + '</span>';
-      var chips = '';
+      var ch = gxChan(a);
+      if (!ch) return '<div class="gx-chan"></div>';
+      var isIn = ch === 'inbound', P = mvPal();
+      var h = '<span class="gx-tag"><i style="background:' + (isIn ? P.s1 : P.s2) + ';"></i>' + (isIn ? 'In' : 'Out') + '</span>';
       if (isIn) {
           var qs = a.genesys.queues || [];
           if (qs.length) {
-              chips = qs.slice(0, 3).map(function(q) { return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
-              if (qs.length > 3) chips += '<span class="qchip more" title="' + escapeHTML(qs.slice(3).join(', ')) + '">+' + (qs.length - 3) + '</span>';
+              // As many chips as fit the cell (by name length), then "+n".
+              var shown = [], used = 0;
+              for (var qi = 0; qi < qs.length && shown.length < 2; qi++) { if (shown.length && used + qs[qi].length > (qs.length > 2 ? 17 : 22)) break; shown.push(qs[qi]); used += qs[qi].length; }
+              h += shown.map(function(q) { return '<span class="qchip" title="Click to copy: ' + escapeHTML(GENESYS_QUEUE_PREFIX + q) + '" onclick="copyQueueName(event, \'' + escapeHTML(q) + '\')">' + escapeHTML(q) + '</span>'; }).join('');
+              if (qs.length > shown.length) h += '<span class="qchip more" title="' + escapeHTML(qs.slice(shown.length).join(', ')) + '">+' + (qs.length - shown.length) + '</span>';
           } else {
-              chips = '<span style="color:var(--status-warn); font-size:0.72rem; font-weight:700;">No queue yet</span>';
+              h += '<span class="gx-noq"><i data-lucide="alert-triangle" width="12"></i>No queue</span>';
           }
       }
-      return '<div class="qrow" style="margin-top:3px; align-items:center;">' + flag + chips + '</div>';
+      return '<div class="gx-chan">' + h + '</div>';
   }
 
+  // One roster row: dot · name (ID + attributes under it) · status (and what
+  // is next) · channel + queues · shift or break window. Plain "Active"
+  // recedes so breaks, absences and shift ends are what the eye lands on.
   function renderAgentRow(a, upInfo) {
      var start = "00:00", end = "00:00";
      if (a.shift && a.shift.indexOf("?") === -1) { var parts = a.shift.split(' - '); if(parts.length===2){ start=parts[0]; end=parts[1]; } }
-     var stripClass = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
-     // Same absence list as the server's Needs Attention rule — this was missing
-     // UNAB, COMP, ALU, LOA and BEREAVEMENT, so even a correctly-bucketed UNAB or
-     // TI LOA row rendered without the red alert strip.
-     if(a.subStatus && a.subStatus.match(/SICK|NCNS|\bUNAB\b|AWOL|\bCOMPU?\b|\bALU\b|\bLOA\b|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/i)) stripClass = 'alert';
-     if(a.onBreakNow) stripClass = 'break';
-     var statusText = escapeHTML(a.subStatus) || "Active";
-     var statusColor = "var(--text-secondary)";
-     if (a.role && a.role.indexOf('SAFE') !== -1) { statusColor = "var(--status-active)"; }
-     if (a.role && a.role.indexOf('ICL') !== -1) { statusColor = "var(--status-role)"; }
-     if (a.role && (a.role.indexOf('ULC') !== -1 || a.role.indexOf('FIRE') !== -1)) { statusColor = "var(--status-ulc)"; }
-     if (a.onBreakNow) { statusColor = "var(--status-break)"; statusText = escapeHTML(a.subStatus); }
+     var dot = (a.region || '').indexOf('Onshore') !== -1 ? 'on' : 'off';
+     // Same absence list as the server's Needs Attention rule.
+     if(a.subStatus && a.subStatus.match(/SICK|NCNS|\bUNAB\b|AWOL|\bCOMPU?\b|\bALU\b|\bLOA\b|PW\/ALT|PERSONAL|WELLNESS|BEREAVEMENT/i)) dot = 'alert';
+     if(a.onBreakNow) dot = 'break';
+     var quiet = !a.subStatus && !a.onBreakNow;
+     var statusText = escapeHTML(a.subStatus) || 'Active';
+     var next = [];
+     if (a.onBreakNow && a.timer) next.push(escapeHTML(a.timer) + ' left');
+     else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) next.push(escapeHTML(upInfo.nextBreakType) + ' in ' + escapeHTML(upInfo.startsIn));
+     if (a.shiftEndsIn) next.push('<span class="gx-ends">shift ends in ' + escapeHTML(a.shiftEndsIn) + '</span>');
 
-     var breakHtml = "";
-     if (a.onBreakNow && a.currentBreakStr) { 
-         breakHtml += '<div style="font-size:0.75rem; opacity:0.8; margin-top:2px; color:var(--text-main); font-weight:500;">from ' + escapeHTML(a.currentBreakStr) + ' • Remaining: <span style="font-weight:800; color:var(--status-break);">' + escapeHTML(a.timer) + '</span></div>'; 
-     } else if (upInfo && upInfo.nextBreakType && upInfo.startsIn) { 
-         breakHtml += '<div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px; font-weight:500;"><span style="background:var(--card-bg); padding:2px 6px; border-radius:4px; border:1px solid var(--glass-border); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--text-main);">UPCOMING</span>' + escapeHTML(upInfo.nextBreakType) + ' in <span style="font-weight:800; color:var(--text-main);">' + escapeHTML(upInfo.startsIn) + '</span></div>'; 
-     }
-     if (a.shiftEndsIn) { 
-         breakHtml += '<div style="font-size:0.7rem; color:var(--status-alert); margin-top:2px; font-weight:500;"><span style="background:rgba(220, 38, 38, 0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(220, 38, 38, 0.2); font-size:0.65rem; margin-right:6px; font-weight:800; color:var(--status-alert);">SHIFT ENDS</span>in <span style="font-weight:800;">' + escapeHTML(a.shiftEndsIn) + '</span></div>'; 
-     }
-
-     // Default to Onshore prefix (T) when region is unset; only mark x for explicit Offshore.
-     var prefix = (a.region || '').indexOf('Offshore') !== -1 ? 'x' : 'T';
-     var formattedId = prefix + escapeHTML(a.id || '');
+     var formattedId = escapeHTML(fmtAgentId(a));
      var timeDisplay = escapeHTML(start) + "–" + escapeHTML(end);
-     var timeStyle = '';
-     if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') { timeDisplay = "OFF"; }
-     // While on break/lunch, show the break window itself in the right-hand
-     // time slot, color-matched to the break-status accent. Reads at a glance
-     // as "this person is out from X until Y" instead of generic shift hours.
-     if (a.onBreakNow && a.currentBreakStr) {
-         timeDisplay = escapeHTML(a.currentBreakStr);
-         timeStyle = 'color: var(--status-break); background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.18);';
-     }
+     if (!a.shift || a.shiftType === 'Off' || a.subStatus === 'Scheduled Off') timeDisplay = "Off";
+     // While on break/lunch the time slot shows the break window itself:
+     // "out from X until Y" instead of the shift hours.
+     var onBrk = a.onBreakNow && a.currentBreakStr;
+     if (onBrk) timeDisplay = escapeHTML(a.currentBreakStr).replace(/ - /, '–');
 
-     // The old hover card was unreachable: .agent-tooltip is absolutely positioned
-     // inside .row-name, which is overflow:hidden, so it was always clipped. The
-     // attributes now render on the row itself, and the title attribute carries
-     // the detail (supervisor, skills) that doesn't fit.
      var attrTitle = [];
      if (a.level) attrTitle.push('Level ' + a.level);
      if (a.lang) attrTitle.push(a.lang);
      if (a.manager) attrTitle.push('Sup: ' + a.manager);
      if (a.region) attrTitle.push(a.region);
      if (a.skills) attrTitle.push(prettySkills(a.skills));
-     var attrsHtml = '<div class="row-attrs" title="' + escapeHTML(attrTitle.join(' · ')) + '">' +
-                     agentLvlChip(a.level) + agentLangChip(a.lang) + agentRoleChips(a) +
-                     ((a.manager) ? '<span class="attr-chip sup" title="Supervisor: ' + escapeHTML(a.manager) + '">' + escapeHTML(String(a.manager).split(/[ ,]/)[0]) + '</span>' : '') +
-                     '</div>';
+     var meta = '<div class="gx-meta" title="' + escapeHTML(attrTitle.join(' · ')) + '">' +
+                '<span class="gx-id" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Copy ID">' + formattedId + '</span>' +
+                agentLvlChip(a.level) + agentLangChip(a.lang) + agentRoleChips(a) +
+                (a.manager ? '<span class="attr-chip sup" title="Supervisor: ' + escapeHTML(a.manager) + '">' + escapeHTML(String(a.manager).split(/[ ,]/)[0]) + '</span>' : '') + '</div>';
 
-     var html = '<div class="agent-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
-                '<div class="status-dot ' + stripClass + '"></div>' +
-                '<div class="row-name">' + escapeHTML(a.name || '') + '</div>' +
-                attrsHtml +
-                '<div style="display:flex; align-items:center; width:80px; cursor:pointer;" onclick="copyAgentInfo(event, \'' + formattedId + '\')" title="Click to Copy ID"><span class="row-id" style="text-decoration:underline dashed var(--glass-border); text-underline-offset:4px; font-weight:700; color:var(--text-muted); transition:0.2s;" onmouseover="this.style.color=\'var(--accent-primary)\'" onmouseout="this.style.color=\'var(--text-muted)\'">' + formattedId + '</span></div>' +
-                '<div class="row-status" style="color:' + statusColor + ';"><div><span style="font-weight:700;">' + statusText + '</span> ' + (a.isOT ? '<span style="font-size:0.7em; border:1px solid currentColor; padding:0 3px; border-radius:3px; margin-left:4px;">OT</span>' : '') + '</div>' + agentGenesysLine(a) + breakHtml + '</div>' +
-                '<div class="row-time" style="' + timeStyle + '">' + timeDisplay + '</div></div>';
-     return html;
+     return '<div class="agent-row gx-row" data-agent="' + encodeURIComponent(a.name || '') + '" onclick="openMenuFromRow(event, this)">' +
+            '<div class="status-dot ' + dot + '"></div>' +
+            '<div class="gx-who"><div class="row-name">' + escapeHTML(a.name || '') + '</div>' + meta + '</div>' +
+            '<div class="gx-mid"><div class="row-status' + (quiet ? ' quiet' : '') + '"><span class="st">' + statusText + (a.isOT ? '<span class="gx-ot">OT</span>' : '') + '</span>' +
+              (next.length ? '<span class="nx">' + next.join(' · ') + '</span>' : '') + '</div>' + agentGenesysLine(a) + '</div>' +
+            '<div class="row-time' + (onBrk ? ' brk' : '') + '">' + timeDisplay + '</div></div>';
   }
-  
+
   // Read the agent off the element instead of interpolating the name into an
   // inline handler — that was a SyntaxError for any name with an apostrophe.
   window.openMenuFromRow = function(e, el) {
@@ -2993,87 +2973,116 @@
       return sectionCard('Lunches and breaks stacking today', side, 'agents on lunch or break at the same time, per 15 min · Onshore and Offshore · SL and ACK readings on hover · dashed line = now', body, { cls: 'dash-lunch mv-row' });
   }
   
+  // ───────────── WEATHER ─────────────
+  function wxNum(v) { var n = parseFloat(String(v == null ? '' : v)); return isFinite(n) ? n : null; }
+  // Forecast temps arrive as "5°" from the server; strip the unit so it is never doubled.
+  function wxDeg(v) { var s = String(v == null ? '' : v).replace(/°/g, '').trim(); return s === '' || s === '--' ? '—' : escapeHTML(s) + '°'; }
+  function wxCities() { var out = []; Object.keys(state.weather || {}).forEach(function(pv) { (Array.isArray(state.weather[pv]) ? state.weather[pv] : []).forEach(function(c) { out.push({ c: c, prov: pv }); }); }); return out; }
+  window.toggleWxWarn = function(pv) { state.wxOpen = state.wxOpen || {}; state.wxOpen[pv] = !state.wxOpen[pv]; render(); };
+
   function renderWeather() {
-      if (!state.weather || typeof state.weather !== 'object') { return '<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data unavailable</div></div>'; }
+      var head = function(sub) { return pageHeader('Weather', sub, '<button class="mv-text-btn gx-primary" onclick="copyWindTemplate()" title="Winds for the 8 report cities, one per line"><i data-lucide="copy" width="14"></i> Copy winds</button>'); };
+      if (!state.weather || typeof state.weather !== 'object') return head('') + '<div class="aether-card">' + mvEmpty('cloud-off', 'Weather data unavailable', 'The weather feed did not answer. It refreshes on its own.') + '</div>';
       var provs = Object.keys(state.weather);
-      if (provs.length === 0) { return '<div class="aether-card" style="padding:60px; text-align:center;"><div style="font-weight:700; color:var(--text-muted);">Weather data loading...</div></div>'; }
+      if (provs.length === 0) return head('Loading…') + skeletonPage('Loading weather <span>current conditions and the 3-day outlook</span>');
 
-      // Header: what the page covers at a glance, then the action.
-      var allC = []; provs.forEach(function(pv) { (Array.isArray(state.weather[pv]) ? state.weather[pv] : []).forEach(function(c) { allC.push(c); }); });
-      var num = function(v) { var n = parseFloat(String(v == null ? '' : v)); return isFinite(n) ? n : null; };
-      var coldest = allC.filter(function(c) { return num(c.temp) != null; }).sort(function(a, b) { return num(a.temp) - num(b.temp); })[0];
-      var windiest = allC.filter(function(c) { return num(c.wind) != null; }).sort(function(a, b) { return num(b.wind) - num(a.wind); })[0];
-      var facts = [allC.length + ' cities · ' + provs.length + ' provinces'];
-      facts.push((state.alerts || []).length ? '<b style="color:var(--status-alert);">' + state.alerts.length + ' province' + (state.alerts.length === 1 ? '' : 's') + ' under warning</b>' : 'no active warnings');
-      if (coldest) facts.push('coldest ' + escapeHTML(coldest.name || '') + ' ' + num(coldest.temp) + '°');
-      if (windiest) facts.push('windiest ' + escapeHTML(windiest.name || '') + ' ' + num(windiest.wind) + ' km/h');
-      var html = '<div class="sticky-header" style="justify-content:space-between; align-items:center;"><div><h2 style="margin:0; font-size:1.3rem;">Weather</h2><div style="font-size:0.76rem; color:var(--text-muted); margin-top:4px; font-weight:600;">' + facts.join(' · ') + '</div></div><button class="btn btn-primary" onclick="copyWindTemplate()"><i data-lucide="copy" width="16"></i> Copy winds</button></div><div class="grid-masonry">';
-      
-      if (state.alerts && state.alerts.length > 0) {
-         html += '<div class="aether-card" style="grid-column: 1 / -1;"><div class="section-header" style="color:var(--status-alert); border-bottom-color:rgba(220,38,38,0.2);">⚠️ Active Warnings (RED-level) — tap a province to expand</div><div style="display:flex; flex-direction:column; gap:8px;">';
-         state.alerts.forEach(function(a) {
-             var prov = escapeHTML(a.province || '—');
-             var hazards = a.hazards || [];
-             var zones = a.zoneCount || 0;
-             var severe = (a.topRank || 0) >= 80;               // tornado / blizzard / winter storm / surge
-             var provBg = severe ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.07)';
+      var all = wxCities();
+      var live = all.filter(function(x) { return wxNum(x.c.temp) != null; });
+      var coldest = live.slice().sort(function(a, b) { return wxNum(a.c.temp) - wxNum(b.c.temp); })[0];
+      var windiest = all.filter(function(x) { return wxNum(x.c.wind) != null; }).sort(function(a, b) { return wxNum(b.c.wind) - wxNum(a.c.wind); })[0];
+      var alerts = state.alerts || [];
+      var facts = ['<b>' + all.length + ' cities</b> · ' + provs.length + ' provinces', alerts.length ? '<b>' + alerts.length + ' province' + (alerts.length === 1 ? '' : 's') + ' under warning</b>' : 'no active warnings'];
+      if (coldest) facts.push('coldest ' + escapeHTML(coldest.c.name || '') + ' ' + wxNum(coldest.c.temp) + '°');
+      if (windiest) facts.push('windiest ' + escapeHTML(windiest.c.name || '') + ' ' + wxNum(windiest.c.wind) + ' km/h');
+      var html = head(facts.join(' · '));
 
-             // Hazard chips (each: "Wind warning ×12").
-             var chips = hazards.map(function(h) {
-                 var hot = (h.rank || 0) >= 70;
-                 return '<span style="background:' + (hot ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.08)') + '; color:var(--status-alert); padding:2px 8px; border-radius:6px; font-size:0.72rem; font-weight:700; white-space:nowrap;">' +
-                        escapeHTML(h.type || 'Warning') + (h.count ? ' <span style="opacity:0.7;">×' + h.count + '</span>' : '') + '</span>';
-             }).join('');
-
-             // Expanded detail: per hazard, the actual affected region names (or an
-             // honest note when the feed doesn't provide them).
-             var details = hazards.map(function(h) {
-                 var areas = h.areas || [];
-                 var body = areas.length
-                     ? areas.map(function(x){ return escapeHTML(x); }).join(', ')
-                     : (h.count || 0) + ' affected ' + ((h.count === 1) ? 'zone' : 'zones') + ' (specific region names not provided by the alert feed)';
-                 return '<div style="padding:6px 0; border-top:1px solid var(--glass-border);">' +
-                        '<span style="font-weight:800; color:var(--status-alert); font-size:0.8rem;">' + escapeHTML(h.type || 'Warning') + '</span>' +
-                        '<div style="color:var(--text-muted); font-size:0.78rem; margin-top:3px; line-height:1.4;">' + body + '</div></div>';
-             }).join('');
-
-             html += '<details style="background:var(--bg-root); border:1px solid var(--status-alert); border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(220,38,38,0.08);">' +
-                       '<summary style="list-style:none; cursor:pointer; padding:10px 14px; display:flex; align-items:center; gap:12px;">' +
-                         '<span style="background:' + provBg + '; color:var(--status-alert); padding:3px 10px; border-radius:6px; font-weight:800; font-size:0.8rem; letter-spacing:1px; flex-shrink:0;">' + prov + '</span>' +
-                         '<span style="display:flex; gap:6px; flex-wrap:wrap; flex:1; min-width:0;">' + chips + '</span>' +
-                         '<span title="Distinct affected zones" style="color:var(--text-muted); font-weight:700; font-size:0.74rem; white-space:nowrap; flex-shrink:0;">' + zones + (zones !== 1 ? ' zones' : ' zone') + '</span>' +
-                       '</summary>' +
-                       '<div style="padding:2px 14px 12px 14px;">' + details + '</div>' +
-                     '</details>';
-         });
-         html += '</div></div>';
+      if (alerts.length) {
+          var openMap = state.wxOpen || {};
+          var rows = alerts.map(function(a) {
+              var pv = a.province || '—', open = !!openMap[pv], hazards = a.hazards || [], zones = a.zoneCount || 0;
+              var names = hazards.map(function(h) { return '<span class="wx-hz">' + escapeHTML(h.type || 'Warning') + (h.count ? ' <small>×' + h.count + '</small>' : '') + '</span>'; }).join('');
+              var detail = open ? '<div class="wx-warn-d">' + hazards.map(function(h) {
+                  var areas = h.areas || [];
+                  return '<div class="wx-warn-a"><b>' + escapeHTML(h.type || 'Warning') + '</b><span>' + (areas.length ? areas.map(function(x) { return escapeHTML(x); }).join(', ') : (h.count || 0) + ' affected zone' + (h.count === 1 ? '' : 's') + ' — the feed gives no region names') + '</span></div>';
+              }).join('') + '</div>' : '';
+              return '<div class="wx-warn' + (open ? ' open' : '') + '"><button class="wx-warn-h" onclick="toggleWxWarn(\'' + escapeHTML(pv).replace(/'/g, "\\'") + '\')">' +
+                     '<i data-lucide="chevron-right" width="14" class="gx-chev"></i><span class="wx-pv">' + escapeHTML(pv) + '</span>' +
+                     '<i data-lucide="alert-triangle" width="14" class="wx-ic"></i><span class="wx-hzs">' + names + '</span>' +
+                     ((a.topRank || 0) >= 80 ? mvBadge('bad', 'zap', 'Severe') : '') +
+                     '<span class="wx-z">' + zones + ' zone' + (zones === 1 ? '' : 's') + '</span></button>' + detail + '</div>';
+          }).join('');
+          html += sectionCard('Active warnings', '<span class="cnum">' + alerts.length + '</span>', 'red-level alerts from Environment Canada · open a province for the affected areas', '<div class="wx-warns">' + rows + '</div>', { cls: 'wx-warn-card' });
       } else {
-         html += '<div class="aether-card" style="grid-column: 1 / -1; padding:20px; display:flex; align-items:center; gap:12px; opacity:0.8;"><i data-lucide="check-circle" style="color:var(--status-active);"></i><span style="font-weight:700; color:var(--text-muted);">No active warnings or watches in key regions.</span></div>';
+          html += '<div class="aether-card wx-calm"><i data-lucide="check-circle" width="18"></i><span><b>No active warnings</b> in the monitored provinces.</span></div>';
       }
-      
-      for(var i=0; i<provs.length; i++) {
-         var prov = provs[i]; var cities = state.weather[prov]; if (!cities || !Array.isArray(cities)) continue;
-         cities.forEach(function(c) {
-             var icon = getWeatherIcon(c.condition);
-             var th = weatherTheme(c.condition);
-             var forecastHtml = (c.forecast || []).slice(0,3).map(function(f) { var dayName = f.day ? escapeHTML(String(f.day).substring(0,3)) : "---"; return '<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">' + dayName + '</span><div style="color:var(--text-main);">' + getWeatherIcon(f.cond, true) + '</div><span style="font-size:0.9rem; font-weight:800; color:var(--text-main);">' + (f.temp == null || f.temp === '' ? '—' : escapeHTML(String(f.temp)) + '°') + '</span></div>'; }).join('');
-             html += '<div class="aether-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="cursor:pointer; transition:0.2s; background:' + th.bg + ', var(--card-bg);"><i data-lucide="' + th.ico + '" class="wx-big ' + th.anim + '" width="84"></i><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;"><span style="font-weight:800; font-size:1.1rem;">' + escapeHTML(c.name || '') + '</span><span class="region-tag" style="margin:0; background:rgba(0,0,0,0.05); color:var(--text-muted); padding:2px 8px; border-radius:8px; font-size:0.75rem;">' + escapeHTML(prov) + '</span></div><div style="display:flex; justify-content:space-between; align-items:flex-end;"><div style="display:flex; flex-direction:column; gap:4px;"><div style="font-size:3rem; font-weight:800; line-height:1; letter-spacing:-2px;">' + (c.temp == null || c.temp === '' ? '—' : escapeHTML(String(c.temp)) + '°') + '</div><div style="display:flex; align-items:center; gap:6px; color:' + th.chip + '; font-weight:700; font-size:0.9rem;">' + icon + ' ' + escapeHTML(c.condition || '') + '</div></div><div style="text-align:right; display:flex; flex-direction:column; gap:4px;"><div style="font-size:1.4rem; font-weight:700;">' + escapeHTML(String(c.wind == null ? '—' : c.wind).replace(/\s*km\/h/i, '')) + '</div><div class="kpi-label" style="font-size:0.7rem; color:var(--text-muted); font-weight:800; text-transform:uppercase;">wind · km/h</div></div></div><div style="display:flex; justify-content:space-between; margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-border);">' + (forecastHtml || '<div style="width:100%; text-align:center; font-size:0.8rem; color:var(--text-muted);">Forecast Unavailable</div>') + '</div></div>';
-         });
-      }
-      html += '</div>'; return html;
+
+      html += '<div class="wx-grid">' + all.map(function(x) {
+          var c = x.c, th = weatherTheme(c.condition), down = wxNum(c.temp) == null;
+          var wind = wxNum(c.wind);
+          var fc = (c.forecast || []).slice(0, 3).map(function(f) {
+              return '<div class="wx-fd"><span class="d">' + (f.day ? escapeHTML(String(f.day).substring(0, 3)) : '—') + '</span>' +
+                     (f.cond ? getWeatherIcon(f.cond, true) : '') + '<b>' + wxDeg(f.temp) + '</b>' +
+                     (wxNum(f.wind) != null ? '<span class="w"><i data-lucide="wind" width="11"></i>' + wxNum(f.wind) + '</span>' : '') + '</div>';
+          }).join('');
+          return '<div class="aether-card wx-card" onclick="openWeatherModal(\'' + escapeHTML(c.id) + '\')" style="--wx-tint:' + th.tint + ';">' +
+                 '<i data-lucide="' + th.ico + '" class="wx-big ' + th.anim + '" width="92" style="color:' + th.chip + ';"></i>' +
+                 '<div class="wx-top"><span class="wx-city">' + escapeHTML(c.name || '') + '</span><span class="wx-prov">' + escapeHTML(x.prov) + '</span></div>' +
+                 (down ? '<div class="wx-down"><i data-lucide="cloud-off" width="16"></i> Unavailable right now</div>' :
+                 '<div class="wx-main"><div class="wx-temp"><span class="cnum">' + wxDeg(c.temp) + '</span></div>' +
+                   '<div class="wx-wind"><b>' + (wind != null ? wind : '—') + '</b><span>km/h wind</span></div></div>' +
+                 '<div class="wx-cond"><i data-lucide="' + th.ico + '" width="15" style="color:' + th.chip + ';"></i><span>' + escapeHTML(c.condition || '') + '</span>' +
+                   (wind != null && wind >= 40 ? mvBadge('bad', 'wind', 'Strong wind') : '') + '</div>') +
+                 '<div class="wx-fc">' + (fc || '<span class="wx-nofc">Forecast unavailable</span>') + '</div></div>';
+      }).join('') + '</div>';
+      return html;
   }
 
-  // Condition theme: tinted gradient + animated watermark, Weather-Network
-  // style but in our palette.
+  // Condition theme: a soft corner tint, the watermark icon and its one-shot
+  // motion (the watermark loops only while the card is hovered).
   function weatherTheme(cond) {
       var c = (cond || '').toLowerCase();
-      if (c.indexOf('storm') !== -1 || c.indexOf('thunder') !== -1) return { ico: 'cloud-lightning', anim: 'wx-flash', chip: '#818cf8', bg: 'linear-gradient(150deg, rgba(129,140,248,0.22), rgba(244,114,182,0.07) 55%, transparent 75%)' };
-      if (c.indexOf('snow') !== -1 || c.indexOf('flurr') !== -1) return { ico: 'snowflake', anim: 'wx-spin', chip: '#38bdf8', bg: 'linear-gradient(150deg, rgba(186,230,253,0.30), rgba(148,163,184,0.08) 55%, transparent 75%)' };
-      if (c.indexOf('rain') !== -1 || c.indexOf('shower') !== -1 || c.indexOf('drizzle') !== -1) return { ico: 'cloud-rain', anim: 'wx-bob', chip: '#0ea5e9', bg: 'linear-gradient(150deg, rgba(56,189,248,0.20), rgba(99,102,241,0.06) 55%, transparent 75%)' };
-      if (c.indexOf('sun') !== -1 || c.indexOf('clear') !== -1) return { ico: 'sun', anim: 'wx-spin-slow', chip: '#f59e0b', bg: 'linear-gradient(150deg, rgba(251,191,36,0.25), rgba(251,146,60,0.07) 55%, transparent 75%)' };
-      if (c.indexOf('fog') !== -1 || c.indexOf('mist') !== -1) return { ico: 'cloud-fog', anim: 'wx-bob', chip: '#94a3b8', bg: 'linear-gradient(150deg, rgba(148,163,184,0.22), transparent 65%)' };
-      return { ico: 'cloud', anim: 'wx-bob', chip: '#64748b', bg: 'linear-gradient(150deg, rgba(148,163,184,0.16), transparent 65%)' };
+      if (c.indexOf('storm') !== -1 || c.indexOf('thunder') !== -1) return { ico: 'cloud-lightning', anim: 'wx-flash', chip: '#818cf8', tint: 'rgba(129,140,248,0.16)' };
+      if (c.indexOf('snow') !== -1 || c.indexOf('flurr') !== -1) return { ico: 'snowflake', anim: 'wx-spin', chip: '#38bdf8', tint: 'rgba(125,211,252,0.18)' };
+      if (c.indexOf('rain') !== -1 || c.indexOf('shower') !== -1 || c.indexOf('drizzle') !== -1) return { ico: 'cloud-rain', anim: 'wx-bob', chip: '#0ea5e9', tint: 'rgba(56,189,248,0.14)' };
+      if (c.indexOf('sun') !== -1 || c.indexOf('clear') !== -1) return { ico: 'sun', anim: 'wx-spin-slow', chip: '#f59e0b', tint: 'rgba(251,191,36,0.18)' };
+      if (c.indexOf('fog') !== -1 || c.indexOf('mist') !== -1) return { ico: 'cloud-fog', anim: 'wx-bob', chip: '#94a3b8', tint: 'rgba(148,163,184,0.16)' };
+      return { ico: 'cloud', anim: 'wx-bob', chip: '#64748b', tint: 'rgba(148,163,184,0.12)' };
   }
+
+  // City detail, built when opened (nothing pre-rendered per card).
+  window.openWeatherModal = function(id) {
+      var hit = null; wxCities().forEach(function(x) { if (String(x.c.id) === String(id)) hit = x; });
+      if (!hit) return;
+      var c = hit.c, th = weatherTheme(c.condition);
+      var warn = (state.alerts || []).filter(function(a) { return a.province === hit.prov; })[0];
+      var m = document.getElementById('wx-modal');
+      if (!m) {
+          m = document.createElement('div'); m.id = 'wx-modal'; m.className = 'modal-blur';
+          m.onclick = function() { closeWeatherModal(); };
+          document.body.appendChild(m);
+          document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeWeatherModal(); });
+      }
+      var fc = (c.forecast || []).map(function(f) {
+          return '<tr><td>' + escapeHTML(f.day || '—') + '</td><td class="n">' + wxDeg(f.temp) + '</td><td class="n">' + (wxNum(f.wind) != null ? wxNum(f.wind) + ' km/h' : '—') + '</td></tr>';
+      }).join('');
+      m.innerHTML = '<div class="modal-window wx-modal" onclick="event.stopPropagation()">' +
+          '<div class="wx-m-h"><div><div class="wx-m-p">' + escapeHTML(hit.prov) + '</div><h3>' + escapeHTML(c.name || '') + '</h3></div>' +
+          '<button class="mv-icon-btn" onclick="closeWeatherModal()" title="Close"><i data-lucide="x" width="16"></i></button></div>' +
+          '<div class="wx-m-now"><i data-lucide="' + th.ico + '" width="34" style="color:' + th.chip + ';"></i><span class="t">' + wxDeg(c.temp) + '</span>' +
+          '<span class="c">' + escapeHTML(c.condition || '') + '<small>wind ' + escapeHTML(formatWindString(c.wind) || '—') + '</small></span></div>' +
+          (fc ? '<table class="mv-table wx-m-t"><thead><tr><th>Day</th><th class="n">High</th><th class="n">Max wind</th></tr></thead><tbody>' + fc + '</tbody></table>' : '') +
+          (warn ? '<div class="wx-m-w"><div class="wx-m-wh"><i data-lucide="alert-triangle" width="14"></i> ' + escapeHTML(hit.prov) + ' warnings</div>' + (warn.hazards || []).map(function(h) {
+              return '<div class="wx-warn-a"><b>' + escapeHTML(h.type || 'Warning') + '</b><span>' + ((h.areas || []).length ? h.areas.map(function(x) { return escapeHTML(x); }).join(', ') : (h.count || 0) + ' zones') + '</span></div>';
+          }).join('') + '</div>' : '') +
+          '<div class="wx-m-a"><button class="mv-text-btn" onclick="copyCityWind(\'' + escapeHTML(c.id) + '\')"><i data-lucide="wind" width="14"></i> Copy this wind</button>' +
+          '<button class="mv-text-btn gx-primary" onclick="closeWeatherModal()">Done</button></div></div>';
+      refreshIcons();
+      requestAnimationFrame(function() { m.classList.add('open'); });
+  };
+  window.closeWeatherModal = function() { var m = document.getElementById('wx-modal'); if (m) m.classList.remove('open'); };
+  window.copyCityWind = function(id) {
+      wxCities().forEach(function(x) { if (String(x.c.id) === String(id)) fallbackCopyTextToClipboard(formatWindString(x.c.wind), 'Copied wind: ' + x.c.name); });
+  };
 
   function getWeatherIcon(cond, isSmall) {
       var c = (cond || "").toLowerCase(); var i = "cloud";
@@ -3082,30 +3091,90 @@
       return '<i data-lucide="' + i + '" width="20"></i>';
   }
 
-  function renderScripts() {
-     var cats = new Set(); var scriptArr = state.scripts || [];
-     for(var i=0; i<scriptArr.length; i++) { if ((scriptArr[i].category || "General") !== "All") cats.add(scriptArr[i].category || "General"); }
-     var categories = Array.from(cats).sort(); categories.unshift("All");
-     var catList = categories.map(function(c) { return '<button onclick="state.selectedCategory=\'' + escapeHTML(c) + '\'; state.selectedScriptId=null; render();" class="ctx-item" style="width:100%; text-align:left; padding:12px 16px; margin-bottom:6px; border-radius:12px; transition:0.2s; ' + (state.selectedCategory===c ? 'background:var(--accent-primary); color:#fff; font-weight:800;' : 'color:var(--text-main); font-weight:600;') + '"><i data-lucide="' + (c === 'All' ? 'layers' : 'folder') + '" width="16" style="margin-right:10px; vertical-align:middle; opacity:0.8;"></i> ' + escapeHTML(c) + '</button>'; }).join('');
-
-     var filtered = scriptArr.filter(function(s) { var st = s.title || ""; var sb = s.body || ""; var matchSearch = !state.searchTerm || st.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1 || sb.toLowerCase().indexOf(state.searchTerm.toLowerCase()) !== -1; var matchCat = state.selectedCategory === "All" || (s.category || "General") === state.selectedCategory; return matchSearch && matchCat; });
-     var scriptListHTML = filtered.map(function(s) { var isActive = state.selectedScriptId === s.index; var titleSafe = escapeHTML(s.title || "Untitled"); var catSafe = escapeHTML(s.category || "General"); var bodySafe = escapeHTML(String(s.body || "").replace(/\n/g, ' ')); return '<div onclick="state.selectedScriptId=' + s.index + '; render();" class="aether-card hover-bg" style="padding:16px; cursor:pointer; margin-bottom:12px; border:2px solid ' + (isActive ? 'var(--accent-primary)' : 'var(--glass-border)') + '; box-shadow: ' + (isActive ? '0 8px 25px rgba(99,102,241,0.2)' : 'none') + ';"><div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; font-weight:800;">' + catSafe + '</div><div style="font-weight:800; font-size:1.05rem; color:var(--text-main); margin-bottom:6px;">' + titleSafe + '</div><div style="font-size:0.85rem; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + bodySafe + '</div></div>'; }).join('') || '<div style="text-align:center; padding:40px; color:var(--text-muted); font-weight:600;">No scripts found.</div>';
-
-     var activeScriptHTML = '<div class="aether-card" style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); border: 2px dashed var(--glass-border); background: transparent; box-shadow: none;"><i data-lucide="file-code" width="48" style="opacity:0.3; margin-bottom:16px;"></i><h3 style="margin:0;">No Script Selected</h3><p style="font-size:0.9rem;">Select a script from the list to view, copy, or edit.</p></div>';
-     if (state.selectedScriptId !== null) {
-         var activeScript = null; for(var j=0; j<scriptArr.length; j++) { if(scriptArr[j].index === state.selectedScriptId) { activeScript = scriptArr[j]; break; } }
-         if (activeScript) {
-             var titleSafe = escapeHTML(activeScript.title || "Untitled"); var catSafe = escapeHTML(activeScript.category || "General"); var bodySafe = escapeHTML(String(activeScript.body || ""));
-             activeScriptHTML = '<div class="aether-card" style="height:100%; display:flex; flex-direction:column; padding:0; overflow:hidden;"><div style="padding:24px 32px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:flex-start; background:rgba(0,0,0,0.02);"><div><div style="font-size:0.75rem; font-weight:800; color:var(--accent-primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">' + catSafe + '</div><div style="font-weight:800; font-size:1.8rem; color:var(--text-main); line-height:1.2;">' + titleSafe + '</div></div><div style="display:flex; gap:10px;"><button class="btn btn-primary" onclick="copyScript(' + activeScript.index + ')"><i data-lucide="copy" width="16"></i> Copy</button><button class="btn btn-glass" onclick="editScript(' + activeScript.index + ')"><i data-lucide="edit-2" width="16"></i> Edit</button><button class="btn btn-glass" style="color:var(--status-alert); border-color:var(--status-alert);" onclick="delScript(' + activeScript.index + ')"><i data-lucide="trash-2" width="16"></i></button></div></div><div style="padding:32px; flex:1; overflow-y:auto; background:var(--bg-root);"><pre style="margin:0; font-family:monospace; font-size:1rem; color:var(--text-secondary); white-space:pre-wrap; line-height:1.7; word-wrap:break-word;">' + bodySafe + '</pre></div></div>';
-         }
-     }
-     return '<div style="display:flex; height:calc(100vh - 140px); gap:24px; align-items:stretch;"><div style="width:260px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;"><div class="aether-card script-col" style="padding:20px 16px; flex:1; overflow-y:auto; overflow-x:hidden;"><div class="section-header" style="margin-bottom:16px;">Library</div><div style="display:flex; flex-direction:column;">' + catList + '</div></div><button class="btn btn-primary" style="height:52px; font-size:1rem; border-radius:16px;" onclick="openComposeMode()"><i data-lucide="plus" width="20"></i> New Script</button></div><div style="width:380px; display:flex; flex-direction:column; gap:16px; flex-shrink:0;">' + searchBox('script-search', 'Search scripts...', escapeHTML(state.searchTerm), 'handleScriptSearch(this.value)', 'flex-shrink:0;', 'height:48px;') + '<div class="script-col" style="flex:1; overflow-y:auto; overflow-x:hidden; padding-right:12px; padding-bottom:20px;">' + scriptListHTML + '</div></div><div style="flex:1; display:flex; flex-direction:column; min-width:0;">' + activeScriptHTML + '</div></div>';
+  // ───────────── SCRIPTS (team library) ─────────────
+  // Search hits are wrapped in <mark>; the raw text is split on the term so
+  // escaping never cuts through an entity.
+  function scHl(raw, term) {
+      raw = String(raw == null ? '' : raw);
+      if (!term) return escapeHTML(raw);
+      var lo = raw.toLowerCase(), t = term.toLowerCase(), out = '', i = 0, j;
+      while ((j = lo.indexOf(t, i)) !== -1) { out += escapeHTML(raw.slice(i, j)) + '<mark>' + escapeHTML(raw.slice(j, j + t.length)) + '</mark>'; i = j + t.length; }
+      return out + escapeHTML(raw.slice(i));
   }
+  // One-line preview: around the first hit in the body when searching.
+  function scSnippet(body, term) {
+      var flat = String(body || '').replace(/\s+/g, ' ').trim();
+      var at = term ? flat.toLowerCase().indexOf(term.toLowerCase()) : -1;
+      if (at > 40) flat = '…' + flat.slice(at - 30);
+      return scHl(flat.slice(0, 160), term);
+  }
+  window.pickScriptCat = function(el) {
+      var c = 'All'; try { c = decodeURIComponent(el.getAttribute('data-cat') || 'All'); } catch (e) {}
+      state.selectedCategory = c; state.selectedScriptId = null; render();
+  };
+  window.pickScript = function(idx) { state.selectedScriptId = idx; render(); };
+  window.copyScriptFromList = function(e, idx) { e.stopPropagation(); copyScript(idx); };
 
+  function renderScripts() {
+     var arr = state.scripts || [];
+     var term = (state.searchTerm || '').trim();
+     var counts = {};
+     arr.forEach(function(s) { var c = s.category || 'General'; counts[c] = (counts[c] || 0) + 1; });
+     var categories = Object.keys(counts).filter(function(c) { return c !== 'All'; }).sort();
+     if (state.selectedCategory !== 'All' && !counts[state.selectedCategory]) state.selectedCategory = 'All';
+     var filtered = arr.filter(function(s) {
+         var hit = !term || String(s.title || '').toLowerCase().indexOf(term.toLowerCase()) !== -1 || String(s.body || '').toLowerCase().indexOf(term.toLowerCase()) !== -1;
+         return hit && (state.selectedCategory === 'All' || (s.category || 'General') === state.selectedCategory);
+     });
+     var sub = '<b>' + arr.length + ' script' + (arr.length === 1 ? '' : 's') + '</b> · ' + categories.length + ' categor' + (categories.length === 1 ? 'y' : 'ies') +
+               (term ? '<span class="mv-cmp">' + filtered.length + ' match “' + escapeHTML(term) + '”</span>' : '<span class="mv-cmp">shared with the whole team</span>');
+     var header = pageHeader('Scripts', sub,
+         searchBox('script-search', 'Search titles and text…', escapeHTML(state.searchTerm), 'handleScriptSearch(this.value)', 'width:260px;', 'height:36px; font-size:0.84rem;') +
+         '<button class="mv-text-btn gx-primary" onclick="openComposeMode()"><i data-lucide="plus" width="15"></i> New script</button>');
+     if (!arr.length) {
+         return header + '<div class="aether-card sc-first">' + mvEmpty('file-text', 'No scripts yet', 'Greetings, outage wording, escalation lines — save them here once and the whole team can copy them in one click.') +
+                '<button class="mv-text-btn gx-primary" onclick="openComposeMode()"><i data-lucide="plus" width="15"></i> Write the first script</button></div>';
+     }
+
+     var catBtn = function(c, n) {
+         var on = state.selectedCategory === c;
+         return '<button class="sc-cat' + (on ? ' on' : '') + '" data-cat="' + encodeURIComponent(c) + '" onclick="pickScriptCat(this)" aria-pressed="' + on + '"><i data-lucide="' + (c === 'All' ? 'layers' : 'folder') + '" width="15"></i><span>' + (c === 'All' ? 'All scripts' : escapeHTML(c)) + '</span><b>' + n + '</b></button>';
+     };
+     var cats = '<nav class="aether-card sc-cats"><div class="sc-h">Categories</div><div class="sc-cat-list custom-scrollbar">' + catBtn('All', arr.length) + categories.map(function(c) { return catBtn(c, counts[c]); }).join('') + '</div></nav>';
+
+     var items = filtered.map(function(s, i) {
+         var on = state.selectedScriptId === s.index;
+         return '<div class="sc-item' + (on ? ' on' : '') + '" style="--i:' + Math.min(i, 24) + ';" onclick="pickScript(' + s.index + ')">' +
+                '<div class="t">' + scHl(s.title || 'Untitled', term) + '</div>' +
+                '<div class="p">' + (state.selectedCategory === 'All' ? '<span class="c">' + escapeHTML(s.category || 'General') + '</span>' : '') + scSnippet(s.body, term) + '</div>' +
+                '<button class="sc-copy mv-icon-btn" title="Copy script" onclick="copyScriptFromList(event, ' + s.index + ')"><i data-lucide="copy" width="14"></i></button></div>';
+     }).join('');
+     var listTitle = state.selectedCategory === 'All' ? 'All scripts' : escapeHTML(state.selectedCategory);
+     var list = '<div class="aether-card sc-list"><div class="sc-h">' + listTitle + '<span>' + filtered.length + '</span></div>' +
+                '<div class="sc-items custom-scrollbar">' + (items || mvEmpty('search-x', 'No scripts match', term ? 'Nothing in ' + listTitle.toLowerCase() + ' contains “' + escapeHTML(term) + '”.' : 'This category is empty.')) + '</div></div>';
+
+     var active = null;
+     if (state.selectedScriptId !== null) arr.forEach(function(s) { if (s.index === state.selectedScriptId) active = s; });
+     var reader;
+     if (active) {
+         var body = String(active.body || '');
+         var words = body.trim() ? body.trim().split(/\s+/).length : 0;
+         reader = '<article class="aether-card sc-reader">' +
+             '<div class="sc-rh"><div class="sc-rt"><div class="sc-rc">' + escapeHTML(active.category || 'General') + '</div><h3>' + escapeHTML(active.title || 'Untitled') + '</h3>' +
+             '<div class="sc-meta">' + words + ' word' + (words === 1 ? '' : 's') + ' · ' + body.split('\n').length + ' line' + (body.split('\n').length === 1 ? '' : 's') + '</div></div>' +
+             '<div class="sc-acts"><button class="mv-text-btn gx-primary" onclick="copyScript(' + active.index + ')"><i data-lucide="copy" width="14"></i> Copy</button>' +
+             '<button class="mv-text-btn" onclick="editScript(' + active.index + ')"><i data-lucide="pencil" width="14"></i> Edit</button>' +
+             '<button class="mv-icon-btn sc-del" title="Delete script" onclick="delScript(' + active.index + ')"><i data-lucide="trash-2" width="15"></i></button></div></div>' +
+             '<div class="sc-body custom-scrollbar">' + scHl(body, term) + '</div></article>';
+     } else {
+         reader = '<article class="aether-card sc-reader sc-none">' + mvEmpty('mouse-pointer-click', 'Pick a script', 'Choose one from the list to read it, copy it in one click or edit it.') + '</article>';
+     }
+     return header + '<div class="sc-grid">' + cats + list + reader + '</div>';
+  }
   window.toggleNewCategoryInput = function() { var sel = document.getElementById('new-script-cat-select'); var inp = document.getElementById('new-script-cat-input'); if(!sel || !inp) return; if(sel.value === '__NEW__') { inp.style.display = 'block'; inp.focus(); } else { inp.style.display = 'none'; inp.value = ""; } };
-  window.openComposeMode = function() { document.getElementById('compose-overlay').classList.add('open'); state.editingId = null; document.getElementById('compose-title').innerText = "Create New Script"; document.getElementById('new-script-title').value = ""; document.getElementById('new-script-body').value = ""; var cats = new Set(); var scriptArr = state.scripts || []; for(var i=0; i<scriptArr.length; i++) { cats.add(scriptArr[i].category || "General"); } var optionsHtml = Array.from(cats).sort().map(function(c){return '<option value="' + escapeHTML(c) + '">' + escapeHTML(c) + '</option>';}).join(''); optionsHtml += '<option value="__NEW__" style="font-weight:800; color:var(--accent-primary);">➕ Create New Category...</option>'; var sel = document.getElementById('new-script-cat-select'); if(sel) { sel.innerHTML = optionsHtml; var targetCat = state.selectedCategory !== "All" ? state.selectedCategory : "General"; if(!cats.has(targetCat)) targetCat = "General"; sel.value = targetCat; } toggleNewCategoryInput(); };
+  window.openComposeMode = function() { document.getElementById('compose-overlay').classList.add('open'); state.editingId = null; document.getElementById('compose-title').innerText = "New script"; document.getElementById('new-script-title').value = ""; document.getElementById('new-script-body').value = ""; var cats = new Set(); var scriptArr = state.scripts || []; for(var i=0; i<scriptArr.length; i++) { cats.add(scriptArr[i].category || "General"); } var optionsHtml = Array.from(cats).sort().map(function(c){return '<option value="' + escapeHTML(c) + '">' + escapeHTML(c) + '</option>';}).join(''); optionsHtml += '<option value="__NEW__">+ New category…</option>'; var sel = document.getElementById('new-script-cat-select'); if(sel) { sel.innerHTML = optionsHtml; var targetCat = state.selectedCategory !== "All" ? state.selectedCategory : "General"; if(!cats.has(targetCat)) targetCat = "General"; sel.value = targetCat; } toggleNewCategoryInput(); };
   window.closeComposeMode = function() { document.getElementById('compose-overlay').classList.remove('open'); state.editingId = null; };
-  window.editScript = function(idx) { var s = null; var scriptArr = state.scripts || []; for(var i=0; i<scriptArr.length; i++) { if(scriptArr[i].index === idx) { s = scriptArr[i]; break; } } if(!s) return; openComposeMode(); document.getElementById('compose-title').innerText = "Edit Script"; state.editingId = s.index; document.getElementById('new-script-title').value = s.title || ""; document.getElementById('new-script-body').value = s.body || ""; var sel = document.getElementById('new-script-cat-select'); var cat = s.category || "General"; if(sel) { var found = false; for(var j=0; j<sel.options.length; j++) { if(sel.options[j].value === cat) { found = true; break; } } if(found) { sel.value = cat; } else { sel.value = '__NEW__'; var inp = document.getElementById('new-script-cat-input'); if(inp) inp.value = cat; } } toggleNewCategoryInput(); };
+  window.editScript = function(idx) { var s = null; var scriptArr = state.scripts || []; for(var i=0; i<scriptArr.length; i++) { if(scriptArr[i].index === idx) { s = scriptArr[i]; break; } } if(!s) return; openComposeMode(); document.getElementById('compose-title').innerText = "Edit script"; state.editingId = s.index; document.getElementById('new-script-title').value = s.title || ""; document.getElementById('new-script-body').value = s.body || ""; var sel = document.getElementById('new-script-cat-select'); var cat = s.category || "General"; if(sel) { var found = false; for(var j=0; j<sel.options.length; j++) { if(sel.options[j].value === cat) { found = true; break; } } if(found) { sel.value = cat; } else { sel.value = '__NEW__'; var inp = document.getElementById('new-script-cat-input'); if(inp) inp.value = cat; } } toggleNewCategoryInput(); };
   window.copyScript = function(idx) { var s = null; var scriptArr = state.scripts || []; for(var i=0; i<scriptArr.length; i++) { if(scriptArr[i].index === idx) { s = scriptArr[i]; break; } } if(s) fallbackCopyTextToClipboard(s.body || "", "Script Copied!"); };
   window.delScript = function(idx) { if(confirm("Are you sure you want to delete this script? This action cannot be undone.")) { if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(function() { showToast("Script Deleted"); if(state.selectedScriptId === idx) state.selectedScriptId = null; google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e){} }).fetchScripts(); }).deleteTeamScript(idx); } else { var newArr = []; for(var i=0; i<state.scripts.length; i++) { if(state.scripts[i].index !== idx) newArr.push(state.scripts[i]); } state.scripts = newArr; if(state.selectedScriptId === idx) state.selectedScriptId = null; render(); } } };
   window.addScript = function() { var t = document.getElementById('new-script-title').value; var b = document.getElementById('new-script-body').value; var sel = document.getElementById('new-script-cat-select'); var inp = document.getElementById('new-script-cat-input'); var finalCat = "General"; if(sel) { finalCat = (sel.value === '__NEW__' ? (inp ? inp.value.trim() : "General") : sel.value) || "General"; } if(!t || !b) { showToast("Title and script content are required!"); return; } if(typeof google !== 'undefined') { google.script.run.withSuccessHandler(function() { closeComposeMode(); showToast("Saved to Library"); google.script.run.withSuccessHandler(function(res) { try { state.scripts = JSON.parse(res); render(); } catch(e){} }).fetchScripts(); }).saveTeamScript(state.editingId, t, b, finalCat); } };
@@ -6026,43 +6095,46 @@
   };
 
   function ponrVerdictHtml(r, target, withStats) {
-      var stat = function(label, value, color) {
-          return '<div style="flex:1; min-width:140px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px; padding:12px 16px;"><div style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px;">' + label + '</div><div style="font-size:1.5rem; font-weight:800; color:' + (color || 'var(--text-main)') + '; font-variant-numeric:tabular-nums; margin-top:4px;">' + value + '</div></div>';
-      };
       // `target` is really the upper STRESS LIMIT (e.g. 30s): at or above it we
       // can't release furlough / off-queue. It is NOT a goal to reach. `required`
       // = the average ACK the REST of the day can run before the day-end ACK
       // crosses that limit.
-      var wrap = function(bg, bd, col, icon, txt) {
-          return '<div style="margin-top:14px; padding:14px 18px; border-radius:12px; background:' + bg + '; border:1px solid ' + bd + '; color:' + col + '; font-weight:800; display:flex; align-items:center; gap:10px;"><i data-lucide="' + icon + '" width="20"></i> ' + txt + '</div>';
+      var verdict = function(tone, icon, head, txt) {
+          return '<div class="cx-verdict ' + tone + '"><span class="ic"><i data-lucide="' + icon + '" width="16"></i></span><div><b>' + head + '</b> — ' + txt + '</div></div>';
       };
       var reqTxt = r.required > 600 ? 'far above the limit' : ('≈ ' + r.required.toFixed(1) + 's');
       var banner;
       if (r.floor > target || r.required < 0) {
-          banner = wrap('rgba(220,38,38,0.10)', 'var(--status-alert)', 'var(--status-alert)', 'alert-octagon',
-              'OVER THE ' + target + 's LIMIT — even instant ACKs land the day at ' + r.floor.toFixed(1) + 's. At/above ' + target + 's, furlough &amp; off-queue come off the table.');
+          banner = verdict('bad', 'alert-octagon', 'Over the ' + target + 's limit', 'even instant ACKs land the day at ' + r.floor.toFixed(1) + 's. At or above ' + target + 's, furlough &amp; off-queue come off the table.');
       } else if (r.required < target) {
           // Must run TIGHTER than the limit for the rest of the day to stay under.
           var warn = r.required < target * 0.6;
-          banner = wrap(warn ? 'rgba(217,119,6,0.10)' : 'rgba(5,150,105,0.10)', warn ? 'var(--status-warn)' : 'var(--status-active)', warn ? 'var(--status-warn)' : 'var(--status-active)', warn ? 'alert-triangle' : 'check-circle',
-              (warn ? 'Tight — ' : 'On track — ') + 'keep the rest of the day averaging ≤ ' + r.required.toFixed(1) + 's to finish under the ' + target + 's limit.');
+          banner = verdict(warn ? 'warn' : 'good', warn ? 'alert-triangle' : 'check-circle', warn ? 'Tight' : 'On track',
+              'keep the rest of the day averaging ≤ ' + r.required.toFixed(1) + 's to finish under the ' + target + 's limit.');
       } else {
           // required ≥ limit → comfortable headroom.
-          banner = wrap('rgba(5,150,105,0.10)', 'var(--status-active)', 'var(--status-active)', 'check-circle',
-              'Comfortable — well under the ' + target + 's limit. The rest of the day would have to average ' + reqTxt + ' to breach it.');
+          banner = verdict('good', 'check-circle', 'Comfortable', 'well under the ' + target + 's limit. The rest of the day would have to average ' + reqTxt + ' to breach it.');
       }
       if (!withStats) return banner;
-      return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px;">' +
-          stat('Remaining Alarms (proj.)', Math.round(r.remaining * 100) / 100) +
-          stat('Breach threshold (rest-of-day avg)', r.required < 0 ? 'past' : (r.required > 600 ? '>600s' : r.required.toFixed(1) + 's'), r.floor > target ? 'var(--status-alert)' : (r.required < target ? 'var(--status-warn)' : 'var(--status-active)')) +
-          stat('Best possible day-end', r.floor.toFixed(1) + 's', r.floor > target ? 'var(--status-alert)' : 'var(--text-main)') +
+      var stat = function(label, value, note) { return '<div class="cx-stat"><span class="k">' + label + '</span><b>' + value + '</b>' + (note ? '<small>' + note + '</small>' : '') + '</div>'; };
+      return '<div class="cx-stats cx-stats-3">' +
+          stat('Remaining alarms (projected)', Math.round(r.remaining * 100) / 100) +
+          stat('Breach threshold', r.required < 0 ? 'past' : (r.required > 600 ? '>600s' : r.required.toFixed(1) + 's'), 'rest-of-day average') +
+          stat('Best possible day-end', r.floor.toFixed(1) + 's', r.floor > target ? 'over the limit' : 'if the rest were instant') +
           '</div>' + banner;
+  }
+
+  function calcHourLabel(h) {
+      if (h == null || !isFinite(h)) return '';
+      var hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+      return ((hh % 12) || 12) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM');
   }
 
   function renderPonrCard() {
       var lc = state.lastCalc || {};
       var auto = (lc.burgActual > 0 && lc.burgAckSec != null && lc.updateHour != null);
       var target = ponrTarget();
+      var title = '<span class="cx-ponr-t"><i data-lucide="timer" width="17"></i> Point of no return</span>';
 
       // What-if mode: the manual form, prefilled from the last calculation.
       if (state.ponrWhatIf) {
@@ -6071,50 +6143,86 @@
           var n = new Date();
           var timePre = auto ? lc.updateHour.toFixed(2) : (n.getHours() + Math.floor(n.getMinutes() / 15) * 0.25).toFixed(2);
           var input = function(id, label, value, placeholder, extra) {
-              return '<div style="flex:1; min-width:150px;"><label style="font-size:0.68rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">' + label + '</label><div style="display:flex; gap:6px; margin-top:6px;">' +
-                     '<input id="' + id + '" type="number" step="any" class="input-aether" style="height:38px; font-weight:700; font-variant-numeric:tabular-nums;" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</div></div>';
+              return '<label class="cx-field"><span>' + label + '</span><span class="cx-in">' +
+                     '<input id="' + id + '" type="number" step="any" class="input-aether" value="' + value + '" placeholder="' + placeholder + '" oninput="updatePonr()">' + (extra || '') + '</span></label>';
           };
-          return '<div class="aether-card" style="margin-bottom:24px; padding:24px;">' +
-              '<div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> Point of No Return — What-if</span><button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="togglePonrWhatIf()">Back to automatic</button></div>' +
-              '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">' +
+          return '<div class="aether-card cx-ponr">' +
+              '<div class="cx-ponr-h">' + title + '<span class="cx-pill">What-if</span><span style="flex:1;"></span><button class="mv-text-btn" onclick="togglePonrWhatIf()"><i data-lucide="corner-up-left" width="14"></i> Back to automatic</button></div>' +
+              '<div class="cx-fields">' +
               input('ponr-ack', 'Current ACK (s)', ackPre, 'e.g. 50') +
-              input('ponr-alarms', 'BURG Alarms Received', alarmsPre, 'e.g. 540') +
-              input('ponr-time', 'Time (decimal)', timePre, '16.25', '<button class="btn btn-glass" style="height:38px; padding:0 10px; font-size:0.72rem; flex-shrink:0;" onclick="ponrSetNow()" title="Set to current quarter-hour">Now</button>') +
+              input('ponr-alarms', 'BURG alarms received', alarmsPre, 'e.g. 540') +
+              input('ponr-time', 'Time (decimal hours)', timePre, '16.25', '<button class="mv-text-btn" onclick="event.preventDefault(); ponrSetNow()" title="Set to the current quarter-hour">Now</button>') +
               input('ponr-target', 'Stress limit (s)', target, '30') +
               '</div><div id="ponr-result"></div></div>';
       }
 
-      // Automatic mode: nothing to fill in. Before the first calculation,
-      // just a one-line hint; after, the verdict banner.
-      var headRight = '<span style="display:flex; align-items:center; gap:10px;">' +
-          '<label style="font-size:0.65rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;" title="Upper stress limit — at/above this we can\'t release furlough or off-queue. Not a goal to hit.">Limit (s)</label>' +
-          '<input type="number" step="any" class="input-aether" style="width:70px; height:28px; font-size:0.8rem; font-weight:800; text-align:center;" value="' + target + '" onchange="setPonrTarget(this.value)">' +
-          '<button class="btn btn-glass" style="height:28px; font-size:0.72rem;" onclick="togglePonrWhatIf()">What-if</button></span>';
+      var headRight = '<span class="cx-limit"><label title="Upper stress limit — at/above this we can\'t release furlough or off-queue. Not a goal to hit.">Limit</label>' +
+          '<input type="number" step="any" class="input-aether" value="' + target + '" onchange="setPonrTarget(this.value)"><span>s</span></span>' +
+          '<button class="mv-text-btn" onclick="togglePonrWhatIf()"><i data-lucide="flask-conical" width="14"></i> What-if</button>';
 
       if (!auto) {
-          return '<div class="aether-card" style="margin-bottom:24px; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
-              '<span style="display:flex; align-items:center; gap:10px; font-weight:700; font-size:0.88rem; color:var(--text-muted);"><i data-lucide="timer" width="17"></i> Point of No Return — checked automatically when you run a calculation.</span>' +
-              headRight + '</div>';
+          return '<div class="aether-card cx-ponr cx-ponr-idle"><div class="cx-ponr-h">' + title +
+              '<span class="cx-ponr-hint">checked automatically when you run a calculation</span><span style="flex:1;"></span>' + headRight + '</div></div>';
       }
 
       var r = computePonr(lc.burgAckSec, lc.burgActual, lc.updateHour, target);
-      var detail = '<div style="font-size:0.72rem; color:var(--text-muted); font-weight:600; margin-top:10px;">From your paste: <b style="color:var(--text-main);">' + Number(lc.burgActual).toLocaleString() + '</b> BURG alarms · ACK <b style="color:var(--text-main);">' + lc.burgAckSec + 's</b> · snapshot at <b style="color:var(--text-main);">' + lc.updateHour.toFixed(2) + 'h</b>' + (r ? ' · projected remaining <b style="color:var(--text-main);">' + Math.round(r.remaining) + '</b>' + ((r.required >= 0 && r.floor <= target && r.required < target) ? ' · keep rest ≤ <b style="color:var(--text-main);">' + r.required.toFixed(1) + 's</b> to stay under ' + target + 's' : (r.floor > target ? ' · <b style="color:var(--status-alert);">over the ' + target + 's limit</b>' : ' · comfortable headroom under ' + target + 's')) : '') + '</div>';
-      return '<div class="aether-card" style="margin-bottom:24px; padding:18px 24px;">' +
-          '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">' +
-          '<span style="display:flex; align-items:center; gap:10px; font-weight:800; font-size:0.95rem;"><i data-lucide="timer" width="18" style="color:var(--status-alert);"></i> Point of No Return <span style="font-size:0.62rem; font-weight:800; color:var(--status-active); background:rgba(5,150,105,0.1); padding:2px 8px; border-radius:99px; letter-spacing:1px;">AUTO</span></span>' +
-          headRight + '</div>' +
-          (r ? ponrVerdictHtml(r, target, false) : '<div style="margin-top:12px; color:var(--text-muted); font-size:0.85rem; font-weight:600;">Not enough data in the paste to project (needs BURG volume and a valid snapshot time).</div>') +
+      var detail = '<div class="cx-ponr-d">From your paste: <b>' + Number(lc.burgActual).toLocaleString() + '</b> BURG alarms · ACK <b>' + lc.burgAckSec + 's</b> · snapshot at <b>' + calcHourLabel(lc.updateHour) + '</b>' +
+          (r ? ' · projected remaining <b>' + Math.round(r.remaining) + '</b>' : '') + '</div>';
+      return '<div class="aether-card cx-ponr">' +
+          '<div class="cx-ponr-h">' + title + '<span class="cx-pill">Auto</span><span style="flex:1;"></span>' + headRight + '</div>' +
+          (r ? ponrVerdictHtml(r, target, false) : '<div class="cx-ponr-d">Not enough data in the paste to project (needs BURG volume and a valid snapshot time).</div>') +
           detail + '</div>';
+  }
+
+  // Report preview: the exact text, with the section headers in bold so the
+  // preview reads like the pasted result. Copy buttons use the raw text.
+  function calcReportPreview(text) {
+      return String(text).split('\n').map(function(line) {
+          var h = calcHeaderSplit(line);
+          return h ? '<b>' + calcEsc(h.head) + '</b>' + calcEsc(h.rest) : calcEsc(line);
+      }).join('\n');
   }
 
   function renderCalc() {
      if(!state.calcLibLoaded) fetchCalcTemplate();
-     return renderPonrCard() + '<div class="grid-split"><div class="aether-card"><div class="section-header"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="clipboard-paste" width="17" style="color:var(--accent-primary);"></i> Stats Paste</span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">inbound from Genesys Cloud, outbound from MAS</span></div>' +
-        '<label class="paste-label"><i data-lucide="phone-incoming" width="13"></i> Inbound — Genesys Cloud (External ASA / SL / LCW)</label>' +
-        '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…"></textarea>' +
-        '<label class="paste-label" style="margin-top:16px;"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
-        '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…"></textarea>' +
-        '<button class="btn btn-primary" style="width:100%; margin-top:18px; height:42px;" onclick="runCalculation()"><i data-lucide="play" width="16"></i> Run Analysis</button></div><div class="aether-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;"><div style="font-weight:700; margin-bottom:20px; color:var(--text-muted); letter-spacing:1px;">PROJECTED SVL</div>' + (/^-+$|^$/.test(String(state.currentSL || '').trim()) ? '<div style="margin-bottom:40px; display:flex; flex-direction:column; align-items:center; gap:8px;"><div style="font-size:4.5rem; font-weight:800; line-height:1; color:var(--text-muted); opacity:0.35;">—</div><div style="font-size:0.8rem; font-weight:600; color:var(--text-muted);">Paste the stats and run the analysis</div></div>' : '<div style="font-size:6rem; font-weight:800; line-height:1.05; color:var(--text-main); margin-bottom:40px; font-variant-numeric:tabular-nums; letter-spacing:-0.03em;">' + escapeHTML(state.currentSL) + '</div>') + '<div id="report-box" style="width:100%;"><div class="custom-scrollbar" style="background:var(--bg-root); padding:24px; border-radius:24px; text-align:left; font-family:monospace; font-size:0.85rem; max-height:300px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;" id="report-content">' + (state.currentReport && state.currentReport !== '...' ? escapeHTML(state.currentReport) : '<span style="color:var(--text-muted); font-family:var(--font-ui);">The report appears here after a run.</span>') + '</div><div style="display:flex; gap:10px; margin-top:20px;"><button class="btn btn-glass" style="flex:1;" onclick="copyReport()" title="For Google Chat: exact spacing, section headers in bold (Chat can\'t show colours)"><i data-lucide="message-square" width="15"></i> Copy for Chat</button><button class="btn btn-glass" style="flex:1;" onclick="copyReportRich()" title="For Gmail / Docs: section headers in red"><i data-lucide="mail" width="15"></i> Copy Rich (email)</button></div></div></div></div>' + renderCalcTemplateEditor();
+     var lc = state.lastCalc && state.lastCalc.svl ? state.lastCalc : null;
+     var sl = String(state.currentSL || '').trim(), hasSl = !/^-+$|^$/.test(sl);
+     var slNum = parseFloat(sl), target = mgmtSlTarget(), limit = ponrTarget();
+     var sub = lc && lc.updateHour != null ? 'last run on the <b>' + calcHourLabel(lc.updateHour) + '</b> snapshot<span class="mv-cmp">template: ' + escapeHTML(state.calcActive || 'Default') + '</span>'
+             : 'paste the Genesys and MAS pages, run the analysis, then copy the report';
+     var header = pageHeader('Calculator', sub, '');
+
+     var paste = '<div class="aether-card cx-paste">' +
+        '<div class="mv-sec-h">Stats paste<span>inbound from Genesys Cloud · outbound from MAS</span></div>' +
+        '<label class="paste-label" for="in-text"><i data-lucide="phone-incoming" width="13"></i> Inbound — Genesys Cloud (External ASA / SL / LCW)</label>' +
+        '<textarea id="in-text" class="paste-zone custom-scrollbar" placeholder="Paste the Genesys widgets here…" oninput="state.calcIn=this.value">' + escapeHTML(state.calcIn || '') + '</textarea>' +
+        '<label class="paste-label" for="out-text"><i data-lucide="phone-outgoing" width="13"></i> Outbound — Alarm Resp Time</label>' +
+        '<textarea id="out-text" class="paste-zone custom-scrollbar" placeholder="Paste the OUTBOUND page here…" oninput="state.calcOut=this.value">' + escapeHTML(state.calcOut || '') + '</textarea>' +
+        '<button class="btn btn-primary cx-run" onclick="runCalculation()"' + (state.calcRunning ? ' disabled' : '') + '><i data-lucide="' + (state.calcRunning ? 'loader' : 'play') + '" width="16"></i> ' + (state.calcRunning ? 'Calculating…' : 'Run analysis') + '</button></div>';
+
+     var badge = hasSl && isFinite(slNum) ? (slNum >= target ? mvBadge('good', 'check', 'On target') : mvBadge('bad', 'arrow-down-right', 'Below target')) : '';
+     var pct = hasSl && isFinite(slNum) ? Math.max(0, Math.min(100, slNum)) : 0;
+     var resultTop = (hasSl ? '<div class="cx-big"><span class="cnum">' + escapeHTML(sl) + '</span></div>' : '<div class="cx-big cx-dash">No run yet</div><div class="cx-none">Paste both pages on the left and run the analysis</div>') +
+         '<div class="cx-gauge"><div class="cx-track">' + (pct ? '<i style="width:' + pct + '%;"></i>' : '') + '<span class="cx-tick" style="left:' + target + '%;"></span></div>' +
+         '<div class="cx-scale"><span>0%</span><span class="tg" style="left:' + target + '%;">target ' + target + '%</span><span>100%</span></div></div>';
+     // Breakdown: the run's other figures (an empty frame until the first run).
+     var L = lc || {};
+     var ackN = parseFloat(L.ack);
+     var ackNote = isFinite(ackN) ? (ackN >= limit ? '<em class="bad">over the ' + limit + 's limit</em>' : 'under the ' + limit + 's limit') : '';
+     var st = function(k, v, note) { return '<div class="cx-stat"><span class="k">' + k + '</span><b>' + escapeHTML(v == null || v === '' ? '—' : String(v)) + '</b>' + (note ? '<small>' + note + '</small>' : '') + '</div>'; };
+     resultTop += '<div class="cx-stats' + (lc ? '' : ' empty') + '">' +
+         st('SVL in', L.inSVL, lc ? 'Genesys' : '') + st('ACK', L.ack, ackNote) + st('ASA', L.asa) + st('LCW interval', L.lcw) +
+         st('Trend out', L.trendOut, lc ? 'last 60 min' : '') + st('Trend in', L.trendIn) + st('SAFE', L.safe) +
+         st('BURG ACK', L.burgAckSec != null && L.burgActual ? L.burgAckSec + 's' : '', L.burgActual ? Number(L.burgActual).toLocaleString() + ' alarms' : '') + '</div>';
+     var hasReport = state.currentReport && state.currentReport !== '...';
+     var result = '<div class="aether-card cx-result">' +
+        '<div class="mv-k">Projected SVL out' + badge + '</div>' + resultTop +
+        '<div class="cx-rep-h">Report<span>' + escapeHTML(state.calcActive || 'Default') + ' template</span></div>' +
+        '<div id="report-box"><div class="cx-report custom-scrollbar" id="report-content">' + (hasReport ? calcReportPreview(state.currentReport) : '<span class="cx-ph">The report appears here after a run.</span>') + '</div>' +
+        '<div class="cx-copy"><button class="mv-text-btn gx-primary"' + (hasReport ? '' : ' disabled') + ' onclick="copyReport()" title="For Google Chat: exact spacing, section headers in bold (Chat can\'t show colours)"><i data-lucide="message-square" width="14"></i> Copy for Chat</button>' +
+        '<button class="mv-text-btn"' + (hasReport ? '' : ' disabled') + ' onclick="copyReportRich()" title="For Gmail / Docs: section headers in red"><i data-lucide="mail" width="14"></i> Copy Rich (email)</button></div></div></div>';
+
+     return header + renderPonrCard() + '<div class="grid-split cx-row">' + paste + result + '</div>' + renderCalcTemplateEditor();
   }
 
   // Client-side token fill — mirrors buildCalcReport() in CORE/Calculator.gs so
@@ -6146,10 +6254,12 @@
   }
 
   function renderCalcTemplateEditor() {
-     if(!state.calcLibLoaded) return '<div class="aether-card" style="margin-top:24px; color:var(--text-muted); font-weight:600;">Loading report template…</div>';
+     if(!state.calcLibLoaded) return '<div class="aether-card cx-tpl"><div class="cx-tpl-h"><span class="t"><i data-lucide="pencil-ruler" width="16"></i> Report template</span><span class="gx-muted">Loading…</span></div></div>';
      var activeName = state.calcActive || "Default";
-     var header = '<div class="section-header" style="cursor:pointer;" onclick="toggleCalcEditor()"><span style="display:flex; align-items:center; gap:8px;"><i data-lucide="pencil-ruler" width="17" style="color:var(--accent-primary);"></i> Report Template <span style="font-size:0.62rem; font-weight:800; color:var(--accent-primary); background:rgba(99,102,241,0.12); padding:2px 8px; border-radius:99px; letter-spacing:1px;">' + escapeHTML(activeName.toUpperCase()) + '</span></span><span style="font-size:0.68rem; font-weight:700; color:var(--text-muted); text-transform:none;">' + (state.calcEditing ? 'click to collapse' : 'switch or edit report layouts — no redeploy') + '</span></div>';
-     if(!state.calcEditing) return '<div class="aether-card" style="margin-top:24px;">' + header + '</div>';
+     var header = '<div class="cx-tpl-h" onclick="toggleCalcEditor()"><span class="t"><i data-lucide="pencil-ruler" width="16"></i> Report template</span><span class="cx-pill">' + escapeHTML(activeName) + '</span>' +
+        '<span class="gx-muted cx-tpl-hint">' + (state.calcEditing ? '' : 'switch or edit report layouts — no redeploy') + '</span><span style="flex:1;"></span>' +
+        '<button class="mv-text-btn" onclick="event.stopPropagation(); toggleCalcEditor()"><i data-lucide="' + (state.calcEditing ? 'chevron-up' : 'pencil') + '" width="14"></i> ' + (state.calcEditing ? 'Close' : 'Edit') + '</button></div>';
+     if(!state.calcEditing) return '<div class="aether-card cx-tpl">' + header + '</div>';
 
      // Active-template selector (Default built-in + every saved template).
      var opts = '<option value=""' + (state.calcActive === "" ? ' selected' : '') + '>Default (built-in)</option>';
@@ -6159,14 +6269,14 @@
      var isDefault = (state.calcActive === "");
      var body = state.calcEditBody;
      var preview = escapeHTML(applyCalcTemplate(body, calcPreviewStats()));
-     var legend = '{svlOut} {svlIn} {ack} {asa} {lcw} {safe} {trendIn} {trendOut}';
+     var legend = ['svlOut', 'svlIn', 'ack', 'asa', 'lcw', 'safe', 'trendIn', 'trendOut'].map(function(k) { return '<code>{' + k + '}</code>'; }).join('');
 
-     var controls = '<div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">' +
-        '<div style="flex:1; min-width:200px;"><label class="paste-label"><i data-lucide="layers" width="13"></i> Active template (used by the report)</label>' +
-        '<select id="calc-select" class="paste-zone custom-scrollbar" style="height:40px; padding:0 12px;" onchange="calcSelectTemplate(this.value)">' + opts + '</select></div>' +
-        '<button class="btn btn-glass" style="height:40px;" onclick="calcNewTemplate()"><i data-lucide="plus" width="15"></i> New</button>' +
-        '<button class="btn btn-glass" style="height:40px;"' + (isDefault ? ' disabled title="The built-in Default can\'t be renamed"' : '') + ' onclick="calcRenameTemplate()"><i data-lucide="pencil" width="15"></i> Rename</button>' +
-        '<button class="btn btn-glass" style="height:40px;"' + (isDefault ? ' disabled title="The built-in Default can\'t be deleted"' : '') + ' onclick="calcDeleteTemplate()"><i data-lucide="trash-2" width="15"></i> Delete</button>' +
+     var controls = '<div class="cx-tpl-bar">' +
+        '<label class="cx-field cx-grow"><span>Active template (used by the report)</span>' +
+        '<select id="calc-select" class="input-aether cx-select" onchange="calcSelectTemplate(this.value)">' + opts + '</select></label>' +
+        '<button class="mv-text-btn" onclick="calcNewTemplate()"><i data-lucide="plus" width="14"></i> New</button>' +
+        '<button class="mv-text-btn"' + (isDefault ? ' disabled title="The built-in Default can\'t be renamed"' : '') + ' onclick="calcRenameTemplate()"><i data-lucide="pencil" width="14"></i> Rename</button>' +
+        '<button class="mv-text-btn"' + (isDefault ? ' disabled title="The built-in Default can\'t be deleted"' : '') + ' onclick="calcDeleteTemplate()"><i data-lucide="trash-2" width="14"></i> Delete</button>' +
         '</div>';
 
      var editHint = isDefault
@@ -6174,27 +6284,27 @@
         : 'Editing <b>' + escapeHTML(state.calcActive) + '</b>. Placeholders in braces are filled with live values; all other text is literal (add/remove "(Genesys)", flip Coaching Open/Closed, etc.).';
 
      var saveBtn = isDefault
-        ? '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveDefault()"><i data-lucide="save" width="15"></i> Save Default</button>' +
-          '<button class="btn btn-glass" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="copy" width="15"></i> Save As New…</button>'
-        : '<button class="btn btn-primary" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveTemplate()"><i data-lucide="save" width="15"></i> Save "' + escapeHTML(state.calcActive) + '"</button>' +
-          '<button class="btn btn-glass" style="flex:1; min-width:150px; height:40px;" onclick="calcSaveAsNew()"><i data-lucide="copy" width="15"></i> Save As New…</button>';
+        ? '<button class="mv-text-btn gx-primary" onclick="calcSaveDefault()"><i data-lucide="save" width="14"></i> Save Default</button>' +
+          '<button class="mv-text-btn" onclick="calcSaveAsNew()"><i data-lucide="copy" width="14"></i> Save As New…</button>'
+        : '<button class="mv-text-btn gx-primary" onclick="calcSaveTemplate()"><i data-lucide="save" width="14"></i> Save "' + escapeHTML(state.calcActive) + '"</button>' +
+          '<button class="mv-text-btn" onclick="calcSaveAsNew()"><i data-lucide="copy" width="14"></i> Save As New…</button>';
 
      // On the Default, offer a reset-to-factory when it's been customized;
      // elsewhere, a button to pull the Default text into the editor.
      var resetBtn = isDefault
-        ? (state.calcDefaultCustom ? '<button class="btn btn-glass" style="height:40px;" onclick="calcResetDefaultFactory()" title="Discard customizations and restore the factory Default"><i data-lucide="rotate-ccw" width="15"></i> Reset to factory</button>' : '')
-        : '<button class="btn btn-glass" style="height:40px;" onclick="calcResetBody()" title="Load the Default text into the editor"><i data-lucide="rotate-ccw" width="15"></i> Load default text</button>';
+        ? (state.calcDefaultCustom ? '<button class="mv-text-btn" onclick="calcResetDefaultFactory()" title="Discard customizations and restore the factory Default"><i data-lucide="rotate-ccw" width="14"></i> Reset to factory</button>' : '')
+        : '<button class="mv-text-btn" onclick="calcResetBody()" title="Load the Default text into the editor"><i data-lucide="rotate-ccw" width="14"></i> Load default text</button>';
 
-     return '<div class="aether-card" style="margin-top:24px;">' + header + controls +
-        '<div style="font-size:0.72rem; font-weight:700; color:var(--text-muted); margin:4px 0 12px;">' + editHint + ' Available placeholders: <code style="color:var(--text-accent);">' + legend + '</code></div>' +
-        '<div class="grid-split">' +
-          '<div><label class="paste-label"><i data-lucide="code" width="13"></i> Template</label>' +
-          '<textarea id="calc-template" class="paste-zone custom-scrollbar" style="min-height:280px; font-family:monospace;" oninput="calcOnEdit()">' + escapeHTML(body) + '</textarea></div>' +
-          '<div><label class="paste-label"><i data-lucide="eye" width="13"></i> Live preview' + (state.lastCalc && state.lastCalc.svl ? ' (your last run)' : ' (sample values)') + '</label>' +
-          '<div id="calc-template-preview" class="custom-scrollbar" style="background:var(--bg-root); padding:18px; border-radius:18px; font-family:monospace; font-size:0.85rem; min-height:280px; max-height:340px; overflow-y:auto; border:1px solid var(--glass-border); white-space:pre-wrap;">' + preview + '</div></div>' +
+     return '<div class="aether-card cx-tpl open">' + header + controls +
+        '<div class="cx-tpl-hint2">' + editHint + '</div>' +
+        '<div class="cx-legend"><span>Placeholders</span>' + legend + '</div>' +
+        '<div class="grid-split cx-tpl-grid">' +
+          '<div><label class="paste-label" for="calc-template"><i data-lucide="code" width="13"></i> Template</label>' +
+          '<textarea id="calc-template" class="paste-zone custom-scrollbar" oninput="calcOnEdit()">' + escapeHTML(body) + '</textarea></div>' +
+          '<div><div class="paste-label"><i data-lucide="eye" width="13"></i> Live preview' + (state.lastCalc && state.lastCalc.svl ? ' · your last run' : ' · sample values') + '</div>' +
+          '<div id="calc-template-preview" class="cx-report custom-scrollbar">' + preview + '</div></div>' +
         '</div>' +
-        '<div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">' + saveBtn + resetBtn +
-        '</div></div>';
+        '<div class="cx-tpl-save">' + saveBtn + '<span style="flex:1;"></span>' + resetBtn + '</div></div>';
   }
 
   window.toggleCalcEditor = function() { state.calcEditing = !state.calcEditing; if(state.calcEditing) state.calcEditBody = calcActiveBody(); render(); };
@@ -6286,7 +6396,16 @@
   
   window.runCalculation = function() {
      var i = document.getElementById('in-text').value; var o = document.getElementById('out-text').value;
-     if(typeof google!=='undefined') { showToast("Calculating..."); google.script.run.withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; state.lastCalc = d; fetchStats(); render(); }).runCalculator(i, o); } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; render(); }
+     // Keep the paste in state so a re-render (poll, template switch) never wipes it.
+     state.calcIn = i; state.calcOut = o;
+     var done = function() { state.calcRunning = false; render(); animateCountUps(); };
+     if(typeof google!=='undefined') {
+        state.calcRunning = true; render();
+        google.script.run
+           .withSuccessHandler(function(r){ var d=JSON.parse(r); state.currentSL=d.svl; state.currentReport = d.report; state.lastCalc = d; fetchStats(); done(); })
+           .withFailureHandler(function(err){ state.calcRunning = false; render(); showToast("Calculation failed: " + ((err && err.message) || 'unknown')); })
+           .runCalculator(i, o);
+     } else { state.currentSL = "84.5%"; state.currentReport = "STATS UPDATE:\nSVL OUT: 84.5%\n..."; done(); }
   };
 
   // Section headers that get emphasis on copy; the ":" and everything else keep
