@@ -98,27 +98,27 @@
                     </div>
                 </div>
 
-                <button class="action-btn" id="btn-feedback" onclick="openFeedback()" title="Send Feedback — suggestions, ideas, bug reports"><i data-lucide="message-square-plus" width="20"></i></button>
-                <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()" title="Notifications"><i data-lucide="bell" width="20"></i><div id="notif-dot" style="display:none; position:absolute; top:8px; right:8px; width:8px; height:8px; background:var(--status-alert); border-radius:50%;"></div></button>
-                <button class="action-btn" id="btn-insights" onclick="setView('insights')" title="Insights"><i data-lucide="bar-chart-2" width="20"></i></button>
-                <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags">
-                    <i data-lucide="flag" width="20" color="var(--status-alert)" fill="rgba(220, 38, 38, 0.2)"></i>
-                </button>
-                <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region Manager"><i data-lucide="map-pin" width="20"></i></button>
-                <button class="action-btn" id="btn-outage-admin" onclick="openOutageAdmin()" title="Outage URL Settings"><i data-lucide="zap" width="20"></i></button>
-                <button class="action-btn" onclick="openImportModal()" title="Import"><i data-lucide="download" width="20"></i></button>
+                <button class="action-btn" id="btn-feedback" onclick="openFeedback()" title="Send feedback — suggestions, ideas, bug reports" aria-label="Send feedback"><i data-lucide="message-square-plus" width="18"></i></button>
+                <button class="action-btn" id="btn-bell" onclick="toggleNotifPanel()" title="Notifications" aria-label="Notifications"><i data-lucide="bell" width="18"></i><span id="notif-dot" class="notif-dot"></span></button>
+                <span class="action-sep"></span>
+                <button class="action-btn" id="btn-insights" onclick="setView('insights')" title="Master Operations" aria-label="Master Operations"><i data-lucide="bar-chart-2" width="18"></i></button>
+                <button class="action-btn" id="btn-analyzer" onclick="setView('analyzer')" title="Red Flags" aria-label="Red Flags"><i data-lucide="flag" width="18"></i></button>
+                <span class="action-sep"></span>
+                <button class="action-btn" id="btn-region" onclick="openRegionManager()" title="Region manager" aria-label="Region manager"><i data-lucide="map-pin" width="18"></i></button>
+                <button class="action-btn" id="btn-outage-admin" onclick="openOutageAdmin()" title="Outage URL settings" aria-label="Outage URL settings"><i data-lucide="zap" width="18"></i></button>
+                <button class="action-btn" onclick="openImportModal()" title="Import data" aria-label="Import data"><i data-lucide="download" width="18"></i></button>
             </div>
         </header>
         <div id="maint-banner" class="maint-banner" style="display:none;"></div>
         <main class="viewport" id="content"></main>
     </div>
 
-    <div id="notif-panel" class="drawer" style="right:20px; top:80px; bottom:auto; height:500px;">
-        <div class="section-header" style="padding:20px;">
-            <span>Notifications</span>
-            <button class="btn-icon-sm" onclick="toggleNotifPanel()"><i data-lucide="x" width="20"></i></button>
+    <div id="notif-panel" class="notif-pop" role="dialog" aria-label="Notifications">
+        <div class="np-h">
+            <span>Notifications</span><span id="notif-count" class="np-count"></span>
+            <button class="mdl-x" onclick="toggleNotifPanel()" title="Close" aria-label="Close"><i data-lucide="x" width="18"></i></button>
         </div>
-        <div id="notif-list" style="overflow-y:auto; flex:1; padding:0 20px 20px;"></div>
+        <div id="notif-list" class="np-list custom-scrollbar"></div>
     </div>
 
     <div id="agent-menu" class="ctx-menu">
@@ -139,29 +139,36 @@
     <div id="overlay" onclick="closeMenu()" style="position:fixed; inset:0; z-index:400; display:none;"></div>
 
     <div id="import-modal" class="modal-blur" onclick="closeImportModal()">
-       <div class="modal-window" onclick="event.stopPropagation()">
-          <h2 style="margin-top:0;">Import Data <span id="import-build" style="font-size:0.62rem; font-weight:700; color:var(--text-muted); background:rgba(0,0,0,0.05); padding:3px 10px; border-radius:99px; vertical-align:middle; margin-left:8px;">stale build — redeploy needed</span></h2>
-          <textarea id="import-text" class="input-aether" style="height: 200px; padding-top: 16px; resize: none; margin-bottom: 16px;" placeholder="Paste WFM schedule text here... (Also accepts IDP, the open-OT slots JSON, the IEX/BI reports — Activity loading, Alarms, Forecast, SAFE roster — and the Genesys Agent Performance Summary CSV)" oninput="onImportInput()"></textarea>
-          <div id="import-detect" class="imp-detect"></div>
-          <div id="import-health" class="imp-health"></div>
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:20px; padding:10px 14px; background:var(--bg-root); border:1px solid var(--glass-border); border-radius:12px;">
-             <span style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">SAFE report period</span>
-             <select id="safe-period-grain" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;" onchange="onSafeGrainChange()">
-                <option value="day">Day</option>
-                <option value="week">Week (pick dates)</option>
-                <option value="month" selected>Month</option>
-                <option value="quarter">Quarter</option>
-                <option value="ytd">YTD</option>
-                <option value="custom">Custom range</option>
-             </select>
-             <input type="date" id="safe-period-date" class="input-aether" style="width:auto; height:32px; font-size:0.8rem; font-weight:700;">
-             <span id="safe-period-to" style="display:none; font-size:0.75rem; font-weight:700; color:var(--text-muted);">→</span>
-             <input type="date" id="safe-period-end" class="input-aether" style="display:none; width:auto; height:32px; font-size:0.8rem; font-weight:700;">
-             <span id="safe-period-hint" style="font-size:0.68rem; color:var(--text-muted); font-weight:600;">used when pasting a SAFE roster (no dates) or a Genesys agent report (its own interval dates aren't reliable)</span>
+       <div class="modal-window mdl mdl-wide" role="dialog" aria-modal="true" aria-labelledby="import-t" onclick="event.stopPropagation()">
+          <div class="mdl-h">
+             <span class="mdl-ic"><i data-lucide="download" width="18"></i></span>
+             <div class="mdl-tt"><h3 id="import-t">Import data</h3><p>Paste a report and Sync. The type is recognised from the text.</p></div>
+             <button class="mdl-x" onclick="closeImportModal()" title="Close" aria-label="Close"><i data-lucide="x" width="18"></i></button>
           </div>
-          <div style="display:flex; justify-content:flex-end; gap:16px;">
+          <div class="mdl-b">
+             <textarea id="import-text" class="input-aether mdl-paste custom-scrollbar" placeholder="Paste the WFM schedule here… Also accepts IDP, the open-OT slots JSON, the IEX/BI reports (Activity loading, Alarms, Forecast, SAFE roster) and the Genesys Agent Performance Summary CSV." oninput="onImportInput()"></textarea>
+             <div id="import-detect" class="imp-detect"></div>
+             <div id="import-health" class="imp-health"></div>
+             <div class="imp-period">
+                <span class="mdl-label">SAFE / Genesys period</span>
+                <select id="safe-period-grain" class="input-aether" onchange="onSafeGrainChange()">
+                   <option value="day">Day</option>
+                   <option value="week">Week (pick dates)</option>
+                   <option value="month" selected>Month</option>
+                   <option value="quarter">Quarter</option>
+                   <option value="ytd">YTD</option>
+                   <option value="custom">Custom range</option>
+                </select>
+                <input type="date" id="safe-period-date" class="input-aether">
+                <span id="safe-period-to" style="display:none; font-size:0.75rem; font-weight:700; color:var(--text-muted);">→</span>
+                <input type="date" id="safe-period-end" class="input-aether" style="display:none;">
+                <small id="safe-period-hint">used when pasting a SAFE roster (no dates) or a Genesys agent report (its own interval dates aren't reliable)</small>
+             </div>
+          </div>
+          <div class="mdl-f">
+             <span id="import-build" class="mdl-note" title="Deployed build">stale build — redeploy needed</span>
              <button class="btn btn-glass" onclick="closeImportModal()">Cancel</button>
-             <button class="btn btn-primary" onclick="runImportAction()">Sync</button>
+             <button class="btn btn-primary" onclick="runImportAction()"><i data-lucide="upload" width="15"></i> Sync</button>
           </div>
        </div>
     </div>
@@ -340,23 +347,17 @@
     </div>
 
     <div id="region-modal" class="modal-blur" onclick="closeRegionManager()">
-       <div class="modal-window" onclick="event.stopPropagation()" style="width:720px; max-width:95%; padding:0; overflow:hidden;">
-          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
-             <div>
-                <h2 style="margin:0 0 4px 0; font-size:1.25rem;">Region Manager</h2>
-                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Single source of truth for Onshore / Offshore. Manual flips always beat auto-detection.</div>
-             </div>
-             <button class="btn-icon-sm" onclick="closeRegionManager()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+       <div class="modal-window mdl" role="dialog" aria-modal="true" aria-labelledby="region-t" onclick="event.stopPropagation()" style="width:720px;">
+          <div class="mdl-h">
+             <span class="mdl-ic"><i data-lucide="map-pin" width="18"></i></span>
+             <div class="mdl-tt"><h3 id="region-t">Region manager</h3><p id="region-sub">Single source of truth for Onshore / Offshore. Manual flips always beat auto-detection.</p></div>
+             <button class="mdl-x" onclick="closeRegionManager()" title="Close" aria-label="Close"><i data-lucide="x" width="18"></i></button>
           </div>
-          <div style="padding:12px 24px; border-bottom:1px solid var(--glass-border); display:flex; gap:12px; align-items:center;">
-             <input id="region-search" class="input-aether" style="flex:1; height:34px; font-size:0.85rem;" placeholder="Search agent..." oninput="renderRegionManager()">
-             <div style="display:flex; gap:6px;">
-                <button class="btn btn-glass" id="region-filter-all" onclick="state.regionManagerFilter='ALL'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">All</button>
-                <button class="btn btn-glass" id="region-filter-on" onclick="state.regionManagerFilter='Onshore'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">Onshore</button>
-                <button class="btn btn-glass" id="region-filter-off" onclick="state.regionManagerFilter='Offshore'; renderRegionManager();" style="height:34px; padding:0 12px; font-size:0.8rem;">Offshore</button>
-             </div>
+          <div class="mdl-tools">
+             <span class="search-wrap"><i data-lucide="search" width="15"></i><input id="region-search" type="text" class="input-search" style="height:36px; border-radius:11px;" placeholder="Search agent…" oninput="renderRegionManager()"></span>
+             <div id="region-filter"></div>
           </div>
-          <div id="region-list" style="max-height:520px; overflow-y:auto;" class="custom-scrollbar"></div>
+          <div id="region-list" class="mdl-b flush custom-scrollbar" style="max-height:520px;"></div>
        </div>
     </div>
 
@@ -374,36 +375,30 @@
     </div>
 
     <div id="outage-admin-modal" class="modal-blur" onclick="closeOutageAdmin()">
-       <div class="modal-window" onclick="event.stopPropagation()" style="width:640px; max-width:95%; padding:0; overflow:hidden;">
-          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
-             <div>
-                <h2 style="margin:0 0 4px 0; font-size:1.25rem;">Outage URL Settings</h2>
-                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Paste the JSON endpoint each utility uses. Leave blank to disable that source.</div>
-             </div>
-             <button class="btn-icon-sm" onclick="closeOutageAdmin()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+       <div class="modal-window mdl" role="dialog" aria-modal="true" aria-labelledby="outage-admin-t" onclick="event.stopPropagation()" style="width:640px;">
+          <div class="mdl-h">
+             <span class="mdl-ic"><i data-lucide="zap" width="18"></i></span>
+             <div class="mdl-tt"><h3 id="outage-admin-t">Outage URL settings</h3><p>Paste the JSON endpoint each utility uses. Leave blank to disable that source.</p></div>
+             <button class="mdl-x" onclick="closeOutageAdmin()" title="Close" aria-label="Close"><i data-lucide="x" width="18"></i></button>
           </div>
-          <div id="outage-admin-body" style="padding:20px 24px; max-height:560px; overflow-y:auto;" class="custom-scrollbar"></div>
+          <div id="outage-admin-body" class="mdl-b custom-scrollbar" style="max-height:560px;"></div>
        </div>
     </div>
 
     <div id="feedback-modal" class="modal-blur" onclick="closeFeedback()">
-       <div class="modal-window" onclick="event.stopPropagation()" style="width:640px; max-width:95%; padding:0; overflow:hidden;">
-          <div style="padding:20px 24px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center;">
-             <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width:40px; height:40px; border-radius:12px; background:rgba(99,102,241,0.12); display:flex; align-items:center; justify-content:center;"><i data-lucide="message-square-plus" width="20" style="color:var(--accent-primary);"></i></div>
-                <div>
-                   <h2 style="margin:0 0 2px 0; font-size:1.25rem;">Send Feedback</h2>
-                   <div id="feedback-whoami" style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Identifying you…</div>
-                </div>
-             </div>
-             <button class="btn-icon-sm" onclick="closeFeedback()" style="color:var(--text-muted);"><i data-lucide="x" width="18"></i></button>
+       <div class="modal-window mdl" role="dialog" aria-modal="true" aria-labelledby="feedback-t" onclick="event.stopPropagation()" style="width:620px;">
+          <div class="mdl-h">
+             <span class="mdl-ic"><i data-lucide="message-square-plus" width="18"></i></span>
+             <div class="mdl-tt"><h3 id="feedback-t">Send feedback</h3><p id="feedback-whoami">Identifying you…</p></div>
+             <button class="mdl-x" onclick="closeFeedback()" title="Close" aria-label="Close"><i data-lucide="x" width="18"></i></button>
           </div>
-          <div id="feedback-body" style="padding:22px 24px; max-height:600px; overflow-y:auto;" class="custom-scrollbar"></div>
+          <div id="feedback-body" class="mdl-b custom-scrollbar"></div>
+          <div id="feedback-foot" class="mdl-f"></div>
        </div>
     </div>
 
-    <div id="toast" style="position:fixed; bottom:24px; right:24px; background:var(--text-main); color:var(--bg-root); padding:12px 24px; border-radius:12px; font-weight:700; opacity:0; transform:translateY(20px); transition:0.3s; z-index:2000; display:flex; align-items:center; gap:10px;">
-        <i data-lucide="check-circle" width="18"></i>
+    <div id="toast" class="t-ok" role="status" aria-live="polite">
+        <span class="toast-ic"><i data-lucide="check" width="16" class="t-ok"></i><i data-lucide="alert-circle" width="16" class="t-err"></i><i data-lucide="bell" width="16" class="t-info"></i></span>
         <span id="toast-msg">Action Completed</span>
     </div>
 
