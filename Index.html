@@ -49,7 +49,8 @@
         if (typeof window.lucide === 'undefined') tryNext();
       })();
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Pinned: an unversioned URL serves whatever the latest major is, so a Chart.js v5 release could break every chart overnight (same reason Lucide is pinned). -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     

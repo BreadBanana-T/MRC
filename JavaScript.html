@@ -247,28 +247,39 @@
             state.view = 'popout-view'; 
             state.regionFilter = (mode === 'onshore' ? 'Onshore' : (mode === 'offshore' ? 'Offshore' : (mode === 'breaks' ? 'Breaks' : 'All')));
             document.getElementById('content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted); font-weight:700;">Loading Floor...</div>';
-            if (typeof google !== 'undefined') { setInterval(fetchData, 30000); fetchData(); }
+            if (typeof google !== 'undefined') {
+                setInterval(function() { if (!document.hidden) fetchData(); }, 30000); fetchData();
+                document.addEventListener('visibilitychange', function() { if (!document.hidden) fetchData(); });
+            }
             return;
         }
     }
     render(); 
+    // Every poll is skipped while the tab is hidden (no server calls, no
+    // re-renders nobody can see); coming back runs them all once, right away.
+    var polls = [];
+    var every = function(fn, ms) { polls.push(fn); setInterval(function() { if (!document.hidden) fn(); }, ms); };
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) return;
+        polls.forEach(function(fn) { try { fn(); } catch (e) {} });
+    });
     setInterval(updateClock, 1000); 
-    setInterval(fetchData, 60000); 
-    setInterval(fetchNotifications, 15000);
-    setInterval(fetchCalendar, 300000); 
-    setInterval(updateMaintenance, 20000);
-    fetchCoverage(); setInterval(fetchCoverage, 600000);   // data coverage badge (10 min)
-    setInterval(function() { maintTick(true); }, 1000);   // countdown digits + rail
-    setInterval(function() { if(state.view === 'insights') render(); }, 60000); 
+    every(fetchData, 60000); 
+    every(fetchNotifications, 15000);
+    every(fetchCalendar, 300000); 
+    every(updateMaintenance, 20000);
+    fetchCoverage(); every(fetchCoverage, 600000);   // data coverage badge (10 min)
+    setInterval(function() { if (!document.hidden) maintTick(true); }, 1000);   // countdown digits + rail
+    every(function() { if(state.view === 'insights') render(); }, 60000); 
     fetchData(); fetchStats(); fetchNotifications(); fetchCalendar(); fetchTrackerData(); fetchMetadata(); fetchOutages();
     fetchPresenceBootstrap();
     fetchAlarmCom();
     fetchOverviewIdp();
-    setInterval(fetchOverviewIdp, 60000); // 1 min — matches the 15-min IDP bucket granularity
-    setInterval(fetchOutages, 300000); // 5 min
-    setInterval(fetchAlarmCom, 300000); // 5 min — matches the server-side probe cadence
-    setInterval(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
-    setInterval(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
+    every(fetchOverviewIdp, 60000); // 1 min — matches the 15-min IDP bucket granularity
+    every(fetchOutages, 300000); // 5 min
+    every(fetchAlarmCom, 300000); // 5 min — matches the server-side probe cadence
+    every(fetchPresence, 60000); // 1 min heartbeat — "active now" avatars
+    every(fetchLastActions, 120000); // 2 min — refresh "last update by" attribution
   }
 
   function fetchAlarmCom() {
@@ -1391,16 +1402,20 @@
       }
       return d + 'Z M' + (cx + rHole) + ' ' + cy + ' A' + rHole + ' ' + rHole + ' 0 1 0 ' + (cx - rHole) + ' ' + cy + ' A' + rHole + ' ' + rHole + ' 0 1 0 ' + (cx + rHole) + ' ' + cy + ' Z';
   }
-  var MAINT_GEARS = '<svg class="mb-gears" viewBox="0 0 64 64" aria-hidden="true">' +
-      '<path class="mb-gear-a" fill-rule="evenodd" d="' + gearPath(25, 27, 12, 19, 15, 6) + '"/>' +
-      '<path class="mb-gear-b" fill-rule="evenodd" d="' + gearPath(48.5, 46.5, 8, 12, 9, 3.6) + '"/></svg>';
+  // Two stacked SVGs so each gear rotates as its own element (a composited CSS
+  // transform) — rotating paths inside one SVG repainted it every frame.
+  var MAINT_GEARS = '<div class="mb-gears" aria-hidden="true">' +
+      '<svg class="mb-gear mb-gear-a" viewBox="0 0 64 64"><path fill-rule="evenodd" d="' + gearPath(25, 27, 12, 19, 15, 6) + '"/></svg>' +
+      '<svg class="mb-gear mb-gear-b" viewBox="0 0 64 64"><path fill-rule="evenodd" d="' + gearPath(48.5, 46.5, 8, 12, 9, 3.6) + '"/></svg></div>';
 
   function maintMotionOK() {
       return typeof gsap !== 'undefined' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
 
   // Rolling digits: each character sits in a slot; a changed digit slides the
-  // old one up and out while the new one rises in.
+  // old one up and out while the new one rises in. CSS transitions (class
+  // swap), not GSAP — this runs every second for hours, and a CSS transform
+  // transition stays on the compositor.
   function maintSetDigits(box, str, animate) {
       if (!box) return;
       if (box.getAttribute('data-len') !== String(str.length)) {
@@ -1412,26 +1427,29 @@
       for (var i = 0; i < str.length; i++) {
           var ch = str.charAt(i), slot = kids[i];
           if (ch === ':' || !slot || slot.className !== 'mb-slot') continue;
-          // Settle the slot first: any roll still in flight (or queued up while
-          // the tab was in the background, where animation frames pause but the
-          // 1s timer keeps firing) is finished and its leftovers dropped, so a
-          // slot never shows two digits at once.
+          // Settle the slot first: drop any digit still rolling out (or queued
+          // while the tab was in the background), so a slot never shows two.
+          while (slot.children.length > 1) slot.removeChild(slot.firstElementChild);
           var cur = slot.lastElementChild;
-          while (slot.children.length > 1) { if (typeof gsap !== 'undefined') gsap.killTweensOf(slot.firstElementChild); slot.removeChild(slot.firstElementChild); }
-          if (cur && typeof gsap !== 'undefined') { gsap.killTweensOf(cur); gsap.set(cur, { yPercent: 0, opacity: 1 }); }
+          if (cur) cur.className = '';
           if (cur && cur.textContent === ch) continue;
-          var nu = document.createElement('span'); nu.textContent = ch; slot.appendChild(nu);
+          var nu = document.createElement('span'); nu.textContent = ch;
           if (animate && cur && !document.hidden) {
-              gsap.fromTo(nu, { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: 'power3.out' });
-              gsap.to(cur, { yPercent: -100, opacity: 0, duration: 0.45, ease: 'power3.out', onComplete: function() { if (this.targets()[0].parentNode) this.targets()[0].parentNode.removeChild(this.targets()[0]); } });
-          } else if (cur) { slot.removeChild(cur); }
+              nu.className = 'd-in'; slot.appendChild(nu);
+              cur.className = 'd-out';
+              requestAnimationFrame(function(n) { return function() { requestAnimationFrame(function() { n.className = ''; }); }; }(nu));
+              setTimeout(function(o) { return function() { if (o.parentNode) o.parentNode.removeChild(o); }; }(cur), 520);
+          } else {
+              if (cur) slot.removeChild(cur);
+              slot.appendChild(nu);
+          }
       }
   }
 
   var maintShown = null;      // { key, live } currently built in the banner
-  var maintLoops = [];        // running GSAP tweens to kill on rebuild
 
-  function maintKillLoops() { maintLoops.forEach(function(t) { try { t.kill(); } catch (e) {} }); maintLoops = []; }
+  // Stop any entrance / digit tweens still running on the banner.
+  function maintKillLoops() { var el = document.getElementById('maint-banner'); if (el && typeof gsap !== 'undefined') { gsap.killTweensOf(el); gsap.killTweensOf(el.querySelectorAll('*')); } }
 
   // Build (or rebuild on phase change) the banner for one window.
   function buildMaintBanner(el, m, total) {
@@ -1445,7 +1463,7 @@
             '<div class="mb-eyebrow"><span class="mb-chip"><span class="mb-dot"></span>' + L.pill + '</span><span>Scheduled maintenance</span>' + (total > 1 ? '<span class="mb-more">+' + (total - 1) + ' more</span>' : '') + '</div>' +
             '<div class="mb-title">' + L.title + '</div>' +
             '<div class="mb-track"><span class="mb-time">' + (m.live ? L.start : 'Now') + '</span>' +
-              '<div class="mb-rail"><div class="mb-fill"></div><div class="mb-head"></div></div>' +
+              '<div class="mb-rail"><div class="mb-fill"></div><div class="mb-headtrack"><div class="mb-head"></div></div></div>' +
               '<span class="mb-time">' + (m.live ? L.end : L.start) + '</span></div>' +
           '</div>' +
           '<div class="mb-count"><div class="mb-count-label">' + L.countLabel + '</div><div class="mb-digits"></div><div class="mb-count-sub">' + L.start + ' – ' + L.end + '</div></div>' +
@@ -1460,21 +1478,15 @@
       // Entrance (or the phase flip from upcoming → live).
       var tl = gsap.timeline();
       if (phaseChange) {
-          tl.fromTo(el, { scale: 0.985 }, { scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' })
-            .fromTo(q('.mb-sweep'), { xPercent: -100, opacity: 1 }, { xPercent: 260, duration: 0.9, ease: 'power2.inOut' }, 0);
+          tl.fromTo(el, { scale: 0.985 }, { scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' });
       } else {
           tl.fromTo(el, { clipPath: 'inset(0 100% 0 0 round 18px)', opacity: 0.4 }, { clipPath: 'inset(0 0% 0 0 round 18px)', opacity: 1, duration: 0.75, ease: 'power3.inOut' })
             .from(q('.mb-gears'), { rotation: -120, scale: 0.4, opacity: 0, transformOrigin: '50% 50%', duration: 0.7, ease: 'back.out(1.8)' }, 0.25)
             .from([q('.mb-eyebrow'), q('.mb-title'), q('.mb-track'), q('.mb-count')], { y: 10, opacity: 0, duration: 0.5, stagger: 0.07, ease: 'power2.out' }, 0.35)
-            .from(q('.mb-fill'), { scaleX: 0, transformOrigin: '0 50%', duration: 0.9, ease: 'power3.out' }, 0.5);
+            .from(q('.mb-rail'), { scaleX: 0, transformOrigin: '0 50%', duration: 0.9, ease: 'power3.out' }, 0.5);
       }
-      // Ambient loops: meshing gears (12:8 teeth → 1.5× speed), faster while
-      // live; a light sweep every few seconds; a breathing glow on the rail head.
-      var spd = m.live ? 6 : 14;
-      maintLoops.push(gsap.to(q('.mb-gear-a'), { rotation: 360, duration: spd, repeat: -1, ease: 'none', svgOrigin: '25 27' }));
-      maintLoops.push(gsap.to(q('.mb-gear-b'), { rotation: -360, duration: spd / 1.5, repeat: -1, ease: 'none', svgOrigin: '48.5 46.5' }));
-      maintLoops.push(gsap.fromTo(q('.mb-sweep'), { xPercent: -100 }, { xPercent: 260, duration: 1.6, ease: 'power2.inOut', repeat: -1, repeatDelay: m.live ? 3.5 : 6, delay: 1.2 }));
-      maintLoops.push(gsap.to(q('.mb-head'), { boxShadow: '0 0 0 7px rgba(255,255,255,0)', scale: 1.25, duration: 1.1, repeat: -1, yoyo: true, ease: 'sine.inOut' }));
+      // Ambient loops (meshing gears, periodic light sweep, pulsing rail head)
+      // are CSS animations — see .mb-gear / .mb-sweep in CSS.html.
   }
 
   // Per-second refresh of the live bits (digits, rail) without rebuilding.
@@ -1486,10 +1498,12 @@
       if (m.live !== maintShown.live) { updateMaintenance(); return; }
       var now = Date.now();
       maintSetDigits(el.querySelector('.mb-digits'), maintClock(m.live ? m.end - now : m.start - now), animate !== false && maintMotionOK());
+      // Clip + transform only (no width/left) so the per-second update never
+      // triggers layout.
       var pct = maintProgress(m, now);
-      var fill = el.querySelector('.mb-fill'), head = el.querySelector('.mb-head');
-      if (fill) fill.style.width = pct.toFixed(2) + '%';
-      if (head) head.style.left = pct.toFixed(2) + '%';
+      var fill = el.querySelector('.mb-fill'), track = el.querySelector('.mb-headtrack');
+      if (fill) fill.style.clipPath = 'inset(0 ' + (100 - pct).toFixed(2) + '% 0 0 round 99px)';
+      if (track) track.style.transform = 'translateX(' + pct.toFixed(2) + '%)';
   }
 
   window.hideMaintBanner = function(startMs) {
@@ -1556,7 +1570,7 @@
                  '<div class="mb-eyebrow"><span class="mb-chip"><span class="mb-dot"></span>' + L.pill + '</span><span style="flex:1;"></span><span class="nm-count">' + L.countLabel + ' ' + L.count + '</span></div>' +
                  '<div class="nm-title">' + L.title + '</div>' +
                  '<div class="nm-sub">Scheduled maintenance · ' + L.start + ' – ' + L.end + '</div>' +
-                 '<div class="mb-rail nm-rail"><div class="mb-fill" style="width:' + maintProgress(m, now).toFixed(1) + '%;"></div></div>' +
+                 '<div class="mb-rail nm-rail"><div class="mb-fill" style="clip-path:inset(0 ' + (100 - maintProgress(m, now)).toFixed(1) + '% 0 0 round 99px);"></div></div>' +
                  (m.ev.description ? '<div class="nm-desc">' + escapeHTML(String(m.ev.description).replace(/<[^>]*>/g, ' ')) + '</div>' : '') +
                  '</div>';
       }).join('');
@@ -1940,6 +1954,7 @@
           c.__lastHtml = hkey;
 
           c.innerHTML = h; 
+          destroyDetachedCharts();
           refreshIcons();
           animateViewEntrance();
           updateStickyHeader();
@@ -1963,6 +1978,17 @@
           console.error("Critical Render Error:", err);
           var c = document.getElementById('content');
           if(c) c.innerHTML = '<div class="aether-card" style="padding:60px; text-align:center; color:var(--status-alert);"><i data-lucide="alert-triangle" width="48"></i><h2>Critical Error</h2><p>' + escapeHTML(err.message) + '</p></div>';
+      }
+  }
+
+  // Charts whose canvas just left the page (view switch / re-render) are
+  // destroyed here. Otherwise every view switch leaves Chart.js instances —
+  // each with its own resize observer — attached to detached canvases for the
+  // rest of the (all-day) session.
+  function destroyDetachedCharts() {
+      for (var k in charts) {
+          var ch = charts[k];
+          if (ch && ch.canvas && !document.body.contains(ch.canvas)) { try { ch.destroy(); } catch (e) {} charts[k] = null; }
       }
   }
 

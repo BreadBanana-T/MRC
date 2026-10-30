@@ -163,16 +163,16 @@
   .brand { font-size: 1.4rem; font-weight: 800; display: flex; align-items: center; gap: 12px; height: 100%; flex-shrink: 0; }
   /* Logo-only brand mark: the wordmark was dropped, so the diamond gets a
      slow, alive breathing/glow to carry the header on its own. */
-  .brand-logo-diamond { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 7px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 6px; cursor: pointer; animation: brandBreath 4.5s ease-in-out infinite; }
+  .brand-logo-diamond { width: 34px; height: 34px; background: linear-gradient(135deg, var(--accent-primary), var(--text-secondary)); border-radius: 7px; transform: rotate(45deg); box-shadow: var(--accent-glow); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 6px; cursor: pointer; animation: brandBreath 4.5s ease-in-out infinite; will-change: transform; }
   .brand-logo-diamond:hover { animation-duration: 1.6s; }
   .brand-logo-inner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.92); border-radius: 3px; transform: rotate(-45deg); animation: brandInner 4.5s ease-in-out infinite; }
   @keyframes brandBreath {
-      0%, 100% { box-shadow: 0 4px 20px rgba(99, 102, 241, 0.20); transform: rotate(45deg) scale(1); }
-      50%      { box-shadow: 0 6px 30px rgba(99, 102, 241, 0.55); transform: rotate(45deg) scale(1.06); }
+      0%, 100% { transform: rotate(45deg) scale(1); }
+      50%      { transform: rotate(45deg) scale(1.06); }
   }
   @keyframes brandInner {
-      0%, 100% { border-color: rgba(255,255,255,0.70); }
-      50%      { border-color: rgba(255,255,255,1); }
+      0%, 100% { opacity: 0.75; }
+      50%      { opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
       .brand-logo-diamond, .brand-logo-inner { animation: none !important; }
@@ -299,7 +299,7 @@
      above it) on a near-opaque surface (content no longer reads through).
      .is-stuck (set from JS on scroll) squares the top corners, which would
      otherwise show content scrolling past them, and firms up the shadow. */
-  .sticky-header { position: sticky; top: 0; z-index: 100; background: var(--sticky-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--glass-shadow); padding: 12px 24px; margin-bottom: 24px; display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; transition: border-radius 0.2s ease, box-shadow 0.2s ease; }
+  .sticky-header { position: sticky; top: 0; z-index: 100; background: var(--sticky-surface); border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--glass-shadow); padding: 12px 24px; margin-bottom: 24px; display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; transition: border-radius 0.2s ease, box-shadow 0.2s ease; }
   .sticky-header.is-stuck { border-top-left-radius: 0; border-top-right-radius: 0; border-top-color: transparent; box-shadow: 0 14px 28px -18px rgba(15, 23, 42, 0.35); }
   body.dark .sticky-header.is-stuck { box-shadow: 0 14px 30px -16px rgba(0, 0, 0, 0.75); }
 
@@ -336,12 +336,7 @@
   .status-dot.on    { background: var(--region-on); }
   .status-dot.off   { background: var(--region-off); }
   .status-dot.break { background: var(--status-break); }
-  .status-dot.alert { background: var(--status-alert); animation: dot-pulse 2s ease-out infinite; }
-  @keyframes dot-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
-      70%  { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
-  }
+  .status-dot.alert { background: var(--status-alert); }
 
   .row-name { font-weight: 700; color: var(--text-main); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; position: relative; }
 
@@ -731,14 +726,13 @@
   @keyframes sg-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
   @keyframes sg-scan { 0%, 100% { transform: translateY(-1px); opacity: 0.2; } 50% { transform: translateY(9px); opacity: 0.9; } }
   @keyframes sg-swing { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+  /* Animating SVG internals costs a repaint every frame, so a sign plays its
+     motion a couple of times when it appears and again on hover, then rests. */
+  .src-sign * { animation-iteration-count: 2 !important; }
+  .outage-cell:hover .src-sign *, .src-sign:hover * { animation-iteration-count: infinite !important; }
   @media (prefers-reduced-motion: reduce) { .src-sign * { animation: none !important; } }
   .outage-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .outage-dot.pulse { animation: outage-pulse 2s ease-out infinite; }
-  @keyframes outage-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
-      70%  { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
-  }
+  .outage-dot.pulse { }
   .outage-meter { height: 4px; border-radius: 99px; background: rgba(0, 0, 0, 0.06); overflow: hidden; margin-top: 12px; }
   body.dark .outage-meter { background: rgba(255, 255, 255, 0.07); }
   .outage-meter > div { height: 100%; border-radius: inherit; transition: width 0.5s ease; }
@@ -768,12 +762,7 @@
   .uptime-strip > span.up   { background: var(--status-active); }
   .uptime-strip > span.warn { background: var(--status-warn); }
   .uptime-strip > span.down { background: var(--status-alert); }
-  .outage-dot.pulse-ok { animation: dot-pulse-ok 2.4s ease-out infinite; }
-  @keyframes dot-pulse-ok {
-      0%   { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.45); }
-      70%  { box-shadow: 0 0 0 8px rgba(5, 150, 105, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
-  }
+  .outage-dot.pulse-ok { --ring-dur: 2.4s; }
 
   /* ─────────────── SEARCH FIELDS ───────────────
      One consistent search treatment: pill, embedded icon, quiet until
@@ -910,13 +899,6 @@
   .aurora-pulse {
       width: 6px; height: 6px; border-radius: 50%;
       background: #38bdf8;
-      box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
-      animation: aurora-pulse 2s ease-out infinite;
-  }
-  @keyframes aurora-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6); }
-      70%  { box-shadow: 0 0 0 12px rgba(56, 189, 248, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
   }
   /* Scheduled-maintenance banner (above the viewport, every view).
      A deep "ink" ops strip in both themes so it reads as a system notice, not
@@ -943,7 +925,18 @@
 
   .maint-banner .mb-icon { width: 58px; height: 58px; flex-shrink: 0; border-radius: 16px; display: grid; place-items: center;
       background: color-mix(in srgb, var(--mb-accent) 13%, transparent); border: 1px solid color-mix(in srgb, var(--mb-accent) 32%, transparent); }
-  .mb-gears { width: 40px; height: 40px; overflow: visible; }
+  .mb-gears { position: relative; width: 40px; height: 40px; }
+  .mb-gear { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; will-change: transform; }
+  /* Ambient loops are CSS (compositor) — a GSAP loop would tick JavaScript
+     every frame for as long as the window lasts (hours). Live = faster. */
+  .maint-banner { --mb-spin: 14s; --mb-sweep: 7.6s; }
+  .maint-banner.live { --mb-spin: 6s; --mb-sweep: 5.1s; }
+  .mb-gear-a { transform-origin: 39.06% 42.19%; animation: mb-rot var(--mb-spin) linear infinite; }
+  .mb-gear-b { transform-origin: 75.78% 72.66%; animation: mb-rot calc(var(--mb-spin) / 1.5) linear infinite reverse; }
+  @keyframes mb-rot { to { transform: rotate(360deg); } }
+  .maint-banner .mb-sweep { animation: mb-sweep var(--mb-sweep) cubic-bezier(0.45, 0, 0.55, 1) 1.2s infinite; will-change: transform; }
+  @keyframes mb-sweep { 0% { transform: translateX(-100%); } 22% { transform: translateX(260%); } 100% { transform: translateX(260%); } }
+  @media (prefers-reduced-motion: reduce) { .mb-gear-a, .mb-gear-b, .maint-banner .mb-sweep { animation: none; } }
   .mb-gear-a { fill: var(--mb-accent); }
   .mb-gear-b { fill: var(--mb-accent-2); opacity: 0.85; }
 
@@ -951,28 +944,31 @@
   .mb-eyebrow { display: flex; align-items: center; gap: 10px; font-size: 0.64rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mb-muted); }
   .mb-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px; border-radius: 99px; white-space: nowrap;
       font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; color: var(--mb-accent); background: color-mix(in srgb, var(--mb-accent) 16%, transparent); }
-  .mb-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; animation: mb-blink 1.8s ease-out infinite; }
-  @keyframes mb-blink { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); } 80%, 100% { box-shadow: 0 0 0 6px transparent; } }
+  .mb-dot { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .mb-dot::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: ring-pulse 1.8s ease-out infinite; will-change: transform, opacity; }
   .mb-more { color: var(--mb-ink); opacity: 0.7; letter-spacing: 0.06em; }
   .maint-banner .mb-title { font-size: 1.08rem; font-weight: 700; color: #fff; margin-top: 6px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .mb-track { display: flex; align-items: center; gap: 10px; margin-top: 10px; max-width: 560px; }
   .mb-time { font-size: 0.68rem; font-weight: 700; color: var(--mb-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .mb-rail { position: relative; flex: 1; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.09); }
-  .mb-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; transition: width 0.9s ease;
+  .mb-fill { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; clip-path: inset(0 100% 0 0 round 99px);
       background: linear-gradient(90deg, var(--mb-accent), var(--mb-accent-2)); }
-  .maint-banner.live .mb-fill, .notif-maint.live .mb-fill {
-      background: repeating-linear-gradient(115deg, rgba(255,255,255,0.16) 0 6px, transparent 6px 12px), linear-gradient(90deg, var(--mb-accent), var(--mb-accent-2));
-      background-size: 24px 100%, 100% 100%; animation: mb-stripes 0.9s linear infinite; }
-  @keyframes mb-stripes { to { background-position: 24px 0, 0 0; } }
-  .mb-head { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; transition: left 0.9s ease;
+  .maint-banner.live .mb-fill::after, .notif-maint.live .mb-fill::after { content: ''; position: absolute; top: 0; bottom: 0; left: -26px; right: 0;
+      background: repeating-linear-gradient(115deg, rgba(255,255,255,0.18) 0 6px, transparent 6px 12px); animation: mb-stripes 0.9s linear infinite; will-change: transform; }
+  @keyframes mb-stripes { from { transform: translateX(0); } to { transform: translateX(26px); } }
+  .mb-headtrack { position: absolute; inset: 0; pointer-events: none; will-change: transform; }
+  .mb-head { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
       background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--mb-accent) 55%, transparent), 0 0 14px var(--mb-accent); }
+  .mb-head::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--mb-accent); animation: ring-pulse 1.6s ease-out infinite; will-change: transform, opacity; }
 
   .maint-banner .mb-count { flex-shrink: 0; text-align: right; padding: 2px 4px 2px 22px; border-left: 1px solid rgba(255, 255, 255, 0.08); }
   .mb-count-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mb-muted); }
   .mb-digits { display: flex; justify-content: flex-end; font-size: 1.9rem; font-weight: 800; line-height: 1.15; color: #fff; font-variant-numeric: tabular-nums; margin: 2px 0 1px; }
   .mb-slot { position: relative; display: inline-block; width: 0.62em; height: 1.15em; overflow: hidden; }
-  .mb-slot > span { position: absolute; inset: 0; text-align: center; }
+  .mb-slot > span { position: absolute; inset: 0; text-align: center; transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.45s ease; }
+  .mb-slot > span.d-in { transform: translateY(100%); opacity: 0; transition: none; }
+  .mb-slot > span.d-out { transform: translateY(-100%); opacity: 0; }
   .mb-colon { display: inline-block; width: 0.3em; text-align: center; opacity: 0.45; }
   .mb-count-sub { font-size: 0.68rem; font-weight: 600; color: var(--mb-muted); font-variant-numeric: tabular-nums; }
 
@@ -986,7 +982,7 @@
       .maint-banner .mb-close { position: absolute; top: 12px; right: 12px; }
       .maint-banner .mb-main { padding-right: 34px; }
   }
-  @media (prefers-reduced-motion: reduce) { .mb-dot, .maint-banner.live .mb-fill, .notif-maint.live .mb-fill { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .mb-dot::after, .mb-head::after, .maint-banner.live .mb-fill::after, .notif-maint.live .mb-fill::after { animation: none; } }
 
   /* Same ink look, pinned (static) at the top of the notifications panel. */
   .notif-maint {
@@ -1112,4 +1108,15 @@
   .imp-h-strip rect.k-miss { fill: var(--status-alert); } .imp-h-strip rect.k-due { fill: var(--status-alert); fill-opacity: 0.28; }
   .imp-h-strip rect.k-ahead { fill: var(--cvm-ink); fill-opacity: 0.14; } .imp-h-strip rect.k-none { fill: var(--cvm-faint); }
   .imp-h-ok { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); padding-top: 6px; }
+  /* Pulsing status dots (alert rows, outage / Alarm.com dots, live dots).
+     The halo is a ::after ring that only scales and fades — compositor-only,
+     ~no CPU. They used to animate box-shadow, which repaints every frame for
+     every dot (≈30 alert rows on the Genesys page alone). Colour follows the
+     dot's own background. */
+  .status-dot.alert, .outage-dot.pulse, .outage-dot.pulse-ok, .aurora-pulse { position: relative; }
+  .status-dot.alert::after, .outage-dot.pulse::after, .outage-dot.pulse-ok::after, .aurora-pulse::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%; background: inherit; pointer-events: none;
+      animation: ring-pulse var(--ring-dur, 2s) ease-out infinite; will-change: transform, opacity; }
+  @keyframes ring-pulse { 0% { transform: scale(1); opacity: 0.5; } 70%, 100% { transform: scale(2.6); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .status-dot.alert::after, .outage-dot.pulse::after, .outage-dot.pulse-ok::after, .aurora-pulse::after { animation: none; opacity: 0; } }
 </style>
