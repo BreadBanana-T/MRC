@@ -24,7 +24,16 @@
   // like an app bug with nothing in the console. Warn once instead.
   var _lucideWarned = false;
   var refreshIcons = function() {
-      if (typeof lucide !== 'undefined') { try { lucide.createIcons(); } catch (e) { console.warn('[icons] createIcons failed:', e); } return; }
+      if (typeof lucide !== 'undefined') {
+          try { lucide.createIcons(); } catch (e) { console.warn('[icons] createIcons failed:', e); }
+          // Lucide keeps data-lucide on the <svg> it draws, so every call used
+          // to redraw EVERY icon on the page — swapping out an icon mid-click
+          // (the notification bell only opened when clicked off-centre) and
+          // wasting work on each render. Retire the marker once drawn.
+          var done = document.querySelectorAll('svg[data-lucide]');
+          for (var i = 0; i < done.length; i++) { done[i].setAttribute('data-icon', done[i].getAttribute('data-lucide')); done[i].removeAttribute('data-lucide'); }
+          return;
+      }
       if (!_lucideWarned) {
           _lucideWarned = true;
           console.warn('[icons] Lucide is not loaded — every icon will render blank. Check whether the CDN in Index.html is reachable from this network (see the loader comment there).');
@@ -227,6 +236,7 @@
   })();
 
   document.addEventListener('click', function(e) {
+      if (!e.target.isConnected) return;   // the click's element was re-rendered away — not an outside click
       var panel = document.getElementById('notif-panel');
       var bellBtn = document.getElementById('btn-bell');
       if (state.notifOpen && panel && !panel.contains(e.target) && (!bellBtn || !bellBtn.contains(e.target))) toggleNotifPanel();
