@@ -64,7 +64,14 @@ function processWFMImport(rawText, forcedDate) {
        let dateMatch = line.match(rgxAnyDateLine);
        if (dateMatch) {
           const foundDate = dateMatch[1];
-          if ((buffer.dateStr && buffer.dateStr !== foundDate) || (buffer.isOff && !buffer.dateStr)) {
+          // Compare the DAY, not the text. The report repeats the current day's
+          // date mid-day in another format ("10/29/26" vs "10/29/2026", e.g. at a
+          // page break); a raw string compare split the day there, and the rest
+          // of its breaks, lunches and furlough became a separate "Off" row dated
+          // the paste day (1,525 such rows in Schedule_History). A real new day
+          // still splits.
+          const sameDay = buffer.dateStr && safeParseDateStr(buffer.dateStr, defY, defM, defD).str === safeParseDateStr(foundDate, defY, defM, defD).str;
+          if ((buffer.dateStr && !sameDay) || (buffer.isOff && !buffer.dateStr)) {
              pushAgent(rosterData, currentAgent, currentID, buffer, defY, defM, defD);
              let wasOffshore = buffer.isOffshore;
              buffer = resetBuffer();
@@ -73,6 +80,7 @@ function processWFMImport(rawText, forcedDate) {
        }
 
        let shiftMatch = line.match(rgxShiftLine);
+       if (shiftMatch && buffer.start && buffer.dateStr && safeParseDateStr(buffer.dateStr, defY, defM, defD).str === safeParseDateStr(shiftMatch[1], defY, defM, defD).str) shiftMatch = null;  // same day repeated: keep its shift
        if (shiftMatch) { buffer.dateStr = shiftMatch[1]; buffer.start = shiftMatch[2]; buffer.end = shiftMatch[3]; buffer.shiftEnd = shiftMatch[3]; buffer.isOff = false; } 
        else if (line.includes("Off") && !buffer.start) { if (dateMatch) buffer.dateStr = dateMatch[1]; buffer.isOff = true; }
 
@@ -273,58 +281,156 @@ function safeParseDateStr(ds, defY, defM, defD) {
 //   [0]Agent [1]ID [2]DateStr [3]Shift Start [4]Shift End [5]Shift Type
 //   [6]Region [7]Breaks JSON [8]Role [9]AbsentType [10]StartEpoch [11]EndEpoch
 //
-// Dedup key = lowercased agent name + '|' + date. A re-paste of the same period
-// replaces those agent-days rather than stacking duplicates. Rows older than
-// HISTORY_KEEP_DAYS are pruned so the sheet can't grow without bound.
+// Dedup key = lowercased agent name + '|' + day. A re-paste of the same period
+// replaces those agent-days rather than stacking duplicates (newest paste wins).
+// Rows older than HISTORY_KEEP_DAYS are pruned so the sheet can't grow without
+// bound. Rows are kept sorted by day, then agent, so a paste of recent days only
+// rewrites the tail of the sheet instead of all of it.
 var HISTORY_KEEP_DAYS = 550; // ~18 months
-function _histDedupKey(name, dateStr) {
-  return String(name || '').trim().toLowerCase() + '|' + String(dateStr || '').trim();
-}
-function archiveScheduleHistory(ss, rosterData) {
-  if (!rosterData || !rosterData.length) return 0;
-  var HEADERS = ["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"];
-  var hist = ss.getSheetByName("Schedule_History");
-  if (!hist) {
-    hist = ss.insertSheet("Schedule_History");
-    hist.appendRow(HEADERS);
-    hist.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+
+// Day key ("yyyy-MM-dd") for a DateStr cell. Sheets turns the "2026-06-15" we
+// write into a real date, so reading it back gives a Date — and String(Date)
+// never equalled the incoming "2026-06-15". That is why every re-paste stacked
+// instead of replacing (90k rows, 41k of them duplicates, by Oct 2026) and why
+// nothing was ever pruned.
+var _histDayMemo = {};
+function _histDay(v) {
+  if (v instanceof Date) {
+    var t = v.getTime();
+    return _histDayMemo[t] || (_histDayMemo[t] = Utilities.formatDate(v, "America/Toronto", "yyyy-MM-dd"));
   }
+  var s = String(v == null ? '' : v).trim(), m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/))) return m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  return s;
+}
+function _histDedupKey(name, dateVal) {
+  return String(name || '').trim().toLowerCase() + '|' + _histDay(dateVal);
+}
+// "9:30 PM" → 1290; 24-hour "21:30" too. null when unreadable.
+function _histMins(t) {
+  var m = String(t == null ? '' : t).match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
+  if (!m) return null;
+  var h = +m[1];
+  if (m[3]) { h = h % 12; if (m[3].toUpperCase() === 'PM') h += 12; }
+  return h * 60 + (+m[2]);
+}
 
-  // Agent-days present in this paste — these supersede any archived copy.
-  var incoming = {};
-  rosterData.forEach(function (r) { incoming[_histDedupKey(r[0], r[2])] = true; });
+// Folds back the days the old importer split in two (see processWFMImport): an
+// "Off" row with no shift but with breaks, right after the same agent's real
+// day, whose breaks carry on where that day's stopped and sit inside its shift.
+// Works on rows in paste order (it relies on the split half following its day).
+function _histMergeFragments(rows) {
+  var out = [], merged = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i], p = out.length ? out[out.length - 1] : null;
+    if (p && !r[3] && r[7] && r[7] !== '[]' && p[3] &&
+        String(p[0]).trim().toLowerCase() === String(r[0]).trim().toLowerCase()) {
+      var st = _histMins(p[3]), en = _histMins(p[4]);
+      if (st != null && en != null) {
+        if (en <= st) en += 1440;
+        var rel = function (t) { var x = _histMins(t); return x == null ? null : (x < st ? x + 1440 : x); };
+        var pb, fb;
+        try { pb = JSON.parse(p[7] || '[]'); fb = JSON.parse(r[7]); } catch (e) { pb = null; }
+        if (pb && fb && fb.length) {
+          var last = st;
+          pb.forEach(function (b) { var e = rel(b.end); if (e != null && e > last) last = e; });
+          var cont = fb.every(function (b) { var s = rel(b.start); return s != null && s >= last && s <= en; });
+          if (cont) { p[7] = JSON.stringify(pb.concat(fb)); merged++; continue; }
+        }
+      }
+    }
+    out.push(r);
+  }
+  return { rows: out, merged: merged };
+}
 
-  // Prune cutoff (yyyy-MM-dd string compare is safe for ISO dates).
+// existing (sheet order) + incoming (paste order) → the sheet's new rows:
+// fragments merged, one row per agent-day (incoming wins, then the newest
+// existing copy), sorted by day then agent.
+function _histRebuild(existing, incomingRows) {
   var cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - HISTORY_KEEP_DAYS);
   var cutoffStr = Utilities.formatDate(cutoff, "America/Toronto", "yyyy-MM-dd");
+  // Prune in month-sized batches: dropping the oldest day shifts every row up,
+  // which turns the tail-only write into a full rewrite.
+  cutoff.setDate(cutoff.getDate() - 30);
+  var pruneIfBefore = Utilities.formatDate(cutoff, "America/Toronto", "yyyy-MM-dd");
 
-  var kept = [];
+  var ex = _histMergeFragments(existing), inc = _histMergeFragments(incomingRows || []);
+  var byKey = {}, keys = [], dropped = 0, prune = false;
+  var put = function (row) {
+    var k = _histDedupKey(row[0], row[2]);
+    if (k in byKey) dropped++; else keys.push(k);
+    byKey[k] = row;
+  };
+  var incKeys = {};
+  inc.rows.forEach(function (r) { incKeys[_histDedupKey(r[0], r[2])] = true; });
+  ex.rows.forEach(function (r) { var d = _histDay(r[2]); if (d && d < pruneIfBefore) prune = true; });
+  ex.rows.forEach(function (r) {
+    var d = _histDay(r[2]);
+    if (prune && d && d < cutoffStr) { dropped++; return; }
+    if (incKeys[_histDedupKey(r[0], r[2])]) { dropped++; return; }
+    put(r);
+  });
+  inc.rows.forEach(put);
+  var rows = keys.map(function (k) { return { k: k.split('|')[1] + '|' + k.split('|')[0], r: byKey[k] }; });
+  rows.sort(function (a, b) { return a.k < b.k ? -1 : (a.k > b.k ? 1 : 0); });
+  return { rows: rows.map(function (x) { return x.r; }), merged: ex.merged + inc.merged, dropped: dropped };
+}
+
+// Writes `rows` over `existing`, starting at the first row that differs, and
+// blanks any leftover tail. Returns the index of the first rewritten row.
+function _histWrite(sheet, existing, rows) {
+  var sig = function (r) {
+    var a = [];
+    for (var j = 0; j < 12; j++) { var v = r[j]; a.push(j === 2 ? _histDay(v) : (v instanceof Date ? v.getTime() : String(v == null ? '' : v))); }
+    return a.join('\u0001');
+  };
+  var from = 0, n = Math.min(existing.length, rows.length);
+  while (from < n && sig(existing[from]) === sig(rows[from])) from++;
+  if (from < rows.length) {
+    var tail = rows.slice(from);
+    try { sheet.getRange(from + 2, 4, tail.length, 2).setNumberFormat('@'); } catch (e) {}  // shift cols stay text
+    sheet.getRange(from + 2, 1, tail.length, 12).setValues(tail);
+  }
+  if (existing.length > rows.length) sheet.getRange(rows.length + 2, 1, existing.length - rows.length, 12).clearContent();
+  return from;
+}
+
+function _histSheet(ss) {
+  var hist = ss.getSheetByName("Schedule_History");
+  if (!hist) {
+    hist = ss.insertSheet("Schedule_History");
+    hist.appendRow(["Agent Name", "ID", "DateStr", "Shift Start", "Shift End", "Shift Type", "Region", "Breaks JSON", "Role", "AbsentType", "StartEpoch", "EndEpoch"]);
+    hist.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#e0e0e0");
+  }
+  return hist;
+}
+
+function archiveScheduleHistory(ss, rosterData) {
+  if (!rosterData || !rosterData.length) return 0;
+  var hist = _histSheet(ss);
   var last = hist.getLastRow();
-  if (last > 1) {
-    var existing = hist.getRange(2, 1, last - 1, 12).getValues();
-    for (var i = 0; i < existing.length; i++) {
-      var row = existing[i];
-      var dStr = String(row[2] || '').trim();
-      if (dStr && dStr < cutoffStr) continue;                 // prune stale
-      if (incoming[_histDedupKey(row[0], dStr)]) continue;    // superseded by this paste
-      kept.push(row);
-    }
-  }
+  var existing = last > 1 ? hist.getRange(2, 1, last - 1, 12).getValues() : [];
+  var res = _histRebuild(existing, rosterData);
+  var from = _histWrite(hist, existing, res.rows);
+  Logger.log('[wfm] history: ' + res.rows.length + ' rows, rewrote from row ' + (from + 2) + ' (' + (res.rows.length - from) + ' rows), ' + res.dropped + ' replaced/pruned, ' + res.merged + ' split days rejoined');
+  return res.rows.length;
+}
 
-  var merged = kept.concat(rosterData);
-  // Write in place + clear the tail instead of deleteRows(2,last-1). deleteRows is
-  // O(all rows) and physically reflows the whole sheet — on an 18-month
-  // Schedule_History (10k+ rows) that was the dominant import cost (minutes) and
-  // the main reason a 2-month paste timed out. Overwriting yields the same
-  // end-state far faster (one setValues + a tail clearContent).
-  if (merged.length) {
-    try { hist.getRange(1, 4, merged.length + 1, 2).setNumberFormat('@'); } catch (e) {}  // shift cols stay text
-    hist.getRange(2, 1, merged.length, 12).setValues(merged);
-  }
-  var newLast = merged.length + 1;                       // header + data rows
-  if (last > newLast) hist.getRange(newLast + 1, 1, last - newLast, 12).clearContent();
-  return merged.length;
+// One-off clean-up of Schedule_History: rejoins split days, keeps the newest
+// copy of each agent-day, sorts. Safe to run any time; see repairScheduleData().
+function compactScheduleHistory() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hist = _histSheet(ss);
+  var last = hist.getLastRow();
+  var existing = last > 1 ? hist.getRange(2, 1, last - 1, 12).getValues() : [];
+  var res = _histRebuild(existing, []);
+  _histWrite(hist, existing, res.rows);
+  var out = { before: existing.length, after: res.rows.length, removed: res.dropped, rejoined: res.merged };
+  Logger.log('[compactScheduleHistory] ' + JSON.stringify(out));
+  return out;
 }
 
 // parseTime() is shared from CORE/AgentMonitor.gs (one global scope in GAS).

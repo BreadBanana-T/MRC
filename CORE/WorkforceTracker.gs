@@ -230,6 +230,18 @@ var WorkforceTracker = {
       let cleanRoles = [];
       let cleanAbsences = [];
       let agentIds = {};   // normalized key → { id (WFM Agent: NNNNN), name } for ID-exact SAFE matching
+      // What this paste covers, per agent: the schedule days it lists (incl. days
+      // off) with each day's shift. Re-pasting a period replaces exactly those
+      // agent-days in the tracker sheets — including activity that is no longer
+      // there (a cancelled furlough), which keying the wipe on the new rows
+      // alone could never remove.
+      let cover = {};      // lower(agent) → { 'yyyy-MM-dd': { first, end, shift } } (minutes from that day's 00:00)
+      const coverDay = (agent, day) => {
+          const k = String(agent).trim().toLowerCase();
+          if (!cover[k]) cover[k] = {};
+          if (!cover[k][day]) cover[k][day] = { first: null, end: null, shift: '' };
+          return cover[k][day];
+      };
 
       const lines = schedRaw.split(/\r?\n/).filter(l => l.trim().length > 0);
       let currentAgent = "", currentID = "", currentDateStr = "";
@@ -278,6 +290,8 @@ var WorkforceTracker = {
           
           agentBuffer.forEach(obj => { 
               let actLower = obj.act.toLowerCase();
+              let anc = obj.anchor || obj.dateStr, ancShift = (cover[String(currentAgent).trim().toLowerCase()] || {})[anc];
+              let tail = [anc, ancShift ? ancShift.shift : ''];
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
               
               let isCoach = !isTeamLead && !COACH_EXCLUDE_RGX.test(actLower) && COACHING_CODES.some(c => actLower.includes(c));
@@ -302,10 +316,10 @@ var WorkforceTracker = {
                   else if (actLower.includes('reading') || actLower.includes('lecture')) roleType = "READING";
               }
               
-              if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
-              if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg]);
-              if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg]);
-              if (isAbsence) cleanAbsences.push([currentAgent, obj.dateStr, absType, obj.start, obj.end, reg]);
+              if (isCoach) cleanCoach.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg].concat(tail));
+              if (isFurlough && !isOffshore) cleanFurlough.push([currentAgent, obj.dateStr, obj.act, obj.start, obj.end, reg].concat(tail));
+              if (isRole) cleanRoles.push([currentAgent, obj.dateStr, roleType, obj.start, obj.end, reg].concat(tail));
+              if (isAbsence) cleanAbsences.push([currentAgent, obj.dateStr, absType, obj.start, obj.end, reg].concat(tail));
               
               schedDates.push(obj.dateStr);
           });
@@ -325,6 +339,7 @@ var WorkforceTracker = {
               currentID = idMatch ? idMatch[1] : "";
               currentAgent = agentData.replace(/^\d+\s+/, '').trim();
           }
+          currentDateStr = "";   // a new agent's first day always starts a fresh timeline
           return;
         } 
         
@@ -370,10 +385,14 @@ var WorkforceTracker = {
               }
               let pDate = this._parseDate(csvParts[1]);
               
-              if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
-              if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5]]);
-              if (isRole) cleanRoles.push([csvParts[0], pDate, roleType, csvParts[3], csvParts[4], csvParts[5]]);
-              if (isAbsence) cleanAbsences.push([csvParts[0], pDate, absType, csvParts[3], csvParts[4], csvParts[5]]);
+              let cd = coverDay(csvParts[0], pDate), cs = this._timeToMins(csvParts[3]), ce = this._timeToMins(csvParts[4]);
+              if (ce <= cs) ce += 1440;
+              if (cd.first == null || cs < cd.first) cd.first = cs;
+              if (cd.end == null || ce > cd.end) cd.end = ce;
+              if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate, '']);
+              if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate, '']);
+              if (isRole) cleanRoles.push([csvParts[0], pDate, roleType, csvParts[3], csvParts[4], csvParts[5], pDate, '']);
+              if (isAbsence) cleanAbsences.push([csvParts[0], pDate, absType, csvParts[3], csvParts[4], csvParts[5], pDate, '']);
               
               schedDates.push(pDate);
           }
@@ -382,10 +401,19 @@ var WorkforceTracker = {
 
         let dMatch = text.match(dateRegex);
         if (dMatch) {
-            currentDateStr = this._parseDate(dMatch[1]);
-            [currentY, currentM, currentD] = currentDateStr.split('-').map(Number);
-            lastTimeMins = -1;
-            daysAdded = 0;
+            // The report repeats the current day's date mid-day (in another
+            // format, e.g. at a page break). Only a NEW day restarts the
+            // timeline — resetting on the repeat filed the rest of a night
+            // shift under the wrong calendar day.
+            const ds = this._parseDate(dMatch[1]);
+            if (ds !== currentDateStr) {
+                currentDateStr = ds;
+                [currentY, currentM, currentD] = currentDateStr.split('-').map(Number);
+                lastTimeMins = -1;
+                daysAdded = 0;
+            }
+            // A day counts as covered once it lists something (below), or says Off.
+            if (currentAgent && currentDateStr && /\bOff\b/.test(text)) coverDay(currentAgent, currentDateStr);
         }
 
         if (currentAgent && currentY) {
@@ -395,29 +423,35 @@ var WorkforceTracker = {
             let tStartMins = this._timeToMins(segMatch[2].trim());
             if (lastTimeMins > -1 && tStartMins < lastTimeMins) daysAdded++;
             lastTimeMins = tStartMins;
+            let tEndMins = this._timeToMins(segMatch[3].trim());
+            let absS = daysAdded * 1440 + tStartMins, absE = daysAdded * 1440 + tEndMins + (tEndMins <= tStartMins ? 1440 : 0);
+            let cd = currentDateStr ? coverDay(currentAgent, currentDateStr) : null;
+            if (cd) {
+                if (cd.first == null || absS < cd.first) cd.first = absS;
+                if (cd.end == null || absE > cd.end) cd.end = absE;
+                // The day line ("10/29/26 9:00 PM 6:00 AM") is the shift itself:
+                // its midpoint names the shift, as in the Raw Schedule import.
+                if (dMatch && !cd.shift) { let mid = ((absS + absE) / 2) % 1440; cd.shift = (mid >= 1380 || mid < 420) ? 'Night' : (mid >= 900 ? 'Evening' : 'Morning'); }
+            }
             let actDateStr = Utilities.formatDate(new Date(currentY, currentM - 1, currentD + daysAdded), Session.getScriptTimeZone(), "yyyy-MM-dd");
-            if (!act.toLowerCase().match(/^activity|^scheduled/)) agentBuffer.push({ raw: text, dateStr: actDateStr, act: act, start: segMatch[2].trim(), end: segMatch[3].trim() });
+            if (!act.toLowerCase().match(/^activity|^scheduled/)) agentBuffer.push({ raw: text, dateStr: actDateStr, anchor: currentDateStr, act: act, start: segMatch[2].trim(), end: segMatch[3].trim() });
           }
         }
       });
       flushAgentBuffer();
       
-      if (cleanCoach.length > 0) {
-        this._executeDestructiveUpsert('WF_COACHING', cleanCoach, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
-        msg.push(`Coaching`);
-      }
-      if (cleanFurlough.length > 0) {
-        this._executeDestructiveUpsert('WF_FURLOUGH', cleanFurlough, ['Agent Name', 'Date', 'Activity', 'Start Time', 'End Time', 'Region']);
-        msg.push(`Furloughs`);
-      }
-      if (cleanRoles.length > 0) {
-        cleanRoles.sort((a, b) => b[1].localeCompare(a[1]));
-        this._executeDestructiveUpsert('WF_ROLES', cleanRoles, ['Agent Name', 'Date', 'Role', 'Start Time', 'End Time', 'Region']);
-        msg.push(`Roles`);
-      }
-      if (cleanAbsences.length > 0) {
-        this._executeDestructiveUpsert('WF_ABSENCES', cleanAbsences, ['Agent Name', 'Date', 'Type', 'Start Time', 'End Time', 'Region']);
-        msg.push(`Absences`);
+      // Every sheet is reconciled against what the paste covers — even one the
+      // paste has no rows for, so activity removed in WFM disappears here too.
+      if (Object.keys(cover).length) {
+        const tail = ['Start Time', 'End Time', 'Region', 'Shift Date', 'Shift'];
+        this._executeDestructiveUpsert('WF_COACHING', cleanCoach, ['Agent Name', 'Date', 'Activity'].concat(tail), cover);
+        this._executeDestructiveUpsert('WF_FURLOUGH', cleanFurlough, ['Agent Name', 'Date', 'Activity'].concat(tail), cover);
+        this._executeDestructiveUpsert('WF_ROLES', cleanRoles, ['Agent Name', 'Date', 'Role'].concat(tail), cover);
+        this._executeDestructiveUpsert('WF_ABSENCES', cleanAbsences, ['Agent Name', 'Date', 'Type'].concat(tail), cover);
+        if (cleanCoach.length) msg.push(`Coaching`);
+        if (cleanFurlough.length) msg.push(`Furloughs`);
+        if (cleanRoles.length) msg.push(`Roles`);
+        if (cleanAbsences.length) msg.push(`Absences`);
       }
 
       // Persist the WFM agent-ID map (MERGE — IDs survive partial imports), so
@@ -716,56 +750,93 @@ var WorkforceTracker = {
       return JSON.stringify({ year: year, profiles: profiles });
   },
 
-  _executeDestructiveUpsert: function(sheetName, newRows, headersArray) {
+  _executeDestructiveUpsert: function(sheetName, newRows, headersArray, cover) {
     const ssLocal = SpreadsheetApp.getActiveSpreadsheet();
-    this._runDestructiveLogic(ssLocal, sheetName, newRows, headersArray);
+    this._runDestructiveLogic(ssLocal, sheetName, newRows, headersArray, cover);
   },
 
-  _runDestructiveLogic: function(targetSpreadsheet, sheetName, newRows, headersArray) {
+  // Replaces what a paste covers and keeps everything else.
+  //   WF_IDP: by day.
+  //   Schedule sheets, given `cover` from the WFM parse: by agent + schedule
+  //     day. New rows carry their schedule day in "Shift Date"; older rows
+  //     without one are matched by calendar day and start time — the day's own
+  //     hours, plus the after-midnight tail of the night before.
+  //   Otherwise (Overtime): by agent + calendar day of the new rows.
+  // The sheet is kept sorted (day, agent, start) and rewritten only from the
+  // first row that changes, so pasting recent days touches just the tail.
+  _runDestructiveLogic: function(targetSpreadsheet, sheetName, newRows, headersArray, cover) {
       let sheet = targetSpreadsheet.getSheetByName(sheetName);
       if (!sheet) sheet = targetSpreadsheet.insertSheet(sheetName);
 
       let existingData = [];
       if (sheet.getLastRow() > 0) existingData = sheet.getDataRange().getDisplayValues();
       if (existingData.length === 1 && existingData[0].join('') === "") existingData = [];
-      const headers = existingData.length > 0 ? existingData.shift() : headersArray;
+      const oldHeaders = existingData.length > 0 ? existingData.shift() : [];
+      let headers = oldHeaders.length ? oldHeaders.slice() : headersArray.slice();
+      // An older, narrower sheet grows to the caller's layout.
+      if (headers.length < headersArray.length) headers = headers.concat(headersArray.slice(headers.length));
+      const ncol = Math.max(headers.length, newRows.reduce((m, r) => Math.max(m, r.length), 0));
+      const pad = r => r.length < ncol ? r.concat(new Array(ncol - r.length).fill('')) : r;
 
-      let isIDP = sheetName === 'WF_IDP';
-      let wipeKeys = new Set();
-      newRows.forEach(r => {
-          let dateStr = this._formatDate(r[isIDP ? 0 : 1]);
-          if (isIDP) wipeKeys.add(dateStr);
-          else wipeKeys.add(String(r[0]).trim().toLowerCase() + "_" + dateStr);
-      });
-      const retainedRows = existingData.filter(row => {
-          if (!row[0]) return false;
-          let rDate = this._formatDate(row[isIDP ? 0 : 1]);
-          if (!rDate) return false; 
-          let k = isIDP ? rDate : String(row[0]).trim().toLowerCase() + "_" + rDate;
-          if (wipeKeys.has(k)) return false; 
-          return true;
-      });
-      const combined = retainedRows.concat(newRows);
-      // Crash-safe write: overwrite in place + clear the tail, never clearContents()
-      // first. A timed-out import previously left the sheet EMPTY in the gap between
-      // clearContents() and setValues() — which silently broke whichever tracker reads
-      // it (e.g. the Absence Tracker). Header is rewritten in place; data overwrites;
-      // any leftover rows below are blanked.
-      const ncol = combined.length > 0 ? combined[0].length : headers.length;
-      const prevLast = sheet.getLastRow();
-      // Force time columns to PLAIN TEXT before writing so "9:00 AM" is never coerced
-      // into a date/serial that getDisplayValues() would return as "12/30/1899".
-      try {
-        headers.forEach(function (h, i) {
-          if (/time|start|end|interval/i.test(String(h)) && !/epoch/i.test(String(h))) {
-            sheet.getRange(1, i + 1, Math.max(2, combined.length + 1), 1).setNumberFormat('@');
-          }
-        });
-      } catch (e) {}
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      if (combined.length > 0) sheet.getRange(2, 1, combined.length, ncol).setValues(combined);
-      const dlNewLast = combined.length + 1;
-      if (prevLast > dlNewLast) sheet.getRange(dlNewLast + 1, 1, prevLast - dlNewLast, ncol).clearContent();
+      const isIDP = sheetName === 'WF_IDP';
+      const dCol = isIDP ? 0 : 1;
+      const sCol = isIDP ? 1 : Math.max(0, headers.findIndex(h => /start/i.test(String(h))));
+      const memo = {};
+      const day = v => { const k = String(v); return k in memo ? memo[k] : (memo[k] = this._formatDate(v)); };
+      const dayBefore = d => new Date(Date.UTC(+d.substring(0, 4), +d.substring(5, 7) - 1, +d.substring(8, 10) - 1)).toISOString().substring(0, 10);
+
+      let wipe;
+      if (cover === true) {
+          wipe = () => true;   // newRows is the whole sheet (repairScheduleData)
+      } else if (isIDP) {
+          const days = new Set(newRows.map(r => day(r[0])));
+          wipe = row => days.has(day(row[0]));
+      } else if (cover) {
+          wipe = row => {
+              const c = cover[String(row[0]).trim().toLowerCase()];
+              if (!c) return false;
+              const anchor = String(row[6] || '').trim();
+              if (anchor) return !!c[day(anchor)];
+              const d = day(row[1]), t = this._timeToMins(row[3]);
+              const own = c[d], prev = c[dayBefore(d)];
+              if (prev && prev.end != null && t + 1440 < prev.end) return true;
+              if (own) return prev ? true : t >= Math.min(own.first != null ? own.first : 720, 720);
+              return false;
+          };
+      } else {
+          const keys = new Set(newRows.map(r => String(r[0]).trim().toLowerCase() + '_' + day(r[1])));
+          wipe = row => keys.has(String(row[0]).trim().toLowerCase() + '_' + day(row[1]));
+      }
+
+      const retained = existingData.filter(row => row[0] && day(row[dCol]) && !wipe(row));
+      const sortKey = r => day(r[dCol]) + '|' + (isIDP ? '' : String(r[0]).trim().toLowerCase()) + '|' + ('000' + Math.max(0, this._timeToMins(r[sCol]))).slice(-4);
+      const combined = retained.concat(newRows).map(pad)
+          .map((r, i) => ({ r: r, i: i, k: sortKey(r) }))
+          .sort((a, b) => a.k < b.k ? -1 : (a.k > b.k ? 1 : a.i - b.i))
+          .map(x => x.r);
+
+      // Crash-safe write: overwrite in place + blank the leftover tail, never
+      // clear first (a timed-out import used to leave the sheet EMPTY). Only
+      // rows from the first difference down are written.
+      const sig = r => r.map(v => String(v == null ? '' : v)).join('\u0001');
+      const old = existingData.map(pad);
+      let from = 0;
+      const n = Math.min(old.length, combined.length);
+      while (from < n && sig(old[from]) === sig(combined[from])) from++;
+      if (sig(headers) !== sig(oldHeaders)) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      if (from < combined.length) {
+          const tail = combined.slice(from);
+          // Time columns stay PLAIN TEXT so "9:00 AM" is never coerced into a
+          // date/serial that getDisplayValues() would return as "12/30/1899".
+          try {
+            headers.forEach((h, i) => {
+              if (/time|start|end|interval/i.test(String(h)) && !/epoch/i.test(String(h))) sheet.getRange(from + 2, i + 1, tail.length, 1).setNumberFormat('@');
+            });
+          } catch (e) {}
+          sheet.getRange(from + 2, 1, tail.length, ncol).setValues(tail);
+      }
+      if (old.length > combined.length) sheet.getRange(combined.length + 2, 1, old.length - combined.length, ncol).clearContent();
+      return { rows: combined.length, rewritten: combined.length - from };
   },
 
   _getCycleForEpoch: function(epoch) {
@@ -866,7 +937,8 @@ var WorkforceTracker = {
     const searchStartStr = Utilities.formatDate(searchStart, "America/Toronto", "yyyy-MM-dd");
     const endStr = Utilities.formatDate(new Date(bounds.end), "America/Toronto", "yyyy-MM-dd");
 
-    const idpData = dbIDP.getLastRow() > 1 ? dbIDP.getDataRange().getDisplayValues().slice(1) : [];
+    // WF_IDP (~20k rows) only feeds the Daily furlough grid; skip the read otherwise.
+    const idpData = (mode === 'day' && trackerType === 'furlough' && dbIDP.getLastRow() > 1) ? dbIDP.getDataRange().getDisplayValues().slice(1) : [];
     const schedData = dbSched.getLastRow() > 1 ? dbSched.getDataRange().getDisplayValues().slice(1) : [];
 
     let buckets = [];
@@ -923,7 +995,7 @@ var WorkforceTracker = {
 
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
-            this._getShiftSplits(startMins, endMins).forEach(split => {
+            this._shiftSplitsFor(row, startMins, endMins).forEach(split => {
                 // A shift split can still straddle midnight (e.g. a Night chunk
                 // that runs 23:00 -> 00:30). Break it at each midnight so every
                 // piece lands wholly inside one calendar day and is credited to
@@ -1472,6 +1544,18 @@ var WorkforceTracker = {
       }
       report.data.sort((a,b) => b.total - a.total);
       return JSON.stringify(report);
+  },
+
+  // Hours credited to the shift the agent was SCHEDULED on that day ("Shift",
+  // written at import / by repairScheduleData), so a Morning agent's 3–5:30 PM
+  // furlough counts as Morning. Clock windows (Night 23–07, Morning 07–15,
+  // Evening 15–23) are only the fallback for rows with no shift on record —
+  // used alone, they filed 39% of 2026's furlough hours under a shift the
+  // agent wasn't working.
+  _shiftSplitsFor: function(row, startMins, endMins) {
+      const sh = String(row[7] || '').trim();
+      if (sh === 'Night' || sh === 'Morning' || sh === 'Evening') return [{ shift: sh, hours: (endMins - startMins) / 60, startMins: startMins, endMins: endMins }];
+      return this._getShiftSplits(startMins, endMins);
   },
 
   _getShiftSplits: function(startMins, endMins) {

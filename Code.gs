@@ -206,6 +206,55 @@ function rebuildDataSheets(alsoArchives) {
   return JSON.stringify({ ok: true, cleared: cleared });
 }
 
+// ADMIN — run ONCE from the Apps Script editor after deploying this version:
+// repairScheduleData(). Safe to run again; it only cleans and labels.
+//   1. Schedule_History: rejoins days the old importer split in two, keeps the
+//      newest copy of every agent-day (re-pastes used to stack), sorts it.
+//   2. WF_FURLOUGH / WF_COACHING / WF_ROLES / WF_ABSENCES: labels every older row
+//      with the schedule day and shift it belongs to (from Schedule_History),
+//      so furlough is credited to the agent's real shift and re-pastes can
+//      replace those rows exactly. Rows it can't place are left as they are.
+// Logs and returns a summary.
+function repairScheduleData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), WT = WorkforceTracker;
+  var out = { history: compactScheduleHistory(), sheets: {} };
+
+  var hist = ss.getSheetByName('Schedule_History');
+  var idx = {};   // agentKey|day → { st, en, shift }  (minutes from that day's 00:00)
+  if (hist && hist.getLastRow() > 1) {
+    hist.getRange(2, 1, hist.getLastRow() - 1, 6).getValues().forEach(function (r) {
+      var st = _histMins(r[3]), en = _histMins(r[4]);
+      if (st != null && en != null && en <= st) en += 1440;
+      idx[_normalizeAgentKey(r[0]) + '|' + _histDay(r[2])] = { st: st, en: en, shift: r[5] === 'Off' ? '' : String(r[5] || '') };
+    });
+  }
+  var dayBefore = function (d) { return new Date(Date.UTC(+d.substring(0, 4), +d.substring(5, 7) - 1, +d.substring(8, 10) - 1)).toISOString().substring(0, 10); };
+
+  ['WF_FURLOUGH', 'WF_COACHING', 'WF_ROLES', 'WF_ABSENCES'].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var vals = sh.getDataRange().getDisplayValues();
+    var headers = vals.shift();
+    var want = [headers[0] || 'Agent Name', headers[1] || 'Date', headers[2] || 'Activity', 'Start Time', 'End Time', 'Region', 'Shift Date', 'Shift'];
+    var placed = 0, unplaced = 0, already = 0;
+    var rows = vals.filter(function (r) { return r[0]; }).map(function (r) {
+      r = r.slice(0, 8); while (r.length < 8) r.push('');
+      if (r[6]) { already++; return r; }
+      var key = _normalizeAgentKey(r[0]), d = WT._formatDate(r[1]), t = WT._timeToMins(r[3]);
+      var prev = idx[key + '|' + dayBefore(d)], own = idx[key + '|' + d];
+      if (prev && prev.st != null && t + 1440 < prev.en) { r[6] = dayBefore(d); r[7] = prev.shift; }
+      else if (own) { r[6] = d; r[7] = own.shift; }
+      if (r[6]) placed++; else unplaced++;
+      return r;
+    });
+    WT._runDestructiveLogic(ss, name, rows, want, true);
+    out.sheets[name] = { rows: rows.length, labelled: placed, alreadyLabelled: already, notInSchedule: unplaced };
+  });
+  _bustWfCache();
+  Logger.log('[repairScheduleData] ' + JSON.stringify(out, null, 1));
+  return out;
+}
+
 // ── Chunked upload transport ──────────────────────────────────────────────
 // google.script.run reliably carries ~1 MB; large WFM/IDP pastes blow past
 // that and get dropped silently with no error and no response. Chunk the
