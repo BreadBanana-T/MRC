@@ -153,8 +153,10 @@ function processWFMImport(rawText, forcedDate) {
       // Force Shift Start/End (cols 4-5) to plain text BEFORE writing so Sheets
       // never coerces "9:00 AM" into a date/serial (which getDisplayValues would
       // return as "12/30/1899", losing the time for every reader).
+      _gridEnsureRows(sheet, rosterData.length + 1);
       try { sheet.getRange(1, 4, rosterData.length + 1, 2).setNumberFormat('@'); } catch (e) {}
       sheet.getRange(2, 1, rosterData.length, 12).setValues(rosterData);
+      _gridTrimRows(sheet, rosterData.length + 1);
       Logger.log('[wfm] setValues done in ' + (new Date().getTime() - tWrite) + 'ms');
 
       // Permanent schedule archive: Raw Schedule is wiped every paste (current
@@ -391,11 +393,29 @@ function _histWrite(sheet, existing, rows) {
   while (from < n && sig(existing[from]) === sig(rows[from])) from++;
   if (from < rows.length) {
     var tail = rows.slice(from);
+    _gridEnsureRows(sheet, rows.length + 1);
     try { sheet.getRange(from + 2, 4, tail.length, 2).setNumberFormat('@'); } catch (e) {}  // shift cols stay text
     sheet.getRange(from + 2, 1, tail.length, 12).setValues(tail);
   }
   if (existing.length > rows.length) sheet.getRange(rows.length + 2, 1, existing.length - rows.length, 12).clearContent();
+  _gridTrimRows(sheet, rows.length + 1);
   return from;
+}
+
+// Sheet grid upkeep. Clearing content leaves the empty rows behind (Raw
+// Schedule carried ~17k of them), which bloats the file and slows it to open.
+// Writers grow the grid before writing past it and trim the leftovers after,
+// keeping some headroom so small appends never have to grow it.
+var GRID_HEADROOM = 200;
+function _gridEnsureRows(sheet, lastRow) {
+  var mr = sheet.getMaxRows();
+  if (mr < lastRow) sheet.insertRowsAfter(mr, lastRow - mr);
+}
+function _gridTrimRows(sheet, lastUsed) {
+  try {
+    var mr = sheet.getMaxRows(), keep = Math.max(lastUsed, sheet.getLastRow(), 1) + GRID_HEADROOM;
+    if (mr > keep + GRID_HEADROOM) sheet.deleteRows(keep + 1, mr - keep);
+  } catch (e) { Logger.log('[grid] trim skipped on ' + sheet.getName() + ': ' + e); }
 }
 
 function _histSheet(ss) {

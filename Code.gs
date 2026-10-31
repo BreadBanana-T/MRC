@@ -178,6 +178,7 @@ function importWorkforceData(sched, idp) {
 // Drains the deferred per-month unified-report archive queue (called by the client
 // right after an import). Its own execution budget, so it can't time out the import.
 function flushPendingArchives() {
+  _autoRepairScheduleData();
   return (typeof WorkforceTracker !== 'undefined') ? WorkforceTracker.flushPendingArchives() : '{}';
 }
 
@@ -206,26 +207,28 @@ function rebuildDataSheets(alsoArchives) {
   return JSON.stringify({ ok: true, cleared: cleared });
 }
 
-// ADMIN — run ONCE from the Apps Script editor after deploying this version:
-// repairScheduleData(). Safe to run again; it only cleans and labels.
+// Schedule data clean-up. Runs by itself once, after the first import on this
+// version (see flushPendingArchives); safe to run again from the editor.
 //   1. Schedule_History: rejoins days the old importer split in two, keeps the
 //      newest copy of every agent-day (re-pastes used to stack), sorts it.
-//   2. WF_FURLOUGH / WF_COACHING / WF_ROLES / WF_ABSENCES: labels every older row
-//      with the schedule day and shift it belongs to (from Schedule_History),
-//      so furlough is credited to the agent's real shift and re-pastes can
-//      replace those rows exactly. Rows it can't place are left as they are.
+//   2. WF_FURLOUGH / WF_COACHING / WF_ROLES / WF_ABSENCES: labels each older
+//      row with the schedule day it belongs to ("Shift Date", from
+//      Schedule_History) so later re-pastes replace those rows exactly. Rows it
+//      can't place are left as they are.
+//   3. Trims the empty rows those sheets and Raw Schedule had piled up.
 // Logs and returns a summary.
+var SCHED_REPAIR_VERSION = '1';
 function repairScheduleData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), WT = WorkforceTracker;
   var out = { history: compactScheduleHistory(), sheets: {} };
 
   var hist = ss.getSheetByName('Schedule_History');
-  var idx = {};   // agentKey|day → { st, en, shift }  (minutes from that day's 00:00)
+  var idx = {};   // agentKey|day → { st, en }  (minutes from that day's 00:00)
   if (hist && hist.getLastRow() > 1) {
-    hist.getRange(2, 1, hist.getLastRow() - 1, 6).getValues().forEach(function (r) {
+    hist.getRange(2, 1, hist.getLastRow() - 1, 5).getValues().forEach(function (r) {
       var st = _histMins(r[3]), en = _histMins(r[4]);
       if (st != null && en != null && en <= st) en += 1440;
-      idx[_normalizeAgentKey(r[0]) + '|' + _histDay(r[2])] = { st: st, en: en, shift: r[5] === 'Off' ? '' : String(r[5] || '') };
+      idx[_normalizeAgentKey(r[0]) + '|' + _histDay(r[2])] = { st: st, en: en };
     });
   }
   var dayBefore = function (d) { return new Date(Date.UTC(+d.substring(0, 4), +d.substring(5, 7) - 1, +d.substring(8, 10) - 1)).toISOString().substring(0, 10); };
@@ -235,24 +238,41 @@ function repairScheduleData() {
     if (!sh || sh.getLastRow() < 2) return;
     var vals = sh.getDataRange().getDisplayValues();
     var headers = vals.shift();
-    var want = [headers[0] || 'Agent Name', headers[1] || 'Date', headers[2] || 'Activity', 'Start Time', 'End Time', 'Region', 'Shift Date', 'Shift'];
+    var want = [headers[0] || 'Agent Name', headers[1] || 'Date', headers[2] || 'Activity', 'Start Time', 'End Time', 'Region', 'Shift Date'];
     var placed = 0, unplaced = 0, already = 0;
     var rows = vals.filter(function (r) { return r[0]; }).map(function (r) {
-      r = r.slice(0, 8); while (r.length < 8) r.push('');
+      r = r.slice(0, 7); while (r.length < 7) r.push('');
       if (r[6]) { already++; return r; }
       var key = _normalizeAgentKey(r[0]), d = WT._formatDate(r[1]), t = WT._timeToMins(r[3]);
-      var prev = idx[key + '|' + dayBefore(d)], own = idx[key + '|' + d];
-      if (prev && prev.st != null && t + 1440 < prev.en) { r[6] = dayBefore(d); r[7] = prev.shift; }
-      else if (own) { r[6] = d; r[7] = own.shift; }
+      var prev = idx[key + '|' + dayBefore(d)];
+      if (prev && prev.st != null && t + 1440 < prev.en) r[6] = dayBefore(d);   // after-midnight tail of the night before
+      else if (idx[key + '|' + d]) r[6] = d;
       if (r[6]) placed++; else unplaced++;
       return r;
     });
     WT._runDestructiveLogic(ss, name, rows, want, true);
     out.sheets[name] = { rows: rows.length, labelled: placed, alreadyLabelled: already, notInSchedule: unplaced };
   });
+  ['Raw Schedule', 'WF_IDP', 'WF_OVERTIME'].forEach(function (name) { var sh = ss.getSheetByName(name); if (sh) _gridTrimRows(sh, sh.getLastRow()); });
   _bustWfCache();
   Logger.log('[repairScheduleData] ' + JSON.stringify(out, null, 1));
   return out;
+}
+
+// Runs repairScheduleData once per SCHED_REPAIR_VERSION. Called after an
+// import, in its own execution, so it never slows the import itself.
+function _autoRepairScheduleData() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SCHED_REPAIR_DONE') === SCHED_REPAIR_VERSION) return;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(0)) return;   // someone else's import is already running it
+  try {
+    if (props.getProperty('SCHED_REPAIR_DONE') === SCHED_REPAIR_VERSION) return;
+    repairScheduleData();
+    props.setProperty('SCHED_REPAIR_DONE', SCHED_REPAIR_VERSION);
+  } catch (e) {
+    Logger.log('[autoRepair] failed, will retry after the next import: ' + e);
+  } finally { lock.releaseLock(); }
 }
 
 // ── Chunked upload transport ──────────────────────────────────────────────

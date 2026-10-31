@@ -475,12 +475,12 @@ var ManagementView = {
           else if (lateRgx.test(type)) dayInfo[k].late = true;
           else {
             dayInfo[k].real[type] = true;
-            // Real-absence HOURS by the shift the agent was scheduled on (clock
-            // windows 07-15 / 15-23 / 23-07 only when no shift is on record).
+            // Real-absence HOURS, split across the Night/Morning/Evening shift
+            // windows (07-15 / 15-23 / 23-07) so concentration-by-shift is exact.
             var sMin = WT._timeToMins(row[3]), eMin = WT._timeToMins(row[4]);
             if (sMin >= 0 && eMin >= 0 && eMin !== sMin) {
               if (eMin <= sMin) eMin += 1440;
-              WT._shiftSplitsFor(row, sMin, eMin).forEach(function(sp) {
+              WT._getShiftSplits(sMin, eMin).forEach(function(sp) {
                 dayInfo[k].hrs += sp.hours;
                 if (dayInfo[k].shift[sp.shift] != null) dayInfo[k].shift[sp.shift] += sp.hours;
               });

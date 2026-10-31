@@ -235,11 +235,11 @@ var WorkforceTracker = {
       // agent-days in the tracker sheets — including activity that is no longer
       // there (a cancelled furlough), which keying the wipe on the new rows
       // alone could never remove.
-      let cover = {};      // lower(agent) → { 'yyyy-MM-dd': { first, end, shift } } (minutes from that day's 00:00)
+      let cover = {};      // lower(agent) → { 'yyyy-MM-dd': { first, end } } (minutes from that day's 00:00)
       const coverDay = (agent, day) => {
           const k = String(agent).trim().toLowerCase();
           if (!cover[k]) cover[k] = {};
-          if (!cover[k][day]) cover[k][day] = { first: null, end: null, shift: '' };
+          if (!cover[k][day]) cover[k][day] = { first: null, end: null };
           return cover[k][day];
       };
 
@@ -290,8 +290,7 @@ var WorkforceTracker = {
           
           agentBuffer.forEach(obj => { 
               let actLower = obj.act.toLowerCase();
-              let anc = obj.anchor || obj.dateStr, ancShift = (cover[String(currentAgent).trim().toLowerCase()] || {})[anc];
-              let tail = [anc, ancShift ? ancShift.shift : ''];
+              let tail = [obj.anchor || obj.dateStr];
               let isTeamLead = actLower.includes('team lead') || actLower.includes('équipe') || actLower.includes('equipe');
               
               let isCoach = !isTeamLead && !COACH_EXCLUDE_RGX.test(actLower) && COACHING_CODES.some(c => actLower.includes(c));
@@ -389,10 +388,10 @@ var WorkforceTracker = {
               if (ce <= cs) ce += 1440;
               if (cd.first == null || cs < cd.first) cd.first = cs;
               if (cd.end == null || ce > cd.end) cd.end = ce;
-              if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate, '']);
-              if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate, '']);
-              if (isRole) cleanRoles.push([csvParts[0], pDate, roleType, csvParts[3], csvParts[4], csvParts[5], pDate, '']);
-              if (isAbsence) cleanAbsences.push([csvParts[0], pDate, absType, csvParts[3], csvParts[4], csvParts[5], pDate, '']);
+              if (isCoach) cleanCoach.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate]);
+              if (isFurlough && !isOff) cleanFurlough.push([csvParts[0], pDate, this._cleanActivity(csvParts[2]), csvParts[3], csvParts[4], csvParts[5], pDate]);
+              if (isRole) cleanRoles.push([csvParts[0], pDate, roleType, csvParts[3], csvParts[4], csvParts[5], pDate]);
+              if (isAbsence) cleanAbsences.push([csvParts[0], pDate, absType, csvParts[3], csvParts[4], csvParts[5], pDate]);
               
               schedDates.push(pDate);
           }
@@ -429,9 +428,6 @@ var WorkforceTracker = {
             if (cd) {
                 if (cd.first == null || absS < cd.first) cd.first = absS;
                 if (cd.end == null || absE > cd.end) cd.end = absE;
-                // The day line ("10/29/26 9:00 PM 6:00 AM") is the shift itself:
-                // its midpoint names the shift, as in the Raw Schedule import.
-                if (dMatch && !cd.shift) { let mid = ((absS + absE) / 2) % 1440; cd.shift = (mid >= 1380 || mid < 420) ? 'Night' : (mid >= 900 ? 'Evening' : 'Morning'); }
             }
             let actDateStr = Utilities.formatDate(new Date(currentY, currentM - 1, currentD + daysAdded), Session.getScriptTimeZone(), "yyyy-MM-dd");
             if (!act.toLowerCase().match(/^activity|^scheduled/)) agentBuffer.push({ raw: text, dateStr: actDateStr, anchor: currentDateStr, act: act, start: segMatch[2].trim(), end: segMatch[3].trim() });
@@ -443,7 +439,7 @@ var WorkforceTracker = {
       // Every sheet is reconciled against what the paste covers — even one the
       // paste has no rows for, so activity removed in WFM disappears here too.
       if (Object.keys(cover).length) {
-        const tail = ['Start Time', 'End Time', 'Region', 'Shift Date', 'Shift'];
+        const tail = ['Start Time', 'End Time', 'Region', 'Shift Date'];
         this._executeDestructiveUpsert('WF_COACHING', cleanCoach, ['Agent Name', 'Date', 'Activity'].concat(tail), cover);
         this._executeDestructiveUpsert('WF_FURLOUGH', cleanFurlough, ['Agent Name', 'Date', 'Activity'].concat(tail), cover);
         this._executeDestructiveUpsert('WF_ROLES', cleanRoles, ['Agent Name', 'Date', 'Role'].concat(tail), cover);
@@ -826,6 +822,7 @@ var WorkforceTracker = {
       if (sig(headers) !== sig(oldHeaders)) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       if (from < combined.length) {
           const tail = combined.slice(from);
+          _gridEnsureRows(sheet, combined.length + 1);
           // Time columns stay PLAIN TEXT so "9:00 AM" is never coerced into a
           // date/serial that getDisplayValues() would return as "12/30/1899".
           try {
@@ -836,6 +833,7 @@ var WorkforceTracker = {
           sheet.getRange(from + 2, 1, tail.length, ncol).setValues(tail);
       }
       if (old.length > combined.length) sheet.getRange(combined.length + 2, 1, old.length - combined.length, ncol).clearContent();
+      _gridTrimRows(sheet, combined.length + 1);
       return { rows: combined.length, rewritten: combined.length - from };
   },
 
@@ -995,7 +993,7 @@ var WorkforceTracker = {
 
             let endMins = endMinsRaw < startMins ? endMinsRaw + 1440 : endMinsRaw; 
 
-            this._shiftSplitsFor(row, startMins, endMins).forEach(split => {
+            this._getShiftSplits(startMins, endMins).forEach(split => {
                 // A shift split can still straddle midnight (e.g. a Night chunk
                 // that runs 23:00 -> 00:30). Break it at each midnight so every
                 // piece lands wholly inside one calendar day and is credited to
@@ -1544,18 +1542,6 @@ var WorkforceTracker = {
       }
       report.data.sort((a,b) => b.total - a.total);
       return JSON.stringify(report);
-  },
-
-  // Hours credited to the shift the agent was SCHEDULED on that day ("Shift",
-  // written at import / by repairScheduleData), so a Morning agent's 3–5:30 PM
-  // furlough counts as Morning. Clock windows (Night 23–07, Morning 07–15,
-  // Evening 15–23) are only the fallback for rows with no shift on record —
-  // used alone, they filed 39% of 2026's furlough hours under a shift the
-  // agent wasn't working.
-  _shiftSplitsFor: function(row, startMins, endMins) {
-      const sh = String(row[7] || '').trim();
-      if (sh === 'Night' || sh === 'Morning' || sh === 'Evening') return [{ shift: sh, hours: (endMins - startMins) / 60, startMins: startMins, endMins: endMins }];
-      return this._getShiftSplits(startMins, endMins);
   },
 
   _getShiftSplits: function(startMins, endMins) {

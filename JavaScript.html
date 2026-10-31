@@ -3704,7 +3704,7 @@
       var P = mvPal(), tot = (t.night || 0) + (t.morning || 0) + (t.evening || 0);
       if (!(tot > 0)) return '';
       return '<div class="mv-split">' + MV_SHIFTS.map(function(s) { var v = t[s.k.toLowerCase()] || 0; return v ? '<span style="flex:' + v + ' 1 0; background:' + P[s.slot] + ';" title="' + s.k + ' ' + trkH(v) + '"></span>' : ''; }).join('') + '</div>' +
-          (legend === false ? '' : '<div class="mv-split-legend">' + MV_SHIFTS.map(function(s) { var v = t[s.k.toLowerCase()] || 0; return '<span><i style="background:' + P[s.slot] + ';"></i>' + s.k + ' <b>' + trkPct(v, tot) + '%</b> · ' + trkH(v) + '</span>'; }).join('') + '</div>');
+          (legend === false ? '' : '<div class="mv-split-legend">' + MV_SHIFTS.map(function(s) { var v = t[s.k.toLowerCase()] || 0; return '<span><i style="background:' + P[s.slot] + ';"></i>' + s.k + ' <small>' + s.hrs + '</small> <b>' + trkPct(v, tot) + '%</b> · ' + trkH(v) + '</span>'; }).join('') + '</div>');
   }
   function trkCanvas(id, h) { return '<div class="mv-canvas"' + (h ? ' style="height:' + h + 'px;"' : '') + '><canvas id="' + id + '"></canvas></div>'; }
 
@@ -4029,7 +4029,7 @@
 
       // ── charts ──
       var titleBy = mode === 'day' ? 'by hour of day' : 'by ' + unitW;
-      var periodCard = sectionCard(word + ' ' + titleBy, trkH(all), (mode === 'day' ? 'agent-hours in each clock hour' : 'hours per ' + unitW) + ' · coloured by the shift each agent was scheduled on',
+      var periodCard = sectionCard(word + ' ' + titleBy, trkH(all), (mode === 'day' ? 'agent-hours in each clock hour' : 'hours per ' + unitW) + ' · coloured by shift · ' + MV_SHIFTS.map(function(s) { return s.k + ' ' + s.hrs; }).join(' · '),
           all > 0 ? trkCanvas('tracker-chart') : mvEmpty('bar-chart-3', 'Nothing logged in this window', 'Try another period or region.'));
       var topCard = sectionCard('Top agents', nAg + ' agent' + (nAg === 1 ? '' : 's'), 'hours this window' + (nAg > 10 ? ', top 10 of ' + nAg : '') + ' · days with ' + lw + ' in small type', top.html, { cls: 'trk-top' });
       var trendCard = '', abCard = '';
@@ -5653,7 +5653,7 @@
       // Absence: where it lands (shift split bar) + per-bucket hours by shift.
       var sh = cur.absShift || {}, shT = (sh.Night || 0) + (sh.Morning || 0) + (sh.Evening || 0), P = mvPal();
       var split = shT > 0 ? '<div class="mv-split">' + MV_SHIFTS.map(function(s) { var v = sh[s.k] || 0; if (!v) return ''; return '<span style="flex:' + v + ' 1 0; background:' + P[s.slot] + ';" title="' + s.k + ' ' + r1(v) + 'h"></span>'; }).join('') + '</div>' +
-          '<div class="mv-split-legend">' + MV_SHIFTS.map(function(s) { var v = sh[s.k] || 0; return '<span><i style="background:' + P[s.slot] + ';"></i>' + s.k + ' <b>' + Math.round(v / shT * 100) + '%</b> · ' + r1(v) + 'h</span>'; }).join('') + '</div>' : '';
+          '<div class="mv-split-legend">' + MV_SHIFTS.map(function(s) { var v = sh[s.k] || 0; return '<span><i style="background:' + P[s.slot] + ';"></i>' + s.k + ' <small>' + s.hrs + '</small> <b>' + Math.round(v / shT * 100) + '%</b> · ' + r1(v) + 'h</span>'; }).join('') + '</div>' : '';
       var absCard = d.grain === 'day'
           ? (shT > 0 ? '<div class="aether-card mv-chart-card">' + mgmtHideBtn('abschart') + '<div class="mv-sec-h">Absence by shift<span class="mv-side">' + r1(cur.absHours) + 'h</span></div><div class="mv-sec-sub">real-absence hours today</div>' + split + '</div>' : '')
           : card('abschart', 'Absence hours by ' + unitWord + ' and shift', 'real-absence hours · lates (ALU) ' + (cur.lates || 0) + (cur.approvedLeave ? ' · approved leave not counted: ' + cur.approvedLeave : ''), 'mgmt-chart-abs', split, r1(cur.absHours) + 'h');
