@@ -5313,25 +5313,117 @@
           mvBarList(list.slice(0, 12).map(function(a) { return { name: escapeHTML(a.name) + (a.lang ? ' <small>' + escapeHTML(a.lang) + '</small>' : ''), title: a.tid || '', v: a.hrs, label: a.hrs + 'h' }; }), { color: P.s3 }) + '</div>';
   }
 
-  // Furlough & absences by bucket — the weekly sheet's table: Furlough (ACSU)
-  // and real-absence hours split by shift, with a total row.
+  // Furlough & absence by shift window — laid out around the Week A / Week B
+  // cycle. Two summaries (furlough, real absence) with their Night / Morning /
+  // Evening split and the heaviest week or day, then one table: each side's
+  // shift hours tinted by size and a total with an inline bar. In Month, days
+  // sit under their cycle week (Thu–Wed): the weeks show first, a click opens
+  // one, "Days" opens them all.
+  var MV_CYCLE_ANCHOR = Date.UTC(2026, 0, 29);   // a Thursday that starts a Week A (as WorkforceTracker)
+  function mvCycleOf(dt) {
+      var d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+      d.setDate(d.getDate() - ((d.getDay() + 3) % 7));   // back to its Thursday
+      var wk = Math.floor(Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - MV_CYCLE_ANCHOR) / 86400000) / 7);
+      return { key: localDateStr(d), ab: Math.abs(wk) % 2 === 1 ? 'B' : 'A' };
+  }
+  window.setMgmtOffView = function(v) { state.mgmtOffView = v; state.mgmtOffOpen = {}; render(); };
+  window.toggleMgmtOffWeek = function(k) { state.mgmtOffOpen = state.mgmtOffOpen || {}; state.mgmtOffOpen[k] = !state.mgmtOffOpen[k]; render(); };
+
   function mgmtOfflineTableCard() {
       var L = getMgmtLayout();
       if (L.hidden['offline']) return '';
       var d = state.mgmtData || {};
       var B = d.buckets || [], A = d.abs || [];
       if (d.grain === 'day' || A.length !== B.length || !B.length) return '';
-      var f = function(h) { return (Math.round((h || 0) * 10) / 10) + 'h'; };
-      var T = { fur: 0, Night: 0, Morning: 0, Evening: 0 };
+      var P = mvPal(), K = MV_SHIFTS.map(function(x) { return x.k; });
+      var r1 = function(h) { return Math.round((h || 0) * 10) / 10; };
+      var hh = function(h) { return h ? r1(h).toLocaleString() + 'h' : '–'; };
+      var sum = function(a) { return a.reduce(function(x, v) { return x + v; }, 0); };
+      var furShift = B.some(function(b) { return b.acsuShift; });   // older server: furlough total only
+      var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
       var rows = B.map(function(b, i) {
-          var sh = (A[i] || {}).absShift || {};
-          T.fur += b.acsu || 0; MV_SHIFTS.forEach(function(s) { T[s.k] += sh[s.k] || 0; });
-          return '<tr><td>' + escapeHTML(b.label) + '</td><td class="n">' + f(b.acsu) + '</td>' + MV_SHIFTS.map(function(s) { var v = sh[s.k] || 0; return '<td class="n' + (v ? '' : ' zero') + '">' + f(v) + '</td>'; }).join('') + '</tr>';
-      }).join('');
-      return '<div class="aether-card mv-chart-card">' + mgmtHideBtn('offline') +
-          '<div class="mv-sec-h">Furlough &amp; absence hours</div><div class="mv-sec-sub">Furlough = ACSU · absence split by shift</div>' +
-          '<div class="mv-table-wrap custom-scrollbar"><table class="mv-table"><thead><tr><th></th><th class="n">Furlough</th>' + MV_SHIFTS.map(function(s) { return '<th class="n">' + s.k + '</th>'; }).join('') + '</tr></thead>' +
-          '<tbody>' + rows + '</tbody><tfoot><tr><td>Total</td><td class="n">' + f(T.fur) + '</td>' + MV_SHIFTS.map(function(s) { return '<td class="n">' + f(T[s.k]) + '</td>'; }).join('') + '</tr></tfoot></table></div></div>';
+          var fs = b.acsuShift || {}, as = (A[i] || {}).absShift || {};
+          var abs = K.map(function(k) { return as[k] || 0; });
+          return { label: b.label, dt: b.start ? new Date(b.start) : null, fur: K.map(function(k) { return fs[k] || 0; }), furT: b.acsu || 0, abs: abs, absT: sum(abs) };
+      });
+      var add = function(t, r) { K.forEach(function(k, i) { t.fur[i] += r.fur[i]; t.abs[i] += r.abs[i]; }); t.furT += r.furT; t.absT += r.absT; return t; };
+      var blank = function() { return { fur: [0, 0, 0], abs: [0, 0, 0], furT: 0, absT: 0 }; };
+      var T = rows.reduce(add, blank());
+
+      // Month: group days under their cycle week.
+      var grouped = d.grain === 'month' && rows.every(function(r) { return r.dt; });
+      var groups = [];
+      if (grouped) {
+          rows.forEach(function(r) {
+              var c = mvCycleOf(r.dt), g = groups[groups.length - 1];
+              if (!g || g.key !== c.key) { g = add(blank(), { fur: [0, 0, 0], abs: [0, 0, 0], furT: 0, absT: 0 }); g.key = c.key; g.ab = c.ab; g.days = []; groups.push(g); }
+              g.days.push(r); add(g, r);
+          });
+          groups.forEach(function(g) {
+              var a = g.days[0].dt, b = g.days[g.days.length - 1].dt;
+              g.label = MON[a.getMonth()] + ' ' + a.getDate() + (g.days.length > 1 ? ' – ' + (b.getMonth() !== a.getMonth() ? MON[b.getMonth()] + ' ' : '') + b.getDate() : '');
+          });
+      }
+      var view = grouped ? (state.mgmtOffView || 'weeks') : 'days', open = state.mgmtOffOpen || {};
+
+      // Scales: tint and bars are relative to the rows on show at each level.
+      var scale = function(list) { return { f: Math.max.apply(null, [0].concat.apply([], list.map(function(r) { return r.fur; }))), a: Math.max.apply(null, [0].concat.apply([], list.map(function(r) { return r.abs; }))), fT: Math.max.apply(null, [0].concat(list.map(function(r) { return r.furT; }))), aT: Math.max.apply(null, [0].concat(list.map(function(r) { return r.absT; }))) }; };
+      var daySc = scale(rows), wkSc = grouped ? scale(groups) : null;
+      var cells = function(r, sc, tint) {
+          var c = function(v, max, first) { return '<td class="n' + (first ? ' s0' : '') + (v ? '' : ' zero') + '"' + (tint && max ? ' style="--h:' + (v / max).toFixed(3) + ';"' : '') + '>' + hh(v) + '</td>'; };
+          var tot = function(v, max, col) { return '<td class="n mv-ft-t"><span class="mv-ft-bar"><i style="width:' + (max ? v / max * 100 : 0).toFixed(1) + '%; background:' + col + ';"></i></span><b>' + hh(v) + '</b></td>'; };
+          return (furShift ? r.fur.map(function(v, i) { return c(v, sc.f, i === 0); }).join('') : '') + (furShift ? tot(r.furT, sc.fT, P.s7) : '<td class="n s0 mv-ft-t"><span class="mv-ft-bar"><i style="width:' + (sc.fT ? r.furT / sc.fT * 100 : 0).toFixed(1) + '%; background:' + P.s7 + ';"></i></span><b>' + hh(r.furT) + '</b></td>') +
+                 r.abs.map(function(v, i) { return c(v, sc.a, i === 0); }).join('') + tot(r.absT, sc.aT, P.s5);
+      };
+      var dayLabel = function(r) {
+          if (!r.dt) return '<b>' + escapeHTML(r.label) + '</b>';
+          if (d.grain === 'month' || d.grain === 'week') {
+              var c = mvCycleOf(r.dt), we = r.dt.getDay() === 0 || r.dt.getDay() === 6;
+              return '<span class="mv-ft-d' + (we ? ' we' : '') + '"><small>' + DOW[r.dt.getDay()] + '</small><b>' + r.dt.getDate() + '</b>' + (d.grain === 'week' ? '<span class="mv-ft-ab">' + c.ab + '</span>' : '') + '</span>';
+          }
+          return '<b>' + escapeHTML(r.label) + '</b>';
+      };
+      var n = 0, body = '';
+      if (grouped) {
+          groups.forEach(function(g) {
+              var isOpen = view === 'days' || open[g.key];
+              body += '<tr class="mv-ft-wk' + (isOpen ? ' open' : '') + '" style="--i:' + Math.min(n++, 30) + ';" onclick="toggleMgmtOffWeek(\'' + g.key + '\')" title="' + (isOpen ? 'Hide' : 'Show') + ' the days">' +
+                  '<td><span class="mv-ft-w"><i data-lucide="chevron-right" width="14"></i><span class="mv-ft-ab">' + g.ab + '</span><span><b>Week ' + g.ab + '</b><small>' + g.label + '</small></span></span></td>' + cells(g, wkSc, !isOpen) + '</tr>';
+              if (isOpen) g.days.forEach(function(r) { body += '<tr class="mv-ft-day" style="--i:' + Math.min(n++, 30) + ';"><td>' + dayLabel(r) + '</td>' + cells(r, daySc, true) + '</tr>'; });
+          });
+      } else {
+          rows.forEach(function(r) { body += '<tr style="--i:' + Math.min(n++, 30) + ';"><td>' + dayLabel(r) + '</td>' + cells(r, daySc, true) + '</tr>'; });
+      }
+
+      // Summaries.
+      var split = function(vals, tot) {
+          return '<div class="mv-split">' + MV_SHIFTS.map(function(x, i) { return vals[i] ? '<span style="flex:' + vals[i] + ' 1 0; background:' + P[x.slot] + ';" title="' + x.k + ' ' + hh(vals[i]) + '"></span>' : ''; }).join('') + '</div>' +
+              '<div class="mv-split-legend">' + MV_SHIFTS.map(function(x, i) { return '<span><i style="background:' + P[x.slot] + ';"></i>' + x.k + ' <b>' + (tot ? Math.round(vals[i] / tot * 100) : 0) + '%</b> · ' + hh(vals[i]) + '</span>'; }).join('') + '</div>';
+      };
+      var unitList = grouped ? groups : rows;
+      var nameOf = function(r) { return grouped ? 'Week ' + r.ab + ' · ' + r.label : (r.dt && (d.grain === 'week' || d.grain === 'month') ? DOW[r.dt.getDay()] + ' ' + MON[r.dt.getMonth()] + ' ' + r.dt.getDate() : r.label); };
+      var top = function(key) { var b = null; unitList.forEach(function(r) { if (r[key] > 0 && (!b || r[key] > b[key])) b = r; }); return b; };
+      var tf = top('furT'), ta = top('absT'), unitW = grouped ? 'week' : (d.grain === 'quarter' ? 'week' : (d.grain === 'ytd' ? 'month' : 'day'));
+      var sums = '<div class="mv-ft-sum">' +
+          '<div class="mv-ft-s"><span class="k">Furlough (ACSU)</span><b class="cnum">' + hh(T.furT) + '</b>' + (furShift && sum(T.fur) ? split(T.fur, sum(T.fur)) : '<div class="mv-ft-note">released time, hours</div>') + '</div>' +
+          '<div class="mv-ft-s"><span class="k">Real absence</span><b class="cnum">' + hh(T.absT) + '</b>' + (T.absT ? split(T.abs, T.absT) : '<div class="mv-ft-note">none in this period</div>') + '</div>' +
+          '<div class="mv-ft-s mv-ft-top"><span class="k">Heaviest ' + unitW + '</span>' +
+              '<div class="mv-ft-tl"><span>Furlough</span><b>' + (tf ? hh(tf.furT) : '–') + '</b><small>' + (tf ? escapeHTML(nameOf(tf)) : 'none') + '</small></div>' +
+              '<div class="mv-ft-tl"><span>Absence</span><b>' + (ta ? hh(ta.absT) : '–') + '</b><small>' + (ta ? escapeHTML(nameOf(ta)) : 'none') + '</small></div></div>' +
+          '</div>';
+
+      var shiftTh = function() { return MV_SHIFTS.map(function(x, i) { return '<th class="n' + (i === 0 ? ' s0' : '') + '"><i style="background:' + P[x.slot] + ';"></i>' + x.k + '<small>' + x.hrs + '</small></th>'; }).join('') + '<th class="n">Total</th>'; };
+      var head = '<thead><tr class="mv-ft-g"><th rowspan="2"></th><th class="s0" colspan="' + (furShift ? 4 : 1) + '">Furlough (ACSU)</th><th class="s0" colspan="4">Real absence</th></tr>' +
+          '<tr>' + (furShift ? shiftTh() : '<th class="n s0">Total</th>') + shiftTh() + '</tr></thead>';
+      var foot = '<tfoot><tr><td>Total</td>' + cells(T, { f: 0, a: 0, fT: T.furT, aT: T.absT }, false) + '</tr></tfoot>';
+      var seg = grouped ? '<span data-seg="offview">' + segControl([['weeks', 'Weeks'], ['days', 'Days']], view, 'setMgmtOffView') + '</span>' : '';
+
+      return '<div class="aether-card mv-chart-card mv-ft-card">' + mgmtHideBtn('offline') +
+          '<div class="mv-sec-h">Furlough &amp; absence by shift' + seg + '</div>' +
+          '<div class="mv-sec-sub">hours in each shift window · real absence leaves out furlough and lates' + (grouped ? ' · weeks run Thu–Wed (Week A / Week B); click a week for its days' : '') + '</div>' +
+          sums +
+          '<div class="mv-table-wrap custom-scrollbar"><table class="mv-table mv-ft' + (furShift ? '' : ' nofs') + '">' + head + '<tbody>' + body + '</tbody>' + foot + '</table></div></div>';
   }
 
   // Rendered tracker-section cards (one chart each) + their chart-type toggle.
@@ -5679,7 +5771,8 @@
           mgmtSectionsHtml() +
           mgmtForecastCard() +
           pair(mgmtActivityCard(), mgmtAlarmsCard()) +
-          pair(mgmtSafeAgentsCard(), mgmtOfflineTableCard()) +
+          pair(mgmtSafeAgentsCard()) +
+          pair(mgmtOfflineTableCard()) +
           mgmtCodingCard() +
           '</div>';
   }

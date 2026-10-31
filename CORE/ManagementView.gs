@@ -203,6 +203,7 @@ var ManagementView = {
 
     var newTotals = function() {
       return { ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0, coach: 0, acsu: 0, elearn: 0,
+               acsuShift: { Night: 0, Morning: 0, Evening: 0 },
                coachSessions: 0, absences: 0, absOn: 0, absOff: 0, lates: 0, approvedLeave: 0,
                absTypes: {}, absTypesOff: {}, slAvg: null, ackAvg: null,
                // Absence HOURS (not just agent-day counts) + shift concentration.
@@ -222,8 +223,8 @@ var ManagementView = {
     };
     var selT = newTotals(), prevT = newTotals();
     var buckets = wins.map(function(w) {
-      return { label: w.label, ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0,
-               coach: 0, acsu: 0, elearn: 0, coachSessions: 0, slAvg: null, ackAvg: null,
+      return { label: w.label, start: w.start, ot: 0, otX1: 0, otX15: 0, safe: 0, tower: 0,
+               coach: 0, acsu: 0, elearn: 0, acsuShift: { Night: 0, Morning: 0, Evening: 0 }, coachSessions: 0, slAvg: null, ackAvg: null,
                openOt: 0, openSlots: 0, idpDeficit: 0, idpNet: null, idpReq: null, idpOpen: null, _idpSum: 0, _idpN: 0, _idpReq: 0, _idpOpen: 0,
                reading: 0, breakH: 0, lunchH: 0, schedH: 0 };
     });
@@ -367,8 +368,27 @@ var ManagementView = {
       });
     } catch (e) {}
 
-    // ACSU hours
-    try { walkHours('WF_FURLOUGH', function(iv) { distribute(iv, function(t, h) { t.acsu += h; }, function(b, h) { b.acsu += h; }); }); } catch (e) {}
+    // ACSU hours, also split by shift window (Night 23–07, Morning 07–15,
+    // Evening 15–23): a block crossing 07:00, 15:00 or 23:00 is cut there.
+    var shiftPieces = function(iv) {
+      var out = [], s = iv.s;
+      while (s < iv.e) {
+        var d = new Date(s), m = d.getHours() * 60 + d.getMinutes();
+        var sh = m < 420 ? 'Night' : (m < 900 ? 'Morning' : (m < 1380 ? 'Evening' : 'Night'));
+        var next = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, m < 420 ? 420 : (m < 900 ? 900 : (m < 1380 ? 1380 : 1860))).getTime();
+        var e = Math.min(iv.e, next);
+        out.push({ s: s, e: e, sh: sh });
+        s = e;
+      }
+      return out;
+    };
+    try {
+      walkHours('WF_FURLOUGH', function(iv) {
+        shiftPieces(iv).forEach(function(p) {
+          distribute(p, function(t, h) { t.acsu += h; t.acsuShift[p.sh] += h; }, function(b, h) { b.acsu += h; b.acsuShift[p.sh] += h; });
+        });
+      });
+    } catch (e) {}
 
     // Open OT slots — WF_OT_OPEN (human layout): [Date, Start Time, End Time,
     // Slots, Activity, Min Length, ADG, ADV, Type, Rate, Skill, WindowHours,
@@ -648,8 +668,8 @@ var ManagementView = {
       o.idpOpen = o._idpN > 0 ? round1(o._idpOpen / o._idpN) : null; // avg staffed/open seats
       delete o._idpSum; delete o._idpN; delete o._idpReq; delete o._idpOpen;
     };
-    buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); finIdp(b); });
-    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
+    buckets.forEach(function(b) { HOUR_KEYS.forEach(function(k2) { b[k2] = round1(b[k2]); }); roundShift(b.acsuShift); finIdp(b); });
+    [selT, prevT].forEach(function(t) { HOUR_KEYS.forEach(function(k2) { t[k2] = round1(t[k2]); }); roundShift(t.acsuShift); t.absHours = round1(t.absHours); t.absHoursOff = round1(t.absHoursOff); roundShift(t.absShift); finIdp(t); });
     absSeries.forEach(function(a) { a.absHours = round1(a.absHours); roundShift(a.absShift); });
     // Codes derived directly from category totals, then round everything.
     selT.codes.ACSU = selT.acsu; selT.codes.OT = selT.ot;
