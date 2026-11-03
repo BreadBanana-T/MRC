@@ -255,7 +255,8 @@
       });
       ag.acts.forEach(function (a, k) {
         if (a.orig != null && a.orig !== a.s) h += '<div class="wf-ghost" style="left:' + pct(a.orig) + '%;width:' + (pct(a.orig + (a.origDur || a.dur)) - pct(a.orig)) + '%"></div>';
-        var cls = 'wf-blk mv ' + a.type + (a.unpaid ? ' unpaid' : '') + (a.past ? ' past' : '') + (a.pinned ? ' pinned' : '') + (ag.infeasible ? ' locked' : '');
+        var kind = E.moveKind(S.model, a);
+        var cls = 'wf-blk mv ' + a.type + (a.unpaid ? ' unpaid' : '') + (a.past ? ' past' : '') + (a.pinned ? ' pinned' : '') + (ag.infeasible ? ' locked' : '') + (kind === 30 ? ' big' : kind === 'fix' ? ' fix' : '');
         h += '<div class="' + cls + '" id="blk-' + ai + '-' + k + '" data-ai="' + ai + '" data-k="' + k + '" style="left:' + pct(a.s) + '%;width:' + (pct(a.s + a.dur) - pct(a.s)) + '%">' + (a.type === 'Lunch' ? 'L' + a.dur : a.dur) + '</div>';
       });
     }
@@ -344,13 +345,16 @@
     document.querySelectorAll('.wf-kpi').forEach(function (card) {
       var k = card.getAttribute('data-k'), num = card.querySelector('.num');
       if (k === 'idpShortMin' && !hasIdp) { num.textContent = '—'; num.setAttribute('data-v', 0); card.classList.remove('zero', 'hot'); return; }
-      var v = k === 'total' ? Math.round(sc.total) : sc[k];
+      var v = k === 'total' ? Math.round(sc.total) : k === 'moves' ? sc.moved15 + sc.moved30 : sc[k];
       tweenNum(num, v);
       if (k !== 'total' && k !== 'moves') { card.classList.toggle('zero', v === 0); card.classList.toggle('hot', v > 0 && v >= (S.base[k] || 0) && v > 30); }
     });
     $('kpi-idp-sub').textContent = hasIdp ? 'on queue < required' : 'no IDP imported for this date';
-    $('kpi-added').textContent = sc.added ? '+' + sc.added + ' added · ' : '';
-    $('kpi-added').title = sc.added ? 'Blocks the paid-break grid requires that the current plan doesn\'t have (usually paid lunches — the WFM import skips "Paid Lunch" lines)' : '';
+    var parts = [sc.moved15 + '×15'];
+    parts.push('<b class="' + (sc.moved30 ? 'warn' : '') + '" title="30-min moves — capped at ' + sc.bigAllowed + ' for this plan">' + sc.moved30 + '×30</b>');
+    if (sc.fixes) parts.push('<span title="Moved because the current time breaks the spacing rules">' + sc.fixes + ' rule fix' + (sc.fixes === 1 ? '' : 'es') + '</span>');
+    if (sc.added) parts.push('<span title="Blocks the paid-break grid requires that the current plan doesn\'t have (usually paid lunches — the WFM import skips &quot;Paid Lunch&quot; lines)">+' + sc.added + ' added</span>');
+    $('kpi-added').innerHTML = parts.join(' · ') + ' · ';
     var d = $('kpi-delta'), b = S.base.total;
     if (!b || Math.abs(sc.total - b) < 0.5) d.innerHTML = 'current plan, before optimizing';
     else {
@@ -426,9 +430,9 @@
       var r = E.optimize(S.model, { budgetMs: 2500 });
       afterBulkChange(before);
       btn.disabled = false;
-      var a = S.cur.total, n = 0;
+      var sc = S.cur, a = sc.total, n = 0;
       S.model.agents.forEach(function (ag, ai) { ag.acts.forEach(function (x, k) { if (before[ai + '-' + k] !== x.s) n++; }); });
-      toast(n ? ('Optimized: ' + n + ' block' + (n === 1 ? '' : 's') + ' moved · risk ' + (b ? Math.round((a - b) / b * 100) : 0) + '%') : 'Already optimal for these rules', 'ok');
+      toast(n ? ('Optimized: ' + (sc.moved15 + sc.moved30) + ' moved (' + sc.moved15 + ' × 15 min, ' + sc.moved30 + ' × 30 min) · risk ' + (b ? Math.round((a - b) / b * 100) : 0) + '%') : 'Already optimal for these rules', 'ok');
       if (hasGsap()) gsap.fromTo('.wf-kpi-hero', { scale: .97 }, { scale: 1, duration: .5, ease: 'elastic.out(1, .5)' });
       void r;
     }, 30);
@@ -512,7 +516,13 @@
     if (el.classList.contains('mv')) {
       var k = +el.getAttribute('data-k'), a = ag.acts[k], r = E.rangeFor(S.model, ag, k);
       html = '<b>' + (a.unpaid ? 'Unpaid lunch' : a.type === 'Lunch' ? 'Paid lunch' : 'Break') + '</b> · ' + a.dur + ' min<br><span class="m">' + fmt(a.s) + '–' + fmt(a.s + a.dur) + '</span>' +
-        (a.orig == null ? '<br>Added (not in the current plan)' : a.orig !== a.s ? '<br>was <span class="m">' + fmt(a.orig) + '</span>' : '') +
+        (function () {
+          var kind = E.moveKind(S.model, a);
+          if (kind === 'added') return '<br>Added (not in the current plan)';
+          if (!kind) return '';
+          var d = Math.abs(a.s - a.orig);
+          return '<br>' + (kind === 'fix' ? '<b>Moved by the spacing rules</b> ' + d + ' min' : (kind === 30 ? '<b>Moved ' + d + ' min</b>' : 'Moved ' + d + ' min')) + ' (was <span class="m">' + fmt(a.orig) + '</span>)';
+        })() +
         (a.past ? '<br>Already started' : '<br>Allowed start <span class="m">' + fmt(r[0]) + '–' + fmt(r[1]) + '</span>') +
         (a.pinned ? '<br>Pinned · double-click to unpin' : (a.past ? '' : '<br>Drag to move'));
     } else {
@@ -525,26 +535,38 @@
   // ── Changes drawer ───────────────────────────────────────────────────────
   function renderChanges() {
     var body = $('changes-body'); if (!S.model) { body.innerHTML = ''; return; }
-    var changed = [], flags = [];
+    var groups = { 30: [], 15: [], fix: [], added: [] }, flags = [];
     S.model.agents.forEach(function (ag, ai) {
       if (ag.fullAbsent) return;
-      var mv = [];
       ag.acts.forEach(function (a) {
+        var kind = E.moveKind(S.model, a); if (!kind) return;
         var lbl = a.unpaid ? 'Unpaid lunch' : a.type;
-        if (a.orig == null) mv.push(lbl + ' added at <b>' + fmt(a.s) + '</b>');
-        else if (a.orig !== a.s) mv.push(lbl + ' <s>' + fmt(a.orig) + '</s> → <b>' + fmt(a.s) + '</b>');
+        var line = kind === 'added' ? lbl + ' added at <b>' + fmt(a.s) + '</b>'
+          : lbl + ' <s>' + fmt(a.orig) + '</s> → <b>' + fmt(a.s) + '</b> <span class="wf-muted">' + (a.s > a.orig ? '+' : '−') + Math.abs(a.s - a.orig) + ' min' + (a.pinned ? ' · manual' : '') + '</span>';
+        groups[kind].push({ ai: ai, ag: ag, line: line });
       });
-      if (mv.length) changed.push({ ai: ai, ag: ag, mv: mv });
       if (ag.infeasible) flags.push({ ai: ai, ag: ag, t: 'No legal layout — left as is' + (ag.skipped ? ' (' + ag.skipped + ' missing block' + (ag.skipped === 1 ? '' : 's') + ' not added)' : '') });
       else if (ag.relaxed) flags.push({ ai: ai, ag: ag, t: 'Spacing relaxed to fit (level ' + ag.relaxed + ')' });
       if (ag.mismatch) flags.push({ ai: ai, ag: ag, t: ag.mismatch });
     });
-    var h = '<div class="wf-sec"><h4>' + changed.length + ' agent' + (changed.length === 1 ? '' : 's') + ' changed</h4>';
-    if (!changed.length) h += '<p>Nothing moved yet. Press <b>Optimize</b> or drag a block.</p>';
-    changed.forEach(function (c) {
-      h += '<div class="wf-change" onclick="WF.focusRow(' + c.ai + ')"><div><b>' + esc(c.ag.name) + '</b> <span class="chip ' + c.ag.lang.toLowerCase() + '">' + c.ag.lang + '</span><div class="mv">' + c.mv.join('<br>') + '</div></div></div>';
+    var sc = S.cur || E.score(S.model);
+    var SECT = [
+      { k: 30, t: '30-minute moves', d: 'Expensive on purpose — each one buys a real coverage gain. Capped at ' + sc.bigAllowed + ' for this plan (' + Math.round((S.rules.moves.maxBigShare || 0) * 100) + '% of moved blocks).' },
+      { k: 15, t: '15-minute moves', d: 'The normal adjustment.' },
+      { k: 'fix', t: 'Rule fixes', d: 'The current time breaks the spacing rules, so the block had to move — to the closest legal time.' },
+      { k: 'added', t: 'Added', d: 'Required by the paid-break grid but missing from the current plan (usually paid lunches — the WFM import skips "Paid Lunch" lines).' }
+    ];
+    var h = '', any = false;
+    SECT.forEach(function (sec) {
+      var list = groups[sec.k]; if (!list.length) return; any = true;
+      h += '<div class="wf-sec"><h4>' + sec.t + ' · ' + list.length + '</h4><p>' + esc(sec.d) + '</p>';
+      list.forEach(function (c) {
+        h += '<div class="wf-change' + (sec.k === 30 ? ' big' : '') + '" onclick="WF.focusRow(' + c.ai + ')"><div><b>' + esc(c.ag.name) + '</b> <span class="chip ' + c.ag.lang.toLowerCase() + '">' + c.ag.lang + '</span><div class="mv">' + c.line + '</div></div></div>';
+      });
+      h += '</div>';
     });
-    h += '</div><div class="wf-sec"><h4>' + flags.length + ' flag' + (flags.length === 1 ? '' : 's') + '</h4>';
+    if (!any) h += '<div class="wf-sec"><p>Nothing moved yet. Press <b>Optimize</b> or drag a block.</p></div>';
+    h += '<div class="wf-sec"><h4>' + flags.length + ' flag' + (flags.length === 1 ? '' : 's') + '</h4>';
     if (!flags.length) h += '<p>Every shift fits the rules as set.</p>';
     flags.forEach(function (f) {
       h += '<div class="wf-change" onclick="WF.focusRow(' + f.ai + ')"><div><b>' + esc(f.ag.name) + '</b><div class="mv">' + esc(f.t) + '</div></div></div>';
@@ -579,7 +601,11 @@
     h += '<div class="wf-sec"><h4>Protection weights</h4><p>How much an agent being off queue at the same time as a peer costs. Pairs multiply, so two Bilinguals together cost ' + (W.BL * W.BL) + ' vs ' + (W.EN * W.EN) + ' for two English.</p><div class="wf-form">' +
       field('Bilingual', 'k-BL', W.BL) + field('French', 'k-FR', W.FR) + field('English', 'k-EN', W.EN) +
       field('+ Level 4', 'k-L4', W.L4) + field('+ Question Line', 'k-QL', W.QL) + field('+ Escalation', 'k-ESC', W.ESC) +
-      field('Trainee × ', 'k-tr', W.traineeMult) + field('IDP shortfall λ', 'k-lam', r.idpLambda) + field('Stay-put μ (per min moved)', 'k-mu', r.churnMu) + '</div></div>';
+      field('Trainee × ', 'k-tr', W.traineeMult) + field('IDP shortfall λ', 'k-lam', r.idpLambda) + '</div></div>';
+    var MV = r.moves;
+    h += '<div class="wf-sec"><h4>Moves</h4><p>How far blocks may move from the current plan. On the 15-min grid a 15-min move is the normal one; a 30-min move has to buy a real gain (the default costs about one Bilingual overlap) and only a share of moves may be 30. Nothing moves further unless the current time breaks the spacing rules.</p><div class="wf-form">' +
+      field('Cost of a 15-min move', 'm-c15', MV.cost15) + field('Cost of a 30-min move', 'm-c30', MV.cost30) + field('Max move (min)', 'm-max', MV.maxMin) +
+      field('Max share of 30-min moves (%)', 'm-share', Math.round((MV.maxBigShare || 0) * 100)) + '</div></div>';
     h += '<div class="wf-sec"><p>' + (admin ? 'You can save these for everyone.' : 'Only MRC admins can save rules for everyone — <b>Apply</b> still lets you try them on this page.') + '</p>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="wf-btn primary" onclick="WF.applyRules(false)"><i data-lucide="play" width="14"></i>Apply here</button>' +
       '<button class="wf-btn accent" onclick="WF.applyRules(true)"' + (admin ? '' : ' disabled') + '><i data-lucide="cloud-upload" width="14"></i>Save for everyone</button>' +
@@ -605,7 +631,8 @@
       grid: grid,
       windows: { firstMin: num('w-firstMin'), gapMin: num('w-gapMin'), lastBeforeEndMin: num('w-last'), snap: num('w-snap') || 15, lunchMiddleThird: $('w-third').value === '1' },
       weights: { BL: num('k-BL'), FR: num('k-FR'), EN: num('k-EN'), L4: num('k-L4'), QL: num('k-QL'), ESC: num('k-ESC'), traineeMult: num('k-tr') },
-      idpLambda: num('k-lam'), churnMu: num('k-mu'), liveLeadMin: num('w-lead')
+      moves: { cost15: num('m-c15'), cost30: num('m-c30'), maxMin: num('m-max'), maxBigShare: num('m-share') == null ? null : num('m-share') / 100 },
+      idpLambda: num('k-lam'), liveLeadMin: num('w-lead')
     };
   }
   function applyRules(save) {

@@ -364,9 +364,17 @@ snap — relaxed step-wise only when a shift can't fit, and flagged), and weight
 **Optimizer** (client-side, `WorkforceEngine.html`, no hard caps): minimizes pairwise overlap of
 off-queue agents per 5-min slot inside each group (BL, FR, EN, French cover = FR+BL, Senior =
 L4/QL/ESC), weighted by language/level and scaled up by that group's absences today, plus an IDP
-shortfall term and a small stay-put term. Each agent's whole layout is re-solved exactly by DP
+shortfall term and a move cost. Each agent's whole layout is re-solved exactly by DP
 given everyone else, until a pass changes nothing. "Rest of day only" freezes anything starting
-within the lead time. Note: the WFM importer skips "Paid Lunch" lines, so paid lunches the grid
+within the lead time.
+
+**Move policy** (`rules.moves`): on the 15-min grid a 15-min move is the normal one (`cost15`
+3); a 30-min move costs `cost30` 40 — about one Bilingual overlap — and at most
+`maxBigShare` (10%) of moved blocks may be 30s (enforced after optimizing by raising their cost,
+then giving up the ones that buy least). Moves are priced on the TOTAL distance from the current
+plan's time and never exceed `maxMin` (30). The only exception is a **rule fix**: when the current
+time breaks the spacing rules the block is repaired to the closest legal time (fewest blocks
+moved, then fewest minutes) and shown as such, not as an optimizer choice. Note: the WFM importer skips "Paid Lunch" lines, so paid lunches the grid
 requires show as **added** blocks.
 
 ---

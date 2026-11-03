@@ -60,7 +60,12 @@
     windows: { firstMin: 120, gapMin: 90, lastBeforeEndMin: 60, snap: 15, lunchMiddleThird: true },
     weights: { BL: 10, FR: 6, EN: 1, L4: 3, QL: 2, ESC: 2, traineeMult: 0.5 },
     idpLambda: 2,
-    churnMu: 0.02,
+    // Moving a block away from the current plan. On the 15-min grid a 15-min
+    // move is the normal, cheap one; 30 is expensive (it has to save about a
+    // whole Bilingual overlap) and capped to maxBigShare of all moved blocks;
+    // more than maxMin only ever happens when the current time breaks the
+    // spacing rules ("rule fix").
+    moves: { cost15: 3, cost30: 40, maxMin: 30, maxBigShare: 0.10 },
     liveLeadMin: 15
   };
 
@@ -70,10 +75,10 @@
     var r = clone(DEFAULT_RULES);
     if (!saved || typeof saved !== 'object') return r;
     if (Array.isArray(saved.grid) && saved.grid.length) r.grid = saved.grid;
-    ['windows', 'weights'].forEach(function (k) {
+    ['windows', 'weights', 'moves'].forEach(function (k) {
       if (saved[k] && typeof saved[k] === 'object') for (var p in saved[k]) if (saved[k][p] !== '' && saved[k][p] != null) r[k][p] = saved[k][p];
     });
-    ['idpLambda', 'churnMu', 'liveLeadMin'].forEach(function (k) { if (saved[k] !== '' && saved[k] != null && !isNaN(Number(saved[k]))) r[k] = Number(saved[k]); });
+    ['idpLambda', 'liveLeadMin'].forEach(function (k) { if (saved[k] !== '' && saved[k] != null && !isNaN(Number(saved[k]))) r[k] = Number(saved[k]); });
     r.grid = r.grid.map(function (g) { return { hours: Number(g.hours), label: String(g.label || (g.hours + ' hrs')), seq: String(g.seq || ''), site: g.site || '', spanMax: g.spanMax != null && g.spanMax !== '' ? Number(g.spanMax) : null }; })
       .filter(function (g) { return !isNaN(g.hours); })
       .sort(function (a, b) { return a.hours - b.hours; });
@@ -169,23 +174,47 @@
     return false;
   }
 
-  // Earliest feasible layout at a window level (null if none). Earliest-start
-  // is optimal for feasibility here: every later constraint only gets easier
-  // the earlier the previous block ends.
-  function earliestLayout(ag, lv, snap, minStart) {
-    var b = staticBounds(ag, lv, snap), out = [], prevEnd = -Infinity;
-    for (var k = 0; k < ag.acts.length; k++) {
-      var act = ag.acts[k];
-      if (act.locked) {   // pinned or already in the past: taken as given
-        out.push(act.s); prevEnd = act.s + act.dur; continue;
+  // Cheapest legal layout of one agent's blocks at window level lv, solved
+  // exactly by dynamic programming over the blocks in order: each block's legal
+  // starts are a handful of grid slots, and the only coupling between blocks is
+  // the gap rule. costOf(act, k, start) prices one block at one start.
+  // Returns { starts, cost } or null when nothing legal fits.
+  function solveLayout(ag, lv, snap, live, costOf) {
+    var n = ag.acts.length;
+    if (!n) return { starts: [], cost: 0 };
+    var b = staticBounds(ag, lv, snap), cand = [], cost = [], best = [], prev = [];
+    for (var k = 0; k < n; k++) {
+      var act = ag.acts[k], list = [];
+      if (act.locked) list.push(act.s);   // pinned or already in the past: taken as given
+      else {
+        var lo = b[k][0];
+        if (live != null) lo = Math.max(lo, snapUp(live, snap));
+        for (var s = lo; s <= b[k][1]; s += snap) if (!overlapsFixed(ag, s, s + act.dur)) list.push(s);
       }
-      var s = Math.max(b[k][0], snapUp(prevEnd + lv.gapMin, snap), minStart || 0);
-      s = snapUp(s, snap);
-      while (s <= b[k][1] && overlapsFixed(ag, s, s + act.dur)) s += snap;
-      if (s > b[k][1]) return null;
-      out.push(s); prevEnd = s + act.dur;
+      if (!list.length) return null;
+      cand.push(list);
+      cost.push(list.map(function (st) { return costOf(act, k, st); }));
     }
-    return out;
+    best.push(cost[0].slice());
+    prev.push(cost[0].map(function () { return -1; }));
+    for (var k2 = 1; k2 < n; k2++) {
+      var row = [], pr = [], pd = ag.acts[k2 - 1].dur, pc = cand[k2 - 1], pb = best[k2 - 1];
+      for (var i = 0; i < cand[k2].length; i++) {
+        var lim = ag.acts[k2].locked ? Infinity : cand[k2][i] - pd - lv.gapMin, bv = Infinity, bj = -1;
+        for (var j = 0; j < pc.length; j++) {
+          if (pc[j] > lim) break;
+          if (pb[j] < bv) { bv = pb[j]; bj = j; }
+        }
+        row.push(bj < 0 ? Infinity : bv + cost[k2][i]); pr.push(bj);
+      }
+      best.push(row); prev.push(pr);
+    }
+    var last = best[n - 1], bi = -1, bc = Infinity;
+    for (var q = 0; q < last.length; q++) if (last[q] < bc) { bc = last[q]; bi = q; }
+    if (bi < 0 || !isFinite(bc)) return null;
+    var starts = new Array(n);
+    for (var k3 = n - 1; k3 >= 0; k3--) { starts[k3] = cand[k3][bi]; bi = prev[k3][bi]; }
+    return { starts: starts, cost: bc };
   }
 
   // Is the layout `starts` valid for agent at level lv?
@@ -268,22 +297,21 @@
         if (live != null && act.s != null && act.s < live) { act.locked = true; act.past = true; }
       });
 
-      // Pick the strictest window level the agent can satisfy.
+      // Pick the strictest window level the agent can satisfy. When the current
+      // times break the rules, repair to the CLOSEST legal layout (fewest blocks
+      // moved, then fewest minutes) instead of just the earliest one; a missing
+      // block goes to the middle of its window.
       var lvUsed = -1, layout = null;
       for (var li = 0; li < levels.length; li++) {
         var cand = ag.acts.map(function (x) { return x.s; });
         if (cand.every(function (v) { return v != null; }) && validLayout(ag, cand, levels[li], snap)) { lvUsed = li; layout = cand; break; }
-        var el = earliestLayout(ag, levels[li], snap, live);
-        if (el) {
-          lvUsed = li;
-          // Keep every seed that still fits around the fallback layout.
-          layout = el;
-          for (var k2 = 0; k2 < ag.acts.length; k2++) {
-            var trial = layout.slice(); if (ag.acts[k2].s != null) trial[k2] = ag.acts[k2].s;
-            if (validLayout(ag, trial, levels[li], snap)) layout = trial;
-          }
-          break;
-        }
+        var bnd = staticBounds(ag, levels[li], snap);
+        var sol = solveLayout(ag, levels[li], snap, live, function (act, k, st) {
+          if (act.s == null) return Math.abs(st - (bnd[k][0] + bnd[k][1]) / 2) * 0.001;
+          var d = Math.abs(st - act.s);
+          return d ? 1000 + d : 0;
+        });
+        if (sol) { lvUsed = li; layout = sol.starts; break; }
       }
       if (lvUsed === -1) {
         // Nothing legal fits (usually live mode late in a shift, or big fixed
@@ -292,10 +320,16 @@
         ag.infeasible = true;
         ag.skipped = ag.acts.filter(function (x) { return x.s == null; }).length;
         ag.acts = ag.acts.filter(function (x) { return x.s != null; });
-        ag.acts.forEach(function (x) { x.locked = true; });
+        ag.acts.forEach(function (x) { x.locked = true; x.anchor = x.orig; });
       } else {
         ag.relaxed = lvUsed; ag.lv = levels[lvUsed];
-        ag.acts.forEach(function (x, k) { x.s = layout[k]; });
+        ag.acts.forEach(function (x, k) {
+          x.s = layout[k];
+          // The rules forced this block off its current time: that's a "rule
+          // fix", and moves are measured from the repaired time from here on.
+          x.ruleFix = x.orig != null && x.s !== x.orig;
+          x.anchor = x.orig == null ? null : x.s;
+        });
       }
       agents.push(ag);
     });
@@ -330,7 +364,8 @@
       S2: GROUPS.map(function () { return new Float64Array(NSLOT); }),
       offCnt: GROUPS.map(function () { return new Float64Array(NSLOT); }),
       offAll: new Float64Array(NSLOT),
-      lambda: Number(rules.idpLambda) || 0, mu: Number(rules.churnMu) || 0
+      lambda: Number(rules.idpLambda) || 0,
+      moves: rules.moves, bigMult: 1, forbidBig: null
     };
     agents.forEach(function (ag) {
       ag.occ = new Uint8Array(NSLOT);
@@ -373,7 +408,37 @@
     return c;
   }
 
-  function churn(model, act, s) { return act.orig == null ? 0 : model.mu * Math.abs(s - act.orig); }
+  // Cost of putting a block at s, measured from its anchor (the current time,
+  // or the repaired time when the rules forced it off). 15 min is cheap, up to
+  // maxMin is expensive, beyond that only when nothing else is legal.
+  function moveCost(model, act, s) {
+    if (act.anchor == null || s === act.anchor) return 0;   // added block, or where it already is
+    var M = model.moves, total = Math.abs(s - act.orig);
+    if (!total) return 0;
+    // Priced on the TOTAL distance from the current plan's time, so a block the
+    // rules already pushed 15 can't quietly take 15 more and become a 30.
+    if (total <= 15) return M.cost15 * total / 15;
+    if (total <= M.maxMin) {
+      if (model.forbidBig && !act.pinned) return 1e5 + total * 100;
+      return M.cost30 * model.bigMult * total / 30;
+    }
+    // Past the cap: only the rule-fix time itself (handled above) is allowed.
+    return act.pinned ? M.cost30 * total / 30 : 1e5 + total * 100;
+  }
+
+  // What kind of move a block is: 0, 15, 30 ("big"), 'fix' (rules forced it,
+  // or a manual drag past the cap) or 'added' (the grid requires it, the
+  // current plan doesn't have it).
+  function moveKind(model, act) {
+    if (act.orig == null) return 'added';
+    if (act.s === act.orig) return 0;
+    var d = Math.abs(act.s - act.orig);
+    if (act.pinned) return d <= 15 ? 15 : 30;   // a manual drag: shown, never reverted
+    if (act.ruleFix && act.s === act.anchor) return 'fix';
+    if (d <= 15) return 15;
+    if (d <= model.moves.maxMin) return 30;
+    return 'fix';
+  }
 
   // Legal start range for block k given the agent's other blocks.
   function rangeFor(model, ag, k) {
@@ -400,72 +465,85 @@
     addInterval(model, ag, act.s, act.s + act.dur, 1);
   }
 
-  // Best layout for ONE agent given everyone else, solved exactly by dynamic
-  // programming over the agent's blocks in order (each block's legal starts are
-  // a handful of 15-minute slots, and the only coupling between them is the
-  // gap rule). Plain block-by-block moves get stuck — moving a lunch often
-  // needs the next break to move too — the joint re-placement doesn't.
-  function placeAgent(model, ag) {
-    var lv = ag.lv, snap = model.snap, n = ag.acts.length;
-    if (!n || !lv) return false;
-    var b = staticBounds(ag, lv, snap);
+  // Best layout for ONE agent given everyone else (plain block-by-block moves
+  // get stuck — moving a lunch often needs the next break to move too; the
+  // joint re-placement doesn't). Accepted only if it lowers the total, unless
+  // `force` (used by the 30-min quota). Returns the cost change, or null.
+  function placeAgent(model, ag, force) {
+    var lv = ag.lv, n = ag.acts.length;
+    if (!n || !lv) return null;
     var old = ag.acts.map(function (a) { return a.s; });
     ag.acts.forEach(function (a) { addInterval(model, ag, a.s, a.s + a.dur, -1); });
     var curCost = 0;
-    ag.acts.forEach(function (a) { curCost += addCost(model, ag, a.s, a.s + a.dur) + churn(model, a, a.s); });
-    var cand = [], cost = [], prev = [];
-    for (var k = 0; k < n; k++) {
-      var act = ag.acts[k], list = [];
-      if (act.locked) list.push(act.s);
-      else {
-        var lo = b[k][0];
-        if (model.live != null) lo = Math.max(lo, snapUp(model.live, snap));
-        for (var s = lo; s <= b[k][1]; s += snap) if (!overlapsFixed(ag, s, s + act.dur)) list.push(s);
-      }
-      cand.push(list);
-      cost.push(list.map(function (s) { return addCost(model, ag, s, s + act.dur) + churn(model, act, s); }));
-    }
-    // best[k][i] = cheapest layout of blocks 0..k with block k at cand[k][i].
-    var best = [cost[0].slice()];
-    prev.push(cost[0].map(function () { return -1; }));
-    for (var k2 = 1; k2 < n; k2++) {
-      var row = [], pr = [], pd = ag.acts[k2 - 1].dur, pc = cand[k2 - 1], pb = best[k2 - 1];
-      for (var i = 0; i < cand[k2].length; i++) {
-        var s2 = cand[k2][i], lim = ag.acts[k2].locked ? Infinity : s2 - pd - lv.gapMin, bv = Infinity, bj = -1;
-        for (var j = 0; j < pc.length; j++) {
-          if (pc[j] > lim) break;
-          if (pb[j] < bv) { bv = pb[j]; bj = j; }
-        }
-        row.push(bj < 0 ? Infinity : bv + cost[k2][i]); pr.push(bj);
-      }
-      best.push(row); prev.push(pr);
-    }
-    var last = best[n - 1], bi = -1, bc = Infinity;
-    for (var q = 0; q < last.length; q++) if (last[q] < bc) { bc = last[q]; bi = q; }
-    var improved = bi >= 0 && bc < curCost - 1e-9;
-    if (improved) {
-      for (var k3 = n - 1; k3 >= 0; k3--) { ag.acts[k3].s = cand[k3][bi]; bi = prev[k3][bi]; }
-    }
-    ag.acts.forEach(function (a, k4) { if (!improved) a.s = old[k4]; addInterval(model, ag, a.s, a.s + a.dur, 1); });
-    return improved;
+    ag.acts.forEach(function (a) { curCost += addCost(model, ag, a.s, a.s + a.dur) + moveCost(model, a, a.s); });
+    var sol = solveLayout(ag, lv, model.snap, model.live, function (act, k, st) { return addCost(model, ag, st, st + act.dur) + moveCost(model, act, st); });
+    var take = sol && (force ? sol.cost < 1e5 : sol.cost < curCost - 1e-9);
+    ag.acts.forEach(function (a, k) { a.s = take ? sol.starts[k] : old[k]; addInterval(model, ag, a.s, a.s + a.dur, 1); });
+    return take ? sol.cost - curCost : null;
+  }
+
+  function bigMoves(model) {
+    var out = [];
+    model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { if (!a.pinned && moveKind(model, a) === 30) out.push({ ag: ag, act: a }); }); });
+    return out;
+  }
+  function movedCount(model) {
+    var n = 0;
+    model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { var k = moveKind(model, a); if (k === 15 || k === 30) n++; }); });
+    return n;
+  }
+  function bigAllowance(model) {
+    var moved = movedCount(model), share = Number(model.moves.maxBigShare) || 0;
+    return (moved && share > 0) ? Math.max(1, Math.round(share * moved)) : 0;
   }
 
   // Re-place agents one at a time, scarcest first, until a full pass changes
-  // nothing (each accepted move strictly lowers the total, so this ends).
+  // nothing (each accepted move strictly lowers the total, so this ends). Then
+  // hold 30-min moves to their quota: first by making them dearer, then by
+  // giving up the ones that buy the least.
   function optimize(model, opts) {
     opts = opts || {};
     var budget = opts.budgetMs != null ? opts.budgetMs : 1500, maxPass = opts.maxPass || 20;
     var t0 = Date.now(), passes = 0, moved = 0;
     var order = model.agents.filter(function (a) { return !a.fullAbsent && !a.infeasible && a.acts.some(function (x) { return !x.locked; }); })
       .sort(function (a, b) { return (b.w - a.w) || (a.S - b.S) || String(a.name).localeCompare(String(b.name)); });
-    for (var p = 0; p < maxPass; p++) {
-      passes++;
-      var changed = 0;
-      for (var i = 0; i < order.length; i++) if (placeAgent(model, order[i])) changed++;
-      moved += changed;
-      if (!changed || Date.now() - t0 > budget) break;
+    function run() {
+      for (var p = 0; p < maxPass; p++) {
+        passes++;
+        var changed = 0;
+        for (var i = 0; i < order.length; i++) if (placeAgent(model, order[i]) != null) changed++;
+        moved += changed;
+        if (!changed || Date.now() - t0 > budget) break;
+      }
     }
-    return { passes: passes, iterations: moved, ms: Date.now() - t0 };
+    model.bigMult = 1;
+    run();
+    for (var r = 0; r < 4 && bigMoves(model).length > bigAllowance(model); r++) { model.bigMult *= 2; run(); }
+    var reverted = 0;
+    var big = bigMoves(model);
+    if (big.length > bigAllowance(model)) {
+      // Price each agent's 30-min move(s): re-solve with them forbidden.
+      var seen = {}, cands = [];
+      big.forEach(function (x) { if (!seen[x.ag.key]) { seen[x.ag.key] = 1; cands.push(x.ag); } });
+      cands.forEach(function (ag) {
+        var keep = ag.acts.map(function (a) { return a.s; });
+        model.forbidBig = true;
+        var delta = placeAgent(model, ag, true);
+        model.forbidBig = null;
+        ag.benefit = delta == null ? Infinity : delta;
+        // put it back for now
+        ag.acts.forEach(function (a, k) { if (a.s !== keep[k]) moveAct(model, ag, k, keep[k]); });
+      });
+      cands.sort(function (a, b) { return (a.benefit - b.benefit) || String(a.name).localeCompare(String(b.name)); });
+      for (var c = 0; c < cands.length && bigMoves(model).length > bigAllowance(model); c++) {
+        if (!isFinite(cands[c].benefit)) continue;
+        model.forbidBig = true;
+        if (placeAgent(model, cands[c], true) != null) reverted++;
+        model.forbidBig = null;
+      }
+    }
+    model.bigMult = 1;   // scores stay comparable with the baseline
+    return { passes: passes, iterations: moved, reverted: reverted, ms: Date.now() - t0 };
   }
 
   // Full score and plain-language metrics for the current state.
@@ -483,9 +561,10 @@
       if (model.offCnt[G_IDX.BL][t] >= 2) blOverlap += SLOT;
       if (model.offCnt[G_IDX.SR][t] >= 2) srOverlap += SLOT;
     }
-    var moves = 0, added = 0;
-    model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { ch += churn(model, a, a.s); if (a.orig == null) added++; else if (a.orig !== a.s) moves++; }); });
-    return { total: pair + idp + ch, overlap: pair, idp: idp, churn: ch, frGapMin: frGap, blOverlapMin: blOverlap, srOverlapMin: srOverlap, idpShortMin: idpShort, moves: moves, added: added };
+    var c = { 15: 0, 30: 0, fix: 0, added: 0 };
+    model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { ch += moveCost(model, a, a.s); var k = moveKind(model, a); if (k) c[k]++; }); });
+    return { total: pair + idp + ch, overlap: pair, idp: idp, churn: ch, frGapMin: frGap, blOverlapMin: blOverlap, srOverlapMin: srOverlap, idpShortMin: idpShort,
+      moves: c[15] + c[30] + c.fix, moved15: c[15], moved30: c[30], fixes: c.fix, added: c.added, bigAllowed: bigAllowance(model) };
   }
 
   // Per-slot coverage for the ribbon: on-queue by language, on shift, IDP.
@@ -527,7 +606,7 @@
     SLOT: SLOT, NSLOT: NSLOT, GROUPS: GROUPS, DEFAULT_RULES: DEFAULT_RULES,
     mergeRules: mergeRules, parseSeq: parseSeq, ruleFor: ruleFor, agentWeight: agentWeight,
     buildModel: buildModel, optimize: optimize, score: score, coverage: coverage,
-    rangeFor: rangeFor, canPlace: canPlace, moveAct: moveAct, exportPlan: exportPlan,
+    rangeFor: rangeFor, canPlace: canPlace, moveAct: moveAct, exportPlan: exportPlan, moveKind: moveKind,
     validLayout: validLayout, staticBounds: staticBounds, fmt: fmt
   };
   root.WFEngine = api;

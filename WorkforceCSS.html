@@ -236,6 +236,10 @@
   .wf-blk.fx.ACSU { background: repeating-linear-gradient(-45deg, var(--acsu) 0 4px, transparent 4px 8px); }
   .wf-blk.locked { cursor: default; }
   .wf-blk.past { opacity: .45; cursor: default; }
+  .wf-blk.big { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--warn); }
+  .wf-blk.fix { outline: 1.5px dashed var(--muted); outline-offset: 2px; }
+  .wf-kpi-s b.warn { color: var(--warn); }
+  .wf-change.big { border-color: rgba(217, 119, 6, .45); }
   .wf-blk.pinned::after { content: ''; position: absolute; top: 2px; right: 2px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
   .wf-blk.dragging { z-index: 5; box-shadow: 0 10px 24px -6px rgba(15, 23, 42, .45); }
   .wf-blk.invalid { outline: 2px solid var(--bad); outline-offset: 1px; }
