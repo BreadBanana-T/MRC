@@ -1,0 +1,536 @@
+<script>
+/**
+ * MRC WORKFORCE — break & lunch optimizer engine.
+ *
+ * Pure logic, no DOM: the Workforce page drives it, and the node tests load the
+ * body of this <script> directly (module.exports at the bottom).
+ *
+ * Model of a day
+ *   - Minutes are day-minutes on the selected date, 0..2880 (an overnight shift
+ *     runs past 1440). Occupancy is tracked in 5-minute slots.
+ *   - Each scheduled agent has FIXED blocks (Training, ACSU, SAFE, part-day
+ *     absences…) that never move, and MOVABLE blocks (breaks and lunches) whose
+ *     count and length come from the paid-break grid for the shift length.
+ *   - The current floor plan (IEX, plus any floor edits) seeds the movable blocks.
+ *
+ * Score (lower is better, "risk points") — no hard caps, per product owner:
+ *   1. Overlap: for every 5-minute slot and every protection group, the sum over
+ *      PAIRS of agents off-queue together of w_i·w_j, scaled by the group's
+ *      absence pressure and divided by how many of that group are on shift.
+ *      Weights make Bilingual overlaps expensive, French next, then L4 /
+ *      Question Line / Escalation; English is nearly free and fills around them.
+ *      Groups: BL, FR, EN, FRC (French cover = FR + BL together) and SR
+ *      (seniors: L4, Question Line, Escalation — any language).
+ *   2. IDP: λ · shortfall² per slot where the IDP Required is above the agents
+ *      left on queue.
+ *   3. Churn: μ · minutes moved away from the current plan, so nothing moves
+ *      unless it actually helps.
+ */
+(function (root) {
+  'use strict';
+
+  var SLOT = 5;
+  var DAY_SPAN = 2880;
+  var NSLOT = DAY_SPAN / SLOT;
+  var GROUPS = ['BL', 'FR', 'EN', 'FRC', 'SR'];
+  var G_IDX = { BL: 0, FR: 1, EN: 2, FRC: 3, SR: 4 };
+
+  // Paid-break grid (product owner's table). seq tokens: B = paid break,
+  // L = paid lunch, U = unpaid lunch; the number is minutes. Rows are matched on
+  // the gross shift span (end − start), the longest row not above it. A row with
+  // site 'CALG' is used only for Calgary agents, and up to its spanMax (the 4/3
+  // compressed day is 9h paid + 30 unpaid, so its span can read 9 or 9.5).
+  var DEFAULT_RULES = {
+    version: 1,
+    grid: [
+      { hours: 4,   label: '4 hrs',             seq: 'B15' },
+      { hours: 5,   label: '5 hrs / 5 hrs CALG', seq: 'B15' },
+      { hours: 6,   label: '6 hrs',             seq: 'L30' },
+      { hours: 6.5, label: '6.5 hrs',           seq: 'L30' },
+      { hours: 7,   label: '7 hrs',             seq: 'B15 L30 B15' },
+      { hours: 7.5, label: '7.5 hrs',           seq: 'B15 L30 B15' },
+      { hours: 8,   label: '8 hrs',             seq: 'B15 L30 B15' },
+      { hours: 8.5, label: '8.5 hrs',           seq: 'B15 L30 B15' },
+      { hours: 9,   label: '9 hrs (4/3 CALG)',  seq: 'B15 U30 B15', site: 'CALG', spanMax: 9.5 },
+      { hours: 9.5, label: '9.5 hrs',           seq: 'B10 L30 B10 B10' },
+      { hours: 10,  label: '10 hrs',            seq: 'B10 L30 B10 B10' }
+    ],
+    // "Tighter spacing" defaults. gapMin is on-queue time between the end of
+    // one block and the start of the next.
+    windows: { firstMin: 120, gapMin: 90, lastBeforeEndMin: 60, snap: 15, lunchMiddleThird: true },
+    weights: { BL: 10, FR: 6, EN: 1, L4: 3, QL: 2, ESC: 2, traineeMult: 0.5 },
+    idpLambda: 2,
+    churnMu: 0.02,
+    liveLeadMin: 15
+  };
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function mergeRules(saved) {
+    var r = clone(DEFAULT_RULES);
+    if (!saved || typeof saved !== 'object') return r;
+    if (Array.isArray(saved.grid) && saved.grid.length) r.grid = saved.grid;
+    ['windows', 'weights'].forEach(function (k) {
+      if (saved[k] && typeof saved[k] === 'object') for (var p in saved[k]) if (saved[k][p] !== '' && saved[k][p] != null) r[k][p] = saved[k][p];
+    });
+    ['idpLambda', 'churnMu', 'liveLeadMin'].forEach(function (k) { if (saved[k] !== '' && saved[k] != null && !isNaN(Number(saved[k]))) r[k] = Number(saved[k]); });
+    r.grid = r.grid.map(function (g) { return { hours: Number(g.hours), label: String(g.label || (g.hours + ' hrs')), seq: String(g.seq || ''), site: g.site || '', spanMax: g.spanMax != null && g.spanMax !== '' ? Number(g.spanMax) : null }; })
+      .filter(function (g) { return !isNaN(g.hours); })
+      .sort(function (a, b) { return a.hours - b.hours; });
+    return r;
+  }
+
+  function parseSeq(seq) {
+    var out = [];
+    String(seq || '').toUpperCase().split(/[\s,;+]+/).forEach(function (tok) {
+      var m = tok.match(/^([BLU])(\d{1,3})$/);
+      if (!m) return;
+      var dur = parseInt(m[2], 10);
+      if (!dur) return;
+      out.push({ type: m[1] === 'B' ? 'Break' : 'Lunch', dur: dur, unpaid: m[1] === 'U' });
+    });
+    return out;
+  }
+
+  // Grid row for a shift span in minutes, or null under the smallest row.
+  function ruleFor(spanMin, calgary, rules) {
+    var h = spanMin / 60 + 1e-6;
+    var grid = rules.grid;
+    if (calgary) {
+      for (var i = 0; i < grid.length; i++) {
+        var g = grid[i];
+        if (g.site && /calg/i.test(g.site) && h >= g.hours && h <= (g.spanMax || g.hours) + 1e-6) return g;
+      }
+    }
+    var best = null;
+    for (var j = 0; j < grid.length; j++) {
+      if (grid[j].site) continue;
+      if (grid[j].hours <= h) best = grid[j];
+    }
+    return best;
+  }
+
+  function agentWeight(a, W) {
+    var w = Number(W[a.lang] != null ? W[a.lang] : W.EN) || 1;
+    if (Number(a.level) === 4) w += Number(W.L4) || 0;
+    if (a.isQL) w += Number(W.QL) || 0;
+    if (a.isESC) w += Number(W.ESC) || 0;
+    if (a.trainee) w *= (W.traineeMult != null ? Number(W.traineeMult) : 1);
+    return Math.max(0.01, w);
+  }
+
+  function agentGroups(a) {
+    var g = [];
+    if (a.lang === 'BL') g.push(G_IDX.BL, G_IDX.FRC);
+    else if (a.lang === 'FR') g.push(G_IDX.FR, G_IDX.FRC);
+    else g.push(G_IDX.EN);
+    if (a.isSenior) g.push(G_IDX.SR);
+    return g;
+  }
+
+  function slotOf(m) { return Math.max(0, Math.min(NSLOT, Math.floor(m / SLOT))); }
+  function slotEnd(m) { return Math.max(0, Math.min(NSLOT, Math.ceil(m / SLOT))); }
+  function snapUp(m, snap) { return Math.ceil(m / snap) * snap; }
+  function snapDown(m, snap) { return Math.floor(m / snap) * snap; }
+  function sq(x) { return x > 0 ? x * x : 0; }
+
+  // Relaxation ladder: level 0 is the configured rule; each step loosens it
+  // until a shift that can't fit (short shifts, big fixed blocks) has a layout.
+  function windowLevels(W) {
+    var base = { firstMin: Number(W.firstMin), gapMin: Number(W.gapMin), last: Number(W.lastBeforeEndMin), third: !!W.lunchMiddleThird };
+    return [
+      base,
+      { firstMin: Math.min(base.firstMin, 90), gapMin: Math.min(base.gapMin, 60), last: Math.min(base.last, 45), third: base.third },
+      { firstMin: Math.min(base.firstMin, 60), gapMin: Math.min(base.gapMin, 45), last: Math.min(base.last, 30), third: false },
+      { firstMin: 30, gapMin: 15, last: 15, third: false }
+    ];
+  }
+
+  // Static [lo, hi] start bounds for each movable block at a window level.
+  function staticBounds(ag, lv, snap) {
+    var S = ag.S, E = ag.E, L = E - S, n = ag.acts.length;
+    return ag.acts.map(function (act, k) {
+      var lo = S + (k === 0 ? lv.firstMin : 0);
+      var hi = E - act.dur - (k === n - 1 ? lv.last : 0);
+      if (lv.third && act.type === 'Lunch') {
+        var tlo = S + L / 3, thi = S + 2 * L / 3 - act.dur;
+        if (thi >= tlo) { lo = Math.max(lo, tlo); hi = Math.min(hi, thi); }
+      }
+      return [snapUp(lo, snap), snapDown(hi, snap)];
+    });
+  }
+
+  function overlapsFixed(ag, s, e) {
+    for (var i = 0; i < ag.fixed.length; i++) {
+      var f = ag.fixed[i];
+      if (f.blocks === false) continue;
+      if (s < f.e && e > f.s) return true;
+    }
+    return false;
+  }
+
+  // Earliest feasible layout at a window level (null if none). Earliest-start
+  // is optimal for feasibility here: every later constraint only gets easier
+  // the earlier the previous block ends.
+  function earliestLayout(ag, lv, snap, minStart) {
+    var b = staticBounds(ag, lv, snap), out = [], prevEnd = -Infinity;
+    for (var k = 0; k < ag.acts.length; k++) {
+      var act = ag.acts[k];
+      if (act.locked) {   // pinned or already in the past: taken as given
+        out.push(act.s); prevEnd = act.s + act.dur; continue;
+      }
+      var s = Math.max(b[k][0], snapUp(prevEnd + lv.gapMin, snap), minStart || 0);
+      s = snapUp(s, snap);
+      while (s <= b[k][1] && overlapsFixed(ag, s, s + act.dur)) s += snap;
+      if (s > b[k][1]) return null;
+      out.push(s); prevEnd = s + act.dur;
+    }
+    return out;
+  }
+
+  // Is the layout `starts` valid for agent at level lv?
+  function validLayout(ag, starts, lv, snap) {
+    var b = staticBounds(ag, lv, snap), prevEnd = -Infinity;
+    for (var k = 0; k < starts.length; k++) {
+      var s = starts[k], d = ag.acts[k].dur;
+      if (s == null || isNaN(s)) return false;
+      if (!ag.acts[k].locked && (s < b[k][0] || s > b[k][1])) return false;
+      if (!ag.acts[k].locked && s < prevEnd + lv.gapMin) return false;
+      if (!ag.acts[k].locked && overlapsFixed(ag, s, s + d)) return false;
+      prevEnd = s + d;
+    }
+    return true;
+  }
+
+  /**
+   * Build the working model.
+   * day:  payload from BreakPlanner.getDay (agents[], idp.req[96], …)
+   * opts: { nowMin: number|null (live mode lock line), locks: {"key:k": true}, pins: {"key:k": start} }
+   */
+  function buildModel(day, rulesIn, opts) {
+    opts = opts || {};
+    var rules = mergeRules(rulesIn);
+    var W = rules.weights, snap = Number(rules.windows.snap) || 15;
+    var levels = windowLevels(rules.windows);
+    var live = opts.nowMin != null ? Number(opts.nowMin) + (Number(rules.liveLeadMin) || 0) : null;
+
+    var agents = [], absentByG = [0, 0, 0, 0, 0], schedByG = [0, 0, 0, 0, 0];
+    (day.agents || []).forEach(function (a) {
+      if (a.s == null || a.e == null || !(a.e > a.s)) return;
+      var ag = {
+        key: a.key, name: a.name, id: a.id || '', region: a.region || '', lang: a.lang || 'EN',
+        level: a.level, trainee: !!a.trainee, isQL: !!a.isQL, isESC: !!a.isESC,
+        supervisor: a.supervisor || '', site: a.site || '', calgary: !!a.calgary,
+        absent: a.absent || '', fullAbsent: !!a.fullAbsent, hasOverride: !!a.hasOverride,
+        S: Number(a.s), E: Number(a.e), fixed: [], acts: [], extra: [], level0: 0,
+        relaxed: 0, infeasible: false, mismatch: '', rule: null
+      };
+      ag.isSenior = Number(ag.level) === 4 || ag.isQL || ag.isESC;
+      ag.w = agentWeight(ag, W);
+      ag.groups = agentGroups(ag);
+      ag.groups.forEach(function (g) { schedByG[g]++; if (ag.fullAbsent) absentByG[g]++; });
+      if (ag.fullAbsent) { agents.push(ag); return; }
+
+      // Split current blocks into fixed and movable.
+      var cur = (a.acts || []).slice().sort(function (x, y) { return x.s - y.s; });
+      var curMov = [];
+      cur.forEach(function (b) {
+        if (b.fixed) ag.fixed.push({ type: b.type, s: Number(b.s), e: Number(b.e), rs: b.rs, re: b.re, abs: b.abs, blocks: true });
+        else curMov.push({ type: b.type, s: Number(b.s), e: Number(b.e) });
+      });
+
+      var rule = ruleFor(ag.E - ag.S, ag.calgary, rules);
+      ag.rule = rule ? rule.label : '';
+      var need = rule ? parseSeq(rule.seq) : [];
+      // Seed each required block from the current plan, matched by type in order.
+      var pools = { Break: curMov.filter(function (b) { return b.type === 'Break'; }), Lunch: curMov.filter(function (b) { return b.type === 'Lunch'; }) };
+      var used = { Break: 0, Lunch: 0 };
+      need.forEach(function (n, k) {
+        var src = pools[n.type][used[n.type]++];
+        ag.acts.push({ type: n.type, dur: n.dur, unpaid: n.unpaid, s: src ? src.s : null, orig: src ? src.s : null, origDur: src ? (src.e - src.s) : null, locked: false, pinned: false, k: k });
+      });
+      // Current blocks the rule doesn't ask for stay where they are as fixed
+      // blocks, so the floor doesn't silently lose a break IEX gave someone.
+      ['Break', 'Lunch'].forEach(function (t) {
+        pools[t].slice(used[t]).forEach(function (b) { ag.extra.push(b); ag.fixed.push({ type: t, s: b.s, e: b.e, extra: true, blocks: true }); });
+      });
+      var haveB = pools.Break.length, haveL = pools.Lunch.length;
+      var needB = need.filter(function (n) { return n.type === 'Break'; }).length, needL = need.length - needB;
+      // A missing PAID lunch is normal (the WFM import skips "Paid Lunch" lines),
+      // so it's simply added; only a different break count or an extra lunch is flagged.
+      if (haveB !== needB || haveL > needL) ag.mismatch = 'Current plan has ' + haveB + 'B/' + haveL + 'L, rule ' + (rule ? rule.label : 'none') + ' wants ' + needB + 'B/' + needL + 'L';
+
+      // Locks: live mode freezes anything already started/imminent; user pins.
+      ag.acts.forEach(function (act) {
+        var lk = ag.key + ':' + act.k;
+        if (opts.pins && opts.pins[lk] != null) { act.s = Number(opts.pins[lk]); act.locked = true; act.pinned = true; }
+        else if (opts.locks && opts.locks[lk]) { act.locked = act.s != null; act.pinned = act.locked; }
+        if (live != null && act.s != null && act.s < live) { act.locked = true; act.past = true; }
+      });
+
+      // Pick the strictest window level the agent can satisfy.
+      var lvUsed = -1, layout = null;
+      for (var li = 0; li < levels.length; li++) {
+        var cand = ag.acts.map(function (x) { return x.s; });
+        if (cand.every(function (v) { return v != null; }) && validLayout(ag, cand, levels[li], snap)) { lvUsed = li; layout = cand; break; }
+        var el = earliestLayout(ag, levels[li], snap, live);
+        if (el) {
+          lvUsed = li;
+          // Keep every seed that still fits around the fallback layout.
+          layout = el;
+          for (var k2 = 0; k2 < ag.acts.length; k2++) {
+            var trial = layout.slice(); if (ag.acts[k2].s != null) trial[k2] = ag.acts[k2].s;
+            if (validLayout(ag, trial, levels[li], snap)) layout = trial;
+          }
+          break;
+        }
+      }
+      if (lvUsed === -1) {
+        // Nothing legal fits (usually live mode late in a shift, or big fixed
+        // blocks). Keep what the current plan has, frozen, and leave out any
+        // missing block rather than inventing one in the past.
+        ag.infeasible = true;
+        ag.skipped = ag.acts.filter(function (x) { return x.s == null; }).length;
+        ag.acts = ag.acts.filter(function (x) { return x.s != null; });
+        ag.acts.forEach(function (x) { x.locked = true; });
+      } else {
+        ag.relaxed = lvUsed; ag.lv = levels[lvUsed];
+        ag.acts.forEach(function (x, k) { x.s = layout[k]; });
+      }
+      agents.push(ag);
+    });
+
+    // Group pressure: a heavy sick day in a group makes its overlaps cost more.
+    var pressure = GROUPS.map(function (g, i) { return 1 + (schedByG[i] ? absentByG[i] / schedByG[i] : 0); });
+
+    var onShift = GROUPS.map(function () { return new Float64Array(NSLOT); });
+    var onShiftAll = new Float64Array(NSLOT);
+    agents.forEach(function (ag) {
+      if (ag.fullAbsent) return;
+      for (var t = slotOf(ag.S); t < slotEnd(ag.E); t++) {
+        onShiftAll[t]++;
+        ag.groups.forEach(function (g) { onShift[g][t]++; });
+      }
+    });
+    var f = GROUPS.map(function (g, i) {
+      var arr = new Float64Array(NSLOT);
+      for (var t = 0; t < NSLOT; t++) arr[t] = pressure[i] / Math.max(1, onShift[i][t]);
+      return arr;
+    });
+
+    // IDP Required per 15-min bucket on the selected date → per 5-min slot.
+    var req = new Float64Array(NSLOT).fill(-1);
+    var idp = (day.idp && day.idp.req) || [];
+    for (var t = 0; t < 288; t++) { var v = idp[Math.floor(t / 3)]; if (v != null && v !== '' && !isNaN(Number(v))) req[t] = Number(v); }
+
+    var model = {
+      rules: rules, snap: snap, levels: levels, live: live, agents: agents, pressure: pressure,
+      onShift: onShift, onShiftAll: onShiftAll, f: f, req: req,
+      S1: GROUPS.map(function () { return new Float64Array(NSLOT); }),
+      S2: GROUPS.map(function () { return new Float64Array(NSLOT); }),
+      offCnt: GROUPS.map(function () { return new Float64Array(NSLOT); }),
+      offAll: new Float64Array(NSLOT),
+      lambda: Number(rules.idpLambda) || 0, mu: Number(rules.churnMu) || 0
+    };
+    agents.forEach(function (ag) {
+      ag.occ = new Uint8Array(NSLOT);
+      if (ag.fullAbsent) return;
+      ag.fixed.forEach(function (fx) { addInterval(model, ag, fx.s, fx.e, 1); });
+      ag.acts.forEach(function (act) { addInterval(model, ag, act.s, act.s + act.dur, 1); });
+    });
+    return model;
+  }
+
+  function setOff(model, ag, t, sign) {
+    var w = ag.w, gs = ag.groups;
+    for (var i = 0; i < gs.length; i++) {
+      var g = gs[i];
+      model.S1[g][t] += sign * w;
+      model.S2[g][t] += sign * w * w;
+      model.offCnt[g][t] += sign;
+    }
+    model.offAll[t] += sign;
+  }
+
+  function addInterval(model, ag, s, e, sign) {
+    // Only the part inside the shift takes the agent off queue.
+    var a = slotOf(Math.max(s, ag.S)), b = slotEnd(Math.min(e, ag.E));
+    for (var t = a; t < b; t++) {
+      if (sign > 0) { if (ag.occ[t]++ === 0) setOff(model, ag, t, 1); }
+      else { if (--ag.occ[t] === 0) setOff(model, ag, t, -1); }
+    }
+  }
+
+  // Marginal cost of taking `ag` off queue over [s, e) given everything else.
+  function addCost(model, ag, s, e) {
+    var a = slotOf(Math.max(s, ag.S)), b = slotEnd(Math.min(e, ag.E)), c = 0, w = ag.w, gs = ag.groups, lam = model.lambda;
+    for (var t = a; t < b; t++) {
+      if (ag.occ[t]) continue;
+      for (var i = 0; i < gs.length; i++) { var g = gs[i]; c += model.f[g][t] * w * model.S1[g][t]; }
+      var R = model.req[t];
+      if (lam && R >= 0) { var onQ = model.onShiftAll[t] - model.offAll[t]; c += lam * (sq(R - onQ + 1) - sq(R - onQ)); }
+    }
+    return c;
+  }
+
+  function churn(model, act, s) { return act.orig == null ? 0 : model.mu * Math.abs(s - act.orig); }
+
+  // Legal start range for block k given the agent's other blocks.
+  function rangeFor(model, ag, k) {
+    var lv = ag.lv || model.levels[model.levels.length - 1], snap = model.snap;
+    var b = staticBounds(ag, lv, snap)[k];
+    var lo = b[0], hi = b[1];
+    if (k > 0) lo = Math.max(lo, snapUp(ag.acts[k - 1].s + ag.acts[k - 1].dur + lv.gapMin, snap));
+    if (k < ag.acts.length - 1) hi = Math.min(hi, snapDown(ag.acts[k + 1].s - lv.gapMin - ag.acts[k].dur, snap));
+    if (model.live != null) lo = Math.max(lo, snapUp(model.live, snap));
+    return [lo, hi];
+  }
+
+  function canPlace(model, ag, k, s) {
+    var r = rangeFor(model, ag, k);
+    if (s < r[0] || s > r[1]) return { ok: false, why: 'Outside the allowed window (' + fmt(r[0]) + '–' + fmt(r[1]) + ')' };
+    if (overlapsFixed(ag, s, s + ag.acts[k].dur)) return { ok: false, why: 'Overlaps a fixed block' };
+    return { ok: true };
+  }
+
+  function moveAct(model, ag, k, s) {
+    var act = ag.acts[k];
+    addInterval(model, ag, act.s, act.s + act.dur, -1);
+    act.s = s;
+    addInterval(model, ag, act.s, act.s + act.dur, 1);
+  }
+
+  // Best layout for ONE agent given everyone else, solved exactly by dynamic
+  // programming over the agent's blocks in order (each block's legal starts are
+  // a handful of 15-minute slots, and the only coupling between them is the
+  // gap rule). Plain block-by-block moves get stuck — moving a lunch often
+  // needs the next break to move too — the joint re-placement doesn't.
+  function placeAgent(model, ag) {
+    var lv = ag.lv, snap = model.snap, n = ag.acts.length;
+    if (!n || !lv) return false;
+    var b = staticBounds(ag, lv, snap);
+    var old = ag.acts.map(function (a) { return a.s; });
+    ag.acts.forEach(function (a) { addInterval(model, ag, a.s, a.s + a.dur, -1); });
+    var curCost = 0;
+    ag.acts.forEach(function (a) { curCost += addCost(model, ag, a.s, a.s + a.dur) + churn(model, a, a.s); });
+    var cand = [], cost = [], prev = [];
+    for (var k = 0; k < n; k++) {
+      var act = ag.acts[k], list = [];
+      if (act.locked) list.push(act.s);
+      else {
+        var lo = b[k][0];
+        if (model.live != null) lo = Math.max(lo, snapUp(model.live, snap));
+        for (var s = lo; s <= b[k][1]; s += snap) if (!overlapsFixed(ag, s, s + act.dur)) list.push(s);
+      }
+      cand.push(list);
+      cost.push(list.map(function (s) { return addCost(model, ag, s, s + act.dur) + churn(model, act, s); }));
+    }
+    // best[k][i] = cheapest layout of blocks 0..k with block k at cand[k][i].
+    var best = [cost[0].slice()];
+    prev.push(cost[0].map(function () { return -1; }));
+    for (var k2 = 1; k2 < n; k2++) {
+      var row = [], pr = [], pd = ag.acts[k2 - 1].dur, pc = cand[k2 - 1], pb = best[k2 - 1];
+      for (var i = 0; i < cand[k2].length; i++) {
+        var s2 = cand[k2][i], lim = ag.acts[k2].locked ? Infinity : s2 - pd - lv.gapMin, bv = Infinity, bj = -1;
+        for (var j = 0; j < pc.length; j++) {
+          if (pc[j] > lim) break;
+          if (pb[j] < bv) { bv = pb[j]; bj = j; }
+        }
+        row.push(bj < 0 ? Infinity : bv + cost[k2][i]); pr.push(bj);
+      }
+      best.push(row); prev.push(pr);
+    }
+    var last = best[n - 1], bi = -1, bc = Infinity;
+    for (var q = 0; q < last.length; q++) if (last[q] < bc) { bc = last[q]; bi = q; }
+    var improved = bi >= 0 && bc < curCost - 1e-9;
+    if (improved) {
+      for (var k3 = n - 1; k3 >= 0; k3--) { ag.acts[k3].s = cand[k3][bi]; bi = prev[k3][bi]; }
+    }
+    ag.acts.forEach(function (a, k4) { if (!improved) a.s = old[k4]; addInterval(model, ag, a.s, a.s + a.dur, 1); });
+    return improved;
+  }
+
+  // Re-place agents one at a time, scarcest first, until a full pass changes
+  // nothing (each accepted move strictly lowers the total, so this ends).
+  function optimize(model, opts) {
+    opts = opts || {};
+    var budget = opts.budgetMs != null ? opts.budgetMs : 1500, maxPass = opts.maxPass || 20;
+    var t0 = Date.now(), passes = 0, moved = 0;
+    var order = model.agents.filter(function (a) { return !a.fullAbsent && !a.infeasible && a.acts.some(function (x) { return !x.locked; }); })
+      .sort(function (a, b) { return (b.w - a.w) || (a.S - b.S) || String(a.name).localeCompare(String(b.name)); });
+    for (var p = 0; p < maxPass; p++) {
+      passes++;
+      var changed = 0;
+      for (var i = 0; i < order.length; i++) if (placeAgent(model, order[i])) changed++;
+      moved += changed;
+      if (!changed || Date.now() - t0 > budget) break;
+    }
+    return { passes: passes, iterations: moved, ms: Date.now() - t0 };
+  }
+
+  // Full score and plain-language metrics for the current state.
+  function score(model) {
+    var pair = 0, idp = 0, ch = 0, frGap = 0, blOverlap = 0, srOverlap = 0, idpShort = 0;
+    for (var t = 0; t < NSLOT; t++) {
+      for (var g = 0; g < GROUPS.length; g++) {
+        var s1 = model.S1[g][t], s2 = model.S2[g][t];
+        if (s1) pair += model.f[g][t] * (s1 * s1 - s2) / 2;
+      }
+      var R = model.req[t], onQ = model.onShiftAll[t] - model.offAll[t];
+      if (R >= 0) { idp += model.lambda * sq(R - onQ); if (onQ < R - 1e-9) idpShort += SLOT; }
+      var frc = G_IDX.FRC;
+      if (model.onShift[frc][t] > 0 && model.onShift[frc][t] - model.offCnt[frc][t] <= 0 && model.offCnt[frc][t] > 0) frGap += SLOT;
+      if (model.offCnt[G_IDX.BL][t] >= 2) blOverlap += SLOT;
+      if (model.offCnt[G_IDX.SR][t] >= 2) srOverlap += SLOT;
+    }
+    var moves = 0, added = 0;
+    model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { ch += churn(model, a, a.s); if (a.orig == null) added++; else if (a.orig !== a.s) moves++; }); });
+    return { total: pair + idp + ch, overlap: pair, idp: idp, churn: ch, frGapMin: frGap, blOverlapMin: blOverlap, srOverlapMin: srOverlap, idpShortMin: idpShort, moves: moves, added: added };
+  }
+
+  // Per-slot coverage for the ribbon: on-queue by language, on shift, IDP.
+  function coverage(model) {
+    var out = { slot: SLOT, bl: [], fr: [], en: [], shift: [], req: [], frGap: [] };
+    for (var t = 0; t < NSLOT; t++) {
+      var bl = model.onShift[G_IDX.BL][t] - model.offCnt[G_IDX.BL][t];
+      var fr = model.onShift[G_IDX.FR][t] - model.offCnt[G_IDX.FR][t];
+      var en = model.onShift[G_IDX.EN][t] - model.offCnt[G_IDX.EN][t];
+      out.bl.push(bl); out.fr.push(fr); out.en.push(en);
+      out.shift.push(model.onShiftAll[t]);
+      out.req.push(model.req[t] >= 0 ? model.req[t] : null);
+      out.frGap.push(model.onShift[G_IDX.FRC][t] > 0 && bl + fr <= 0 && model.offCnt[G_IDX.FRC][t] > 0 ? 1 : 0);
+    }
+    return out;
+  }
+
+  // Plan rows to save / approve. `changed` = differs from the current floor.
+  function exportPlan(model) {
+    return model.agents.filter(function (ag) { return !ag.fullAbsent; }).map(function (ag) {
+      var changed = ag.acts.some(function (a) { return a.orig == null || a.orig !== a.s || (a.origDur != null && a.origDur !== a.dur); });
+      return {
+        key: ag.key, name: ag.name, id: ag.id, hasOverride: ag.hasOverride, changed: changed,
+        acts: ag.acts.map(function (a) { return { type: a.type, s: a.s, e: a.s + a.dur, unpaid: !!a.unpaid }; }),
+        fixed: ag.fixed.filter(function (f) { return !f.extra; }).map(function (f) { return { type: f.type, s: f.s, e: f.e, rs: f.rs, re: f.re, abs: f.abs }; }),
+        extra: ag.extra.map(function (b) { return { type: b.type, s: b.s, e: b.e }; })
+      };
+    });
+  }
+
+  function fmt(m) {
+    if (m == null || isNaN(m)) return '—';
+    var x = ((Math.round(m) % 1440) + 1440) % 1440;
+    var h = Math.floor(x / 60), mi = x % 60;
+    return (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi;
+  }
+
+  var api = {
+    SLOT: SLOT, NSLOT: NSLOT, GROUPS: GROUPS, DEFAULT_RULES: DEFAULT_RULES,
+    mergeRules: mergeRules, parseSeq: parseSeq, ruleFor: ruleFor, agentWeight: agentWeight,
+    buildModel: buildModel, optimize: optimize, score: score, coverage: coverage,
+    rangeFor: rangeFor, canPlace: canPlace, moveAct: moveAct, exportPlan: exportPlan,
+    validLayout: validLayout, staticBounds: staticBounds, fmt: fmt
+  };
+  root.WFEngine = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : this);
+</script>

@@ -1,0 +1,841 @@
+<script>
+/**
+ * MRC WORKFORCE — page controller.
+ * Server: BreakPlanner.gs via Code.gs wrappers (getPlannerDay, getPlannerWeek,
+ * savePlannerDraft, approvePlannerPlan, setPlannerRules, resetPlannerRules).
+ * Optimizer: WFEngine (WorkforceEngine.html).
+ */
+(function () {
+  'use strict';
+  var E = window.WFEngine;
+  var S = {
+    appUrl: '', date: '', view: 'day', day: null, rules: null, model: null, base: null, cur: null,
+    pins: {}, live: false, q: '', region: 'all', lang: 'all', collapsed: {}, week: null, weekStart: '',
+    t0: 0, t1: 1440, kpiShown: {}, loadSeq: 0
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var hasGsap = function () { return typeof window.gsap !== 'undefined'; };
+
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function fmt(m) { return E.fmt(m); }
+  function dur(m) { var h = Math.floor(m / 60), mi = Math.round(m % 60); return h ? (h + 'h' + (mi ? (mi < 10 ? '0' : '') + mi : '')) : (mi + 'm'); }
+  window.wfRefreshIcons = function () { try { if (window.lucide) window.lucide.createIcons(); } catch (e) {} };
+  var icons = window.wfRefreshIcons;
+
+  // ── Server ───────────────────────────────────────────────────────────────
+  function call(fn, args, ok, fail) {
+    var onFail = fail || function (m) { toast(m, 'bad'); };
+    if (typeof google === 'undefined' || !google.script || !google.script.run) { onFail('Not connected to Apps Script'); return; }
+    var r = google.script.run
+      .withSuccessHandler(function (res) {
+        var o;
+        try { o = (typeof res === 'string') ? JSON.parse(res) : res; } catch (e) { o = { ok: false, error: 'Unexpected server response' }; }
+        if (!o || o.ok === false) { onFail((o && o.error) || 'Server error'); return; }
+        ok(o);
+      })
+      .withFailureHandler(function (e) { onFail((e && e.message) || String(e)); });
+    r[fn].apply(r, args || []);
+  }
+
+  // ── Toasts / tooltip / modal / drawers ───────────────────────────────────
+  function toast(msg, kind) {
+    var el = document.createElement('div');
+    el.className = 'wf-toast ' + (kind || '');
+    el.innerHTML = (kind === 'ok' ? '<i data-lucide="check-circle-2" width="16"></i>' : kind === 'bad' ? '<i data-lucide="alert-triangle" width="16"></i>' : '') + '<span>' + esc(msg) + '</span>';
+    $('wf-toasts').appendChild(el); icons();
+    if (hasGsap()) {
+      gsap.fromTo(el, { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: .35, ease: 'back.out(1.6)' });
+      gsap.to(el, { y: 10, opacity: 0, duration: .3, delay: kind === 'bad' ? 6 : 3.2, onComplete: function () { el.remove(); } });
+    } else setTimeout(function () { el.remove(); }, 4000);
+  }
+
+  var tipEl;
+  function showTip(html, x, y) {
+    tipEl = tipEl || $('wf-tip');
+    tipEl.innerHTML = html;
+    var w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    var left = Math.min(window.innerWidth - w - 10, x + 14), top = y + 16;
+    if (top + h > window.innerHeight - 8) top = y - h - 12;
+    tipEl.style.left = left + 'px'; tipEl.style.top = top + 'px'; tipEl.style.opacity = 1;
+  }
+  function hideTip() { if (tipEl) tipEl.style.opacity = 0; }
+
+  function openModal(html, okLabel, onOk) {
+    $('wf-modal-body').innerHTML = html;
+    var ok = $('wf-modal-ok');
+    ok.textContent = okLabel || 'Confirm';
+    ok.onclick = function () { closeModal(); onOk && onOk(); };
+    $('wf-modal').hidden = false; icons();
+    if (hasGsap()) gsap.fromTo('.wf-modal-card', { y: 14, scale: .97, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: .3, ease: 'power3.out' });
+  }
+  function closeModal() { $('wf-modal').hidden = true; }
+
+  var openDrawerId = null;
+  function openDrawer(which) {
+    if (openDrawerId) closeDrawer();
+    var d = $('drawer-' + which); if (!d) return;
+    if (which === 'changes') renderChanges();
+    if (which === 'settings') renderSettings();
+    openDrawerId = which;
+    $('wf-scrim').classList.add('on');
+    d.classList.add('open');
+    icons();
+  }
+  function closeDrawer() {
+    if (!openDrawerId) return;
+    var d = $('drawer-' + openDrawerId); openDrawerId = null;
+    $('wf-scrim').classList.remove('on');
+    d.classList.remove('open');
+  }
+
+  // ── Dates ────────────────────────────────────────────────────────────────
+  function addDays(ds, n) {
+    var p = ds.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2] + n, 12);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function localToday() { var d = new Date(); return addDays(d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2), 0); }
+  function dateLabel(ds, short) {
+    var p = ds.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2], 12);
+    return d.toLocaleDateString('en-CA', short ? { weekday: 'short', month: 'short', day: 'numeric' } : { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function mondayOf(ds) { var p = ds.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2], 12); var dow = (d.getDay() + 6) % 7; return addDays(ds, -dow); }
+
+  function setDateUi() {
+    var today = (S.day && S.day.today) || localToday();
+    $('wf-date').value = S.date;
+    $('wf-date-label').innerHTML = esc(dateLabel(S.date)) + (S.date === today ? ' <span class="chip l4">TODAY</span>' : '');
+  }
+
+  // ── Loading a day ────────────────────────────────────────────────────────
+  function loadDay(keepPins) {
+    var seq = ++S.loadSeq;
+    setDateUi();
+    loader(true, 'Loading ' + dateLabel(S.date, true) + '…');
+    call('getPlannerDay', [S.date], function (o) {
+      if (seq !== S.loadSeq) return;
+      S.day = o; S.loadedAt = Date.now();
+      S.rules = E.mergeRules(o.rules);
+      if (!keepPins) S.pins = {};
+      if (o.nowMin == null) { S.live = false; $('wf-live').checked = false; }
+      $('wf-live-wrap').classList.toggle('disabled', o.nowMin == null);
+      $('wf-user').textContent = o.user || '';
+      setDateUi();
+      build();
+      renderAll(true);
+      banner();
+      loader(false);
+    }, function (err) {
+      if (seq !== S.loadSeq) return;
+      loader(false);
+      $('wf-rows').innerHTML = '<div class="wf-empty"><b>Couldn\'t load the schedule</b>' + esc(err) + '</div>';
+      toast(err, 'bad');
+    });
+  }
+
+  function modelOpts() { return { nowMin: (S.live && S.day && S.day.nowMin != null) ? S.day.nowMin : null, pins: S.pins }; }
+
+  // (Re)build the model from the day. The baseline is the same day with no
+  // pins and nothing optimized — what the floor shows right now.
+  function build() {
+    var o = modelOpts();
+    S.model = E.buildModel(S.day, S.rules, o);
+    S.base = E.score(E.buildModel(S.day, S.rules, { nowMin: o.nowMin }));
+    var lo = Infinity, hi = -Infinity;
+    S.model.agents.forEach(function (a) { lo = Math.min(lo, a.S); hi = Math.max(hi, a.E); });
+    if (!isFinite(lo)) { lo = 360; hi = 1320; }
+    S.t0 = Math.floor(lo / 60) * 60; S.t1 = Math.ceil(hi / 60) * 60;
+    if (S.t1 - S.t0 < 480) S.t1 = S.t0 + 480;
+    var hours = (S.t1 - S.t0) / 60;
+    var canvas = $('wf-canvas');
+    canvas.style.setProperty('--hours', hours);
+    canvas.style.setProperty('--track-min', Math.max(700, hours * 58) + 'px');
+  }
+
+  function pct(m) { return ((m - S.t0) / (S.t1 - S.t0) * 100); }
+
+  // ── Filters ──────────────────────────────────────────────────────────────
+  function visible(ag) {
+    if (S.region !== 'all' && String(ag.region || '').toLowerCase() !== S.region.toLowerCase()) return false;
+    if (S.lang === 'SR') { if (!ag.isSenior) return false; }
+    else if (S.lang !== 'all' && ag.lang !== S.lang) return false;
+    if (S.q) {
+      var hay = (ag.name + ' ' + ag.supervisor + ' ' + ag.id + ' ' + (ag.absent || '')).toLowerCase();
+      if (hay.indexOf(S.q) === -1) return false;
+    }
+    return true;
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  function renderAll(entrance) {
+    renderAxis();
+    renderRows(entrance);
+    renderRibbon();
+    updateKpis(entrance);
+    positionNow();
+    var h = $('wf-head'); if (h) $('wf-canvas').style.setProperty('--head-h', h.offsetHeight + 'px');
+  }
+
+  function renderAxis() {
+    var html = '';
+    for (var m = S.t0; m < S.t1; m += 60) {
+      var major = ((m % 1440) / 60) % 3 === 0;
+      html += '<div class="tick' + (major ? ' major' : '') + '" style="left:' + pct(m) + '%">' + fmt(m) + '</div>';
+    }
+    $('wf-axis').innerHTML = html;
+  }
+
+  var GROUP_DEF = [
+    { id: 'BL', label: 'Bilingual', color: 'var(--bl)' },
+    { id: 'FR', label: 'French', color: 'var(--fr)' },
+    { id: 'EN', label: 'English', color: 'var(--en)' },
+    { id: 'ABS', label: 'Absent today', color: 'var(--bad)' }
+  ];
+
+  function renderRows(entrance) {
+    var m = S.model, total = 0, shown = 0;
+    if (!m || !m.agents.length) {
+      $('wf-rows').innerHTML = '<div class="wf-empty"><b>No schedule for ' + esc(dateLabel(S.date)) + '</b>' +
+        'Paste the WFM Agent Schedules report into MRC OPS → Import' + (S.day && S.day.range && S.day.range.min ? ' (imported range: ' + esc(S.day.range.min) + ' → ' + esc(S.day.range.max) + ')' : '') + '.</div>';
+      $('wf-count').textContent = '0 agents';
+      return;
+    }
+    var buckets = { BL: [], FR: [], EN: [], ABS: [] };
+    m.agents.forEach(function (ag, ai) {
+      total++;
+      if (!visible(ag)) return;
+      shown++;
+      (ag.fullAbsent ? buckets.ABS : (buckets[ag.lang] || buckets.EN)).push(ai);
+    });
+    var html = '';
+    GROUP_DEF.forEach(function (g) {
+      var list = buckets[g.id]; if (!list.length) return;
+      list.sort(function (a, b) { var x = m.agents[a], y = m.agents[b]; return (x.S - y.S) || x.name.localeCompare(y.name); });
+      html += '<div class="wf-group' + (S.collapsed[g.id] ? ' collapsed' : '') + '" data-g="' + g.id + '">' +
+        '<div class="wf-group-h" onclick="WF.toggleGroup(\'' + g.id + '\')"><span style="position:sticky;left:14px;display:flex;align-items:center;gap:10px">' +
+        '<i data-lucide="chevron-down" width="14"></i><span class="dot" style="background:' + g.color + '"></span>' + g.label +
+        ' <span class="cnt">' + list.length + '</span></span></div>';
+      list.forEach(function (ai) { html += rowHtml(ai); });
+      html += '</div>';
+    });
+    $('wf-rows').innerHTML = html || '<div class="wf-empty"><b>No agents match</b>Clear the search or filters.</div>';
+    $('wf-count').textContent = (shown === total ? total : shown + ' of ' + total) + ' agents';
+    icons();
+    if (entrance && hasGsap()) {
+      var rows = Array.prototype.slice.call(document.querySelectorAll('.wf-row'), 0, 28);
+      gsap.from(rows, { opacity: 0, x: -8, duration: .35, stagger: .012, ease: 'power2.out', clearProps: 'opacity,transform' });
+    }
+  }
+
+  function chipsFor(ag) {
+    var c = '<span class="chip ' + ag.lang.toLowerCase() + '">' + ag.lang + '</span>';
+    if (Number(ag.level) === 4) c += '<span class="chip l4">L4</span>';
+    else if (ag.trainee) c += '<span class="chip tr">TRN</span>';
+    if (ag.isQL) c += '<span class="chip ql" title="Question Line">QL</span>';
+    if (ag.isESC) c += '<span class="chip esc" title="Escalation queue">ESC</span>';
+    if (ag.absent) c += '<span class="chip abs" title="' + esc(ag.absent) + '">' + esc(String(ag.absent).replace(/\s*\(part day\)/i, ' ½')) + '</span>';
+    if (ag.infeasible) c += '<span class="chip flag bad" title="No legal layout fits — blocks left where they were' + (ag.skipped ? '; ' + ag.skipped + ' missing block(s) not added' : '') + '">no fit</span>';
+    else if (ag.relaxed) c += '<span class="chip flag warn" title="Spacing relaxed to fit this shift (level ' + ag.relaxed + ')">relaxed</span>';
+    if (ag.mismatch) c += '<span class="chip flag" title="' + esc(ag.mismatch) + '">IEX≠rule</span>';
+    if (!ag.rule && !ag.fullAbsent) c += '<span class="chip flag" title="Shift shorter than the smallest grid row">&lt;4h</span>';
+    return c;
+  }
+
+  function rowHtml(ai) {
+    var ag = S.model.agents[ai];
+    var sub = fmt(ag.S) + '–' + fmt(ag.E) + ' · ' + (ag.rule || dur(ag.E - ag.S)) + (ag.supervisor ? ' · ' + ag.supervisor : '');
+    var h = '<div class="wf-row' + (ag.fullAbsent ? ' absent' : '') + '" data-ai="' + ai + '" id="row-' + ai + '">' +
+      '<div class="wf-name"><div class="wf-name-top"><b title="' + esc(ag.name) + '">' + esc(ag.name) + '</b>' + chipsFor(ag) + '</div>' +
+      '<div class="wf-name-sub" title="' + esc(sub) + '">' + esc(sub) + '</div></div>' +
+      '<div class="wf-track" id="trk-' + ai + '">' +
+      '<div class="wf-shift' + (ag.fullAbsent ? ' absent' : '') + '" style="left:' + pct(ag.S) + '%;width:' + (pct(ag.E) - pct(ag.S)) + '%"></div>';
+    if (!ag.fullAbsent) {
+      ag.fixed.forEach(function (f, fi) {
+        var w = pct(f.e) - pct(f.s);
+        h += '<div class="wf-blk fx ' + esc(f.type.replace(/\s+/g, '')) + '" data-ai="' + ai + '" data-f="' + fi + '" style="left:' + pct(f.s) + '%;width:' + w + '%">' + (w > 2.2 ? esc(f.extra ? 'extra' : f.type) : '') + '</div>';
+      });
+      ag.acts.forEach(function (a, k) {
+        if (a.orig != null && a.orig !== a.s) h += '<div class="wf-ghost" style="left:' + pct(a.orig) + '%;width:' + (pct(a.orig + (a.origDur || a.dur)) - pct(a.orig)) + '%"></div>';
+        var cls = 'wf-blk mv ' + a.type + (a.unpaid ? ' unpaid' : '') + (a.past ? ' past' : '') + (a.pinned ? ' pinned' : '') + (ag.infeasible ? ' locked' : '');
+        h += '<div class="' + cls + '" id="blk-' + ai + '-' + k + '" data-ai="' + ai + '" data-k="' + k + '" style="left:' + pct(a.s) + '%;width:' + (pct(a.s + a.dur) - pct(a.s)) + '%">' + (a.type === 'Lunch' ? 'L' + a.dur : a.dur) + '</div>';
+      });
+    }
+    return h + '</div></div>';
+  }
+
+  function rerenderRow(ai) {
+    var el = $('row-' + ai); if (!el) return;
+    var tmp = document.createElement('div'); tmp.innerHTML = rowHtml(ai);
+    el.replaceWith(tmp.firstChild);
+  }
+
+  // Coverage ribbon: stacked BL / FR / EN on queue, IDP Required dashed,
+  // red ticks where no French speaker is on queue while one is scheduled.
+  function renderRibbon() {
+    var host = $('wf-ribbon'); if (!S.model) { host.innerHTML = ''; return; }
+    var cov = E.coverage(S.model), slot = cov.slot;
+    var a = Math.floor(S.t0 / slot), b = Math.ceil(S.t1 / slot);
+    var max = 1;
+    for (var t = a; t < b; t++) max = Math.max(max, cov.shift[t] || 0, cov.req[t] || 0);
+    max *= 1.08;
+    var X = function (t) { return ((t * slot - S.t0) / (S.t1 - S.t0) * 1000).toFixed(2); };
+    var Y = function (v) { return (100 - (v / max) * 96).toFixed(2); };
+    function area(lowF, highF) {
+      var top = '', bot = '';
+      for (var t = a; t < b; t++) { top += (t === a ? 'M' : 'L') + X(t) + ',' + Y(highF(t)) + 'L' + X(t + 1) + ',' + Y(highF(t)); }
+      for (var u = b - 1; u >= a; u--) { bot += 'L' + X(u + 1) + ',' + Y(lowF(u)) + 'L' + X(u) + ',' + Y(lowF(u)); }
+      return top + bot + 'Z';
+    }
+    var bl = function (t) { return Math.max(0, cov.bl[t]); };
+    var fr = function (t) { return bl(t) + Math.max(0, cov.fr[t]); };
+    var en = function (t) { return fr(t) + Math.max(0, cov.en[t]); };
+    var zero = function () { return 0; };
+    var idp = '', shiftLine = '', gaps = '';
+    for (var t2 = a; t2 < b; t2++) {
+      if (cov.req[t2] != null) idp += ((idp && cov.req[t2 - 1] != null) ? 'L' : 'M') + X(t2) + ',' + Y(cov.req[t2]) + 'L' + X(t2 + 1) + ',' + Y(cov.req[t2]);
+      shiftLine += (t2 === a ? 'M' : 'L') + X(t2) + ',' + Y(cov.shift[t2]) + 'L' + X(t2 + 1) + ',' + Y(cov.shift[t2]);
+      if (cov.frGap[t2]) gaps += '<rect x="' + X(t2) + '" y="96" width="' + (slot / (S.t1 - S.t0) * 1000).toFixed(2) + '" height="4" style="fill:var(--bad)"/>';
+    }
+    host.innerHTML = '<svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-label="On-queue coverage">' +
+      '<path d="' + area(fr, en) + '" style="fill:var(--en);opacity:.35"/>' +
+      '<path d="' + area(bl, fr) + '" style="fill:var(--fr);opacity:.75"/>' +
+      '<path d="' + area(zero, bl) + '" style="fill:var(--bl);opacity:.85"/>' +
+      '<path d="' + shiftLine + '" style="fill:none;stroke:var(--muted);stroke-width:1;opacity:.6" vector-effect="non-scaling-stroke"/>' +
+      (idp ? '<path d="' + idp + '" style="fill:none;stroke:var(--idp);stroke-width:1.5;stroke-dasharray:4 3" vector-effect="non-scaling-stroke"/>' : '') +
+      gaps + '</svg><div class="hover-line" id="rib-line"></div>';
+    S.cov = cov;
+  }
+
+  function ribbonHover(ev) {
+    if (!S.cov) return;
+    var r = $('wf-ribbon').getBoundingClientRect();
+    var frac = (ev.clientX - r.left) / r.width; if (frac < 0 || frac > 1) { hideTip(); return; }
+    var m = S.t0 + frac * (S.t1 - S.t0), t = Math.floor(m / S.cov.slot);
+    var c = S.cov, onq = Math.max(0, c.bl[t]) + Math.max(0, c.fr[t]) + Math.max(0, c.en[t]);
+    var line = $('rib-line'); if (line) { line.style.left = (frac * 100) + '%'; line.style.opacity = .5; }
+    showTip('<b>' + fmt(t * c.slot) + '</b> · on queue <b>' + onq + '</b> of ' + c.shift[t] + ' on shift<br>' +
+      '<span class="m">BL ' + Math.max(0, c.bl[t]) + ' · FR ' + Math.max(0, c.fr[t]) + ' · EN ' + Math.max(0, c.en[t]) + '</span>' +
+      (c.req[t] != null ? '<br>IDP required <b>' + (+c.req[t]).toFixed(1) + '</b>' + (onq < c.req[t] ? ' — <b>short ' + (c.req[t] - onq).toFixed(1) + '</b>' : '') : '') +
+      (c.frGap[t] ? '<br><b>No French speaker on queue</b>' : ''), ev.clientX, ev.clientY);
+  }
+
+  function positionNow() {
+    var el = $('wf-now');
+    if (!S.day || S.day.nowMin == null || S.date !== S.day.today) { el.hidden = true; return; }
+    var now = S.day.nowMin + Math.floor((Date.now() - S.loadedAt) / 60000);
+    if (now < S.t0 || now > S.t1) { el.hidden = true; return; }
+    el.hidden = false;
+    el.style.left = 'calc(var(--name-w) + (100% - var(--name-w)) * ' + ((now - S.t0) / (S.t1 - S.t0)).toFixed(5) + ')';
+  }
+
+  // ── KPIs ─────────────────────────────────────────────────────────────────
+  function tweenNum(el, to, decimals) {
+    var from = parseFloat(el.getAttribute('data-v') || '0') || 0;
+    el.setAttribute('data-v', to);
+    var put = function (v) { el.textContent = decimals ? v.toFixed(decimals) : Math.round(v).toLocaleString('en-CA'); };
+    if (!hasGsap()) { put(to); return; }
+    var o = { v: from };
+    gsap.to(o, { v: to, duration: .7, ease: 'power2.out', onUpdate: function () { put(o.v); } });
+  }
+
+  function updateKpis() {
+    if (!S.model) return;
+    var sc = E.score(S.model); S.cur = sc;
+    var hasIdp = S.day && S.day.idp && S.day.idp.has;
+    document.querySelectorAll('.wf-kpi').forEach(function (card) {
+      var k = card.getAttribute('data-k'), num = card.querySelector('.num');
+      if (k === 'idpShortMin' && !hasIdp) { num.textContent = '—'; num.setAttribute('data-v', 0); card.classList.remove('zero', 'hot'); return; }
+      var v = k === 'total' ? Math.round(sc.total) : sc[k];
+      tweenNum(num, v);
+      if (k !== 'total' && k !== 'moves') { card.classList.toggle('zero', v === 0); card.classList.toggle('hot', v > 0 && v >= (S.base[k] || 0) && v > 30); }
+    });
+    $('kpi-idp-sub').textContent = hasIdp ? 'on queue < required' : 'no IDP imported for this date';
+    $('kpi-added').textContent = sc.added ? '+' + sc.added + ' added · ' : '';
+    $('kpi-added').title = sc.added ? 'Blocks the paid-break grid requires that the current plan doesn\'t have (usually paid lunches — the WFM import skips "Paid Lunch" lines)' : '';
+    var d = $('kpi-delta'), b = S.base.total;
+    if (!b || Math.abs(sc.total - b) < 0.5) d.innerHTML = 'current plan, before optimizing';
+    else {
+      var p = Math.round((sc.total - b) / b * 100);
+      d.innerHTML = '<span class="' + (p < 0 ? 'good' : 'badd') + '">' + (p < 0 ? '−' : '+') + Math.abs(p) + '%</span> vs current plan (' + Math.round(b).toLocaleString('en-CA') + ')';
+    }
+  }
+
+  // ── Banner (saved plans) ─────────────────────────────────────────────────
+  function banner() {
+    var el = $('wf-banner'), p = S.day && S.day.plan;
+    if (!p) { el.hidden = true; return; }
+    el.hidden = false;
+    if (p.status === 'approved') {
+      el.className = 'wf-banner ok';
+      el.innerHTML = '<i data-lucide="badge-check" width="16"></i><span>Plan approved by <b>' + esc(p.by || 'someone') + '</b> · ' + esc(p.at) + '. The floor already shows it.</span>';
+    } else {
+      el.className = 'wf-banner info';
+      el.innerHTML = '<i data-lucide="file-clock" width="16"></i><span>Draft saved by <b>' + esc(p.by || 'someone') + '</b> · ' + esc(p.at) + '</span>' +
+        '<button class="wf-btn" onclick="WF.loadDraft()"><i data-lucide="download" width="14"></i>Load draft</button>';
+    }
+    icons();
+  }
+
+  function loadDraft() {
+    var p = S.day && S.day.plan; if (!p) return;
+    var snap = snapshot(), n = 0;
+    S.model.agents.forEach(function (ag) {
+      var sv = p.agents[ag.key]; if (!sv || !sv.acts || sv.acts.length !== ag.acts.length || ag.fullAbsent || !ag.lv) return;
+      // Take the agent's whole saved layout, or none of it (a block-by-block
+      // check would trip over neighbours that haven't moved yet).
+      var starts = ag.acts.map(function (act, k) { return act.locked ? act.s : Number(sv.acts[k].s); });
+      if (!E.validLayout(ag, starts, ag.lv, S.model.snap)) return;
+      starts.forEach(function (st, k) { if (ag.acts[k].s !== st) { E.moveAct(S.model, ag, k, st); n++; } });
+    });
+    afterBulkChange(snap);
+    toast('Draft loaded · ' + n + ' block' + (n === 1 ? '' : 's') + ' placed', 'ok');
+    $('wf-banner').hidden = true;
+  }
+
+  // ── Optimize / reset ─────────────────────────────────────────────────────
+  function snapshot() {
+    var out = {};
+    S.model.agents.forEach(function (ag, ai) { ag.acts.forEach(function (a, k) { out[ai + '-' + k] = a.s; }); });
+    return out;
+  }
+
+  function afterBulkChange(before) {
+    renderRows(false);
+    renderRibbon();
+    updateKpis();
+    if (!hasGsap() || !before) return;
+    var moved = [];
+    S.model.agents.forEach(function (ag, ai) {
+      ag.acts.forEach(function (a, k) {
+        var was = before[ai + '-' + k];
+        if (was == null || was === a.s) return;
+        var el = $('blk-' + ai + '-' + k); if (!el) return;
+        moved.push({ el: el, from: pct(was) });
+      });
+    });
+    moved.slice(0, 400).forEach(function (mv, i) {
+      gsap.fromTo(mv.el, { left: mv.from + '%' }, { left: mv.el.style.left, duration: .75, delay: Math.min(.6, i * .004), ease: 'power3.inOut' });
+      gsap.fromTo(mv.el, { scale: 1 }, { scale: 1.18, duration: .2, yoyo: true, repeat: 1, delay: Math.min(.6, i * .004) + .6, ease: 'power1.out' });
+    });
+  }
+
+  function optimize() {
+    if (!S.model || !S.model.agents.length) return;
+    var btn = $('wf-optimize'); btn.disabled = true;
+    var before = snapshot(), b = E.score(S.model).total;
+    setTimeout(function () {   // let the button state paint first
+      var r = E.optimize(S.model, { budgetMs: 2500 });
+      afterBulkChange(before);
+      btn.disabled = false;
+      var a = S.cur.total, n = 0;
+      S.model.agents.forEach(function (ag, ai) { ag.acts.forEach(function (x, k) { if (before[ai + '-' + k] !== x.s) n++; }); });
+      toast(n ? ('Optimized: ' + n + ' block' + (n === 1 ? '' : 's') + ' moved · risk ' + (b ? Math.round((a - b) / b * 100) : 0) + '%') : 'Already optimal for these rules', 'ok');
+      if (hasGsap()) gsap.fromTo('.wf-kpi-hero', { scale: .97 }, { scale: 1, duration: .5, ease: 'elastic.out(1, .5)' });
+      void r;
+    }, 30);
+  }
+
+  function resetPlan() {
+    if (!S.day) return;
+    var before = S.model ? snapshot() : null;
+    S.pins = {};
+    build();
+    afterBulkChange(before);
+    toast('Back to the current plan');
+  }
+
+  // ── Drag & drop ──────────────────────────────────────────────────────────
+  var drag = null;
+  function onPointerDown(ev) {
+    var el = ev.target.closest('.wf-blk.mv'); if (!el || ev.button !== 0) return;
+    var ai = +el.getAttribute('data-ai'), k = +el.getAttribute('data-k');
+    var ag = S.model.agents[ai], act = ag.acts[k];
+    if (act.past || ag.infeasible) { toast(act.past ? 'Already started — can\'t move it' : 'This shift has no legal layout'); return; }
+    ev.preventDefault();
+    var trk = $('trk-' + ai), rect = trk.getBoundingClientRect();
+    // Pinned blocks can be dragged again: unlock while dragging.
+    act.locked = false;
+    var range = E.rangeFor(S.model, ag, k);
+    var win = document.createElement('div');
+    win.className = 'wf-window';
+    win.style.left = pct(range[0]) + '%'; win.style.width = Math.max(0, pct(range[1] + act.dur) - pct(range[0])) + '%';
+    trk.insertBefore(win, trk.firstChild.nextSibling);
+    drag = { el: el, ai: ai, k: k, ag: ag, act: act, x0: ev.clientX, s0: act.s, s: act.s, w: rect.width, range: range, win: win, ok: true, wasPinned: act.pinned };
+    el.classList.add('dragging');
+    el.setPointerCapture && el.setPointerCapture(ev.pointerId);
+    hideTip();
+  }
+  function onPointerMove(ev) {
+    if (!drag) return;
+    var span = S.t1 - S.t0, snap = S.model.snap;
+    var s = drag.s0 + (ev.clientX - drag.x0) / drag.w * span;
+    s = Math.round(s / snap) * snap;
+    s = Math.max(drag.range[0] - 120, Math.min(drag.range[1] + 120, s));
+    drag.s = s;
+    drag.el.style.left = pct(s) + '%';
+    var chk = E.canPlace(S.model, drag.ag, drag.k, s);
+    drag.ok = chk.ok; drag.why = chk.why;
+    drag.el.classList.toggle('invalid', !chk.ok);
+    showTip('<b>' + drag.act.type + '</b> <span class="m">' + fmt(s) + '–' + fmt(s + drag.act.dur) + '</span>' + (chk.ok ? '' : '<br>' + esc(chk.why)), ev.clientX, ev.clientY);
+  }
+  function onPointerUp() {
+    if (!drag) return;
+    var d = drag; drag = null;
+    d.el.classList.remove('dragging', 'invalid');
+    d.win.remove(); hideTip();
+    if (d.ok && d.s !== d.s0) {
+      E.moveAct(S.model, d.ag, d.k, d.s);
+      d.act.locked = true; d.act.pinned = true;
+      S.pins[d.ag.key + ':' + d.k] = d.s;
+      rerenderRow(d.ai); renderRibbon(); updateKpis();
+      var nb = $('blk-' + d.ai + '-' + d.k);
+      if (nb && hasGsap()) gsap.fromTo(nb, { scale: 1.15 }, { scale: 1, duration: .45, ease: 'elastic.out(1, .45)' });
+    } else {
+      d.act.locked = d.wasPinned;
+      if (hasGsap()) gsap.to(d.el, { left: pct(d.s0) + '%', duration: .5, ease: 'elastic.out(1, .55)' });
+      else d.el.style.left = pct(d.s0) + '%';
+      if (!d.ok && d.s !== d.s0) toast(d.why || 'Not allowed there', 'bad');
+    }
+  }
+  function onDblClick(ev) {
+    var el = ev.target.closest('.wf-blk.mv'); if (!el) return;
+    var ai = +el.getAttribute('data-ai'), k = +el.getAttribute('data-k'), ag = S.model.agents[ai], act = ag.acts[k];
+    if (!act.pinned || act.past) return;
+    act.pinned = false; act.locked = false; delete S.pins[ag.key + ':' + k];
+    rerenderRow(ai); toast('Unpinned — Optimize may move it again');
+  }
+
+  function onRowsOver(ev) {
+    if (drag) return;
+    var el = ev.target.closest('.wf-blk'); if (!el) { hideTip(); return; }
+    var ag = S.model.agents[+el.getAttribute('data-ai')];
+    var html;
+    if (el.classList.contains('mv')) {
+      var k = +el.getAttribute('data-k'), a = ag.acts[k], r = E.rangeFor(S.model, ag, k);
+      html = '<b>' + (a.unpaid ? 'Unpaid lunch' : a.type === 'Lunch' ? 'Paid lunch' : 'Break') + '</b> · ' + a.dur + ' min<br><span class="m">' + fmt(a.s) + '–' + fmt(a.s + a.dur) + '</span>' +
+        (a.orig == null ? '<br>Added (not in the current plan)' : a.orig !== a.s ? '<br>was <span class="m">' + fmt(a.orig) + '</span>' : '') +
+        (a.past ? '<br>Already started' : '<br>Allowed start <span class="m">' + fmt(r[0]) + '–' + fmt(r[1]) + '</span>') +
+        (a.pinned ? '<br>Pinned · double-click to unpin' : (a.past ? '' : '<br>Drag to move'));
+    } else {
+      var f = ag.fixed[+el.getAttribute('data-f')];
+      html = '<b>' + esc(f.extra ? f.type + ' (not in the rule, kept as is)' : f.type) + '</b>' + (f.abs ? ' · ' + esc(f.abs) : '') + '<br><span class="m">' + fmt(f.s) + '–' + fmt(f.e) + '</span><br>Fixed — the planner works around it';
+    }
+    showTip(html, ev.clientX, ev.clientY);
+  }
+
+  // ── Changes drawer ───────────────────────────────────────────────────────
+  function renderChanges() {
+    var body = $('changes-body'); if (!S.model) { body.innerHTML = ''; return; }
+    var changed = [], flags = [];
+    S.model.agents.forEach(function (ag, ai) {
+      if (ag.fullAbsent) return;
+      var mv = [];
+      ag.acts.forEach(function (a) {
+        var lbl = a.unpaid ? 'Unpaid lunch' : a.type;
+        if (a.orig == null) mv.push(lbl + ' added at <b>' + fmt(a.s) + '</b>');
+        else if (a.orig !== a.s) mv.push(lbl + ' <s>' + fmt(a.orig) + '</s> → <b>' + fmt(a.s) + '</b>');
+      });
+      if (mv.length) changed.push({ ai: ai, ag: ag, mv: mv });
+      if (ag.infeasible) flags.push({ ai: ai, ag: ag, t: 'No legal layout — left as is' + (ag.skipped ? ' (' + ag.skipped + ' missing block' + (ag.skipped === 1 ? '' : 's') + ' not added)' : '') });
+      else if (ag.relaxed) flags.push({ ai: ai, ag: ag, t: 'Spacing relaxed to fit (level ' + ag.relaxed + ')' });
+      if (ag.mismatch) flags.push({ ai: ai, ag: ag, t: ag.mismatch });
+    });
+    var h = '<div class="wf-sec"><h4>' + changed.length + ' agent' + (changed.length === 1 ? '' : 's') + ' changed</h4>';
+    if (!changed.length) h += '<p>Nothing moved yet. Press <b>Optimize</b> or drag a block.</p>';
+    changed.forEach(function (c) {
+      h += '<div class="wf-change" onclick="WF.focusRow(' + c.ai + ')"><div><b>' + esc(c.ag.name) + '</b> <span class="chip ' + c.ag.lang.toLowerCase() + '">' + c.ag.lang + '</span><div class="mv">' + c.mv.join('<br>') + '</div></div></div>';
+    });
+    h += '</div><div class="wf-sec"><h4>' + flags.length + ' flag' + (flags.length === 1 ? '' : 's') + '</h4>';
+    if (!flags.length) h += '<p>Every shift fits the rules as set.</p>';
+    flags.forEach(function (f) {
+      h += '<div class="wf-change" onclick="WF.focusRow(' + f.ai + ')"><div><b>' + esc(f.ag.name) + '</b><div class="mv">' + esc(f.t) + '</div></div></div>';
+    });
+    body.innerHTML = h + '</div>';
+  }
+
+  function focusRow(ai) {
+    closeDrawer();
+    var ag = S.model.agents[ai];
+    if (!visible(ag)) { S.q = ''; $('wf-q').value = ''; S.lang = 'all'; S.region = 'all'; syncSegs(); }
+    var g = ag.fullAbsent ? 'ABS' : ag.lang; if (S.collapsed[g]) { S.collapsed[g] = false; }
+    renderRows(false);
+    var el = $('row-' + ai); if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (hasGsap()) gsap.fromTo(el, { backgroundColor: 'rgba(99,102,241,.22)' }, { backgroundColor: 'rgba(99,102,241,0)', duration: 1.6, delay: .35, clearProps: 'backgroundColor' });
+  }
+
+  // ── Settings drawer ──────────────────────────────────────────────────────
+  function renderSettings() {
+    var r = S.rules || E.mergeRules(null), admin = S.day && S.day.isAdmin;
+    var h = '<div class="wf-sec"><h4>Paid-break grid</h4><p>Matched on the gross shift length (longest row not above it). Blocks in order: <b>B15</b> = 15-min paid break, <b>L30</b> = paid lunch, <b>U30</b> = unpaid lunch. A row with site <b>CALG</b> only applies to Calgary agents.</p>' +
+      '<table class="wf-grid-tbl"><thead><tr><th>Hours</th><th>Label</th><th>Blocks</th><th>Site</th><th>Span max</th><th></th></tr></thead><tbody id="grid-body">';
+    r.grid.forEach(function (g) { h += gridRow(g); });
+    h += '</tbody></table><button class="wf-btn ghost" style="margin-top:6px" onclick="WF.addGridRow()"><i data-lucide="plus" width="14"></i>Add row</button></div>';
+    var w = r.windows, W = r.weights;
+    h += '<div class="wf-sec"><h4>Spacing</h4><div class="wf-form">' +
+      field('First block after start (min)', 'w-firstMin', w.firstMin) + field('Gap between blocks (min)', 'w-gapMin', w.gapMin) + field('Last block ends before shift end (min)', 'w-last', w.lastBeforeEndMin) +
+      field('Snap (min)', 'w-snap', w.snap) +
+      '<label class="wf-field">Lunch in middle third<select id="w-third"><option value="1"' + (w.lunchMiddleThird ? ' selected' : '') + '>Yes</option><option value="0"' + (!w.lunchMiddleThird ? ' selected' : '') + '>No</option></select></label>' +
+      field('Live lead time (min)', 'w-lead', r.liveLeadMin) + '</div></div>';
+    h += '<div class="wf-sec"><h4>Protection weights</h4><p>How much an agent being off queue at the same time as a peer costs. Pairs multiply, so two Bilinguals together cost ' + (W.BL * W.BL) + ' vs ' + (W.EN * W.EN) + ' for two English.</p><div class="wf-form">' +
+      field('Bilingual', 'k-BL', W.BL) + field('French', 'k-FR', W.FR) + field('English', 'k-EN', W.EN) +
+      field('+ Level 4', 'k-L4', W.L4) + field('+ Question Line', 'k-QL', W.QL) + field('+ Escalation', 'k-ESC', W.ESC) +
+      field('Trainee × ', 'k-tr', W.traineeMult) + field('IDP shortfall λ', 'k-lam', r.idpLambda) + field('Stay-put μ (per min moved)', 'k-mu', r.churnMu) + '</div></div>';
+    h += '<div class="wf-sec"><p>' + (admin ? 'You can save these for everyone.' : 'Only MRC admins can save rules for everyone — <b>Apply</b> still lets you try them on this page.') + '</p>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="wf-btn primary" onclick="WF.applyRules(false)"><i data-lucide="play" width="14"></i>Apply here</button>' +
+      '<button class="wf-btn accent" onclick="WF.applyRules(true)"' + (admin ? '' : ' disabled') + '><i data-lucide="cloud-upload" width="14"></i>Save for everyone</button>' +
+      '<button class="wf-btn ghost" onclick="WF.resetRules()"' + (admin ? '' : ' disabled') + '><i data-lucide="rotate-ccw" width="14"></i>Defaults</button></div></div>';
+    $('settings-body').innerHTML = h; icons();
+  }
+  function field(label, id, v) { return '<label class="wf-field">' + esc(label) + '<input id="' + id + '" type="number" step="any" value="' + esc(v) + '"></label>'; }
+  function gridRow(g) {
+    return '<tr><td><input class="g-h" type="number" step="0.5" value="' + esc(g.hours) + '"></td><td><input class="g-l" value="' + esc(g.label) + '"></td><td><input class="g-s" value="' + esc(g.seq) + '"></td>' +
+      '<td><input class="g-site" value="' + esc(g.site || '') + '" placeholder="—"></td><td><input class="g-max" type="number" step="0.5" value="' + esc(g.spanMax == null ? '' : g.spanMax) + '"></td>' +
+      '<td class="x"><button class="wf-icon-btn" onclick="this.closest(\'tr\').remove()" aria-label="Remove row"><i data-lucide="trash-2" width="14"></i></button></td></tr>';
+  }
+  function addGridRow() { $('grid-body').insertAdjacentHTML('beforeend', gridRow({ hours: '', label: '', seq: '' })); icons(); }
+  function readRules() {
+    var num = function (id) { var v = $(id).value; return v === '' ? null : Number(v); };
+    var grid = [];
+    document.querySelectorAll('#grid-body tr').forEach(function (tr) {
+      var h = tr.querySelector('.g-h').value; if (h === '') return;
+      var seq = tr.querySelector('.g-s').value.trim();
+      grid.push({ hours: Number(h), label: tr.querySelector('.g-l').value.trim() || (h + ' hrs'), seq: seq, site: tr.querySelector('.g-site').value.trim(), spanMax: tr.querySelector('.g-max').value === '' ? null : Number(tr.querySelector('.g-max').value) });
+    });
+    return {
+      grid: grid,
+      windows: { firstMin: num('w-firstMin'), gapMin: num('w-gapMin'), lastBeforeEndMin: num('w-last'), snap: num('w-snap') || 15, lunchMiddleThird: $('w-third').value === '1' },
+      weights: { BL: num('k-BL'), FR: num('k-FR'), EN: num('k-EN'), L4: num('k-L4'), QL: num('k-QL'), ESC: num('k-ESC'), traineeMult: num('k-tr') },
+      idpLambda: num('k-lam'), churnMu: num('k-mu'), liveLeadMin: num('w-lead')
+    };
+  }
+  function applyRules(save) {
+    var raw = readRules();
+    var bad = raw.grid.filter(function (g) { return g.seq && !E.parseSeq(g.seq).length; });
+    if (bad.length) { toast('Unreadable blocks in row "' + bad[0].label + '" — use B15 L30 U30 …', 'bad'); return; }
+    var go = function () { S.rules = E.mergeRules(raw); var before = snapshot(); build(); afterBulkChange(before); renderAxis(); toast(save ? 'Rules saved for everyone' : 'Rules applied on this page', 'ok'); };
+    if (!save) { go(); return; }
+    call('setPlannerRules', [JSON.stringify(raw)], function () { if (S.day) S.day.rules = raw; go(); });
+  }
+  function resetRules() {
+    call('resetPlannerRules', [], function () { if (S.day) S.day.rules = null; S.rules = E.mergeRules(null); renderSettings(); var b = snapshot(); build(); afterBulkChange(b); toast('Default rules restored', 'ok'); });
+  }
+
+  // ── Save / approve / export ──────────────────────────────────────────────
+  function planPayload() { return JSON.stringify({ agents: E.exportPlan(S.model) }); }
+
+  function saveDraft() {
+    if (!S.model) return;
+    call('savePlannerDraft', [S.date, planPayload()], function (o) {
+      S.day.plan = { status: 'draft', by: o.by, at: o.at, agents: {} };
+      E.exportPlan(S.model).forEach(function (a) { S.day.plan.agents[a.key] = a; });
+      toast('Draft saved · ' + dateLabel(S.date, true), 'ok');
+    });
+  }
+
+  function confirmApprove() {
+    if (!S.model) return;
+    var plan = E.exportPlan(S.model);
+    var changed = plan.filter(function (a) { return a.changed; }).length;
+    var restore = plan.filter(function (a) { return !a.changed && a.hasOverride; }).length;
+    var sc = S.cur || E.score(S.model);
+    openModal('<h3>Send this plan to the floor?</h3>' +
+      '<p><b>' + changed + '</b> agent' + (changed === 1 ? '' : 's') + ' get new break/lunch times for <b>' + esc(dateLabel(S.date)) + '</b>' + (restore ? ' (' + restore + ' existing floor edit' + (restore === 1 ? '' : 's') + ' rewritten)' : '') + '.</p>' +
+      '<p>MRC OPS timers and the Genesys page pick it up within a minute. IEX is not changed — use <b>Export</b> to key it in.</p>' +
+      '<p class="wf-muted">French-cover gaps ' + sc.frGapMin + ' min · Bilingual overlap ' + sc.blOverlapMin + ' min · Risk ' + Math.round(sc.total) + '</p>',
+      'Approve & publish', approve);
+  }
+  function approve() {
+    loader(true, 'Publishing to the floor…');
+    call('approvePlannerPlan', [S.date, planPayload()], function (o) {
+      loader(false);
+      toast('Published · ' + o.written + ' agent' + (o.written === 1 ? '' : 's') + ' updated on the floor', 'ok');
+      loadDay(false);
+    }, function (e) { loader(false); toast(e, 'bad'); });
+  }
+
+  function rowsForExport(onlyChanged) {
+    var out = [];
+    S.model.agents.forEach(function (ag) {
+      if (ag.fullAbsent) return;
+      ag.acts.forEach(function (a) {
+        var ch = a.orig == null || a.orig !== a.s;
+        if (onlyChanged && !ch) return;
+        out.push([ag.name, ag.id, S.date, a.unpaid ? 'Unpaid Lunch' : a.type === 'Lunch' ? 'Paid Lunch' : 'Break', fmt(a.s), fmt(a.s + a.dur), a.dur, ch ? 'Yes' : '', a.orig == null ? '(new)' : fmt(a.orig)]);
+      });
+    });
+    return out;
+  }
+  function exportCsv() {
+    if (!S.model) return;
+    var head = ['Agent', 'WFM ID', 'Date', 'Activity', 'Start', 'End', 'Minutes', 'Changed', 'Was'];
+    var csv = [head].concat(rowsForExport(false)).map(function (r) { return r.map(function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); }).join('\r\n');
+    try {
+      var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'break-plan-' + S.date + '.csv';
+      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      toast('CSV downloaded', 'ok');
+    } catch (e) { copyText(csv, 'Download blocked — CSV copied to the clipboard instead'); }
+  }
+  function copyChanges() {
+    if (!S.model) return;
+    var rows = rowsForExport(true);
+    if (!rows.length) { toast('Nothing changed yet'); return; }
+    var tsv = [['Agent', 'WFM ID', 'Date', 'Activity', 'Start', 'End', 'Minutes', 'Changed', 'Was']].concat(rows).map(function (r) { return r.join('\t'); }).join('\n');
+    copyText(tsv, rows.length + ' changed block' + (rows.length === 1 ? '' : 's') + ' copied — paste into Excel or Chat');
+  }
+  function copyText(text, msg) {
+    var done = function () { toast(msg, 'ok'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = 0;
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed', 'bad'); }
+      ta.remove();
+    }
+  }
+
+  // ── Week view ────────────────────────────────────────────────────────────
+  function loadWeek() {
+    var start = mondayOf(S.date);
+    if (S.week && S.weekStart === start) { renderWeek(); return; }
+    S.weekStart = start;
+    loader(true, 'Loading week…');
+    call('getPlannerWeek', [start], function (o) { S.week = o; loader(false); renderWeek(true); }, function (e) { loader(false); toast(e, 'bad'); });
+  }
+  function renderWeek(entrance) {
+    var w = S.week; if (!w) return;
+    var today = (S.day && S.day.today) || localToday();
+    $('wf-week-label').textContent = dateLabel(w.dates[0], true) + ' → ' + dateLabel(w.dates[6], true);
+    var list = w.agents.filter(function (a) { return !S.q || (a.name + ' ' + a.supervisor).toLowerCase().indexOf(S.q) !== -1; });
+    if (!list.length) { $('wf-week').innerHTML = '<div class="wf-empty"><b>No schedule this week</b>Imported range: ' + esc((w.range && w.range.min) || '—') + ' → ' + esc((w.range && w.range.max) || '—') + '</div>'; return; }
+    var h = '<table><thead><tr><th>Agent (' + list.length + ')</th>';
+    w.dates.forEach(function (d) { h += '<th class="' + (d === today ? 'today' : '') + '" style="cursor:pointer" onclick="WF.openDay(\'' + d + '\')" title="Open the day plan">' + esc(dateLabel(d, true)) + '</th>'; });
+    h += '</tr></thead><tbody>';
+    list.forEach(function (a) {
+      h += '<tr><td><b>' + esc(a.name) + '</b> <span class="chip ' + String(a.lang).toLowerCase() + '">' + esc(a.lang) + '</span>' + (String(a.level) === '4' ? ' <span class="chip l4">L4</span>' : '') + '</td>';
+      w.dates.forEach(function (d) {
+        var x = a.days[d];
+        if (!x) h += '<td><span class="pill off">—</span></td>';
+        else if (x.off) h += '<td><span class="pill ' + (x.absent ? 'abs' : 'off') + '">' + esc(x.absent || 'Off') + '</span></td>';
+        else h += '<td><span class="pill' + (x.absent && !/part day/i.test(x.absent) ? ' abs' : '') + '">' + fmt(x.s) + '–' + fmt(x.e) + ' <small>' + (x.absent ? esc(x.absent) : (x.b + 'B·' + x.l + 'L')) + '</small></span></td>';
+      });
+      h += '</tr>';
+    });
+    $('wf-week').innerHTML = h + '</tbody></table>';
+    if (entrance && hasGsap()) gsap.from('.wf-week tbody tr:nth-child(-n+25)', { opacity: 0, y: 6, duration: .3, stagger: .015, clearProps: 'opacity,transform' });
+  }
+
+  // ── View / filter plumbing ───────────────────────────────────────────────
+  function moveInk() {
+    var act = document.querySelector('.wf-tab.active'), ink = $('wf-tab-ink'); if (!act) return;
+    var p = { x: act.offsetLeft - 3, width: act.offsetWidth };
+    if (hasGsap()) gsap.to(ink, { x: p.x, width: p.width, duration: .35, ease: 'power3.out' });
+    else { ink.style.transform = 'translateX(' + p.x + 'px)'; ink.style.width = p.width + 'px'; }
+  }
+  function setView(v) {
+    S.view = v;
+    document.querySelectorAll('.wf-tab').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === v); });
+    moveInk();
+    $('view-day').hidden = v !== 'day'; $('view-week').hidden = v !== 'week';
+    $('wf-q').value = S.q; $('wf-q2').value = S.q;
+    if (v === 'week') loadWeek();
+    else if (!S.day || S.day.date !== S.date) loadDay(false);
+    if (hasGsap()) gsap.from('#view-' + v, { opacity: 0, y: 6, duration: .3, clearProps: 'opacity,transform' });
+  }
+  function setDate(ds) {
+    if (!ds || ds === S.date) return;
+    S.date = ds; S.pins = {};
+    setDateUi();
+    if (S.view === 'week') loadWeek(); else loadDay(false);
+  }
+  function shiftDate(n) { setDate(addDays(S.date, S.view === 'week' ? n * 7 : n)); }
+  function goToday() { setDate((S.day && S.day.today) || localToday()); }
+  function openDay(ds) { S.date = ds; setView('day'); loadDay(false); }
+
+  var searchT;
+  function onSearch(v) {
+    clearTimeout(searchT);
+    searchT = setTimeout(function () {
+      S.q = String(v || '').trim().toLowerCase();
+      if (S.view === 'week') renderWeek(); else renderRows(false);
+    }, 120);
+  }
+  function syncSegs() {
+    document.querySelectorAll('#seg-region button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === S.region); });
+    document.querySelectorAll('#seg-lang button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === S.lang); });
+  }
+  function bindSeg(id, key) {
+    $(id).addEventListener('click', function (ev) {
+      var b = ev.target.closest('button'); if (!b) return;
+      S[key] = b.getAttribute('data-v'); syncSegs(); renderRows(false);
+    });
+  }
+  function setLive(on) {
+    S.live = !!on;
+    var before = S.model ? snapshot() : null;
+    build(); afterBulkChange(before);
+    toast(on ? 'Rest of day only: blocks starting in the next ' + (S.rules.liveLeadMin || 15) + ' min or earlier stay put' : 'Whole day can move');
+  }
+  function toggleGroup(g) { S.collapsed[g] = !S.collapsed[g]; var el = document.querySelector('.wf-group[data-g="' + g + '"]'); if (el) el.classList.toggle('collapsed', !!S.collapsed[g]); }
+  function toggleTheme() {
+    document.body.classList.toggle('dark');
+    try { localStorage.setItem('rta_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); } catch (e) {}
+  }
+
+  function loader(on, msg) {
+    var el = $('wf-loader');
+    if (on) {
+      el.querySelector('span').textContent = msg || 'Loading…';
+      el.classList.remove('gone'); el.style.display = 'flex';
+      el.style.background = S.day ? 'color-mix(in srgb, var(--bg) 70%, transparent)' : 'var(--bg)';
+      if (hasGsap()) gsap.fromTo(el, { opacity: 0 }, { opacity: 1, duration: .2 }); else el.style.opacity = 1;
+    } else {
+      el.classList.add('gone');
+      if (hasGsap()) gsap.to(el, { opacity: 0, duration: .3, onComplete: function () { el.style.display = 'none'; } });
+      else el.style.display = 'none';
+    }
+  }
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+  function boot() {
+    try { if (localStorage.getItem('rta_theme') === 'dark') document.body.classList.add('dark'); } catch (e) {}
+    var cfg = $('wf-config');
+    S.appUrl = (cfg && cfg.getAttribute('data-url')) || '';
+    var back = $('wf-back'); if (back) back.href = S.appUrl || '#';
+    // The page runs in Apps Script's sandbox iframe, so the ?date= deep link
+    // arrives through the template, not location.search.
+    var qd = (cfg && /^\d{4}-\d{2}-\d{2}$/.test(cfg.getAttribute('data-date') || '')) ? cfg.getAttribute('data-date') : '';
+    S.date = qd || localToday();
+    bindSeg('seg-region', 'region'); bindSeg('seg-lang', 'lang');
+    var rows = $('wf-rows');
+    rows.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    rows.addEventListener('dblclick', onDblClick);
+    rows.addEventListener('mousemove', onRowsOver);
+    rows.addEventListener('mouseleave', hideTip);
+    var rib = $('wf-ribbon');
+    rib.addEventListener('mousemove', ribbonHover);
+    rib.addEventListener('mouseleave', function () { hideTip(); var l = $('rib-line'); if (l) l.style.opacity = 0; });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeDrawer(); closeModal(); } });
+    window.addEventListener('resize', function () { moveInk(); var h = $('wf-head'); if (h) $('wf-canvas').style.setProperty('--head-h', h.offsetHeight + 'px'); });
+    setInterval(positionNow, 60000);
+    icons(); moveInk();
+    if (hasGsap()) gsap.from('.wf-top > *', { opacity: 0, y: -6, duration: .4, stagger: .05, ease: 'power2.out', clearProps: 'opacity,transform' });
+    loadDay(false);
+  }
+
+  window.WF = {
+    setView: setView, setDate: setDate, shiftDate: shiftDate, goToday: goToday, openDay: openDay,
+    onSearch: onSearch, setLive: setLive, toggleGroup: toggleGroup, toggleTheme: toggleTheme,
+    optimize: optimize, resetPlan: resetPlan, saveDraft: saveDraft, confirmApprove: confirmApprove,
+    exportCsv: exportCsv, copyChanges: copyChanges, loadDraft: loadDraft, focusRow: focusRow,
+    openDrawer: openDrawer, closeDrawer: closeDrawer, closeModal: closeModal,
+    addGridRow: addGridRow, applyRules: applyRules, resetRules: resetRules,
+    _state: S
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>

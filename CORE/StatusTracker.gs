@@ -100,6 +100,37 @@ const StatusTracker = {
     return "Breaks Saved";
   },
 
+  // Batch form for the break planner's Approve: one read, in-place updates,
+  // one append — instead of a full sheet read per agent. rows = [{name, json}].
+  // dateStr is the plan's date (the floor reads today's and yesterday's rows).
+  updateBreaksBatch: function(dateStr, rows) {
+    const sheet = this._getSheet("Break_Overrides", ["Timestamp", "Agent Name", "DateStr", "Breaks JSON"]);
+    const data = sheet.getDataRange().getValues();
+    const rowByKey = {};
+    for (let i = 1; i < data.length; i++) {
+      if (this._matchDate(data[i][2], dateStr)) rowByKey[this._key(data[i][1])] = i + 1;
+    }
+    const now = new Date();
+    const toAppend = [];
+    let n = 0;
+    (rows || []).forEach(r => {
+      const k = this._key(r.name);
+      if (!k) return;
+      n++;
+      const at = rowByKey[k];
+      if (at > 0) sheet.getRange(at, 1, 1, 4).setValues([[now, r.name, dateStr, r.json]]);
+      else if (at < 0) toAppend[-at - 1] = [now, r.name, dateStr, r.json];   // same agent twice: last wins
+      else { toAppend.push([now, r.name, dateStr, r.json]); rowByKey[k] = -toAppend.length; }
+    });
+    if (toAppend.length) {
+      const start = sheet.getLastRow() + 1;
+      sheet.getRange(start, 3, toAppend.length, 1).setNumberFormat('@');   // DateStr stays text
+      sheet.getRange(start, 1, toAppend.length, 4).setValues(toAppend);
+    }
+    this._prune(sheet, 2);
+    return n;
+  },
+
   // --- 3. OVERTIME (Overtime_Tracking) ---
   logOvertime: function(name, start, end, bStart, bEnd) {
     const sheet = this._getSheet("Overtime_Tracking", ["Timestamp", "Agent Name", "OT Start", "OT End", "Break Start", "Break End", "DateStr"]);

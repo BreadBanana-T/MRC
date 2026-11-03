@@ -17,6 +17,10 @@ clasp push          # overwrites the Apps Script project with this repo, exactly
 Then in the editor: **Deploy → Manage deployments → ✏ → New version** (or use the
 Test deployment `/dev` URL to verify first).
 
+## MRC Workforce (break planner)
+Same deployment, second page: open `<web app URL>?app=workforce` (or the calendar-clock
+button in the MRC header). Nothing extra to deploy or enable.
+
 ## Services to enable once (Editor → Services → +)
 - People API   (identifier `People`, v1)   — profile photos
 - Google Sheets API (identifier `Sheets`, v4) — fast batch reads

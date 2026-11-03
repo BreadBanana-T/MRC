@@ -2,6 +2,17 @@
  * MAIN ROUTER
  */
 function doGet(e) {
+  // MRC Workforce — the standalone schedule + break planner. Same project (so
+  // it reads the same sheets), its own page outside the dashboard.
+  if (e && e.parameter && e.parameter.app === 'workforce') {
+    const wf = HtmlService.createTemplateFromFile('Workforce');
+    wf.appUrl = ScriptApp.getService().getUrl();
+    wf.dateParam = /^\d{4}-\d{2}-\d{2}$/.test(String(e.parameter.date || '')) ? e.parameter.date : '';
+    return wf.evaluate()
+        .setTitle('MRC Workforce')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   const template = HtmlService.createTemplateFromFile('Index');
   template.appUrl = ScriptApp.getService().getUrl();
   template.popoutParam = (e && e.parameter && e.parameter.popout) ? "true" : "false";
@@ -84,6 +95,17 @@ function updateAgentGenesys(n, channel, queuesJson) { _stampAction('agent_status
 function updateAgentGenesysBatch(namesJson, channel, queuesJson) { _stampAction('agent_status', 'Genesys batch assignment'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setGenesysBatch(namesJson, channel, queuesJson); }
 // Replace an agent's whole role string (used to remove one role off a stack).
 function setAgentRoles(n, roleStr) { _stampAction('agent_status', 'Agent role update'); if(typeof AgentMonitor!=='undefined') return AgentMonitor.setRoles(n, roleStr); }
+// --- MRC WORKFORCE (break planner, ?app=workforce) ---
+function _bpCall(fn) {
+  try { return JSON.stringify(fn()); }
+  catch (e) { return JSON.stringify({ ok: false, error: String(e && e.message || e) }); }
+}
+function getPlannerDay(dateStr) { return _bpCall(function () { return BreakPlanner.getDay(dateStr); }); }
+function getPlannerWeek(startStr) { return _bpCall(function () { return BreakPlanner.getWeek(startStr); }); }
+function setPlannerRules(json) { return _bpCall(function () { return BreakPlanner.setRules(json); }); }
+function resetPlannerRules() { return _bpCall(function () { return BreakPlanner.resetRules(); }); }
+function savePlannerDraft(dateStr, planJson) { return _bpCall(function () { return BreakPlanner.saveDraft(dateStr, planJson); }); }
+function approvePlannerPlan(dateStr, planJson) { _stampAction('agent_status', 'Break plan approved'); return _bpCall(function () { return BreakPlanner.approve(dateStr, planJson); }); }
 function updateAgentBreaks(n, j) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.updateAgentBreaks(n, j); }
 function submitOvertime(n, s, e, bs, be) { if(typeof AgentMonitor!=='undefined') return AgentMonitor.logOvertime(n, s, e, bs, be); }
 function runCalculator(i, o) { if(typeof calculateMetrics!=='undefined') return calculateMetrics(i, o); return "{}"; }

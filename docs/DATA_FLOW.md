@@ -215,6 +215,8 @@ client-rendered status page would fail the regex on a healthy site.
 | **WF_GENESYS_AGENT** | 0 PeriodStart, 1 PeriodEnd, 2 Label, 3 AgentId (Genesys GUID), 4 AgentKey, 5 Agent, 6 MediaType, 7 Answered, 8 Handled, 9 AvgHandleSec, 10 AvgTalkSec, 11 AvgHoldSec, 12 AvgAcwSec, 13 Held, 14 Transferred, 15 NoAnswer, 16 MinTalkSec, 17 AvgRingSec — **all durations in SECONDS** (exported as ms); blank duration = no sample | `ReportImport.importGenesysAgents` |
 | **WF_GENESYS_IDS** | 0 Agent Key (normalized), 1 Agent Id (Genesys GUID), 2 Display Name | `ReportImport._mergeGenesysIds` (merge-upsert) |
 | **Overview IDP tile** | reads its own `state.overviewIdp` via `getWorkforceAnalytics('day', today, 'furlough', …)`, **not** `state.trackerData` — that key is replaced when the tracker switches mode/range, which would blank the tile. Renders through the shared `renderIdpHeatmapTile()` so Dashboard and Furlough tracker cannot disagree | — |
+| **WF_BREAK_PLANS** | 0 DateStr, 1 Agent Key, 2 Agent Name, 3 Plan JSON `{acts:[{type,s,e,unpaid}], fixed, extra, changed}` (day-minutes, may exceed 1440 overnight), 4 Status (`draft`/`approved`), 5 By, 6 Timestamp — one row per agent per date, the whole date rewritten on each save, 45 days kept | `BreakPlanner._savePlan` (MRC Workforce) |
+| **Break_Overrides** (planner) | Approve writes the plan through `StatusTracker.updateBreaksBatch(date, rows)` in the floor's own `[{type,start,end}]` format (`Break`/`Lunch` + every fixed block passed through unchanged) for agents whose blocks changed, or who already had an override | `BreakPlanner.approve` |
 | **WF_ALARMCOM_UPTIME** (hidden) | 0 Timestamp, 1 Up (1/0), 2 LatencyMs, 3 HttpCode, 4 PartnerPortalUp (1/0), 5 Note | `AlarmComMonitor._logHistory` (5-min trigger, ring-buffered) |
 
 > **SAFE matching on Employee ID (this build).** The schedule import now stores the
@@ -333,6 +335,39 @@ and hid 157 of 208 real UNAB days — the nuance is in the label now, never the 
 `UNAB` 233 · `ALU` 231 · `COMPU` 141 · `COMP` 5. The WFM strings are **`TI LOA`**
 (space, no hyphen) and **`LOA Absence / Leave of Absence`**; `UNAB` is always a
 leading token, never `UNABLE`.
+
+---
+
+## 4d. MRC Workforce — schedule & break planner (`?app=workforce`)
+
+A standalone page (`Workforce.html` + `WorkforceCSS` / `WorkforceEngine` / `WorkforceJS`)
+served by the same `doGet` when the URL has `?app=workforce`; MRC OPS links to it from the
+header (calendar-clock icon). It imports nothing itself — it reads what MRC already holds:
+
+- **Shifts + blocks**: `Raw Schedule` for the date, else `Schedule_History` (only its DateStr
+  column is scanned, then the matching span read). Shift window = `SafeTracker._shiftFromRow`.
+- **Current plan** = `Break_Overrides` for that date when present (floor edits / an earlier
+  approval), otherwise the IEX Breaks JSON. `Break`/`Lunch` (any "1st Break"-style label) are
+  movable; Training, ACSU, SAFE, part-day `Absence` blocks are fixed and the planner works around them.
+- **Agent attributes**: language `WF_LANG_MAP` → masterlist col 6; level / Question Line
+  (Skills) / site (Calgary → CALG grid row) / supervisor from `WF_MASTERLIST`; Escalation from
+  `Genesys_Assignments` queues; full-day absence from the fast map / `Status_Overrides` /
+  schedule col 9 — same precedence as `compileFloorData`.
+- **IDP**: `WF_IDP` Required per 15 min for the date.
+
+**Rules** (Script Property `BP_RULES_V1`, admin-only; defaults in `WFEngine.DEFAULT_RULES`):
+the paid-break grid by gross shift length (4–5h B15 · 6–6.5h L30 · 7–8.5h B15 L30 B15 ·
+9h CALG B15 U30 B15 · 9.5–10h B10 L30 B10 B10), spacing (first block ≥ 2h in, ≥ 90 min on
+queue between blocks, lunch in the middle third, last block ends ≥ 1h before shift end, 15-min
+snap — relaxed step-wise only when a shift can't fit, and flagged), and weights.
+
+**Optimizer** (client-side, `WorkforceEngine.html`, no hard caps): minimizes pairwise overlap of
+off-queue agents per 5-min slot inside each group (BL, FR, EN, French cover = FR+BL, Senior =
+L4/QL/ESC), weighted by language/level and scaled up by that group's absences today, plus an IDP
+shortfall term and a small stay-put term. Each agent's whole layout is re-solved exactly by DP
+given everyone else, until a pass changes nothing. "Rest of day only" freezes anything starting
+within the lead time. Note: the WFM importer skips "Paid Lunch" lines, so paid lunches the grid
+requires show as **added** blocks.
 
 ---
 

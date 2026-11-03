@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <title>MRC Workforce</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Crect x='7' y='9' width='12' height='3.5' rx='1.75' fill='white'/%3E%3Crect x='11' y='14.5' width='14' height='3.5' rx='1.75' fill='%23c7d2fe'/%3E%3Crect x='7' y='20' width='9' height='3.5' rx='1.75' fill='white'/%3E%3C/svg%3E">
+    <!-- Same pinned Lucide + fallback chain as the dashboard (Index.html). -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.544.0/dist/umd/lucide.min.js"></script>
+    <script>
+      (function () {
+        var urls = [
+          'https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js',
+          'https://unpkg.com/lucide@0.544.0/dist/umd/lucide.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/lucide/0.544.0/lucide.min.js'
+        ];
+        var i = 0;
+        function tryNext() {
+          if (typeof window.lucide !== 'undefined') { if (window.wfRefreshIcons) window.wfRefreshIcons(); return; }
+          if (i >= urls.length) { window.__lucideFailed = true; return; }
+          var el = document.createElement('script');
+          el.src = urls[i++];
+          el.onload = function () { (typeof window.lucide !== 'undefined') ? (window.wfRefreshIcons && window.wfRefreshIcons()) : tryNext(); };
+          el.onerror = tryNext;
+          document.head.appendChild(el);
+        }
+        if (typeof window.lucide === 'undefined') tryNext();
+      })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <?!= include('WorkforceCSS'); ?>
+  </head>
+  <body>
+    <div id="wf-config" data-url="<?= appUrl ?>" data-date="<?= dateParam ?>" style="display:none;"></div>
+
+    <header class="wf-top">
+      <div class="wf-brand">
+        <div class="wf-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="wf-brand-txt"><b>MRC Workforce</b><small>Schedules &amp; break planner</small></div>
+      </div>
+
+      <nav class="wf-tabs" role="tablist">
+        <button class="wf-tab active" data-view="day" role="tab" onclick="WF.setView('day')"><i data-lucide="chart-gantt" width="15"></i>Day plan</button>
+        <button class="wf-tab" data-view="week" role="tab" onclick="WF.setView('week')"><i data-lucide="calendar-range" width="15"></i>Week</button>
+        <span class="wf-tab-ink" id="wf-tab-ink"></span>
+      </nav>
+
+      <div class="wf-datenav">
+        <button class="wf-icon-btn" onclick="WF.shiftDate(-1)" title="Previous day" aria-label="Previous day"><i data-lucide="chevron-left" width="16"></i></button>
+        <label class="wf-date">
+          <i data-lucide="calendar" width="14"></i>
+          <span id="wf-date-label">—</span>
+          <input type="date" id="wf-date" onchange="WF.setDate(this.value)" aria-label="Date">
+        </label>
+        <button class="wf-icon-btn" onclick="WF.shiftDate(1)" title="Next day" aria-label="Next day"><i data-lucide="chevron-right" width="16"></i></button>
+        <button class="wf-chip-btn" onclick="WF.goToday()">Today</button>
+      </div>
+
+      <div class="wf-top-right">
+        <span class="wf-user" id="wf-user"></span>
+        <button class="wf-icon-btn" onclick="WF.toggleTheme()" title="Light / dark" aria-label="Toggle theme"><i data-lucide="sun-moon" width="16"></i></button>
+        <button class="wf-icon-btn" onclick="WF.openDrawer('settings')" title="Planner rules" aria-label="Planner rules"><i data-lucide="sliders-horizontal" width="16"></i></button>
+        <a class="wf-back" id="wf-back" href="#" target="_top"><i data-lucide="layout-dashboard" width="14"></i>MRC OPS</a>
+      </div>
+    </header>
+
+    <main class="wf-main">
+      <!-- ── DAY ───────────────────────────────────────────── -->
+      <section id="view-day" class="wf-view">
+        <div id="wf-banner" class="wf-banner" hidden></div>
+
+        <div class="wf-kpis" id="wf-kpis">
+          <div class="wf-kpi wf-kpi-hero" data-k="total">
+            <div class="wf-kpi-h">Coverage risk <i data-lucide="info" width="12" title="Weighted overlap of off-queue time: bilingual pairs cost most, then French, then L4 / Question Line / Escalation. Lower is better."></i></div>
+            <div class="wf-kpi-v"><span class="num">—</span></div>
+            <div class="wf-kpi-d" id="kpi-delta">vs current plan</div>
+          </div>
+          <div class="wf-kpi" data-k="frGapMin"><div class="wf-kpi-h">French cover gaps</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">no FR/BL on queue</div></div>
+          <div class="wf-kpi" data-k="blOverlapMin"><div class="wf-kpi-h">Bilingual overlap</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">2+ BL off together</div></div>
+          <div class="wf-kpi" data-k="srOverlapMin"><div class="wf-kpi-h">Senior overlap</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">L4 · Question Line · ESC</div></div>
+          <div class="wf-kpi" data-k="idpShortMin"><div class="wf-kpi-h">Below IDP</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s" id="kpi-idp-sub">on queue &lt; required</div></div>
+          <div class="wf-kpi" data-k="moves"><div class="wf-kpi-h">Moved</div><div class="wf-kpi-v"><span class="num">—</span><small>blocks</small></div><div class="wf-kpi-s"><span id="kpi-added"></span><a href="#" onclick="WF.openDrawer('changes');return false;">Review</a></div></div>
+        </div>
+
+        <div class="wf-toolbar">
+          <div class="wf-search"><i data-lucide="search" width="14"></i><input id="wf-q" type="search" placeholder="Find an agent, supervisor…" oninput="WF.onSearch(this.value)" autocomplete="off"></div>
+          <div class="wf-seg" id="seg-region">
+            <button class="on" data-v="all">All</button><button data-v="Onshore">Onshore</button><button data-v="Offshore">Offshore</button>
+          </div>
+          <div class="wf-seg" id="seg-lang">
+            <button class="on" data-v="all">All</button><button data-v="BL">BL</button><button data-v="FR">FR</button><button data-v="EN">EN</button><button data-v="SR" title="L4, Question Line, Escalation">Senior</button>
+          </div>
+          <label class="wf-switch" id="wf-live-wrap" title="Only move blocks that start 15+ min from now — use when someone calls in sick">
+            <input type="checkbox" id="wf-live" onchange="WF.setLive(this.checked)"><span class="wf-switch-ui"></span>Rest of day only
+          </label>
+          <span class="wf-spacer"></span>
+          <button class="wf-btn ghost" onclick="WF.resetPlan()" title="Back to what the floor shows now"><i data-lucide="rotate-ccw" width="14"></i>Reset</button>
+          <button class="wf-btn primary" id="wf-optimize" onclick="WF.optimize()"><i data-lucide="sparkles" width="15"></i>Optimize</button>
+          <div class="wf-split">
+            <button class="wf-btn" onclick="WF.saveDraft()"><i data-lucide="save" width="14"></i>Save draft</button>
+            <button class="wf-btn" onclick="WF.exportCsv()" title="CSV for keying into IEX"><i data-lucide="file-down" width="14"></i>Export</button>
+            <button class="wf-btn" onclick="WF.copyChanges()" title="Copy the changed blocks as a table"><i data-lucide="clipboard-copy" width="14"></i>Copy</button>
+          </div>
+          <button class="wf-btn accent" onclick="WF.confirmApprove()"><i data-lucide="send" width="14"></i>Approve → floor</button>
+        </div>
+
+        <div class="wf-board" id="wf-board">
+          <div class="wf-scroll" id="wf-scroll">
+            <div class="wf-canvas" id="wf-canvas">
+              <div class="wf-head-sticky" id="wf-head">
+                <div class="wf-board-head">
+                  <div class="wf-namecol-h"><span id="wf-count">—</span></div>
+                  <div class="wf-axis" id="wf-axis"></div>
+                </div>
+                <div class="wf-ribbon-row">
+                  <div class="wf-namecol-h wf-ribbon-legend">
+                    <b>On queue</b>
+                    <span><i class="sw bl"></i>BL</span><span><i class="sw fr"></i>FR</span><span><i class="sw en"></i>EN</span><span><i class="sw idp"></i>IDP</span><span><i class="sw gap"></i>No French</span>
+                  </div>
+                  <div class="wf-ribbon" id="wf-ribbon"></div>
+                </div>
+              </div>
+              <div class="wf-rows" id="wf-rows"></div>
+              <div class="wf-now" id="wf-now" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── WEEK ──────────────────────────────────────────── -->
+      <section id="view-week" class="wf-view" hidden>
+        <div class="wf-toolbar">
+          <div class="wf-search"><i data-lucide="search" width="14"></i><input id="wf-q2" type="search" placeholder="Find an agent…" oninput="WF.onSearch(this.value)" autocomplete="off"></div>
+          <span class="wf-muted" id="wf-week-label"></span>
+          <span class="wf-spacer"></span>
+          <span class="wf-muted">Read-only · from the WFM schedule paste</span>
+        </div>
+        <div class="wf-week" id="wf-week"></div>
+      </section>
+    </main>
+
+    <!-- Drawers -->
+    <div class="wf-scrim" id="wf-scrim" onclick="WF.closeDrawer()"></div>
+    <aside class="wf-drawer" id="drawer-changes" aria-label="Changes">
+      <div class="wf-drawer-h"><b>Changes &amp; flags</b><button class="wf-icon-btn" onclick="WF.closeDrawer()" aria-label="Close"><i data-lucide="x" width="16"></i></button></div>
+      <div class="wf-drawer-b" id="changes-body"></div>
+    </aside>
+    <aside class="wf-drawer wide" id="drawer-settings" aria-label="Planner rules">
+      <div class="wf-drawer-h"><b>Planner rules</b><button class="wf-icon-btn" onclick="WF.closeDrawer()" aria-label="Close"><i data-lucide="x" width="16"></i></button></div>
+      <div class="wf-drawer-b" id="settings-body"></div>
+    </aside>
+
+    <div class="wf-modal" id="wf-modal" hidden>
+      <div class="wf-modal-card" role="dialog" aria-modal="true">
+        <div id="wf-modal-body"></div>
+        <div class="wf-modal-f">
+          <button class="wf-btn ghost" onclick="WF.closeModal()">Cancel</button>
+          <button class="wf-btn accent" id="wf-modal-ok">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-tip" id="wf-tip" role="tooltip"></div>
+    <div class="wf-toasts" id="wf-toasts"></div>
+    <div class="wf-loader" id="wf-loader"><div class="wf-loader-bar"></div><span>Loading schedule…</span></div>
+
+    <?!= include('WorkforceEngine'); ?>
+    <?!= include('WorkforceJS'); ?>
+  </body>
+</html>
