@@ -166,12 +166,15 @@ function calculateMetrics(inText, outText) {
     if (trendRef > 0) {
        const growth = (trendDiff / trendRef) * 100;
        stats.trendOut = formatTrend(growth);
+       stats.trendPct = growth;   // numeric, logged for the break planner's demand model
     }
   }
 
   // LOGGING (Only Local Now)
   if (typeof StatsTracker !== 'undefined' && stats.svl !== "0%") {
-      StatsTracker.logHourlyStats(stats.svl, stats.ack);
+      // Trend % (alarms vs the IEX trend, last 60 min) and the BURG count are
+      // what the break planner learns demand from (CORE/DemandSignals.gs).
+      StatsTracker.logHourlyStats(stats.svl, stats.ack, { trendPct: stats.trendPct, burg: stats.burgActual });
   }
 
   // Render the report from the (possibly customized) template. SAFE and the

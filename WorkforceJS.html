@@ -10,7 +10,7 @@
   var E = window.WFEngine;
   var S = {
     appUrl: '', date: '', view: 'day', day: null, rules: null, model: null, base: null, cur: null,
-    pins: {}, live: false, q: '', region: 'all', lang: 'all', collapsed: {}, week: null, weekStart: '',
+    pins: {}, demandOff: {}, live: false, q: '', region: 'all', lang: 'all', collapsed: {}, week: null, weekStart: '',
     t0: 0, t1: 1440, kpiShown: {}, loadSeq: 0
   };
   var $ = function (id) { return document.getElementById(id); };
@@ -123,6 +123,7 @@
       build();
       renderAll(true);
       banner();
+      renderDemand();
       loader(false);
     }, function (err) {
       if (seq !== S.loadSeq) return;
@@ -132,7 +133,7 @@
     });
   }
 
-  function modelOpts() { return { nowMin: (S.live && S.day && S.day.nowMin != null) ? S.day.nowMin : null, pins: S.pins }; }
+  function modelOpts() { return { nowMin: (S.live && S.day && S.day.nowMin != null) ? S.day.nowMin : null, pins: S.pins, demandOff: S.demandOff }; }
 
   // (Re)build the model from the day. The baseline is the same day with no
   // pins and nothing optimized — what the floor shows right now.
@@ -276,7 +277,7 @@
     var cov = E.coverage(S.model), slot = cov.slot;
     var a = Math.floor(S.t0 / slot), b = Math.ceil(S.t1 / slot);
     var max = 1;
-    for (var t = a; t < b; t++) max = Math.max(max, cov.shift[t] || 0, cov.req[t] || 0);
+    for (var t = a; t < b; t++) max = Math.max(max, cov.shift[t] || 0, cov.req[t] || 0, cov.need[t] || 0);
     max *= 1.08;
     var X = function (t) { return ((t * slot - S.t0) / (S.t1 - S.t0) * 1000).toFixed(2); };
     var Y = function (v) { return (100 - (v / max) * 96).toFixed(2); };
@@ -290,9 +291,18 @@
     var fr = function (t) { return bl(t) + Math.max(0, cov.fr[t]); };
     var en = function (t) { return fr(t) + Math.max(0, cov.en[t]); };
     var zero = function () { return 0; };
-    var idp = '', shiftLine = '', gaps = '';
+    var idp = '', need = '', lift = '', shiftLine = '', gaps = '', hasLift = false;
     for (var t2 = a; t2 < b; t2++) {
       if (cov.req[t2] != null) idp += ((idp && cov.req[t2 - 1] != null) ? 'L' : 'M') + X(t2) + ',' + Y(cov.req[t2]) + 'L' + X(t2 + 1) + ',' + Y(cov.req[t2]);
+      // Need (IDP × uplifts) as a solid line; the band between IDP and Need is
+      // the extra staffing the demand factors ask for.
+      if (cov.need[t2] != null) {
+        need += ((need && cov.need[t2 - 1] != null) ? 'L' : 'M') + X(t2) + ',' + Y(cov.need[t2]) + 'L' + X(t2 + 1) + ',' + Y(cov.need[t2]);
+        if (cov.req[t2] != null && Math.abs(cov.need[t2] - cov.req[t2]) > 1e-6) {
+          hasLift = true;
+          lift += '<rect x="' + X(t2) + '" y="' + Y(Math.max(cov.need[t2], cov.req[t2])) + '" width="' + (slot / (S.t1 - S.t0) * 1000).toFixed(2) + '" height="' + Math.abs(Y(cov.need[t2]) - Y(cov.req[t2])).toFixed(2) + '" style="fill:' + (cov.need[t2] > cov.req[t2] ? 'var(--warn)' : 'var(--ok)') + ';opacity:.28"/>';
+        }
+      }
       shiftLine += (t2 === a ? 'M' : 'L') + X(t2) + ',' + Y(cov.shift[t2]) + 'L' + X(t2 + 1) + ',' + Y(cov.shift[t2]);
       if (cov.frGap[t2]) gaps += '<rect x="' + X(t2) + '" y="96" width="' + (slot / (S.t1 - S.t0) * 1000).toFixed(2) + '" height="4" style="fill:var(--bad)"/>';
     }
@@ -301,7 +311,9 @@
       '<path d="' + area(bl, fr) + '" style="fill:var(--fr);opacity:.75"/>' +
       '<path d="' + area(zero, bl) + '" style="fill:var(--bl);opacity:.85"/>' +
       '<path d="' + shiftLine + '" style="fill:none;stroke:var(--muted);stroke-width:1;opacity:.6" vector-effect="non-scaling-stroke"/>' +
+      lift +
       (idp ? '<path d="' + idp + '" style="fill:none;stroke:var(--idp);stroke-width:1.5;stroke-dasharray:4 3" vector-effect="non-scaling-stroke"/>' : '') +
+      (hasLift && need ? '<path d="' + need + '" style="fill:none;stroke:var(--warn);stroke-width:2" vector-effect="non-scaling-stroke"/>' : '') +
       gaps + '</svg><div class="hover-line" id="rib-line"></div>';
     S.cov = cov;
   }
@@ -315,7 +327,9 @@
     var line = $('rib-line'); if (line) { line.style.left = (frac * 100) + '%'; line.style.opacity = .5; }
     showTip('<b>' + fmt(t * c.slot) + '</b> · on queue <b>' + onq + '</b> of ' + c.shift[t] + ' on shift<br>' +
       '<span class="m">BL ' + Math.max(0, c.bl[t]) + ' · FR ' + Math.max(0, c.fr[t]) + ' · EN ' + Math.max(0, c.en[t]) + '</span>' +
-      (c.req[t] != null ? '<br>IDP required <b>' + (+c.req[t]).toFixed(1) + '</b>' + (onq < c.req[t] ? ' — <b>short ' + (c.req[t] - onq).toFixed(1) + '</b>' : '') : '') +
+      (c.req[t] != null ? '<br>IDP required <b>' + (+c.req[t]).toFixed(1) + '</b>' : '') +
+      (c.need[t] != null && c.req[t] != null && Math.abs(c.need[t] - c.req[t]) > 1e-6 ? ' · need <b>' + (+c.need[t]).toFixed(1) + '</b> <span class="m">(' + upliftsAt(t * c.slot) + ')</span>' : '') +
+      (c.need[t] != null && onq < c.need[t] ? '<br><b>Short ' + (c.need[t] - onq).toFixed(1) + '</b>' : '') +
       (c.frGap[t] ? '<br><b>No French speaker on queue</b>' : ''), ev.clientX, ev.clientY);
   }
 
@@ -349,7 +363,8 @@
       tweenNum(num, v);
       if (k !== 'total' && k !== 'moves') { card.classList.toggle('zero', v === 0); card.classList.toggle('hot', v > 0 && v >= (S.base[k] || 0) && v > 30); }
     });
-    $('kpi-idp-sub').textContent = hasIdp ? 'on queue < required' : 'no IDP imported for this date';
+    var lifted = S.model && S.model.demand && S.model.demand.length;
+    $('kpi-idp-sub').textContent = !hasIdp ? 'no IDP imported for this date' : (lifted ? 'IDP alone: ' + sc.idpRawShortMin + ' min' : 'on queue < IDP required');
     var parts = [sc.moved15 + '×15'];
     parts.push('<b class="' + (sc.moved30 ? 'warn' : '') + '" title="30-min moves — capped at ' + sc.bigAllowed + ' for this plan">' + sc.moved30 + '×30</b>');
     if (sc.fixes) parts.push('<span title="Moved because the current time breaks the spacing rules">' + sc.fixes + ' rule fix' + (sc.fixes === 1 ? '' : 'es') + '</span>');
@@ -361,6 +376,58 @@
       var p = Math.round((sc.total - b) / b * 100);
       d.innerHTML = '<span class="' + (p < 0 ? 'good' : 'badd') + '">' + (p < 0 ? '−' : '+') + Math.abs(p) + '%</span> vs current plan (' + Math.round(b).toLocaleString('en-CA') + ')';
     }
+  }
+
+  // ── Demand strip (IDP × forecast / live / learned uplifts) ───────────────
+  function upliftsAt(m) {
+    var parts = [];
+    ((S.model && S.model.demand) || []).forEach(function (f) {
+      var from = f.from != null ? f.from : -Infinity, to = f.to != null ? f.to : Infinity;
+      if (m < from || m >= to) return;
+      var w = f.decay ? Math.max(0, 1 - (m - from) / Math.max(1, to - from)) : 1;
+      var p = Math.round(f.pct * w * 100);
+      if (p) parts.push(f.label.replace(/\s*[+−-]\d+%.*$/, '') + ' ' + (p > 0 ? '+' : '') + p + '%');
+    });
+    return parts.join(', ') || 'no uplift';
+  }
+
+  function renderDemand() {
+    var el = $('wf-demand'), d = S.day && S.day.demand, fs = (d && d.factors) || [];
+    if (!fs.length) {
+      el.hidden = false;
+      el.innerHTML = '<span class="dm-h"><i data-lucide="activity" width="14"></i>Staffing need</span><span class="dm-none">IDP only — no forecast drift, live surge or learned condition for this date.' +
+        (d && d.error ? ' (' + esc(d.error) + ')' : '') + '</span>';
+      icons(); return;
+    }
+    el.hidden = false;
+    var h = '<span class="dm-h"><i data-lucide="activity" width="14"></i>Staffing need</span>';
+    fs.forEach(function (f) {
+      var off = !!S.demandOff[f.id], apply = f.kind !== 'headsup';
+      h += '<button class="dm-chip ' + f.kind + (off ? ' off' : '') + '" ' + (apply ? 'onclick="WF.toggleDemand(\'' + esc(f.id) + '\')"' : 'aria-disabled="true"') +
+        ' title="' + esc(f.detail || '') + (apply ? (off ? '\n\nOff for this plan — click to apply.' : '\n\nApplied — click to ignore for this plan.') : '') + '">' +
+        (f.kind === 'headsup' ? '<i data-lucide="eye" width="12"></i>' : f.kind === 'live' ? '<i data-lucide="radio" width="12"></i>' : f.kind === 'forecast' ? '<i data-lucide="trending-up" width="12"></i>' : '<i data-lucide="brain" width="12"></i>') +
+        esc(f.label) + (f.kind === 'headsup' ? ' <small>heads-up</small>' : '') + '</button>';
+    });
+    var live = fs.find(function (f) { return f.id === 'live'; });
+    if (live && !S.demandOff.live) {
+      h += '<span class="dm-live">' + esc(live.detail.split('.')[0]) + '.' +
+        ' <button class="wf-btn" onclick="WF.suggestDelays()"><i data-lucide="clock-arrow-down" width="14"></i>Suggest delays</button></span>';
+    }
+    el.innerHTML = h; icons();
+  }
+
+  function toggleDemand(id) {
+    S.demandOff[id] = !S.demandOff[id];
+    var before = snapshot();
+    build(); afterBulkChange(before); renderDemand();
+    toast(S.demandOff[id] ? 'Ignoring that factor for this plan' : 'Factor applied');
+  }
+
+  // Live surge: freeze what has started, raise demand for the next window and
+  // let the optimizer propose (15-min) delays. Nothing is published until Approve.
+  function suggestDelays() {
+    if (!S.live) { S.live = true; $('wf-live').checked = true; build(); }
+    optimize();
   }
 
   // ── Banner (saved plans) ─────────────────────────────────────────────────
@@ -602,6 +669,10 @@
       field('Bilingual', 'k-BL', W.BL) + field('French', 'k-FR', W.FR) + field('English', 'k-EN', W.EN) +
       field('+ Level 4', 'k-L4', W.L4) + field('+ Question Line', 'k-QL', W.QL) + field('+ Escalation', 'k-ESC', W.ESC) +
       field('Trainee × ', 'k-tr', W.traineeMult) + field('IDP shortfall λ', 'k-lam', r.idpLambda) + '</div></div>';
+    var DM = r.demand;
+    h += '<div class="wf-sec"><h4>Demand</h4><p>Uplifts on top of the IDP. Live: SVL under target or alarms over the IEX trend raise need for the next window. Learned conditions (outages, weather, Alarm.com) only apply after enough logged hours. Server-side values take effect after <b>Save for everyone</b>.</p><div class="wf-form">' +
+      field('SVL target (%)', 'd-svl', DM.svlTarget) + field('Live window (min)', 'd-win', DM.liveWindowMin) + field('Samples before a condition counts', 'd-min', DM.minSamples) +
+      field('Max total uplift (%)', 'd-max', Math.round((DM.maxUplift || 0) * 100)) + '</div></div>';
     var MV = r.moves;
     h += '<div class="wf-sec"><h4>Moves</h4><p>How far blocks may move from the current plan. On the 15-min grid a 15-min move is the normal one; a 30-min move has to buy a real gain (the default costs about one Bilingual overlap) and only a share of moves may be 30. Nothing moves further unless the current time breaks the spacing rules.</p><div class="wf-form">' +
       field('Cost of a 15-min move', 'm-c15', MV.cost15) + field('Cost of a 30-min move', 'm-c30', MV.cost30) + field('Max move (min)', 'm-max', MV.maxMin) +
@@ -631,6 +702,7 @@
       grid: grid,
       windows: { firstMin: num('w-firstMin'), gapMin: num('w-gapMin'), lastBeforeEndMin: num('w-last'), snap: num('w-snap') || 15, lunchMiddleThird: $('w-third').value === '1' },
       weights: { BL: num('k-BL'), FR: num('k-FR'), EN: num('k-EN'), L4: num('k-L4'), QL: num('k-QL'), ESC: num('k-ESC'), traineeMult: num('k-tr') },
+      demand: { svlTarget: num('d-svl'), liveWindowMin: num('d-win'), minSamples: num('d-min'), maxUplift: num('d-max') == null ? null : num('d-max') / 100 },
       moves: { cost15: num('m-c15'), cost30: num('m-c30'), maxMin: num('m-max'), maxBigShare: num('m-share') == null ? null : num('m-share') / 100 },
       idpLambda: num('k-lam'), liveLeadMin: num('w-lead')
     };
@@ -860,7 +932,7 @@
     optimize: optimize, resetPlan: resetPlan, saveDraft: saveDraft, confirmApprove: confirmApprove,
     exportCsv: exportCsv, copyChanges: copyChanges, loadDraft: loadDraft, focusRow: focusRow,
     openDrawer: openDrawer, closeDrawer: closeDrawer, closeModal: closeModal,
-    addGridRow: addGridRow, applyRules: applyRules, resetRules: resetRules,
+    addGridRow: addGridRow, toggleDemand: toggleDemand, suggestDelays: suggestDelays, applyRules: applyRules, resetRules: resetRules,
     _state: S
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

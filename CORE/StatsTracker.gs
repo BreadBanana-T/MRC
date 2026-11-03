@@ -8,19 +8,27 @@ const StatsTracker = {
   IDP_SHEET: "IDP_History",
   MAX_HISTORY_POINTS: 24,
 
-  logHourlyStats: function(svl, ack) {
+  // Columns: Timestamp | SVL | ACK | Trend % | BURG Vol. The last two were
+  // added for the break planner (alarms vs the IEX trend over the last 60 min,
+  // and the BURG count); older rows simply have them blank, and every other
+  // reader of this sheet reads columns 1-3 by position.
+  logHourlyStats: function(svl, ack, extra) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(this.SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(this.SHEET_NAME);
-      sheet.appendRow(["Timestamp", "SVL", "ACK"]);
-      sheet.getRange(1, 1, 1, 3).setFontWeight("bold");
+      sheet.appendRow(["Timestamp", "SVL", "ACK", "Trend %", "BURG Vol"]);
+      sheet.getRange(1, 1, 1, 5).setFontWeight("bold");
+    } else if (sheet.getLastColumn() < 5) {
+      sheet.getRange(1, 4, 1, 2).setValues([["Trend %", "BURG Vol"]]).setFontWeight("bold");
     }
 
     let sVal = parseFloat(svl) || 0;
     let aVal = parseFloat(String(ack).replace(/[^\d.]/g, '')) || 0;
+    const tr = (extra && extra.trendPct != null && !isNaN(Number(extra.trendPct))) ? Math.round(Number(extra.trendPct) * 10) / 10 : "";
+    const bv = (extra && extra.burg != null && !isNaN(Number(extra.burg)) && Number(extra.burg) > 0) ? Number(extra.burg) : "";
     const timestamp = new Date();
-    sheet.appendRow([timestamp, sVal, aVal]);
+    sheet.appendRow([timestamp, sVal, aVal, tr, bv]);
     return "Stats Logged";
   },
 

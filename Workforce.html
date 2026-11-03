@@ -79,9 +79,11 @@
           <div class="wf-kpi" data-k="frGapMin"><div class="wf-kpi-h">French cover gaps</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">no FR/BL on queue</div></div>
           <div class="wf-kpi" data-k="blOverlapMin"><div class="wf-kpi-h">Bilingual overlap</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">2+ BL off together</div></div>
           <div class="wf-kpi" data-k="srOverlapMin"><div class="wf-kpi-h">Senior overlap</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s">L4 · Question Line · ESC</div></div>
-          <div class="wf-kpi" data-k="idpShortMin"><div class="wf-kpi-h">Below IDP</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s" id="kpi-idp-sub">on queue &lt; required</div></div>
+          <div class="wf-kpi" data-k="idpShortMin"><div class="wf-kpi-h">Below need</div><div class="wf-kpi-v"><span class="num">—</span><small>min</small></div><div class="wf-kpi-s" id="kpi-idp-sub">on queue &lt; required</div></div>
           <div class="wf-kpi" data-k="moves"><div class="wf-kpi-h">Moved</div><div class="wf-kpi-v"><span class="num">—</span><small>blocks</small></div><div class="wf-kpi-s" style="white-space:normal"><span id="kpi-added"></span><a href="#" onclick="WF.openDrawer('changes');return false;">Review</a></div></div>
         </div>
+
+        <div class="wf-demand" id="wf-demand" hidden></div>
 
         <div class="wf-toolbar">
           <div class="wf-search"><i data-lucide="search" width="14"></i><input id="wf-q" type="search" placeholder="Find an agent, supervisor…" oninput="WF.onSearch(this.value)" autocomplete="off"></div>
@@ -116,7 +118,7 @@
                 <div class="wf-ribbon-row">
                   <div class="wf-namecol-h wf-ribbon-legend">
                     <b>On queue</b>
-                    <span><i class="sw bl"></i>BL</span><span><i class="sw fr"></i>FR</span><span><i class="sw en"></i>EN</span><span><i class="sw idp"></i>IDP</span><span><i class="sw gap"></i>No French</span>
+                    <span><i class="sw bl"></i>BL</span><span><i class="sw fr"></i>FR</span><span><i class="sw en"></i>EN</span><span><i class="sw idp"></i>IDP</span><span><i class="sw need"></i>Need</span><span><i class="sw gap"></i>No French</span>
                   </div>
                   <div class="wf-ribbon" id="wf-ribbon"></div>
                 </div>

@@ -110,7 +110,8 @@ var BreakPlanner = {
     }
     return {
       ok: true, date: dateStr, today: today, nowMin: nowMin, source: src.source[dateStr] || '',
-      agents: agents, idp: this._idpFor(ss, dateStr), rules: this.getRules(),
+      agents: agents, idp: this._idpFor(ss, dateStr), idpNext: this._idpFor(ss, this._addDays(dateStr, 1)), rules: this.getRules(),
+      demand: this._demand(dateStr, dateStr === today),
       plan: this._planFor(ss, dateStr), user: this._me(), isAdmin: this._isAdmin(),
       range: src.range
     };
@@ -369,6 +370,17 @@ var BreakPlanner = {
       out.push(o);
     });
     return out.sort(function (a, b) { return a.s - b.s; });
+  },
+
+  // Uplifts on top of the IDP (forecast bias, live stats, learned conditions) —
+  // CORE/DemandSignals.gs. Never lets a feed problem break the planner.
+  _demand: function (dateStr, isToday) {
+    try { return (typeof DemandSignals !== 'undefined') ? DemandSignals.getFactors(dateStr, isToday) : null; }
+    catch (e) { return { factors: [], error: String(e && e.message || e) }; }
+  },
+  _addDays: function (ds, n) {
+    var p = ds.split('-').map(Number);
+    return Utilities.formatDate(new Date(p[0], p[1] - 1, p[2] + n, 12), this.TZ, 'yyyy-MM-dd');
   },
 
   // ── Small helpers ──────────────────────────────────────────────────────────

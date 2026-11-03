@@ -20,6 +20,8 @@ Test deployment `/dev` URL to verify first).
 ## MRC Workforce (break planner)
 Same deployment, second page: open `<web app URL>?app=workforce` (or the calendar-clock
 button in the MRC header). Nothing extra to deploy or enable.
+Run `setupDemandTrigger()` once from the editor: it logs outages / weather / Alarm.com next to our
+alarm trend every hour, which is how the planner learns which conditions really raise our volume.
 
 ## Services to enable once (Editor → Services → +)
 - People API   (identifier `People`, v1)   — profile photos

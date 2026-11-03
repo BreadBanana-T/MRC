@@ -377,6 +377,32 @@ time breaks the spacing rules the block is repaired to the closest legal time (f
 moved, then fewest minutes) and shown as such, not as an optimizer choice. Note: the WFM importer skips "Paid Lunch" lines, so paid lunches the grid
 requires show as **added** blocks.
 
+## 4e. Staffing need — IDP plus demand signals (`CORE/DemandSignals.gs`)
+
+The planner protects coverage against **need = IDP Required × (1 + active uplifts)**, clamped
+0.8×–(1 + `rules.demand.maxUplift`, default 50%). Overnight slots past 24:00 use the next date's IDP
+(`getDay().idpNext`). Each uplift is shown as a chip on the planner and can be ignored per plan.
+
+| Factor | From | Uplift | Applies |
+|---|---|---|---|
+| forecast | `WF_FORECAST` day rows, last 14 days before the date with FcstAlarm and AlarmVol | ΣActual/ΣForecast − 1, clamped −15…+25% | whole day; needs ≥ 5 days and \|bias\| ≥ 3% |
+| live | latest `Stats History` row ≤ 45 min old | max(Trend %, 0) + ½·(SVL target − SVL), cap 30% | today, now → +90 min, fading to 0 |
+| learned | `WF_CONDITIONS_LOG` | mean Trend % in hours WITH the condition − hours WITHOUT | once ≥ 12 fresh samples over ≥ 3 days and ≥ +3%; per province only the largest learned uplift applies (one storm shows up as alert + wind + outages) |
+| heads-up | present but not learned / learned "no effect" / covered | 0 | shown only |
+
+Conditions (yes/no buckets): `out5k_<P>` / `out25k_<P>` (fresh, non-stale outage customers, BC/ON/QC),
+`alert_<P>` (red ECCC alert), `wind50_<P>` (current max wind ≥ 50 km/h; for dates 1–3 days ahead the
+daily forecast wind), `alarmcom_down`. Outage counts are never converted to alarms directly — 55k out
+can bring almost nothing — a condition only moves the plan once our own alarm trend shows it does.
+
+- **`WF_CONDITIONS_LOG`** (hidden, hourly `logDemandConditions` trigger — `setupDemandTrigger()`):
+  0 Timestamp, 1 Hour, 2 Dow (1 = Mon), 3 Conditions JSON `{keys, raw}`, 4 SVL, 5 ACK, 6 Trend %,
+  7 BURG Vol, 8 Fresh (1 = the Stats History row was ≤ 45 min old — only these teach). 4,000 rows kept.
+- **`Stats History`** gained cols 3 **Trend %** (alarms vs the IEX trend over the last 60 min, from the
+  Calculator's "Last 60 min" section) and 4 **BURG Vol**. Every other reader uses cols 0–2 by position.
+- The learning only gets data when the Calculator is run, so run it through the day.
+- `getFactors(date)` is cached 5 min under `MRC_DEMAND_V1|<date>`; `debugDemandSignals()` logs it.
+
 ---
 
 ## 5. Known divergences → impact → fix (the roadmap)

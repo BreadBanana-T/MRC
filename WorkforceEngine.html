@@ -66,6 +66,9 @@
     // more than maxMin only ever happens when the current time breaks the
     // spacing rules ("rule fix").
     moves: { cost15: 3, cost30: 40, maxMin: 30, maxBigShare: 0.10 },
+    // Demand on top of the IDP (CORE/DemandSignals.gs computes the factors; the
+    // server reads svlTarget / liveWindowMin / minSamples from saved rules).
+    demand: { svlTarget: 90, liveWindowMin: 90, minSamples: 12, maxUplift: 0.5 },
     liveLeadMin: 15
   };
 
@@ -75,7 +78,7 @@
     var r = clone(DEFAULT_RULES);
     if (!saved || typeof saved !== 'object') return r;
     if (Array.isArray(saved.grid) && saved.grid.length) r.grid = saved.grid;
-    ['windows', 'weights', 'moves'].forEach(function (k) {
+    ['windows', 'weights', 'moves', 'demand'].forEach(function (k) {
       if (saved[k] && typeof saved[k] === 'object') for (var p in saved[k]) if (saved[k][p] !== '' && saved[k][p] != null) r[k][p] = saved[k][p];
     });
     ['idpLambda', 'liveLeadMin'].forEach(function (k) { if (saved[k] !== '' && saved[k] != null && !isNaN(Number(saved[k]))) r[k] = Number(saved[k]); });
@@ -231,6 +234,14 @@
     return true;
   }
 
+  // Factors that actually move the need curve for this plan.
+  function demandFactors(day, opts) {
+    var off = (opts && opts.demandOff) || {};
+    return ((day.demand && day.demand.factors) || []).filter(function (f) {
+      return f && f.kind !== 'headsup' && Number(f.pct) && !off[f.id];
+    });
+  }
+
   /**
    * Build the working model.
    * day:  payload from BreakPlanner.getDay (agents[], idp.req[96], …)
@@ -352,14 +363,33 @@
       return arr;
     });
 
-    // IDP Required per 15-min bucket on the selected date → per 5-min slot.
+    // IDP Required per 15-min bucket → per 5-min slot: the selected date, then
+    // the next date for overnight slots past 24:00.
+    var idpRaw = new Float64Array(NSLOT).fill(-1);
+    var idp = (day.idp && day.idp.req) || [], idpN = (day.idpNext && day.idpNext.req) || [];
+    for (var t = 0; t < NSLOT; t++) {
+      var src = t < 288 ? idp : idpN, v = src[Math.floor((t % 288) / 3)];
+      if (v != null && v !== '' && !isNaN(Number(v))) idpRaw[t] = Number(v);
+    }
+    // Need = IDP × (1 + active uplifts). Heads-up factors never apply; any
+    // factor can be switched off for this plan (opts.demandOff[id]).
+    var dm = demandFactors(day, opts);
+    var maxUp = Number(rules.demand && rules.demand.maxUplift);
+    if (isNaN(maxUp)) maxUp = 0.5;
+    var mult = new Float64Array(NSLOT).fill(1);
+    dm.forEach(function (fac) {
+      var from = fac.from != null ? Number(fac.from) : 0, to = fac.to != null ? Number(fac.to) : DAY_SPAN;
+      for (var t2 = slotOf(from); t2 < slotEnd(to); t2++) {
+        var wgt = fac.decay ? Math.max(0, 1 - ((t2 * SLOT) - from) / Math.max(1, to - from)) : 1;
+        mult[t2] += Number(fac.pct) * wgt;
+      }
+    });
     var req = new Float64Array(NSLOT).fill(-1);
-    var idp = (day.idp && day.idp.req) || [];
-    for (var t = 0; t < 288; t++) { var v = idp[Math.floor(t / 3)]; if (v != null && v !== '' && !isNaN(Number(v))) req[t] = Number(v); }
+    for (var t3 = 0; t3 < NSLOT; t3++) if (idpRaw[t3] >= 0) req[t3] = idpRaw[t3] * Math.max(0.8, Math.min(1 + maxUp, mult[t3]));
 
     var model = {
       rules: rules, snap: snap, levels: levels, live: live, agents: agents, pressure: pressure,
-      onShift: onShift, onShiftAll: onShiftAll, f: f, req: req,
+      onShift: onShift, onShiftAll: onShiftAll, f: f, req: req, idpRaw: idpRaw, demand: dm,
       S1: GROUPS.map(function () { return new Float64Array(NSLOT); }),
       S2: GROUPS.map(function () { return new Float64Array(NSLOT); }),
       offCnt: GROUPS.map(function () { return new Float64Array(NSLOT); }),
@@ -548,7 +578,7 @@
 
   // Full score and plain-language metrics for the current state.
   function score(model) {
-    var pair = 0, idp = 0, ch = 0, frGap = 0, blOverlap = 0, srOverlap = 0, idpShort = 0;
+    var pair = 0, idp = 0, ch = 0, frGap = 0, blOverlap = 0, srOverlap = 0, idpShort = 0, rawShort = 0;
     for (var t = 0; t < NSLOT; t++) {
       for (var g = 0; g < GROUPS.length; g++) {
         var s1 = model.S1[g][t], s2 = model.S2[g][t];
@@ -556,6 +586,7 @@
       }
       var R = model.req[t], onQ = model.onShiftAll[t] - model.offAll[t];
       if (R >= 0) { idp += model.lambda * sq(R - onQ); if (onQ < R - 1e-9) idpShort += SLOT; }
+      if (model.idpRaw[t] >= 0 && onQ < model.idpRaw[t] - 1e-9) rawShort += SLOT;
       var frc = G_IDX.FRC;
       if (model.onShift[frc][t] > 0 && model.onShift[frc][t] - model.offCnt[frc][t] <= 0 && model.offCnt[frc][t] > 0) frGap += SLOT;
       if (model.offCnt[G_IDX.BL][t] >= 2) blOverlap += SLOT;
@@ -563,20 +594,21 @@
     }
     var c = { 15: 0, 30: 0, fix: 0, added: 0 };
     model.agents.forEach(function (ag) { ag.acts.forEach(function (a) { ch += moveCost(model, a, a.s); var k = moveKind(model, a); if (k) c[k]++; }); });
-    return { total: pair + idp + ch, overlap: pair, idp: idp, churn: ch, frGapMin: frGap, blOverlapMin: blOverlap, srOverlapMin: srOverlap, idpShortMin: idpShort,
+    return { total: pair + idp + ch, overlap: pair, idp: idp, churn: ch, frGapMin: frGap, blOverlapMin: blOverlap, srOverlapMin: srOverlap, idpShortMin: idpShort, idpRawShortMin: rawShort,
       moves: c[15] + c[30] + c.fix, moved15: c[15], moved30: c[30], fixes: c.fix, added: c.added, bigAllowed: bigAllowance(model) };
   }
 
   // Per-slot coverage for the ribbon: on-queue by language, on shift, IDP.
   function coverage(model) {
-    var out = { slot: SLOT, bl: [], fr: [], en: [], shift: [], req: [], frGap: [] };
+    var out = { slot: SLOT, bl: [], fr: [], en: [], shift: [], req: [], need: [], frGap: [] };
     for (var t = 0; t < NSLOT; t++) {
       var bl = model.onShift[G_IDX.BL][t] - model.offCnt[G_IDX.BL][t];
       var fr = model.onShift[G_IDX.FR][t] - model.offCnt[G_IDX.FR][t];
       var en = model.onShift[G_IDX.EN][t] - model.offCnt[G_IDX.EN][t];
       out.bl.push(bl); out.fr.push(fr); out.en.push(en);
       out.shift.push(model.onShiftAll[t]);
-      out.req.push(model.req[t] >= 0 ? model.req[t] : null);
+      out.req.push(model.idpRaw[t] >= 0 ? model.idpRaw[t] : null);
+      out.need.push(model.req[t] >= 0 ? model.req[t] : null);
       out.frGap.push(model.onShift[G_IDX.FRC][t] > 0 && bl + fr <= 0 && model.offCnt[G_IDX.FRC][t] > 0 ? 1 : 0);
     }
     return out;
